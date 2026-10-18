@@ -9,7 +9,7 @@ import time
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 import pytest
 
@@ -22,6 +22,8 @@ from agent_cordis_plugin import (
     MemoryTranscript,
     StepRecord,
     ToolBroker,
+    TranscriptConfig,
+    TranscriptReplaced,
     Unchanged,
     asked,
     clear_conversation,
@@ -34,6 +36,7 @@ from agent_cordis_plugin import (
     summarise,
     unrestarted,
 )
+from agent_cordis_plugin import transcript as transcript_row
 from agent_cordis_plugin.testing import Stepped, noon, on
 from cordis import Effects, Runtime, bind, component
 from cordis.composition import Entry
@@ -874,8 +877,8 @@ def _slow_disk(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(os, "write", slow)
 
 
-async def _replied(transcript: FileTranscript) -> None:
-    """The loop answers a message over `transcript`: a tool step, then the answer."""
+async def _replied(transcript: FileTranscript, message: str = "find x") -> None:
+    """The loop answers `message` over `transcript`: a tool step, then the answer."""
 
     async def python(input: Json) -> Json:
         return {"content": "42"}
@@ -887,7 +890,7 @@ async def _replied(transcript: FileTranscript) -> None:
         [text("x holds 42")],
     )
     loop = LoopModel(scripted, tools, transcript, _Approved(), clock=on("2026-10-07"))
-    assert [e["type"] async for e in loop.reply("find x")][-1] == "stop"
+    assert [e["type"] async for e in loop.reply(message)][-1] == "stop"
 
 
 def _entries(path: Path) -> list[Json]:
@@ -926,3 +929,99 @@ async def test_compact_after_a_reply_summarises_every_entry_of_it(
     assert _entries(Path(f"{path}.bak")) == appended
     kept = FileTranscript(str(path)).messages
     assert kept == tuple(seeded("x holds 42", "", kept[1]["step"]))
+
+
+@runtime_checkable
+class Recoverable(Protocol):
+    """What `chat:converse` shows and carries on after (CONTRACTS.md: errors), as the family
+    declares it: the chat plugin's own, which this one may not import."""
+
+    kind: str
+    message: str
+
+
+@pytest.mark.parametrize("command", ["clear", "compact"])
+@pytest.mark.parametrize("wrote", [True, False], ids=["file held open", "nothing written yet"])
+async def test_a_reply_after_a_restart_that_failed_is_refused_naming_the_restart(
+    tmp_path: Path, command: str, wrote: bool
+) -> None:
+    """/clear or /compact replaced the file and its restart failed (the person was told): the
+    transcript still mounted is the old conversation's, over the new one's file. A reply's entries
+    are refused, as a recoverable failure that names `/restart transcript`: not written to the old
+    inode (the descriptor it holds), not written after the new conversation's seed (a transcript
+    that had written nothing yet), and not lost without a word. The restart the message names
+    begins the new conversation from the file."""
+    path = tmp_path / "transcript.jsonl"
+    if not wrote:
+        _session(tmp_path)  # a resumed session: the transcript has read the file and written nothing
+    loader, jobs = Loader(str(path)), Jobs()
+    loader.fails = True
+    old = FileTranscript(str(path))
+    if wrote:
+        await _replied(old, "find the answer")
+    if command == "clear":
+        await _clear(loader, jobs)
+        assert path.read_text() == ""
+    else:
+        await _compact(path, Scripted([text("x holds 42"), stop("end_turn")]), loader=loader, jobs=jobs)
+        assert [m["role"] for m in _entries(path)] == ["user", "assistant"]
+    await _drain(jobs)
+    assert jobs.told == [
+        unrestarted(ConversationConfig(), "LookupError: no row 'transcript'; the rows are loop")
+    ]
+    new, backup = path.read_bytes(), Path(f"{path}.bak").read_bytes()
+
+    with pytest.raises(TranscriptReplaced) as refused:
+        await _replied(old, "forged")
+    error = refused.value
+    assert isinstance(error, Recoverable) and isinstance(error, OSError)  # chat shows it and carries on
+    assert error.kind == "transcript_replaced"
+    assert str(path) in error.message and "/restart transcript" in error.message
+    with pytest.raises(TranscriptReplaced, match="/restart transcript"):  # the next message, at once
+        old.append({"role": "user", "content": "forged again"})
+    with pytest.raises(TranscriptReplaced, match="/restart transcript"):
+        await old.flush()
+    # neither file took any of it: the new conversation is as the rewrite left it, the old one is
+    # the backup as it was kept
+    assert path.read_bytes() == new and Path(f"{path}.bak").read_bytes() == backup
+    assert b"forged" not in new + backup
+
+    # what /restart transcript does: the row's leaving (it raises what it kept, as a full disk's
+    # does, and the restart goes on all the same), then a transcript over the file
+    with pytest.raises(TranscriptReplaced):
+        async with old:
+            pass
+    async with FileTranscript(str(path)) as restarted:
+        began = len(restarted.messages)
+        assert began == (0 if command == "clear" else 2)
+        await _replied(restarted, "a fresh question")
+    entries = _entries(path)
+    assert [m["role"] for m in entries[began:]] == ["tools", "user", "assistant", "tool", "assistant"]
+    assert entries[began + 1]["content"].endswith("a fresh question")
+    assert b"forged" not in path.read_bytes()
+
+
+async def test_a_transcript_row_whose_file_was_replaced_restarts_all_the_same(tmp_path: Path) -> None:
+    """The remedy the message names has to work: the row's leaving raises what the refusal kept
+    (the writer's failure is raised by its close, as a full disk's is), cordis ends the row all the
+    same, and the row that takes its place writes to the new file."""
+    path = tmp_path / "transcript.jsonl"
+    rt = Runtime()
+    row = rt.mount(transcript_row, id="transcript", config=TranscriptConfig(path=str(path)))
+    await rt.settle()
+    old = row.ctx.get("transcript")
+    assert isinstance(old, FileTranscript)
+    await _replied(old)
+    rewrite(str(path), [])  # what /clear does
+    with pytest.raises(TranscriptReplaced):
+        await _replied(old, "forged")
+    await row.retire()  # the restart: the row's leaving closes the transcript, which says why it refuses
+    await rt.settle()
+    row = rt.mount(transcript_row, id="transcript", config=TranscriptConfig(path=str(path)))
+    await rt.settle()
+    new = row.ctx.get("transcript")
+    assert isinstance(new, FileTranscript) and new is not old and new.messages == ()
+    await _replied(new, "a fresh question")
+    await rt.shutdown()
+    assert [m["role"] for m in _entries(path)] == ["tools", "user", "assistant", "tool", "assistant"]
+    assert b"forged" not in path.read_bytes()

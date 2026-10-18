@@ -21,20 +21,34 @@ never overtaken or mixed with another, whoever asked and whatever became of the 
 (a cancelled caller leaves its write to finish). `flush` waits for the last write; `close` waits
 for it, then closes the file.
 
-A write that fails (the disk is full, the file was removed, a link stands at the name) is not
-lost silently: it is kept, nothing queued after it is written (a file with a hole in it would
-read as another conversation), and every `append`, `flush` and `close` after it raises it. Whoever
-wants the writes best-effort (the event log) catches it and stops.
+An appender writes to one file, the one it means: the file it holds open, or, before its first
+write, the one standing at the path when the appender was made (none, if there was none). The
+thread checks before each write that the file at the path is still that one (`os.path.samestat`
+of the file held, or found when the appender was made, against a `stat` of the path that follows
+no link). A file renamed over, removed, or turned into a link is another file or none: the write
+would land in the old file's inode, which nobody reads, or in a file that holds another
+conversation, so it is refused as `Replaced` and never made.
+
+A write that fails (the disk is full, a link stands at the name, the file was replaced or removed)
+is not lost silently: it is kept, nothing queued after it is written (a file with a hole in it
+would read as another conversation), and every `append`, `flush` and `close` after it raises it.
+Whoever wants the writes best-effort (the event log) catches it and stops.
 """
 
 import asyncio
 import concurrent.futures
 import os
 
-__all__ = ["Appender"]
+__all__ = ["Appender", "Replaced"]
 
 _APPEND = os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NOCTTY
 _MODE = 0o600
+
+
+class Replaced(OSError):
+    """The file at an appender's path is no longer the one it means: it was renamed over, removed
+    or turned into a link since the appender held it open (or was made, if it had not opened it
+    yet). What the appender had queued from then on was not written, so the file ends before it."""
 
 
 class Appender:
@@ -46,10 +60,13 @@ class Appender:
 
     def __init__(self, path: str, *, new: bool = False) -> None:
         """An appender of `path`, which is opened by its first write: made at 0600 if it is not
-        there. With `new`, it must not be there (the first write fails if it is)."""
+        there. With `new`, it must not be there (the first write fails if it is). The file at
+        `path` now, if there is one, is the one it means (a stat, the one touch of the disk here)."""
         self._path = path
         self._new = new
         self._fd: int | None = None  # opened, written and closed on the thread, in that order
+        # the file it means, once there is one: what it opens must be it, and so must what is at the path
+        self._meant = _stat_of(path)
         self._writer = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="appender")
         self._last: concurrent.futures.Future[None] | None = None
         self._failed: OSError | None = None
@@ -65,7 +82,7 @@ class Appender:
                 followed), `new` and it is there, or its directory is missing or not writable.
         """
         appender = cls(path, new=new)
-        appender._fd = _opened(path, new=new)
+        appender._fd = appender._hold()
         return appender
 
     def append(self, data: bytes) -> None:
@@ -122,13 +139,55 @@ class Appender:
         if self._failed is not None:
             return
         try:
+            self._unreplaced()
             if self._fd is None:
-                self._fd = _opened(self._path, new=self._new)
+                self._fd = self._hold()
             view = memoryview(data)
             while view:
                 view = view[os.write(self._fd, view) :]
         except OSError as error:
             self._failing(error)
+
+    def _hold(self) -> int:
+        """Open the file, on the calling thread, and make it the one this appender means (the file
+        found at the path when it was made, if there was one, else the one opened, made if need
+        be).
+
+        Raises:
+            Replaced: the file opened is not the one found when the appender was made.
+        """
+        fd = os.open(self._path, _APPEND | (os.O_EXCL if self._new else 0), _MODE)
+        try:
+            opened = os.fstat(fd)
+            if self._meant is not None and not os.path.samestat(self._meant, opened):
+                raise self._replaced()
+        except BaseException:
+            os.close(fd)
+            raise
+        self._meant = opened
+        return fd
+
+    def _unreplaced(self) -> None:
+        """Return unless the file at the path is another than the one this appender means (a link
+        counts as another, and so does none); nothing is meant before a file is there to mean.
+
+        Raises:
+            Replaced: it is another, or none.
+        """
+        if self._meant is None:
+            return
+        try:
+            here = os.stat(self._path, follow_symlinks=False)
+        except FileNotFoundError:
+            raise self._replaced() from None
+        if not os.path.samestat(self._meant, here):
+            raise self._replaced()
+
+    def _replaced(self) -> Replaced:
+        return Replaced(
+            f"{self._path} is no longer the file this appender writes to: it was replaced by another "
+            "file, or removed, so nothing more is written to it"
+        )
 
     def _close(self) -> None:
         """Close the file, on the thread, after the writes queued before it."""
@@ -141,5 +200,9 @@ class Appender:
             self._failing(error)
 
 
-def _opened(path: str, *, new: bool) -> int:
-    return os.open(path, _APPEND | (os.O_EXCL if new else 0), _MODE)
+def _stat_of(path: str) -> os.stat_result | None:
+    """The file at `path` as it stands (a link is itself), or None when there is none to stat."""
+    try:
+        return os.stat(path, follow_symlinks=False)
+    except OSError:
+        return None

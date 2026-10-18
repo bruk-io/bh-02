@@ -193,6 +193,21 @@ nothing after it is written, since a file with a hole in it would resume as anot
 The transcript row enters its file, so a restart (or a retired sub-agent) writes what is queued
 and closes it.
 
+A file replaced under a transcript is refused, not written to. `/clear` and `/compact` replace the
+transcript row's file by rename and queue the restart of the loop and the transcript; if that
+restart fails (the person is told), the transcript still mounted is the old conversation's, its
+descriptor on the old file's inode (or, if it had written nothing yet, about to open the new
+file after the old conversation). The appender checks before every write that the file at the
+path is the one it means (`host_paths.Replaced`), and `FileTranscript` says a refusal as
+`TranscriptReplaced`: an `OSError` with a `kind` (`transcript_replaced`) and a `message`, so it is
+a recoverable failure (CONTRACTS.md: errors) and `chat:converse` shows it and carries on. The
+message names `/restart transcript`, which begins the conversation the file holds; until then
+every `append`, `flush` and the row's leaving raise it, nothing is written to the old file (the
+`.bak`) or the new one, and an entry refused by `append` is not kept in memory. The check is
+on the writing thread, so the refusal surfaces at the next `append` after it has run, not at the
+`append` that queued the entry: the first message after a failed restart may reach the model once
+before its step's entry is refused.
+
 `/compact` (`agent:conversation`, `conversation.py`) is for a conversation grown long: a local model
 processes more prompt before each first token, and any model nears its context window. It asks
 the model for a summary in one step: the request is the loop's own (`loop.request_for`: the

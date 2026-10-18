@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from agent_cordis_plugin import FileTranscript, rewrite, seeded
+from agent_cordis_plugin import FileTranscript, TranscriptReplaced, rewrite, seeded
 
 # a compacted conversation, as a rewrite is given one
 SEED = seeded("x holds 42", "", {"at": "2026-10-18T03:47:12.345Z"})
@@ -132,6 +132,31 @@ async def test_a_line_that_can_t_be_written_is_raised_by_the_next_append_and_flu
         await transcript.flush()
     assert [m["content"] for m in transcript.messages] == ["one", "two"]
     assert FileTranscript(str(path)).messages == ({"role": "user", "content": "one"},)
+
+
+async def test_a_file_replaced_under_the_transcript_is_refused_naming_the_restart(tmp_path: Path) -> None:
+    """What `/clear` does to the file under a transcript whose row it then fails to restart: the
+    entries after it are not written to the old inode or the new file, the person is told which
+    command begins the new conversation, and the row's leaving says so too (and still closes)."""
+    path = tmp_path / "transcript.jsonl"
+    transcript = FileTranscript(str(path))
+    transcript.append({"role": "user", "content": "one"})
+    await transcript.flush()
+    backup = rewrite(str(path), SEED)  # the new conversation, the old one kept beside it
+    new = path.read_bytes()
+    transcript.append({"role": "user", "content": "two"})  # queued: the thread has yet to look
+    with pytest.raises(TranscriptReplaced, match="/restart transcript") as refused:
+        await transcript.flush()
+    assert (refused.value.kind, str(path) in refused.value.message) == ("transcript_replaced", True)
+    assert isinstance(refused.value, OSError) and refused.value.message == str(refused.value)
+    with pytest.raises(TranscriptReplaced, match="/restart transcript"):
+        transcript.append({"role": "user", "content": "three"})  # refused, so not kept either
+    assert [m["content"] for m in transcript.messages] == ["one", "two"]
+    with pytest.raises(TranscriptReplaced, match="/restart transcript"):
+        async with transcript:
+            pass
+    assert path.read_bytes() == new and FileTranscript(str(path)).messages == tuple(SEED)
+    assert [json.loads(line)["content"] for line in Path(backup).read_text().splitlines()] == ["one"]
 
 
 @pytest.mark.usefixtures("open_umask")
