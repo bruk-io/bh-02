@@ -26,9 +26,7 @@ root, so there is no hole to plant: the test would pass on an unconfined
 jail too.
 """
 
-import itertools
 import os
-import shutil
 import sys
 from pathlib import Path
 
@@ -41,7 +39,6 @@ from brig.run.compile_ctx import build_compile_ctx
 from brig.stack import Stack
 from tests.conftest import launch
 
-_jail_counter = itertools.count()
 _WAIT_TIMEOUT_S = 30.0
 _SYSTEM_ROOTS = ("/bin", "/usr", "/lib", "/lib64", "/etc")
 _NO_CAPS = "0000000000000000"
@@ -74,7 +71,7 @@ def _status_field(stdout: str, name: str) -> str:
 
 @pytest.mark.integration
 def test_a_jail_started_as_root_holds_no_capabilities_and_cannot_unlock_a_read_only_bind(
-    tmp_path: Path,
+    tmp_path: Path, jail_dir: str
 ) -> None:
     ro = tmp_path / "ro"
     ro.mkdir()
@@ -86,8 +83,6 @@ def test_a_jail_started_as_root_holds_no_capabilities_and_cannot_unlock_a_read_o
     workspace.mkdir()
     planted = ro / "planted"
 
-    jail_dir = f"/tmp/bg{os.getpid()}rc{next(_jail_counter)}"
-    os.makedirs(jail_dir)
     spec = Spec(
         fs=FsPolicy(
             read_model=ReadModel.ALLOW_LIST,
@@ -123,7 +118,6 @@ def test_a_jail_started_as_root_holds_no_capabilities_and_cannot_unlock_a_read_o
         # leader still exiting (a race seen 2 times in 12 without it).
         jail.destroy()
         planted.unlink(missing_ok=True)
-        shutil.rmtree(jail_dir, ignore_errors=True)
 
     # The controls: the jail ran, wrote its workspace and read its tree.
     assert status == 0, (stdout, stderr)

@@ -52,7 +52,6 @@ answered with the FIRST launch's status.
 
 from __future__ import annotations
 
-import itertools
 import os
 import re
 import sys
@@ -84,7 +83,6 @@ def _needs_bubblewrap() -> None:
         )
 
 
-_jail_counter = itertools.count()
 _WAIT_TIMEOUT_S = 30.0
 
 #: The system tree a jailed `/bin/sh` needs to exist at all under an
@@ -98,14 +96,7 @@ def _system_read_allows() -> tuple[str, ...]:
     return tuple(path for path in _SYSTEM_ROOTS if os.path.exists(path))
 
 
-def _new_jail_dir() -> str:
-    """A short scratch root, `/tmp/bg<pid>bw<n>` -- never `tmp_path`. The
-    `bw` infix keeps this file's jail dirs from colliding with a sibling
-    integration file's own counter in the same pytest session."""
-    return f"/tmp/bg{os.getpid()}bw{next(_jail_counter)}"
-
-
-def _denial_signature() -> re.Pattern[str]:
+def _denial_signature(jail_dir: str) -> re.Pattern[str]:
     """The mechanism's OWN declared read-only signature, fetched from a
     real compiled `Step` rather than hand-copied as a literal, so this file
     tests what `bwrap` actually declares. Computed inside a test (never at
@@ -113,7 +104,7 @@ def _denial_signature() -> re.Pattern[str]:
     # The mechanism refuses a Spec that does not mount its supervisor's interpreter
     # (decision-190), which is a fact about the Spec, not about the signature.
     spec = Spec(fs=FsPolicy(read_model=ReadModel.ALLOW_LIST, read_allows=("/usr",)))
-    ctx = build_compile_ctx(spec, jail_dir=_new_jail_dir(), platform="linux")
+    ctx = build_compile_ctx(spec, jail_dir=jail_dir, platform="linux")
     return bwrap.compile(spec, ctx).denial_signatures[0]
 
 
@@ -170,11 +161,12 @@ def _spec_for(workspace: str, hooks: str, envrc: str, *, channel: bool = False) 
 
 
 @pytest.mark.integration
-def test_a_write_outside_every_write_root_is_denied_and_inside_succeeds() -> None:
+def test_a_write_outside_every_write_root_is_denied_and_inside_succeeds(
+    jail_dir: str,
+) -> None:
     """Pair 1. `/etc` is in `read_allows`, so it EXISTS inside the jail and
     is mounted read-only -- which is what makes this a denial with the
     mechanism's own signature rather than a mere absence."""
-    jail_dir = _new_jail_dir()
     workspace, hooks, envrc = _seed_workspace(jail_dir)
     spec = _spec_for(workspace, hooks, envrc)
 
@@ -185,7 +177,7 @@ def test_a_write_outside_every_write_root_is_denied_and_inside_succeeds() -> Non
         label="outside",
     )
 
-    assert _denial_signature().search(stderr) is not None, stderr
+    assert _denial_signature(jail_dir).search(stderr) is not None, stderr
     assert "CONTROL" in stdout
     assert os.path.isfile(f"{workspace}/control.txt"), "the control write did not land"
     assert not os.path.exists("/etc/brig-canary")
@@ -193,12 +185,13 @@ def test_a_write_outside_every_write_root_is_denied_and_inside_succeeds() -> Non
 
 
 @pytest.mark.integration
-def test_a_write_beside_the_workspace_in_a_directory_bwrap_made_is_denied() -> None:
+def test_a_write_beside_the_workspace_in_a_directory_bwrap_made_is_denied(
+    jail_dir: str,
+) -> None:
     """decision-166. The jail directory is not mounted, but it exists in the
     jail: bwrap made it, in its own root tmpfs, to hang the workspace on. A
     write there -- and at `/` itself -- is refused with the read-only
     signature, where until stage 8 it landed in that tmpfs and succeeded."""
-    jail_dir = _new_jail_dir()
     workspace, hooks, envrc = _seed_workspace(jail_dir)
     spec = _spec_for(workspace, hooks, envrc)
 
@@ -213,16 +206,17 @@ def test_a_write_beside_the_workspace_in_a_directory_bwrap_made_is_denied() -> N
     )
 
     assert "BESIDE_WROTE" not in stdout and "ROOT_WROTE" not in stdout, stdout
-    assert len(_denial_signature().findall(stderr)) == 2, stderr
+    assert len(_denial_signature(jail_dir).findall(stderr)) == 2, stderr
     assert "CONTROL" in stdout and status == 0
 
 
 @pytest.mark.integration
-def test_an_existing_write_denies_carveout_is_denied_and_a_sibling_succeeds() -> None:
+def test_an_existing_write_denies_carveout_is_denied_and_a_sibling_succeeds(
+    jail_dir: str,
+) -> None:
     """Pair 2, the read-only BIND form. The carve-out sits INSIDE the
     granted workspace, so nothing but `write_denies` can be denying it --
     which is what the sibling write in the same run proves."""
-    jail_dir = _new_jail_dir()
     workspace, hooks, envrc = _seed_workspace(jail_dir)
     spec = _spec_for(workspace, hooks, envrc)
 
@@ -235,7 +229,7 @@ def test_an_existing_write_denies_carveout_is_denied_and_a_sibling_succeeds() ->
         label="carveout-bind",
     )
 
-    assert _denial_signature().search(stderr) is not None, stderr
+    assert _denial_signature(jail_dir).search(stderr) is not None, stderr
     assert "CONTROL" in stdout
     assert not os.path.exists(f"{hooks}/pre-commit")
     assert os.path.isfile(f"{workspace}/sibling.txt")
@@ -243,7 +237,7 @@ def test_an_existing_write_denies_carveout_is_denied_and_a_sibling_succeeds() ->
 
 
 @pytest.mark.integration
-def test_an_absent_write_denies_carveout_cannot_be_created() -> None:
+def test_an_absent_write_denies_carveout_cannot_be_created(jail_dir: str) -> None:
     """Pair 3, the empty read-only TMPFS form -- the one an `--ro-bind-try`
     would have skipped silently, leaving the jail free to write the
     `.envrc` it was denied. Enforcement is asserted (the write fails, and
@@ -254,7 +248,6 @@ def test_an_absent_write_denies_carveout_cannot_be_created() -> None:
     is bwrap's own behaviour rather than a claim brig makes, so it is left
     unasserted here -- `isfile`, not `exists`, is the enforcement
     question."""
-    jail_dir = _new_jail_dir()
     workspace, hooks, envrc = _seed_workspace(jail_dir)
     spec = _spec_for(workspace, hooks, envrc)
 
@@ -274,14 +267,13 @@ def test_an_absent_write_denies_carveout_cannot_be_created() -> None:
 
 
 @pytest.mark.integration
-def test_a_path_outside_read_allows_is_absent_rather_than_denied() -> None:
+def test_a_path_outside_read_allows_is_absent_rather_than_denied(jail_dir: str) -> None:
     """The allowlist model itself, and the reason this mechanism declares
     no `fs_read` signature. A file seeded OUTSIDE every `read_allows` entry
     is unreadable inside the jail; the same read succeeds through
     `Stack([])` -- the permanent control, which is what makes this an
     observation about the jail rather than about this host's own file
     permissions."""
-    jail_dir = _new_jail_dir()
     workspace, hooks, envrc = _seed_workspace(jail_dir)
     secret = f"{jail_dir}/secret.txt"
     with open(secret, "w") as f:
@@ -319,7 +311,9 @@ def test_a_path_outside_read_allows_is_absent_rather_than_denied() -> None:
 
 
 @pytest.mark.integration
-def test_a_read_carve_out_inside_the_workspace_is_refused_and_a_sibling_reads() -> None:
+def test_a_read_carve_out_inside_the_workspace_is_refused_and_a_sibling_reads(
+    jail_dir: str,
+) -> None:
     """decision-164, observed. A credential FILE and a state DIRECTORY sit
     inside the writable workspace, named in `read_denies`: the file reads
     EACCES (the null device, bound `nodev`), the directory hides
@@ -330,7 +324,6 @@ def test_a_read_carve_out_inside_the_workspace_is_refused_and_a_sibling_reads() 
     CAP_DAC_OVERRIDE overrides), and a sibling file in the same workspace
     reads in the same run -- the control that makes the refusals the
     carve-outs' doing. The host's files are untouched."""
-    jail_dir = _new_jail_dir()
     workspace, hooks, envrc = _seed_workspace(jail_dir)
     secret, state = f"{workspace}/local.env", f"{workspace}/state"
     os.makedirs(f"{state}/deep")
@@ -384,13 +377,14 @@ def test_a_read_carve_out_inside_the_workspace_is_refused_and_a_sibling_reads() 
 
 
 @pytest.mark.integration
-def test_an_absent_write_carve_out_is_a_directory_on_the_host_until_someone_removes_it() -> None:
+def test_an_absent_write_carve_out_is_a_directory_on_the_host_until_someone_removes_it(
+    jail_dir: str,
+) -> None:
     """What the tmpfs form costs, measured (decision-164 corrected the
     docstring that said it materialised "inside the jail"): bwrap makes the
     mount point inside the write root's bind of the HOST directory, so an
     absent denied `.envrc` is an empty `.envrc/` on the host, and it outlives
     the jail. Removing it is the embedder's, after teardown."""
-    jail_dir = _new_jail_dir()
     workspace = f"{jail_dir}/ws"
     os.makedirs(workspace)
     missing_parent = f"{workspace}/.cfg/hooks"  # its parent is absent too
@@ -412,13 +406,14 @@ def test_an_absent_write_carve_out_is_a_directory_on_the_host_until_someone_remo
 
 
 @pytest.mark.integration
-def test_the_directory_a_carve_out_is_in_can_t_be_renamed_away_and_made_again() -> None:
+def test_the_directory_a_carve_out_is_in_can_t_be_renamed_away_and_made_again(
+    jail_dir: str,
+) -> None:
     """decision-168. `.git/hooks` is held by a mount, which can't be renamed or
     removed; `.git` itself is writable, and until it was pinned the workload
     could rename it away and make a new `.git/hooks` with nothing over it
     (measured). Pinned (bound over itself), the rename is refused, and
     writing inside `.git` still works."""
-    jail_dir = _new_jail_dir()
     workspace, hooks, envrc = _seed_workspace(jail_dir)
     spec = _spec_for(workspace, hooks, envrc)
 

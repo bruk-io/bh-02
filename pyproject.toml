@@ -217,6 +217,7 @@ exclude = [
     "bh_02.sessions:create",                                  # makes a session's directory, meta and layer
     "bh_02.sessions:discard",                                 # removes the directory of a run that never started
     "bh_02.sessions:held",                                    # a run's lock on its session: running.lock opened, flocked, the pid written
+    "bh_02.sessions:running",                                 # reads that pid and asks the system whether the process is there
     "bh_02.sessions:set_model",                               # rewrites a session's layer (--resume --model)
     "bh_02.sessions:scanned",                                 # reads every meta.json under the state dir
     "bh_02.sessions:listed",                                  # scanned, without the broken records

@@ -5,6 +5,7 @@ answers every call. A process that dies mid-call answers none, so the transcript
 a call with no result after it, which a provider rejects or the model answers again. The next reply
 answers such a call before anything else, so the conversation is whole before its first request."""
 
+import datetime
 import json
 from collections.abc import AsyncIterator, Mapping, Sequence
 from pathlib import Path
@@ -13,7 +14,7 @@ from typing import Any
 import pytest
 
 from agent_cordis_plugin import Answer, FileTranscript, LoopModel, ToolBroker
-from agent_cordis_plugin.loop import request_for
+from agent_cordis_plugin.loop import lost_answers, request_for
 from agent_cordis_plugin.testing import Stepped
 
 type Json = Mapping[str, Any]
@@ -172,3 +173,29 @@ async def test_a_whole_transcript_is_sent_unchanged_and_nothing_is_added_to_it(
     assert list(sent) == [*request_for(old), new]  # the old conversation bit for bit, then the message
     assert transcript.messages[: len(old)] == tuple(old)
     assert not any(str(m.get("content", "")).startswith("interrupted:") for m in transcript.messages)
+
+
+def test_the_lost_answers_are_one_tool_entry_for_each_call_no_result_follows() -> None:
+    """The pure part the loop keeps its answers with and `/compact` sends its own with: in the
+    calls' order, each with the time alone, and the messages it is given are left as they were."""
+    at = datetime.datetime(2026, 10, 18, 4, 0, 0, tzinfo=datetime.UTC)
+    old = cut("c1", "c2", "c3", answered_ids=["c1"])
+    answers = lost_answers(old, at)
+    assert [a["call_id"] for a in answers] == ["c2", "c3"]
+    assert all(a["role"] == "tool" and a["asides"] == [] for a in answers)
+    assert all(a["call"] == {"at": "2026-10-18T04:00:00.000Z"} for a in answers)
+    assert all(
+        a["content"].startswith("interrupted: bh-02 stopped before this call finished") for a in answers
+    )
+    assert old == cut("c1", "c2", "c3", answered_ids=["c1"])
+    assert lost_answers(cut("c1", answered_ids=["c1"]), at) == []
+    assert lost_answers(conversation(), at) == []
+
+
+async def test_what_the_loop_keeps_for_the_lost_calls_is_what_the_pure_part_makes(tmp_path: Path) -> None:
+    old = cut("c1", "c2", answered_ids=["c1"])
+    transcript, stepped = resumed(tmp_path, old)
+    stepped.advance(600.0)
+    expected = lost_answers(old, stepped.now())
+    await reply(transcript, stepped, Recording(), "carry on")
+    assert list(transcript.messages[len(old) : len(old) + len(expected)]) == expected

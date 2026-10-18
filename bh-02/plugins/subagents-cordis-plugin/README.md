@@ -8,7 +8,7 @@ foreground or, with `background`, to `agent_wait`. The design is decision-0002
 
 | Row | Binds | Consumes |
 |---|---|---|
-| `subagents:parent` | `asker`: `confirm(question)` over the parent's `output`, only for a question labelled with an agent; `roster`: how many children run and a way to hear it change (read-only); registers the `agent`, `agent_wait`, `agent_send` and `agent_stop` tools (`runs="harness"`), the command `/agents` (list, `stop [NAME]`, `watch NAME`) and a note for the stop notice and the `system` section `agents` (naming the types there are); config: `rows` (the parent's rows a child is made of, by id: `loop`, `tools`, `transcript`, `model`, `system`, `asides`, `access`, `memory`, `on-touch`, `executor`, `python`; never auto memory), `tools` (those of `rows` a type may grant, `["python"]`; every other row each child has), `transcript_row` (`transcript`), `model_row` (`model`), `start` (seconds a child has to come up, 30), `max_running` (children at once, 4), `session_agents` (children started before each further start is asked, 16) | `tools` (`register`), `commands` (`register`, `on_stop`), `model` (its lifetime alone), `system` (`add`), `output` (`confirm`: behind `asker`, and a start it asks about; `show`: a note, and each child's usage), `loader` (`rows`), `host` (`trusted`: where type files are read) |
+| `subagents:parent` | `asker`: `confirm(question)` over the parent's `output`, only for a question labelled with an agent; `roster`: how many children run and a way to hear it change (read-only); registers the `agent`, `agent_wait`, `agent_send` and `agent_stop` tools (`runs="harness"`), the command `/agents` (list, `stop [NAME]`, `watch NAME`) and a note for the stop notice and the `system` section `agents` (naming the types there are); config: `rows` (the parent's rows a child is made of, by id: `loop`, `tools`, `transcript`, `model`, `system`, `asides`, `access`, `memory`, `on-touch`, `executor`, `python`; never auto memory), `tools` (those of `rows` a type may grant, `["python"]`; every other row each child has), `transcript_row` (`transcript`), `model_row` (`model`), `start` (seconds a child has to come up, 30), `max_running` (children at once, 4), `session_agents` (children started before each further start is asked, 16) | `tools` (`register`), `commands` (`register`, `on_stop`), `model` (its lifetime alone), `system` (`add`), `output` (`confirm`: behind `asker`, and a start it asks about; `show`: a note, one when a child's event log stopped being written among them, and each child's usage), `loader` (`rows`), `host` (`trusted`: where type files are read) |
 | `subagents:status` | the status bar's `agents` field: `agents: N running` while a sub-agent runs, absent at none; config: none | `roster` (`running`, `watch`), `frame` (`status`) |
 | `subagents:output` | a child's `output`, inside its realm: `confirm(question)` through `asker`, the question labelled `agent: {name, type}`; nothing else; config: `name`, `type` | `asker` |
 | `subagents:child` | nothing: a child's own row, inside its realm: its type's section of the prompt (`agent`) and its `loop` passed to the call that mounted it; config: `hand`, `section` | `loop`, `system`, `asides` (`add`: what `agent_send` left) |
@@ -110,7 +110,8 @@ input, which the loop serves as it does the model's own calls) starts one child:
    tool's result also names the child, `child: NAME` beside `content` (the foreground report and
    the background start alike; a call that started none has no `child`), which the loop keeps on
    the call's record in the transcript (CONTRACTS.md: call record).
-7. **Its end**: retired (`Fiber.retire`, idempotent) when the run ends, however it ends; then
+7. **Its end**: retired (`Fiber.retire`, idempotent) when the run ends, however it ends; then,
+   if its event log stopped being written, one note says so (see Watching a child); then
    what it used, summed over its steps, is shown through the parent's `output.show` as one usage
    event after a note naming it (`agent NAME (TYPE) ended; it used:`), so it joins the session's
    totals (the ui adds every usage event it shows, and keeps it in the session's history, so a
@@ -219,9 +220,17 @@ runs.
   child's transcript uses it too), on a thread, so the event loop never waits on a disk, one
   after the other: a record waits for the write before it, even one a cancelled child's caller left
   to finish, so the end record never overtakes or mixes with it, and closing waits for the last; one
-  that fails (a full disk) stops the log and the child goes on: the log is for the person, so this is
-  the one place a failed write is dropped (the transcript's is raised). A session kept in memory has
-  no log; a log that can't be made is said in a note, and the child runs without one.
+  that fails (a full disk, the file removed or replaced under it) stops the log and the child goes
+  on: the log is for the person, so this is the one place a failed write is not raised (the
+  transcript's is). It is not silent: the log keeps its first failure and when it happened (the
+  appender's own time, taken on its thread; `EventLog.stopped`, found by a write or, when no write
+  heard of it, by closing the log), and when the child's run ends one note through the parent's
+  `output.show` (`child.log_stopped`, once, before the usage note) names the file, when the write
+  failed, the error, and that `bh-02 watch`, which ends only at the `agent_end` record the stopped log
+  never writes, shows nothing after it and must be left with Ctrl-C. The note is kept in the ui's
+  history, so a resume shows it again. A session kept in memory has no log; a log that can't be
+  made is said in a note (the only one), and the child runs without one; a log that never failed
+  says nothing (`test_a_log_removed_under_a_running_child_is_said_once_when_it_ends_before_its_usage`).
 - **`bh-02 watch SESSION AGENT`** (the app's, `bh_02.watching`) renders one log read-only, follows it
   until `agent_end` (`--once` stops after what is there), and refuses names bh-02 did not make before
   it builds a path: it reads through `host_paths.read_beneath` (no link, a descriptor opened

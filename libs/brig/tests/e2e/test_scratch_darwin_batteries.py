@@ -75,7 +75,6 @@ row).
 from __future__ import annotations
 
 import dataclasses
-import itertools
 import os
 import sys
 from collections.abc import Sequence
@@ -104,26 +103,16 @@ from brig.probe.batteries.fs import fs_read_battery, fs_write_battery
 from brig.probe.batteries.network import network_battery
 from brig.run import IoPolicy, Jail, Process, Reservation, build_compile_ctx
 from brig.stack import CompiledJail, Stack, scratch_darwin
-from tests.conftest import launch, teardown_group, workload_argv
+from tests.conftest import NewJailDir, launch, teardown_group, workload_argv
 
 pytestmark = pytest.mark.skipif(
     sys.platform != "darwin",
     reason="scratch_darwin() composes seatbelt (sandbox-exec/SBPL), darwin-only (SPEC.md sec 6)",
 )
 
-_jail_counter = itertools.count()
-
 #: RFC 5737 TEST-NET-1 -- a literal address, never a hostname (network_battery's
 #: own "Defect A" docstring), so the DENIAL probe's only obstacle is policy.
 _DENIED_NETWORK_ADDRESS = "192.0.2.1:80"
-
-
-def _new_root(run_id: str, tag: str) -> str:
-    """A short scratch root, `/tmp/bg<pid><tag><run_id[:8]><n>` -- never
-    pytest `tmp_path` (`sun_path` is 104 bytes on darwin, CLAUDE.md's trap
-    list). The `sd` family of tags below is this file's own, distinct from
-    `test_probe_forgery.py`'s `pf` and `test_degraded_journey.py`'s `dj`."""
-    return f"/tmp/bg{os.getpid()}{tag}{run_id[:8]}{next(_jail_counter)}"
 
 
 def _launch_at(
@@ -161,7 +150,7 @@ def _probe(jail: Jail, battery: object) -> ProbeReport:
     return jail.probe(cast(CoreBattery, battery))
 
 
-def _seed_fs_targets(run_id: str) -> tuple[str, str, str, str, str]:
+def _seed_fs_targets(run_id: str, *, new_jail_dir: NewJailDir) -> tuple[str, str, str, str, str]:
     """Build and seed every HOST-resolved scratch path the fs batteries need
     (doc-016 sec 7 deviation 4, task-062): `workspace` (spec.fs.write_allows[0]),
     `hooks_dir` (the `.git/hooks` carve-out INSIDE workspace -- must also land
@@ -169,21 +158,18 @@ def _seed_fs_targets(run_id: str) -> tuple[str, str, str, str, str]:
     docstring), `outside_writable` (genuinely writable by an unjailed process),
     `credential_canary` (a FILE, seeded), and `ssh_directory_canary` (a
     DIRECTORY, seeded with one entry). Returns them in that order."""
-    workspace = _new_root(run_id, "sdw")
+    workspace = new_jail_dir()
     hooks_dir = os.path.join(workspace, ".git", "hooks")
     os.makedirs(hooks_dir, exist_ok=True)
 
-    outside_writable = _new_root(run_id, "sdo")
-    os.makedirs(outside_writable, exist_ok=True)
+    outside_writable = new_jail_dir()
 
-    credential_root = _new_root(run_id, "sdc")
-    os.makedirs(credential_root, exist_ok=True)
+    credential_root = new_jail_dir()
     credential_canary = os.path.join(credential_root, "credentials")
     with open(credential_canary, "w", encoding="utf-8") as f:
         f.write("canary-secret\n")
 
-    ssh_directory_canary = _new_root(run_id, "sds")
-    os.makedirs(ssh_directory_canary, exist_ok=True)
+    ssh_directory_canary = new_jail_dir()
     with open(os.path.join(ssh_directory_canary, "known_hosts"), "w", encoding="utf-8") as f:
         f.write("canary-host-key\n")
 
@@ -232,6 +218,7 @@ _BATTERY_AXES: dict[str, Axis] = {
 @pytest.mark.e2e
 def test_scratch_darwin_fs_and_network_batteries_reach_consistent_with_denial_pass(
     run_id: str,
+    new_jail_dir: NewJailDir,
 ) -> None:
     """AC #2/#3/#4 -- EC3's headline and EC5's second half, in one real
     `scratch_darwin()` jail.
@@ -256,9 +243,9 @@ def test_scratch_darwin_fs_and_network_batteries_reach_consistent_with_denial_pa
     headline names it ("network -- same shape").
     """
     workspace, hooks_dir, outside_writable, credential_canary, ssh_directory_canary = (
-        _seed_fs_targets(run_id)
+        _seed_fs_targets(run_id, new_jail_dir=new_jail_dir)
     )
-    jail_dir = _new_root(run_id, "sdj")
+    jail_dir = new_jail_dir()
     spec = _journey_spec(
         workspace=workspace,
         hooks_dir=hooks_dir,
@@ -424,6 +411,7 @@ def test_scratch_darwin_fs_and_network_batteries_reach_consistent_with_denial_pa
 @pytest.mark.e2e
 def test_control_against_the_environment_stack_of_no_mechanisms_denies_nothing(
     run_id: str,
+    new_jail_dir: NewJailDir,
 ) -> None:
     """AC #8. The IDENTICAL Spec the headline journey above drives, launched
     through `Stack([])` (zero mechanisms -- `CompiledJail.wrap` is the
@@ -452,9 +440,9 @@ def test_control_against_the_environment_stack_of_no_mechanisms_denies_nothing(
     an honesty note where a battery word alone would read stronger than
     what was actually shown)."""
     workspace, hooks_dir, outside_writable, credential_canary, ssh_directory_canary = (
-        _seed_fs_targets(run_id)
+        _seed_fs_targets(run_id, new_jail_dir=new_jail_dir)
     )
-    jail_dir = _new_root(run_id, "sde")
+    jail_dir = new_jail_dir()
     spec = _journey_spec(
         workspace=workspace,
         hooks_dir=hooks_dir,
@@ -506,6 +494,7 @@ def test_control_against_the_environment_stack_of_no_mechanisms_denies_nothing(
 @pytest.mark.e2e
 def test_journey_spec_declares_a_listen_channel_and_its_removal_makes_the_battery_refuse(
     run_id: str,
+    new_jail_dir: NewJailDir,
 ) -> None:
     """AC #11. Two assertions about THIS file's own `_journey_spec` (the
     exact Spec-building function the headline test above drives) -- distinct
@@ -521,12 +510,12 @@ def test_journey_spec_declares_a_listen_channel_and_its_removal_makes_the_batter
        `network_battery` refuse at construction (`decision-117`, `ValueError`
        naming both missing declarations), pasted below.
     """
-    jail_dir = _new_root(run_id, "sdn")
+    jail_dir = new_jail_dir()
     # network_battery reads only spec.channels and spec.network.allowed_domains
     # (this file's own imported source, `brig/probe/batteries/network.py`) --
     # the fs-shaped placeholders below need not exist on disk for this
     # construct-only test, which never launches a jail or runs a probe.
-    placeholder = _new_root(run_id, "sdnph")
+    placeholder = new_jail_dir()
     spec = _journey_spec(
         workspace=placeholder,
         hooks_dir=os.path.join(placeholder, ".git", "hooks"),

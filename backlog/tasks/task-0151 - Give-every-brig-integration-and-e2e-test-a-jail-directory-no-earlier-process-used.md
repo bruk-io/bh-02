@@ -3,9 +3,11 @@ id: TASK-0151
 title: >-
   Give every brig integration and e2e test a jail directory no earlier process
   used
-status: To Do
-assignee: []
+status: Done
+assignee:
+  - '@claude'
 created_date: '2026-10-18 12:55'
+updated_date: '2026-10-18 23:26'
 labels:
   - brig
   - size-4
@@ -21,7 +23,163 @@ Found while fixing TASK-0140. About 43 files under libs/brig/tests/integration a
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 No test under libs/brig/tests names a jail directory from os.getpid(); each takes one from a shared fixture that makes a new directory and removes it after
-- [ ] #2 A unit test fails when a test file mints /tmp/bg{os.getpid()} names again, and is seen failing on a planted one
-- [ ] #3 scripts/check libs/brig passes
+- [x] #1 No test under libs/brig/tests names a jail directory from os.getpid(); each takes one from a shared fixture that makes a new directory and removes it after
+- [x] #2 A unit test fails when a test file mints /tmp/bg{os.getpid()} names again, and is seen failing on a planted one
+- [x] #3 scripts/check libs/brig passes
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1) conftest.py: one jail_dir fixture and a new_jail_dir factory (tempfile.mkdtemp under /tmp, resolved, removed after the test, retried against a late-exiting supervisor); 2) migrate every integration and e2e file that minted /tmp/bg{os.getpid()}.. (43 at HEAD) plus the local jail_dir fixtures (connect_proxy_launch, channel_reservation_starts, host_records, jail_host, bwrap_channel_dir, bwrap_records_refused), in batches with a scratch AST tool; 3) replace tests/unit/test_jail_dir_infixes_are_unique.py with an AST check that no test names a path from os.getpid(), seen failing on a planted file; 4) tests of the fixture itself; 5) run integration+e2e (baseline 329 passed / 108 skipped here) and scripts/check libs/brig. Risks: darwin-only (seatbelt) and docker-only files cannot run here; tests that asserted the jail dir did not exist yet (test_jail_launch refused-create) now see an empty directory.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+What changed (tests only, no SPEC change: no brig behaviour moved). libs/brig/tests/conftest.py: a shared 'new_jail_dir' fixture (a factory over tempfile.mkdtemp(prefix='bg-', dir='/tmp'): path resolved, 16 characters, removed after the test) and a 'jail_dir' fixture on top of it for the one-directory test. Removal retries for about a second: a jail the test did not destroy has a supervisor that writes supervisor/exit as the tree goes, which left a bg-<8>/supervisor/exit behind after test_bwrap_network (2 times in 17 full runs before the retry, 0 in the 6 full runs and 2 scripts/check runs after). The 43 files that minted /tmp/bg{os.getpid()}.. (48 sites) now take them: a scratch AST tool threaded the fixture through (a helper that mints one directory takes jail_dir=; a test that mints several takes new_jail_dir) and every diff was read by hand. Also dropped the local jail_dir fixtures of test_connect_proxy_launch, test_channel_reservation_starts, test_host_records, test_jail_host, test_bwrap_channel_dir, test_bwrap_records_refused and test_channel_planted_link. Dead os.makedirs / rmtree of fixture-made directories removed. test_jail_launch's refused-create test asserted the directory was never created; it now asserts that the empty directory it was offered is still empty. test_seatbelt_smoke's realpath test now hands build_compile_ctx the fixture's /tmp name (the fixture's own path is already resolved, which would make the test vacuous).
+
+AC1 evidence: tests/unit/test_no_test_names_a_directory_from_its_pid.py scans every .py under libs/brig/tests with ast. Run over the HEAD versions of the same files it flags exactly the 43 files (48 sites) and no other; over the working tree it finds nothing (uv run pytest libs/brig/tests/unit/test_no_test_names_a_directory_from_its_pid.py: 18 passed). AC2 evidence: that file replaces test_jail_dir_infixes_are_unique.py. Seen failing: a planted libs/brig/tests/integration/test_zz_plant.py with f"/tmp/bg{os.getpid()}zz{next(_n)}" made test_no_test_names_a_directory_from_the_process_id fail, naming 'integration/test_zz_plant.py: line 12'; removed, 18 passed. The detector is itself under test: 10 planted shapes (f-string, bare getpid, %, +, str.format, join, pathlib /, makedirs, mkdtemp) must be found and 7 uses of a pid that is not a path (message, comparison, bytes, a /dev name, docstring, template) must not be. Blind spot, said in its docstring: a pid reaching a path through a name (harness_pid, in the name of conftest's /tmp/bg{harness_pid}-spawnreg FILE, which is appended to and removed at the end of the session) is not followed. The retry was planted too: _REMOVE_TRIES = 1 made test_a_directory_written_into_while_it_is_removed_is_removed_in_the_end fail; conftest.py restored (sha256 278875f3...), 3 passed. AC3 evidence: scripts/check libs/brig exit 0 (run twice, the second on the final tree): format, lint, types (63 files), tests 1380 passed 111 skipped, gates (root, brig, cordis, cordis-helpers, host-paths), docs.
+
+Ran here: uv run pytest libs/brig -m 'integration or e2e' -n auto --dist loadgroup: 329 passed 108 skipped before, 332 passed 108 skipped after (the 3 new fixture tests), no bg-<8> left in /tmp. Skipped here, so migrated by reading the diff only: test_seatbelt_channel, test_seatbelt_fs, test_seatbelt_smoke (darwin); the three darwin tests of e2e/test_probe_forgery.py, the three of e2e/test_scratch_darwin_batteries.py and the two of e2e/test_network_battery_against_a_real_mechanism.py; test_wait_ready's tmp_path-overflow test (darwin). The Docker tests (no daemon) were not touched: none names a pid. test_process_namespaces and test_control_battery skip here (no namespaces in this container) and were not touched. Filed, not started: retire the scratch sweep (_scratch_sweep, decision-121: nothing makes a /tmp/bg<pid> root now), and remove the directories other tests leave in /tmp (tests/supervised_jail.py::new_jail_dir leaves 2 bg-sv-<8> per run).
+
+Check `scripts/check` exited 0
+
+(32 earlier lines omitted)
+```text
+........................................................................ [ 34%]
+........................................................................ [ 35%]
+........................................................................ [ 37%]
+........................................................................ [ 39%]
+........................................................................ [ 41%]
+........................................................................ [ 43%]
+........................................................................ [ 44%]
+........................................................................ [ 46%]
+..........................................................s...ssss.s...s [ 48%]
+..sss.s.s.ss.s.s..s.s.ss.s.s..sssss...........s......................... [ 50%]
+........................................................................ [ 51%]
+........................................................................ [ 53%]
+.......................sssssssssssssssssssssssssssssssssssssssssssssssss [ 55%]
+ssssssssssssssssss...............................ssssssssss.....s....... [ 57%]
+......s................................................................. [ 59%]
+........................................................................ [ 60%]
+......................................................................ss [ 62%]
+s....................................................s.................. [ 64%]
+........................................................................ [ 66%]
+........................................................................ [ 68%]
+........................................................................ [ 69%]
+........................................................................ [ 71%]
+........................................................................ [ 73%]
+........................................................................ [ 75%]
+........................................................................ [ 77%]
+........................................................................ [ 78%]
+........................................................................ [ 80%]
+........................................................................ [ 82%]
+........................................................................ [ 84%]
+........................................................................ [ 86%]
+........................................................................ [ 87%]
+........................................................................ [ 89%]
+........................................................................ [ 91%]
+........................................................................ [ 93%]
+........................................................................ [ 94%]
+........................................................................ [ 96%]
+........................................................................ [ 98%]
+..........................................................               [100%]
+3902 passed, 118 skipped in 171.23s (0:02:51)
+   ok
+== gates
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+== (root)
+   ok
+== libs/brig
+   ok
+== libs/cordis
+   ok
+== libs/cordis-helpers
+   ok
+== libs/host-paths
+   ok
+   ok
+== docs
+INFO    -  Cleaning site directory
+INFO    -  Building documentation to directory: /home/user/bh-02/site
+INFO    -  Documentation built in 2.96 seconds
+   ok
+== tokens
+   skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
+```
+
+Review (reviewer, not the worker): not closed. Every AC is met: full scripts/check exit 0 (3902 passed, 118 skipped, every gate ok, nothing reformatted). close-task refused: a bug closes with its repro recorded (record-check TASK-0151 --repro -- <failing test>) or a note starting 'No repro:' saying why. The worker should record one: the flaky pid-reuse race (3/160 under 8-way load) likely warrants a 'No repro:' note citing that measurement, or the planted-file run of test_no_test_names_a_directory_from_its_pid.py as the repro. Nits: the detector does not follow a pid through a name (stated in its docstring); darwin-only files migrated by reading only.
+
+Round 1 review fix (blocking finding 1: a bug needs a repro on record).
+
+No repro: the failure is a pid-reuse race and has no deterministic test. A later process is handed an earlier run's /tmp/bg<pid>... directory only when the kernel reuses a pid, which is a matter of chance and of how much of the 32768-pid space earlier runs have used; TASK-0140 measured it at 3 of 160 runs of one file under 8-way load (JailDirInUse twice, ConnectionRefusedError once) and could not make it fail on demand without first planting a stale directory by hand. The fix is the removal of the shape that allowed it, and what pins it is test_no_test_names_a_directory_from_its_pid.py (AC2), which passes on the fixed tree and was seen failing on a planted file (libs/brig/tests/integration/test_zz_plant.py, since removed): that plant is not a committed failing test, so record-check --repro (which needs a committed test that fails) does not fit. Nothing else changed in this round: no code, no criterion.
+
+Check `scripts/check` exited 0
+
+(32 earlier lines omitted)
+```text
+........................................................................ [ 34%]
+........................................................................ [ 35%]
+........................................................................ [ 37%]
+........................................................................ [ 39%]
+........................................................................ [ 41%]
+........................................................................ [ 43%]
+........................................................................ [ 44%]
+........................................................................ [ 46%]
+........................................................s.s...ssss.s..ss [ 48%]
+s..s.s...s.ss.s.s.s..s.s.s.s.ssss..........s............................ [ 50%]
+........................................................................ [ 51%]
+............................................s........................... [ 53%]
+.......................sssssssssssssssssssssssss.sssssssssssssssssssssss [ 55%]
+sssssssssssssssssss...........................ssssssssssss.............. [ 57%]
+.........................................................s.............. [ 59%]
+........................................................................ [ 60%]
+......................................................................ss [ 62%]
+s....................................................................... [ 64%]
+........................................................................ [ 66%]
+........................................................................ [ 68%]
+........................................................................ [ 69%]
+........................................................................ [ 71%]
+........................................................................ [ 73%]
+........................................................................ [ 75%]
+........................................................................ [ 77%]
+........................................................................ [ 78%]
+........................................................................ [ 80%]
+........................................................................ [ 82%]
+........................................................................ [ 84%]
+........................................................................ [ 86%]
+........................................................................ [ 87%]
+........................................................................ [ 89%]
+........................................................................ [ 91%]
+........................................................................ [ 93%]
+........................................................................ [ 94%]
+........................................................................ [ 96%]
+........................................................................ [ 98%]
+..........................................................               [100%]
+3902 passed, 118 skipped in 162.74s (0:02:42)
+   ok
+== gates
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+== (root)
+   ok
+== libs/brig
+   ok
+== libs/cordis
+   ok
+== libs/cordis-helpers
+   ok
+== libs/host-paths
+   ok
+   ok
+== docs
+INFO    -  Cleaning site directory
+INFO    -  Building documentation to directory: /home/user/bh-02/site
+INFO    -  Documentation built in 3.14 seconds
+   ok
+== tokens
+   skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
+```
+
+Review round 2 (reviewer): closed. Full scripts/check exit 0, nothing reformatted. AC1: no getpid-named paths remain under libs/brig/tests (remaining getpid uses are pid comparisons/records). AC2: detector test plus planted-file failure recorded. AC3: check passes. Round-1 blocker (repro) answered by the 'No repro:' note. Nits unfiled: detector does not follow a pid through a name (documented); darwin-only files migrated by reading only.
+<!-- SECTION:NOTES:END -->

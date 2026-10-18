@@ -1,13 +1,21 @@
 """The chat row driven with fakes and no runtime."""
 
 import asyncio
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Callable, Mapping
 from typing import Any
 
 import pytest
 
 from chat_cordis_plugin import converse
 from chat_cordis_plugin.testing import Angry, Echo, Noted, Screen, Typed
+
+
+async def _until(condition: Callable[[], bool]) -> None:
+    """Wait for what a test needs to have happened, not for a time to pass: a fixed sleep ends
+    before the work does when the machine is busy (`-n auto`)."""
+    async with asyncio.timeout(10):
+        while not condition():
+            await asyncio.sleep(0.01)
 
 
 async def test_converse_replies_until_the_input_runs_out() -> None:
@@ -72,12 +80,11 @@ async def test_an_interrupt_stops_the_reply_says_so_and_the_session_carries_on()
 
     model, screen, typed = Endless(), Screen(), Typed("first")
     session = asyncio.create_task(converse(model, typed, screen))
-    await asyncio.sleep(0.01)
+    await _until(lambda: "thinking about first" in screen.shown)  # the reply is running
     typed.interrupt()
-    await asyncio.sleep(0.01)
-    assert model.closed
+    await _until(lambda: {"type": "stop", "reason": "interrupted"} in screen.events)
+    assert model.closed  # the reply is closed before the stop is shown
     assert screen.shown[0] == "thinking about first"
-    assert {"type": "stop", "reason": "interrupted"} in screen.events
     typed.type(None)  # and the session is still reading
     await asyncio.wait_for(session, 1)
 

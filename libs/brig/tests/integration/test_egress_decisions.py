@@ -26,7 +26,6 @@ unreachability.
 from __future__ import annotations
 
 import contextlib
-import itertools
 import os
 import socket
 import sys
@@ -45,7 +44,6 @@ from tests.conftest import launch, workload_argv
 
 pytestmark = pytest.mark.integration
 
-_jail_counter = itertools.count()
 _BODY = b"origin-server-payload"
 
 #: How long a test waits for the proxy to have written the decision it is
@@ -108,12 +106,6 @@ def origin():  # type: ignore[no-untyped-def]
         yield server
     finally:
         server.close()
-
-
-def _new_jail_dir() -> str:
-    path = f"/tmp/bg{os.getpid()}eg{next(_jail_counter)}"
-    os.makedirs(path, exist_ok=True)
-    return os.path.realpath(path)
 
 
 def _jail(jail_dir: str, domains: tuple[str, ...]) -> CompiledJail:
@@ -181,14 +173,15 @@ def _wait_for_the_proxy_to_record(jail_dir: str, count: int = 1) -> None:
         time.sleep(0.05)
 
 
-def test_the_reader_returns_the_proxys_own_allow_decision(run_id: str, origin: _Origin) -> None:
+def test_the_reader_returns_the_proxys_own_allow_decision(
+    run_id: str, origin: _Origin, jail_dir: str
+) -> None:
     """The round trip: a real request through a real filter, and the reader
     hands back a stamped `Event` naming the destination the proxy permitted.
 
     Stamped is half the claim -- `ts` and `jail_id` are the two fields only
     `run` may supply (SPEC.md section 6), and a reader that returned raw
     lines would push that job onto the embedder."""
-    jail_dir = _new_jail_dir()
     jail, process = _run(
         jail_dir,
         ("localhost",),
@@ -213,13 +206,12 @@ def test_the_reader_returns_the_proxys_own_allow_decision(run_id: str, origin: _
 
 
 def test_the_reader_returns_a_deny_for_a_destination_outside_the_allow_list(
-    run_id: str, origin: _Origin
+    run_id: str, origin: _Origin, jail_dir: str
 ) -> None:
     """THE CONTROL for the test above: the same origin, reachable, by a name
     the policy does not permit -- and what comes back says `deny`. Without
     it, "the reader returned a decision" would be satisfied by a reader that
     hard-coded one."""
-    jail_dir = _new_jail_dir()
     jail, process = _run(
         jail_dir,
         ("localhost",),
@@ -238,7 +230,9 @@ def test_the_reader_returns_a_deny_for_a_destination_outside_the_allow_list(
         jail.destroy()
 
 
-def test_the_cursor_returns_what_is_new_and_never_the_same_line_twice(run_id: str, origin) -> None:  # type: ignore[no-untyped-def]
+def test_the_cursor_returns_what_is_new_and_never_the_same_line_twice(
+    run_id: str, origin: _Origin, jail_dir: str
+) -> None:
     """An embedder folds these into the record of the action that made the
     call, so the reader has to answer "what is new since I last looked". Read
     once, read again from the returned cursor: the second read is empty even
@@ -248,7 +242,6 @@ def test_the_cursor_returns_what_is_new_and_never_the_same_line_twice(run_id: st
     cursor 0 immediately afterwards returns the same records again, so the
     second read's emptiness is the cursor working rather than the file
     having been consumed or the reader having broken."""
-    jail_dir = _new_jail_dir()
     jail, process = _run(
         jail_dir,
         ("localhost",),
@@ -271,18 +264,17 @@ def test_the_cursor_returns_what_is_new_and_never_the_same_line_twice(run_id: st
         jail.destroy()
 
 
-def test_a_jail_with_no_proxy_reads_nothing_rather_than_failing(run_id: str) -> None:
+def test_a_jail_with_no_proxy_reads_nothing_rather_than_failing(run_id: str, jail_dir: str) -> None:
     """A stack without `connect_proxy` writes no decisions file at all, and
     an embedder that asks anyway must get "nothing", not an error: the reader
     is called after every action, and most jails have no proxy."""
-    jail_dir = _new_jail_dir()
     read = read_egress_decisions(jail_dir, "jail-with-no-proxy")
     assert read.events == ()
     assert read.cursor == 0
     assert not os.path.exists(decisions_path(jail_dir))
 
 
-def test_a_half_written_last_line_is_left_for_the_next_read(run_id: str) -> None:
+def test_a_half_written_last_line_is_left_for_the_next_read(run_id: str, jail_dir: str) -> None:
     """The proxy appends for the life of the jail, so a read can always land
     mid-write. A partial trailing line is neither parsed nor skipped: the
     cursor stops before it, and the next read -- once the writer has finished
@@ -291,7 +283,6 @@ def test_a_half_written_last_line_is_left_for_the_next_read(run_id: str) -> None
     Written by hand here on purpose. Catching a real proxy between two
     `write` calls is a race no test can schedule, and what is under test is
     the READER's arithmetic, which a hand-written file exercises exactly."""
-    jail_dir = _new_jail_dir()
     path = decisions_path(jail_dir)
     whole = (
         '{"detail": "", "decision": "allow", "host": "example.test", '
@@ -315,12 +306,11 @@ def test_a_half_written_last_line_is_left_for_the_next_read(run_id: str) -> None
     assert second.events[0].data["host"] == "other.test"
 
 
-def test_a_whole_line_that_is_not_the_proxys_record_is_loud(run_id: str) -> None:
+def test_a_whole_line_that_is_not_the_proxys_record_is_loud(run_id: str, jail_dir: str) -> None:
     """The forgiving cases are exactly two -- no file, and a line that is not
     finished. Anything else means something other than this jail's proxy is
     writing to the path the mechanism announced, which is a fact an embedder
     must not have folded silently into its log."""
-    jail_dir = _new_jail_dir()
     with open(decisions_path(jail_dir), "w", encoding="utf-8") as decisions:
         decisions.write('{"decision": "allow"}\n')
 

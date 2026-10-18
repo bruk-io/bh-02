@@ -102,9 +102,10 @@ def _read(root: Path, session: str) -> list[Transcript]:
     return [*own, *children]
 
 
-def _rows(root: Path, session: str) -> bytes:
-    """The session's `rows.jsonl` (its row reloads), read through no link; nothing for a session that
-    has none (one whose rows have not loaded yet).
+def _rows(root: Path, session: str) -> bytes | None:
+    """The session's `rows.jsonl` (its row reloads), read through no link; None for a session that has
+    none. The shell makes it at boot, before any reply, so a session with a conversation and none had
+    its log removed or never written.
 
     Raises:
         Refused: it is a link, or can't be read.
@@ -113,7 +114,7 @@ def _rows(root: Path, session: str) -> bytes:
     try:
         data = read_beneath(root, [session, ROWS], cap=_CAP)
     except FileNotFoundError:
-        return b""
+        return None
     except OSError as error:
         raise Refused(f"can't read {where}: {error}") from None
     if isinstance(data, Link):

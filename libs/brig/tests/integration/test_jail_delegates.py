@@ -22,9 +22,9 @@ delegate correctly. Nothing here imports the delegate-callee functions or
 their private module paths at all, by construction.
 
 Same environment traps as every other M2 integration file touching a jail or
-a socket (CLAUDE.md, this task's own text): short `/tmp/bg<pid>hd<n>` scratch
-roots throughout, never pytest's `tmp_path` (`sun_path` is 104 bytes on
-darwin); paths compared through `os.path.realpath` so `/tmp` vs
+a socket (CLAUDE.md, this task's own text): short scratch roots from
+`tests/conftest.py`'s `new_jail_dir` throughout, never pytest's `tmp_path`
+(`sun_path` is 104 bytes on darwin); paths compared through `os.path.realpath` so `/tmp` vs
 `/private/tmp` on darwin cannot cause a false negative. Every workload is
 spawned through `tests.conftest.workload_argv` so the suite-wide leak sweep
 (task-013/task-027) can find it without any cooperation from this file. The
@@ -36,9 +36,7 @@ own Deliverable text asks for that, so this file stays coupled only to
 
 from __future__ import annotations
 
-import itertools
 import os
-import shutil
 import time
 from typing import Protocol, cast
 
@@ -47,9 +45,7 @@ import pytest
 from brig.core import Channel, ChannelKind, Spec, unenforced_report
 from brig.run import HostRuntime, IoPolicy, Jail, Process
 from brig.stack import CompiledJail
-from tests.conftest import launch, teardown_group, workload_argv
-
-_counter = itertools.count()
+from tests.conftest import NewJailDir, launch, teardown_group, workload_argv
 
 
 class _NamedTimeout(Protocol):
@@ -63,20 +59,6 @@ class _NamedTimeout(Protocol):
     channel: str
     endpoint: str
     timeout: float
-
-
-def _new_jail_dir() -> str:
-    """A short scratch root, `/tmp/bg<pid>hd<n>` -- never `tmp_path`."""
-    return f"/tmp/bg{os.getpid()}hd{next(_counter)}"
-
-
-def _new_cwd_dir() -> str:
-    """A separate short scratch root for `cwd`, distinct from any
-    `jail_dir` -- same discipline as `test_exec.py`: an implementation that
-    conflated `jail_dir` with `cwd` must not be able to pass by accident."""
-    path = f"/tmp/bg{os.getpid()}hd{next(_counter)}-cwd"
-    os.makedirs(path, exist_ok=True)
-    return path
 
 
 def _identity_wrap(argv: tuple[str, ...]) -> tuple[str, ...]:
@@ -116,7 +98,6 @@ def _launch_on_a_reserved_socket(
     """A jail whose one process is started on a socket `jail.channel("ctl")`
     reserved; `body` is a format string given the socket's path as `{path}`.
     Returns the reservation's endpoint too."""
-    os.makedirs(jail_dir, exist_ok=True)
     jail = Jail.create(
         _compiled_jail(spec=spec),
         runtime=HostRuntime(),
@@ -138,20 +119,17 @@ def _launch_on_a_reserved_socket(
     return jail, process, reservation.endpoint
 
 
-def _teardown_group(process: Process, jail_dir: str | None = None) -> None:
+def _teardown_group(process: Process) -> None:
     """Group-kill the workload (`Jail.destroy()` is out of this task's scope);
     `process.wait()` blocks until the exit waiter has reaped it
-    (task-073). When `jail_dir` is given, also remove it -- a bound socket
-    file outlives the process that bound it, so process teardown alone would
-    leave one behind for the readiness tests below."""
+    (task-073). A bound socket file outlives the process that bound it, and
+    goes with the test's `jail_dir`."""
     # task-086: delegates to the ONE verified helper in tests/conftest.py.
     # The body that used to be inlined here -- killpg, then wait for the
     # LEADER -- verified nothing about the process GROUP, so an orphaned
     # backgrounded child survived silently and surfaced later against an
     # unrelated test. Thirteen modules carried that same body.
     teardown_group(process)
-    if jail_dir is not None:
-        shutil.rmtree(jail_dir, ignore_errors=True)
 
 
 def _bind_script(endpoint: str, *, delay: float) -> str:
@@ -172,13 +150,15 @@ def _bind_script(endpoint: str, *, delay: float) -> str:
 
 
 @pytest.mark.integration
-def test_jail_start_pwd_writes_the_jail_cwd_through_the_bound_method(run_id: str) -> None:
+def test_jail_start_pwd_writes_the_jail_cwd_through_the_bound_method(
+    run_id: str, new_jail_dir: NewJailDir
+) -> None:
     """`jail.start(["pwd"])` -- the BOUND method, never the private
     function it delegates to -- runs a sibling in the jail's own `cwd`.
     Same literal claim MILESTONES.md M2 EC4 makes; this is the one place in
     the suite that reaches it through `Jail.start` itself."""
-    cwd_dir = _new_cwd_dir()
-    jail_dir = _new_jail_dir()
+    cwd_dir = new_jail_dir()
+    jail_dir = new_jail_dir()
     jail, process = _launch(
         workload_argv(run_id, "sleep 5"),
         cwd=cwd_dir,
@@ -195,7 +175,9 @@ def test_jail_start_pwd_writes_the_jail_cwd_through_the_bound_method(run_id: str
 
 
 @pytest.mark.integration
-def test_jail_start_forwards_the_cwd_keyword_through_the_bound_method(run_id: str) -> None:
+def test_jail_start_forwards_the_cwd_keyword_through_the_bound_method(
+    run_id: str, new_jail_dir: NewJailDir
+) -> None:
     """decision-053 names TWO failure shapes for a wrong delegation: wrong
     argument order (task-030 AC #3's mutation) AND a DROPPED keyword. This
     test is what would catch the second shape: `jail.start(["pwd"],
@@ -208,9 +190,9 @@ def test_jail_start_forwards_the_cwd_keyword_through_the_bound_method(run_id: st
     Until decision-183 this test forwarded `interactive=True` through
     `exec`, which could only refuse for want of `PTY`; that keyword went
     with it, and `cwd` is the keyword `start` forwards now."""
-    cwd_dir = _new_cwd_dir()
-    other_dir = _new_cwd_dir()
-    jail_dir = _new_jail_dir()
+    cwd_dir = new_jail_dir()
+    other_dir = new_jail_dir()
+    jail_dir = new_jail_dir()
     jail, process = _launch(
         workload_argv(run_id, "sleep 5"),
         cwd=cwd_dir,
@@ -241,6 +223,7 @@ def test_jail_start_forwards_the_cwd_keyword_through_the_bound_method(run_id: st
 @pytest.mark.integration
 def test_handle_wait_ready_returns_after_a_real_bind_appears_through_the_bound_method(
     run_id: str,
+    jail_dir: str,
 ) -> None:
     """Positive control (AC #5): a workload that sleeps ~0.5s and then
     binds+listens on its reserved socket makes `process.wait_ready` --
@@ -250,7 +233,6 @@ def test_handle_wait_ready_returns_after_a_real_bind_appears_through_the_bound_m
     never worked at all -- 'always raises' is not evidence of a working
     timeout unless something in the same suite proves the non-timeout path
     genuinely returns."""
-    jail_dir = _new_jail_dir()
     channel = Channel(name="ctl", kind=ChannelKind.LISTEN)
     spec = Spec(channels=(channel,))
     _jail, process, _ = _launch_on_a_reserved_socket(
@@ -263,12 +245,13 @@ def test_handle_wait_ready_returns_after_a_real_bind_appears_through_the_bound_m
         assert elapsed >= 0.5, f"returned before the bind could have appeared: elapsed={elapsed}"
         assert elapsed < 5.0, f"returned suspiciously close to the 10s timeout: elapsed={elapsed}"
     finally:
-        _teardown_group(process, jail_dir)
+        _teardown_group(process)
 
 
 @pytest.mark.integration
 def test_handle_wait_ready_raises_the_named_timeout_type_through_the_bound_method(
     run_id: str,
+    jail_dir: str,
 ) -> None:
     """Negative half: a workload that never binds makes `process.wait_ready`
     -- the BOUND method -- raise the named timeout type, carrying the
@@ -277,7 +260,6 @@ def test_handle_wait_ready_raises_the_named_timeout_type_through_the_bound_metho
     exact class is checked by name rather than by importing it, so this
     file never has a reason to import the module `Process.wait_ready`
     delegates to."""
-    jail_dir = _new_jail_dir()
     channel = Channel(name="ctl", kind=ChannelKind.LISTEN)
     spec = Spec(channels=(channel,))
     # never touches its socket
@@ -297,4 +279,4 @@ def test_handle_wait_ready_raises_the_named_timeout_type_through_the_bound_metho
         assert err.endpoint == endpoint
         assert err.timeout == 1.0
     finally:
-        _teardown_group(process, jail_dir)
+        _teardown_group(process)

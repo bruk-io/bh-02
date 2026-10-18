@@ -361,6 +361,12 @@ def _named(name: str, table: Mapping[str, Any], source: str, *, endpoint: bool =
     )
 
 
+def _article(provider: str) -> str:
+    """The article before a provider's name in a message: 'an' before a vowel ('an openai endpoint'),
+    else 'a' ('a claude-code endpoint'). The built-in names are lowercase, and a factory never reaches it."""
+    return "an" if provider.startswith(("a", "e", "i", "o", "u")) else "a"
+
+
 def problem(named: Named) -> str | None:
     """What is wrong with a model's or an endpoint's table, said so the person can fix it; None when
     nothing is. An endpoint's problem is its own or any of its models'."""
@@ -381,7 +387,10 @@ def problem(named: Named) -> str | None:
         return None  # a factory (`module:attribute`), whose tables are its own
     allowed = _ENDPOINT_KEYS[named.provider] - _LISTING | _MODEL_KEYS[named.provider]
     if unknown := sorted(set(named.table) - allowed):
-        return f"{where}: {', '.join(unknown)} is not a setting of a {named.provider} model"
+        return (
+            f"{where}: {', '.join(unknown)} is not a setting of {_article(named.provider)} "
+            f"{named.provider} model"
+        )
     if not named.id:
         return f'{where} names no model id; give it `id = "..."`, the provider\'s own name for the model'
     return _settings_problem(named, where)
@@ -402,8 +411,8 @@ def _endpoint_problem(named: Named, where: str, *, factory: bool) -> str | None:
     if unknown := sorted(set(table) - _ENDPOINT_KEYS[named.provider]):
         allowed = ", ".join(sorted(_ENDPOINT_KEYS[named.provider]))
         return (
-            f"{where}: {', '.join(unknown)} is not a setting of a {named.provider} endpoint; it takes "
-            f"{allowed}"
+            f"{where}: {', '.join(unknown)} is not a setting of {_article(named.provider)} "
+            f"{named.provider} endpoint; it takes {allowed}"
         )
     if named.source == _EXTRA_SOURCE and (said := sorted({_DISCOVER, _KEY_COMMAND} & set(table))):
         return (
@@ -448,8 +457,9 @@ def _models_problem(named: Named, where: str, *, factory: bool) -> str | None:
         if unknown := sorted(set(table) - _MODEL_KEYS[named.provider]):
             allowed = ", ".join(sorted(_MODEL_KEYS[named.provider]))
             return (
-                f"{where}: {', '.join(unknown)} is not a setting of a {named.provider} model "
-                f"({named.name}/{model}); a model takes {allowed}, and its endpoint the rest"
+                f"{where}: {', '.join(unknown)} is not a setting of {_article(named.provider)} "
+                f"{named.provider} model ({named.name}/{model}); a model takes {allowed}, "
+                "and its endpoint the rest"
             )
         if not isinstance(table.get("id"), str) or not table["id"]:
             return (

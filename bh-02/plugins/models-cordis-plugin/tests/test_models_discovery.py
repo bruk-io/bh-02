@@ -154,7 +154,7 @@ _BROKEN = _FILE + 'colour = "red"\n'  # an endpoint with a setting it does not t
 
 def _why(tmp_path: Path) -> str:
     return (
-        f"endpoint 'local' ({tmp_path / 'models.toml'}): colour is not a setting of a openai endpoint; "
+        f"endpoint 'local' ({tmp_path / 'models.toml'}): colour is not a setting of an openai endpoint; "
         "it takes base_url, discover, include, key, key_command, key_ttl_ms, max_tokens, models, provider, "
         "temperature"
     )
@@ -188,7 +188,7 @@ async def test_the_models_file_s_default_naming_a_model_of_a_broken_endpoint_is_
         resolved(config)
     assert raised.value.message == _why(tmp_path)
     async with opened(config) as model:
-        with pytest.raises(ModelsError, match="colour is not a setting of a openai endpoint"):
+        with pytest.raises(ModelsError, match="colour is not a setting of an openai endpoint"):
             [chunk async for chunk in model.complete([{"role": "user", "content": "hi"}], [])]
     assert get.calls == []
 

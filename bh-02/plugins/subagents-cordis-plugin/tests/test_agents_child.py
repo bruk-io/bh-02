@@ -1,5 +1,7 @@
 """A sub-agent as data: its name, its rows, its label and its report, as functions."""
 
+import datetime
+import errno
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import PurePath
@@ -7,6 +9,7 @@ from typing import Any
 
 import pytest
 
+from host_paths import Failure, Replaced
 from subagents_cordis_plugin import (
     GENERAL,
     AgentsConfig,
@@ -19,6 +22,7 @@ from subagents_cordis_plugin import (
     child_rows,
     framed,
     labelled,
+    log_stopped,
     next_name,
     report_of,
     timeout_seconds,
@@ -285,3 +289,27 @@ def test_a_timeout_that_is_no_number_is_refused_saying_what_to_give(value: objec
     assert isinstance(said, str)
     assert said.startswith(f"error: agent_wait's `timeout` is {value!r}, not a number of seconds")
     assert "such as timeout=30" in said and "leave it out to wait until all" in said
+
+
+_LOG = "/s/abc/agents/general-1/events.jsonl"
+
+
+def test_a_log_that_stopped_is_told_with_its_file_when_it_failed_the_error_and_what_watch_does() -> None:
+    full = Failure(
+        datetime.datetime(2026, 10, 18, 20, 11, 21, 345000, tzinfo=datetime.UTC),
+        OSError(errno.ENOSPC, "No space left on device"),
+    )
+    assert log_stopped("general-1", "general", _LOG, full) == (
+        f"agent general-1 (general): its event log {_LOG} stopped being written (it failed at "
+        "2026-10-18T20:11:21.345Z): No space left on device; `bh-02 watch` shows nothing after that "
+        "and never sees the agent end, so it must be left with Ctrl-C"
+    )
+
+
+def test_the_time_a_log_failed_is_told_in_utc_and_an_error_with_no_text_of_its_own_by_its_message() -> None:
+    plus_two = datetime.timezone(datetime.timedelta(hours=2))
+    gone = Failure(
+        datetime.datetime(2026, 10, 18, 22, 11, 21, 345678, tzinfo=plus_two), Replaced("the file went")
+    )
+    said = log_stopped("explore-2", "explore", _LOG, gone)
+    assert "(it failed at 2026-10-18T20:11:21.345Z): the file went;" in said

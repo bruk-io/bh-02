@@ -306,6 +306,32 @@ def test_helper_has_required_fields() -> None:
 
 
 @pytest.mark.unit
+def test_helper_ready_path_is_absent_by_default_and_must_be_absolute() -> None:
+    """`ready_path` (decision-204) is the file the runtime removes before it starts the helper,
+    `None` for a helper that publishes none. A relative one would name a file under the
+    launcher's working directory, so it is refused on construction, as a `StagedFile`'s
+    absolute `relpath` is."""
+    plain = brig.mech.Helper(
+        name="h", argv=("true",), lifetime=brig.mech.HelperLifetime.LAUNCH_SCOPED
+    )
+    assert plain.ready_path is None
+    named = brig.mech.Helper(
+        name="h",
+        argv=("true",),
+        lifetime=brig.mech.HelperLifetime.JAIL_LIFETIME,
+        ready_path="/jail/h.ready",
+    )
+    assert named.ready_path == "/jail/h.ready"
+    with pytest.raises(ValueError, match="absolute"):
+        brig.mech.Helper(
+            name="h",
+            argv=("true",),
+            lifetime=brig.mech.HelperLifetime.JAIL_LIFETIME,
+            ready_path="jail/h.ready",
+        )
+
+
+@pytest.mark.unit
 def test_compile_ctx_has_required_fields() -> None:
     """CompileCtx has jail_dir and platform fields."""
     ctx = brig.mech.CompileCtx(jail_dir="/tmp/jail", platform="linux")

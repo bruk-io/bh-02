@@ -22,7 +22,6 @@ the code under test where a process is concerned (`/bin/ps`, `os.path`):
 from __future__ import annotations
 
 import dataclasses
-import itertools
 import json
 import os
 import shlex
@@ -51,13 +50,6 @@ from tests.conftest import (
 )
 
 pytestmark = pytest.mark.integration
-
-_jail_counter = itertools.count()
-
-
-def _new_jail_dir() -> str:
-    """A short scratch root with this file's own infix (`pd`)."""
-    return f"/tmp/bg{os.getpid()}pd{next(_jail_counter)}"
 
 
 def _identity_wrap(argv: tuple[str, ...]) -> tuple[str, ...]:
@@ -109,15 +101,6 @@ def _wait_for(predicate: Callable[[], bool], seconds: float = 10.0) -> bool:
 def _kill_group(pgid: int) -> None:
     """End `pgid` with the suite's own verified helper, never the code under test."""
     teardown_pgid(pgid)
-
-
-@pytest.fixture
-def jail_dir() -> Iterator[str]:
-    path = _new_jail_dir()
-    try:
-        yield path
-    finally:
-        shutil.rmtree(path, ignore_errors=True)
 
 
 # ---------------------------------------------------------------------------
@@ -317,7 +300,6 @@ def test_destroy_after_a_waited_sibling_ends_what_it_left_in_its_group(
     wait deregistered the sibling and `kill()` never looked at its group again:
     the `sleep` escaped (seen on the tree before TASK-0079.25). Now its record
     outlives the wait and `kill()` ends it."""
-    os.makedirs(jail_dir, exist_ok=True)
     jail, process = launch(
         _compiled_jail(),
         argv=workload_argv(run_id, "sleep 100"),
@@ -393,7 +375,6 @@ def _gone_pid() -> tuple[int, str]:
 
 
 def _launch_live(run_id: str, jail_dir: str) -> tuple[Jail, Process]:
-    os.makedirs(jail_dir, exist_ok=True)
     return launch(
         _compiled_jail(),
         argv=workload_argv(run_id, "sleep 100"),
@@ -481,7 +462,6 @@ def _doubt(jail_dir: str, kind: str, outside: str) -> None:
         case "no-record":
             os.makedirs(os.path.join(procs, _records.new_id()))
         case "procs-is-a-link":
-            os.makedirs(jail_dir)
             os.symlink(outside, procs)
         case _:
             raise AssertionError(kind)
@@ -546,7 +526,6 @@ def test_a_gone_jails_records_are_removed_following_no_links(jail_dir: str, outs
     """A jail that ran and ended: its records, exit record and stdio go, and a
     link planted inside a record's directory is removed, never followed (the
     directory it points at keeps its file)."""
-    os.makedirs(jail_dir)
     jail, process = launch(
         _compiled_jail(),
         argv=["/bin/sh", "-c", "exit 4"],

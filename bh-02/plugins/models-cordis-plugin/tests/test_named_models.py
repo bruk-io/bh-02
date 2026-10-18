@@ -116,7 +116,7 @@ _GATE: dict[str, Any] = {
         ),
         ({"provider": "openai", "models": _X}, "names no base_url; give it the endpoint's base"),
         ({**_OPEN, "base_url": "ftp://h"}, "is not an http(s) URL"),
-        ({**_OPEN, "base-url": "y"}, "base-url is not a setting of a openai endpoint"),
+        ({**_OPEN, "base-url": "y"}, "base-url is not a setting of an openai endpoint"),
         ({**_OPEN, "key": ""}, "key must name a line of local.env"),
         ({**_OPEN, "key": "K", "key_command": "c"}, "give key (a line of local.env) or key_command"),
         ({**_OPEN, "key_command": " "}, "key_command must be a command that prints a key"),
@@ -124,12 +124,15 @@ _GATE: dict[str, Any] = {
         ({**_OPEN, "key_command": "c", "key_ttl_ms": True}, "key_ttl_ms must be a whole number"),
         ({**_OPEN, "max_tokens": 0}, "max_tokens must be"),
         ({**_OPEN, "models": {"x": {"id": "x", "temperature": "hot"}}}, "temperature must be"),
-        ({**_OPEN, "models": {"x": {"id": "x", "key": "K"}}}, "key is not a setting of a openai model (m/x)"),
+        (
+            {**_OPEN, "models": {"x": {"id": "x", "key": "K"}}},
+            "key is not a setting of an openai model (m/x)",
+        ),
         ({**_OPEN, "models": {"x": {}}}, "model 'x' names no id"),
         ({**_OPEN, "models": {"x": "x"}}, "models.x is not a table"),
         ({**_OPEN, "models": {"a/b": {"id": "x"}}}, "'a/b' can't name a model"),
         ({**_OPEN, "models": ["x"]}, "models must be a table of models"),
-        ({**_OPEN, "colour": "red"}, "colour is not a setting of a openai endpoint; it takes"),
+        ({**_OPEN, "colour": "red"}, "colour is not a setting of an openai endpoint; it takes"),
         ({"provider": "claude-code", "base_url": "https://h/v1", "models": _X}, "a gateway needs both"),
         ({"provider": "claude-code", "key_command": "c", "models": _X}, "a gateway needs both"),
         ({"provider": "claude-code", "experimental_betas": False, "models": _X}, "experimental_betas is for"),
@@ -163,22 +166,21 @@ def test_a_table_with_a_problem_says_what_to_fix(table: dict[str, Any], said: st
 
 
 @pytest.mark.parametrize(
-    ("table", "provider"),
+    ("table", "endpoint"),
     [
-        ({"provider": "openai", "base_url": "https://h/v1", "models": _X}, "openai"),
-        ({"provider": "claude-code", "models": _X}, "claude-code"),
+        ({"provider": "openai", "base_url": "https://h/v1", "models": _X}, "an openai endpoint"),
+        ({"provider": "claude-code", "models": _X}, "a claude-code endpoint"),
     ],
 )
 def test_an_id_on_an_endpoint_of_a_built_in_provider_is_refused_as_any_setting_it_does_not_take(
-    table: dict[str, Any], provider: str
+    table: dict[str, Any], endpoint: str
 ) -> None:
     """TASK-0158: an endpoint has no id (its models carry them), so a built-in provider's endpoint refuses
-    one with the generic error for a setting it does not take, not with a message about an old shape."""
+    one with the generic error for a setting it does not take, not with a message about an old shape.
+    TASK-0159: the article follows the provider's name ('an openai', 'a claude-code')."""
     (named,) = [m for m in combined({"m": {**table, "id": "x"}}, "/c/models.toml", {}) if m.name == "m"]
     said = str(problem(named))
-    assert said.startswith(
-        f"endpoint 'm' (/c/models.toml): id is not a setting of a {provider} endpoint; it takes "
-    )
+    assert said.startswith(f"endpoint 'm' (/c/models.toml): id is not a setting of {endpoint}; it takes ")
 
 
 def test_an_endpoint_s_name_can_not_hold_a_slash_but_may_be_any_other_name() -> None:

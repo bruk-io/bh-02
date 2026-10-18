@@ -21,6 +21,7 @@ from bh_02.watching import Refused
 type Json = Mapping[str, object]
 
 SESSION = "20261012-091500-ab12"
+NO_ROWS = "rows.jsonl not found: row reloads are not shown"
 LOCAL = datetime.timezone(datetime.timedelta(hours=-7))
 UNSAFE = re.compile("[\x00-\x08\x0b-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]")
 
@@ -120,9 +121,16 @@ def test_the_sessions_row_reloads_are_read_with_its_files_and_shown_among_the_li
     ]
 
 
-def test_a_session_with_no_rows_file_is_shown_without_reloads(tmp_path: Path) -> None:
-    put(tmp_path / SESSION / "transcript.jsonl", *ONE)  # its rows have not loaded yet
-    assert not any("row " in text for text in lines_of(tmp_path))
+def test_a_session_with_a_conversation_and_no_rows_file_says_so_in_one_line(tmp_path: Path) -> None:
+    # the shell makes rows.jsonl at boot, before any reply, so this session's row log was removed or never
+    # written: its reloads are not shown, and the line says why
+    put(tmp_path / SESSION / "transcript.jsonl", *ONE)
+    assert lines_of(tmp_path) == [
+        NO_ROWS,
+        "conversation 1  transcript.jsonl  2026-10-17 20:00:00.000",
+        "  reply 1  2026-10-17 20:00:00.000  first",
+        "    step 1  20:00:01.000  claude-opus-5-5  first chunk 0.50s  generated in 0.50s",
+    ]
 
 
 def test_a_rows_file_that_is_a_link_or_has_a_second_name_or_is_too_large_is_not_read(
@@ -416,6 +424,7 @@ def test_following_prints_what_is_new_every_second_across_a_clear_and_a_compact(
     # each line once, in the order it came, whichever file it was in: the old conversation is not printed
     # again when its file is renamed, and the new one is not mistaken for it
     assert out == [
+        NO_ROWS,  # this session has no rows.jsonl, said once, as its first line
         "conversation 1  transcript.jsonl  2026-10-17 20:00:00.000",
         "  reply 1  2026-10-17 20:00:00.000  first",
         "    step 1  20:00:01.000  claude-opus-5-5  first chunk 0.50s  generated in 0.50s",
@@ -523,6 +532,24 @@ def test_a_sub_agents_rows_coming_up_while_following_are_one_line_printed_once_w
     assert [text for text in out if "row first load" in text] == [
         "  row first load  20:00:04.000  3 rows in 0.02s"
     ]
+
+
+def test_following_a_session_without_rows_says_so_once_when_its_conversation_begins(tmp_path: Path) -> None:
+    (tmp_path / SESSION).mkdir()
+    path = tmp_path / SESSION / "transcript.jsonl"
+
+    def started() -> None:
+        put(path, *ONE)
+
+    def replied() -> None:
+        pushed(path, message("next", "2026-10-18T03:01:00.000Z"))
+
+    out, _ = following(tmp_path, [lambda: None, started, replied, lambda: None])
+    assert out.count(NO_ROWS) == 1 and out.index(NO_ROWS) == 0  # nothing before the conversation, then once
+    assert [text for text in out if text.startswith("conversation")] == [
+        "conversation 1  transcript.jsonl  2026-10-17 20:00:00.000"
+    ]
+    assert "  reply 2  2026-10-17 20:01:00.000  next" in out
 
 
 def test_following_a_session_not_yet_started_waits_for_its_first_file(tmp_path: Path) -> None:

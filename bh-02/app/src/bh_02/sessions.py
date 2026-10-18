@@ -4,7 +4,8 @@ A session is where one conversation lives, outside the project (so a jailed inpu
 it): `meta.json` (which directory, which stack, when), `session.toml`, the session's own
 layer file, `transcript.jsonl`, the conversation (what a resume sends the model again), and
 `events.jsonl`, what the ui showed (so a resume shows it again), and `rows.jsonl`, the row reloads
-and failures the shell heard, which `bh-02 trajectory` lays out in time. The session's layer is the
+and failures the shell heard, after a line that marks the start of each run, which `bh-02 trajectory`
+lays out in time. The session's layer is the
 last shipped layer, so everything a run chose (the model, the jail, where the conversation is kept) is
 composition, and resuming is booting with that layer again. `/model` edits it the same way:
 the layer files stay the only way the running program changes.
@@ -16,7 +17,9 @@ never stops the app, `bh-02 sessions` or `--resume`.
 A session is written by one bh-02 at a time: `held` takes an exclusive advisory lock on the
 session's `running.lock` for a run, which a second `bh-02 --resume` of it finds taken and refuses
 (`Held`) before it starts a row, naming the process (the pid the holder wrote there). Listing,
-`bh-02 trajectory` and `bh-02 watch` only read, and never take it.
+`bh-02 trajectory` and `bh-02 watch` only read, and never take it: `running` is how a reader asks
+whether a run still holds a session, by that pid, because even a lock tried and let go at once would
+make a bh-02 starting at that instant find the session held.
 
 `session_layer`, `with_model` and `resume_command` (and the private helpers) are pure; the
 rest reads or writes the state directory. `Listing` is the `session` value
@@ -39,7 +42,7 @@ from typing import Any, Protocol, assert_never
 from cordis import Row
 from cordis.composition import format_layer
 from cordis.loader import read_layer
-from host_paths import config_home, passes, roots, state_home
+from host_paths import Link, config_home, passes, read_beneath, roots, state_home
 
 __all__ = [
     "ROWS",
@@ -55,6 +58,7 @@ __all__ = [
     "listed",
     "pins_model",
     "resume_command",
+    "running",
     "scanned",
     "session_layer",
     "set_model",
@@ -348,7 +352,8 @@ def held(session: Session) -> Iterator[None]:
 
     The lock is the whole claim: the pid is a name for the person, written after it is taken, and
     one a crashed holder left stays in the file until the next holder writes its own. Reading the
-    session (listing, `bh-02 trajectory`, `bh-02 watch`) takes no lock and is not stopped by one.
+    session (listing, `bh-02 trajectory`, `bh-02 watch`) takes no lock and is not stopped by one;
+    `running` reads the pid to tell whether a holder is still there.
 
     Raises:
         Held: another process holds the session.
@@ -364,6 +369,44 @@ def held(session: Session) -> Iterator[None]:
         yield
     finally:
         os.close(fd)  # drops the lock with the descriptor
+
+
+def _holder(written: str) -> int | None:
+    """The process id `written` (what a lock file holds) names, or None when it names none."""
+    pid = written.strip()
+    return int(pid) if pid.isdecimal() and 0 < int(pid) < 2**31 else None
+
+
+def running(root: Path, session_id: str) -> bool:
+    """Whether a bh-02 is still running the session `session_id` under `root`: the process whose
+    pid its `running.lock` holds is alive. Nothing is locked or written, so a reader (`bh-02
+    watch`) can ask as often as it likes and never makes a bh-02 that is starting find the session
+    held, which a lock tried and let go at once would (`held` tries its lock without waiting, and
+    fails against any other). `held` writes the pid after it takes the lock and leaves it when the
+    block ends, and the system drops the lock with the process, so a dead pid means the lock is free.
+
+    False only when nothing ran the session (no lock file) or the process named there is gone: a
+    crash leaves its pid, and that is what is found dead. Anything that cannot be told is True, as
+    the follow it ends goes on as it did before: a lock file with no pid yet (a holder between its
+    lock and its write), one that is not a plain file, or a pid that a process of another user or
+    another pid namespace (a container) has, so a bh-02 there is not seen, and the pid of a
+    holder gone that another process has since taken.
+    """
+    try:
+        written = read_beneath(root, [session_id, _LOCK], cap=64)
+    except FileNotFoundError:
+        return False
+    except OSError:  # a lock file that is not a plain file, or too large
+        return True
+    if isinstance(written, Link) or (pid := _holder(written.decode(errors="replace"))) is None:
+        return True
+    try:
+        os.kill(pid, 0)  # signal 0 sends nothing: it only asks whether the process is there
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True  # there, and another user's
+    return True
 
 
 def discard(session: Session) -> None:

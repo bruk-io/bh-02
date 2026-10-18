@@ -18,12 +18,14 @@ directory would race the parent.
 """
 
 import contextlib
+import datetime
 import math
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import PurePath
 from typing import Any, Protocol
 
+from host_paths import Failure
 from subagents_cordis_plugin.kinds import AgentType
 
 __all__ = [
@@ -48,6 +50,7 @@ __all__ = [
     "labelled",
     "limited",
     "listing",
+    "log_stopped",
     "lost",
     "next_name",
     "not_running",
@@ -540,4 +543,23 @@ def lost(name: str, kind: str) -> str:
     return (
         f"agent {name} ({kind}) was ended before it answered: the agents row restarted "
         "(/clear, /model and /restart agents do that) or bh-02 is leaving"
+    )
+
+
+def _stamp(moment: datetime.datetime) -> str:
+    """`moment` as the transcript and the session's row log write a time: UTC ISO-8601 to the
+    millisecond with `Z` (`2026-10-18T03:47:12.345Z`)."""
+    return moment.astimezone(datetime.UTC).isoformat(timespec="milliseconds").removesuffix("+00:00") + "Z"
+
+
+def log_stopped(name: str, kind: str, path: str, stopped: Failure) -> str:
+    """The note for a child whose event log (`path`) stopped being written: the file, when the write
+    failed (the appender's own time, not when the row heard of it), the error, and that `bh-02 watch`
+    shows nothing after it and, since the log never ends, must be left with Ctrl-C. Told once, when
+    the child's run ends."""
+    why = stopped.error.strerror or str(stopped.error)
+    return (
+        f"agent {name} ({kind}): its event log {path} stopped being written (it failed at "
+        f"{_stamp(stopped.at)}): {why}; `bh-02 watch` shows nothing after that and never sees the "
+        "agent end, so it must be left with Ctrl-C"
     )

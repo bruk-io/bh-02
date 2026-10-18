@@ -49,7 +49,7 @@ _BAD_DEFAULTS = {
     "no model": ('default = "gone"\n' + _LLAMA, "no model named 'gone', the default in the models file"),
     "a broken endpoint's model": (
         'default = "local/x:7b"\n' + _ENDPOINT.replace("true\n", 'true\ncolour = "red"\n') + _LLAMA,
-        "colour is not a setting of a openai endpoint",
+        "colour is not a setting of an openai endpoint",
     ),
 }
 

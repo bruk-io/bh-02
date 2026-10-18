@@ -13,6 +13,7 @@ import os
 import subprocess
 import sys
 from collections.abc import Callable, Iterable, Sequence
+from functools import partial
 from importlib.metadata import entry_points
 from importlib.resources.abc import Traversable
 from pathlib import Path
@@ -197,10 +198,14 @@ def _check_program() -> Path:
 def watch_command(session: str, agent: str, once: bool) -> None:
     """Follow one sub-agent's event log, read-only: SESSION is a session's id (`bh-02 sessions`)
     and AGENT the agent's name (`/agents` in the session says the command, such as
-    `bh-02 watch 20261012-091500-ab12 general-1`). Stops when the agent ends; Ctrl-C leaves it
-    sooner. Nothing is written, and only names bh-02 made are accepted."""
+    `bh-02 watch 20261012-091500-ab12 general-1`). Stops when the agent ends, or when the session
+    is no longer running (no bh-02 is running it) and the log has no end; Ctrl-C leaves it sooner.
+    Nothing is written or locked, and only names bh-02 made are accepted."""
+    root = sessions.state_root()
     try:
-        for chunk in watching.watched(sessions.state_root(), session, agent, follow=not once):
+        for chunk in watching.watched(
+            root, session, agent, follow=not once, running=partial(sessions.running, root, session)
+        ):
             click.echo(chunk, nl=False)
     except watching.Refused as error:
         click.echo(f"error: {error.message}", err=True)

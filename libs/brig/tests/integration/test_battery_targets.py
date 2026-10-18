@@ -39,17 +39,16 @@ pins only what it alone owns): the same probes reaching `PASS` under
 Every REAL jail this file launches is built through the REAL `degraded()`
 preset and the REAL `Jail.create` and `jail.start` -- same "observe from inside the
 jail" posture `tests/integration/test_ec1_degraded_batteries.py` already
-established, whose helper shapes (`_new_root`, `_launch`, `_teardown_group`)
+established, whose helper shapes (`_launch`, `_teardown_group`)
 this file mirrors rather than imports (that file's own helpers are private
 module functions, not a shared fixture module).
 
-Short `/tmp/bg<pid>t6<run_id[:8]><n>` scratch roots throughout -- never
-`tmp_path` (`sun_path` is 104 bytes on darwin).
+Short scratch roots from `tests/conftest.py`'s `new_jail_dir` throughout --
+never `tmp_path` (`sun_path` is 104 bytes on darwin).
 """
 
 from __future__ import annotations
 
-import itertools
 import os
 import shutil
 import subprocess
@@ -70,27 +69,16 @@ from brig.probe.batteries.fs import fs_read_battery, fs_write_battery
 from brig.probe.battery import Battery, Expectation, Probe
 from brig.run import IoPolicy, Jail, Process
 from brig.stack import Stack, degraded
-from tests.conftest import launch, teardown_group, workload_argv
-
-_jail_counter = itertools.count()
+from tests.conftest import NewJailDir, launch, teardown_group, workload_argv
 
 #: Bounded deadline for one unjailed `subprocess.run` in this file -- these
 #: are `/bin/sh -c` one-liners against local scratch paths, never network.
 _UNJAILED_TIMEOUT_S = 10.0
 
 
-def _new_root(run_id: str, tag: str) -> str:
-    """A short scratch root, `/tmp/bg<pid><tag><run_id[:8]><n>` -- never
-    `tmp_path` (`sun_path` is 104 bytes on darwin). The `t6` infix (this
-    file's own tag below) avoids colliding with a sibling integration
-    file's own counter."""
-    return f"/tmp/bg{os.getpid()}{tag}{run_id[:8]}{next(_jail_counter)}"
-
-
 def _launch(
-    stack: Stack, spec: Spec, argv: Sequence[str], *, jail_id: str, run_id: str
+    stack: Stack, spec: Spec, argv: Sequence[str], *, jail_id: str, run_id: str, jail_dir: str
 ) -> tuple[Jail, Process]:
-    jail_dir = _new_root(run_id, "t6")
     jail = stack.compile(spec)
     return launch(
         jail,
@@ -118,14 +106,14 @@ def _sleep_workload(run_id: str) -> list[str]:
     return workload_argv(run_id, "sleep 100")
 
 
-def _seed_fs_targets(run_id: str) -> tuple[str, str, str, str]:
+def _seed_fs_targets(run_id: str, *, new_jail_dir: NewJailDir) -> tuple[str, str, str, str]:
     """Build and seed the four scratch paths every fs battery in this file
     needs: `workspace` (spec.fs.write_allows[0]), `outside_writable` (a
     scratch root a genuinely unjailed process can write into),
     `credential_canary` (a FILE, seeded, `read_aws_credentials`' target),
     and `ssh_directory_canary` (a DIRECTORY, seeded with one entry,
     `read_home_ssh_directory`'s target). Returns them in that order."""
-    workspace = _new_root(run_id, "btw")
+    workspace = new_jail_dir()
     # `.git/hooks` must exist under the workspace for `write_into_git_hooks_
     # carveout`'s own write to reach a real ENOENT-free attempt against a
     # stack with no fs mechanism -- that probe's target is unchanged by this
@@ -134,17 +122,14 @@ def _seed_fs_targets(run_id: str) -> tuple[str, str, str, str]:
     # not VACUOUS on a missing parent directory this file's own setup owns.
     os.makedirs(os.path.join(workspace, ".git", "hooks"), exist_ok=True)
 
-    outside_writable = _new_root(run_id, "ow")
-    os.makedirs(outside_writable, exist_ok=True)
+    outside_writable = new_jail_dir()
 
-    credential_root = _new_root(run_id, "cc")
-    os.makedirs(credential_root, exist_ok=True)
+    credential_root = new_jail_dir()
     credential_canary = os.path.join(credential_root, "credentials")
     with open(credential_canary, "w", encoding="utf-8") as f:
         f.write("canary-secret\n")
 
-    ssh_directory_canary = _new_root(run_id, "sd")
-    os.makedirs(ssh_directory_canary, exist_ok=True)
+    ssh_directory_canary = new_jail_dir()
     with open(os.path.join(ssh_directory_canary, "known_hosts"), "w", encoding="utf-8") as f:
         f.write("canary-host-key\n")
 
@@ -160,6 +145,7 @@ def _seed_fs_targets(run_id: str) -> tuple[str, str, str, str]:
 @pytest.mark.integration
 def test_write_and_read_targets_are_genuinely_reachable_by_an_unjailed_process_and_cleanup_leaves_no_trace(
     run_id: str,
+    new_jail_dir: NewJailDir,
 ) -> None:
     """AC #3: the write-outside probe's target is `outside_writable`, and a
     genuinely UNJAILED process (no Stack, no Jail -- `subprocess.run`
@@ -183,7 +169,9 @@ def test_write_and_read_targets_are_genuinely_reachable_by_an_unjailed_process_a
     exist anywhere under the REAL home -- proving this run never touched
     it, which is the whole point of moving the write targets under
     `outside_writable` in the first place."""
-    workspace, outside_writable, credential_canary, ssh_directory_canary = _seed_fs_targets(run_id)
+    workspace, outside_writable, credential_canary, ssh_directory_canary = _seed_fs_targets(
+        run_id, new_jail_dir=new_jail_dir
+    )
 
     # AC #4's own wording: assert existence and readability BEFORE running
     # anything, so the seeding itself is the evidence, not an assumption.
@@ -277,6 +265,7 @@ def _denial_verdicts(jail: Jail, battery: Battery) -> dict[str, Verdict]:
 @pytest.mark.integration
 def test_the_named_regression_first_half_every_fs_denial_probe_fails_under_scrub_and_pass(
     run_id: str,
+    new_jail_dir: NewJailDir,
 ) -> None:
     """AC #9. MILESTONES.md M5-lite: "the battery target-resolution fix
     ... with the PASS-mode control that exposed the defect as the named
@@ -295,7 +284,9 @@ def test_the_named_regression_first_half_every_fs_denial_probe_fails_under_scrub
     regression's retirement -- the target no longer depends on which spec
     is in force at all, unlike the discriminating control below, which
     reproduces the OLD disagreement by hand."""
-    workspace, outside_writable, credential_canary, ssh_directory_canary = _seed_fs_targets(run_id)
+    workspace, outside_writable, credential_canary, ssh_directory_canary = _seed_fs_targets(
+        run_id, new_jail_dir=new_jail_dir
+    )
     fs_policy = FsPolicy(write_allows=(workspace,))
 
     scrub_spec = Spec(env=EnvPolicy(mode=EnvMode.SCRUB, allow_names=("PATH",)), fs=fs_policy)
@@ -304,7 +295,12 @@ def test_the_named_regression_first_half_every_fs_denial_probe_fails_under_scrub
     results: dict[str, dict[str, Verdict]] = {}
     for label, spec in (("scrub", scrub_spec), ("pass", pass_spec)):
         jail, process = _launch(
-            degraded(), spec, _sleep_workload(run_id), jail_id=f"t6-fs-{label}", run_id=run_id
+            degraded(),
+            spec,
+            _sleep_workload(run_id),
+            jail_id=f"t6-fs-{label}",
+            run_id=run_id,
+            jail_dir=new_jail_dir(),
         )
         try:
             write_battery = fs_write_battery(spec, outside_writable=outside_writable)
@@ -384,7 +380,7 @@ def _pre_fix_control_battery(workspace: str) -> Battery:
 
 @pytest.mark.integration
 def test_the_discriminating_control_reproduces_doc_016_deviation_4_exactly(
-    run_id: str, monkeypatch: pytest.MonkeyPatch
+    run_id: str, monkeypatch: pytest.MonkeyPatch, new_jail_dir: NewJailDir
 ) -> None:
     """AC #10. The pre-fix control, `_pre_fix_control_battery` above,
     targets the literal retired string `"$HOME"/.ssh` -- READ-shaped, so
@@ -411,7 +407,7 @@ def test_the_discriminating_control_reproduces_doc_016_deviation_4_exactly(
     measurement exactly and depends on no fact about the host. The
     assertion below is kept, and is now about a directory whose existence
     this test is responsible for."""
-    fake_home = _new_root(run_id, "hm")
+    fake_home = new_jail_dir()
     real_ssh = os.path.join(fake_home, ".ssh")
     os.makedirs(real_ssh, exist_ok=True)
     monkeypatch.setenv("HOME", fake_home)
@@ -420,8 +416,7 @@ def test_the_discriminating_control_reproduces_doc_016_deviation_4_exactly(
         f"doc-016's own measured pairing assumed the same"
     )
 
-    workspace = _new_root(run_id, "btp")
-    os.makedirs(workspace, exist_ok=True)
+    workspace = new_jail_dir()
 
     scrub_spec = Spec(
         env=EnvPolicy(mode=EnvMode.SCRUB, allow_names=("PATH",)),
@@ -432,7 +427,12 @@ def test_the_discriminating_control_reproduces_doc_016_deviation_4_exactly(
     outcomes: dict[str, Verdict] = {}
     for label, spec in (("scrub", scrub_spec), ("pass", pass_spec)):
         jail, process = _launch(
-            degraded(), spec, _sleep_workload(run_id), jail_id=f"t6-pf-{label}", run_id=run_id
+            degraded(),
+            spec,
+            _sleep_workload(run_id),
+            jail_id=f"t6-pf-{label}",
+            run_id=run_id,
+            jail_dir=new_jail_dir(),
         )
         try:
             verdicts = _denial_verdicts(jail, _pre_fix_control_battery(workspace))

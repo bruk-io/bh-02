@@ -30,15 +30,14 @@ test here**, not the same one as `test_jail_launch.py`'s convenience default:
 a start that ran in `jail_dir` instead of the jail's cwd would
 still pass a test where the two happen to coincide.
 
-Short `/tmp/bg<pid>ex<n>` scratch roots throughout, never `tmp_path`
-(`sun_path` is 104 bytes on darwin); paths are compared through
+Short scratch roots throughout (`tests/conftest.py`'s `new_jail_dir`), never
+`tmp_path` (`sun_path` is 104 bytes on darwin); paths are compared through
 `os.path.realpath` so `/tmp` vs `/private/tmp` on darwin cannot cause a
 false negative.
 """
 
 from __future__ import annotations
 
-import itertools
 import os
 import signal
 import subprocess
@@ -51,23 +50,7 @@ from brig.core.runtime import Capability
 from brig.run import ExecFidelity, HostRuntime, IoPolicy, Jail, Process, _records
 from brig.run import _identity as identity
 from brig.stack import CompiledJail
-from tests.conftest import launch, teardown_group, workload_argv
-
-_counter = itertools.count()
-
-
-def _new_jail_dir() -> str:
-    """A short scratch root, `/tmp/bg<pid>ex<n>` -- never `tmp_path`."""
-    return f"/tmp/bg{os.getpid()}ex{next(_counter)}"
-
-
-def _new_cwd_dir() -> str:
-    """A separate short scratch root for `cwd`, distinct from any
-    `jail_dir` -- see the module docstring for why the two must never be
-    the same path in this file."""
-    path = f"/tmp/bg{os.getpid()}ex{next(_counter)}-cwd"
-    os.makedirs(path, exist_ok=True)
-    return path
+from tests.conftest import NewJailDir, launch, teardown_group, workload_argv
 
 
 def _identity_wrap(argv: tuple[str, ...]) -> tuple[str, ...]:
@@ -100,7 +83,7 @@ def _launch(
     cwd: str,
     jail: CompiledJail | None = None,
     jail_id: str = "jail-under-test",
-    jail_dir: str | None = None,
+    jail_dir: str,
 ) -> tuple[Jail, Process]:
     return launch(
         jail if jail is not None else _compiled_jail(),
@@ -108,7 +91,7 @@ def _launch(
         cwd=cwd,
         io=IoPolicy(),
         jail_id=jail_id,
-        jail_dir=jail_dir if jail_dir is not None else _new_jail_dir(),
+        jail_dir=jail_dir,
     )
 
 
@@ -153,17 +136,21 @@ def _registered(jail: Jail, first_process: Process) -> list[tuple[int, int, str]
 
 
 def _new_jail(
-    run_id: str, *, jail: CompiledJail | None = None, jail_id: str = "jail-under-test"
+    run_id: str,
+    *,
+    jail: CompiledJail | None = None,
+    jail_id: str = "jail-under-test",
+    new_jail_dir: NewJailDir,
 ) -> tuple[Jail, Process]:
     """A jail whose first process is a `sleep 5` the exec runs alongside --
     `run_id`-tagged so the leak sweep catches it if this test's own
     teardown fails."""
     return _launch(
         workload_argv(run_id, "sleep 5"),
-        cwd=_new_cwd_dir(),
+        cwd=new_jail_dir(),
         jail=jail,
         jail_id=jail_id,
-        jail_dir=_new_jail_dir(),
+        jail_dir=new_jail_dir(),
     )
 
 
@@ -173,11 +160,11 @@ def _new_jail(
 
 
 @pytest.mark.integration
-def test_exec_pwd_writes_exactly_the_jail_cwd(run_id: str) -> None:
+def test_exec_pwd_writes_exactly_the_jail_cwd(run_id: str, new_jail_dir: NewJailDir) -> None:
     """AC #2, MILESTONES.md M2 EC4 literal: `jail.start(["pwd"])` writes
     exactly the jail's `cwd` (resolved through `/private/tmp`) to its
     stdout file -- exact equality after strip, not containment."""
-    jail, process = _new_jail(run_id)
+    jail, process = _new_jail(run_id, new_jail_dir=new_jail_dir)
     try:
         sibling = jail.start(["pwd"])
         assert sibling.wait(timeout=5.0) == 0
@@ -189,13 +176,13 @@ def test_exec_pwd_writes_exactly_the_jail_cwd(run_id: str) -> None:
 
 
 @pytest.mark.integration
-def test_exec_pwd_control_two_jails_different_cwds(run_id: str) -> None:
+def test_exec_pwd_control_two_jails_different_cwds(run_id: str, new_jail_dir: NewJailDir) -> None:
     """AC #3: the discriminating control. Two jails created with
     DIFFERENT cwds each start `pwd` and each returns its OWN cwd -- without
     this, AC #2's assertion passes for an implementation that inherited the
     test runner's cwd and happened to match."""
-    jail_a, process_a = _new_jail(run_id, jail_id="jail-cwd-a")
-    jail_b, process_b = _new_jail(run_id, jail_id="jail-cwd-b")
+    jail_a, process_a = _new_jail(run_id, jail_id="jail-cwd-a", new_jail_dir=new_jail_dir)
+    jail_b, process_b = _new_jail(run_id, jail_id="jail-cwd-b", new_jail_dir=new_jail_dir)
     assert jail_a._base.cwd != jail_b._base.cwd
     try:
         exec_a = jail_a.start(["pwd"])
@@ -220,7 +207,9 @@ def test_exec_pwd_control_two_jails_different_cwds(run_id: str) -> None:
 
 
 @pytest.mark.integration
-def test_exec_env_jail_overlay_reaches_the_sibling_and_wins(run_id: str) -> None:
+def test_exec_env_jail_overlay_reaches_the_sibling_and_wins(
+    run_id: str, new_jail_dir: NewJailDir
+) -> None:
     """AC #4 (positive) and AC #5 (the real assertion) as one exec, one
     process, two markers -- proving the reader works AND that the jail's
     own overlay is what decides, not this process's environment.
@@ -244,7 +233,7 @@ def test_exec_env_jail_overlay_reaches_the_sibling_and_wins(run_id: str) -> None
     present_marker = f"BRIG_JAIL_ENV_{run_id}"
     contested_marker = f"BRIG_CONTESTED_{run_id}"
     compiled = _compiled_jail(env={present_marker: "jail-value-xyz", contested_marker: "jail-wins"})
-    jail, process = _new_jail(run_id, jail=compiled)
+    jail, process = _new_jail(run_id, jail=compiled, new_jail_dir=new_jail_dir)
     try:
         # The premise the second half rests on, made explicit.
         assert jail._base.jail_env[present_marker] == "jail-value-xyz"
@@ -274,14 +263,16 @@ def test_exec_env_jail_overlay_reaches_the_sibling_and_wins(run_id: str) -> None
 
 
 @pytest.mark.integration
-def test_exec_records_the_sibling_and_the_record_outlives_wait(run_id: str) -> None:
+def test_exec_records_the_sibling_and_the_record_outlives_wait(
+    run_id: str, new_jail_dir: NewJailDir
+) -> None:
     """AC #6, EC4 second half: `exec` records the sibling somewhere a LATER
     process can read (SPEC.md §9's binding durability clause) -- carrying
     both `pid` and `pgid`, because teardown signals the GROUP. Since
     decision-181 the record outlives the sibling's `wait()`, so a teardown
     after it still ends anything the sibling left in its group. Asserted by
     reading the record off disk, never from the live `Process`."""
-    jail, process = _new_jail(run_id, jail_id="jail-exec-evt")
+    jail, process = _new_jail(run_id, jail_id="jail-exec-evt", new_jail_dir=new_jail_dir)
     try:
         assert _registered(jail, process) == []
 
@@ -302,10 +293,10 @@ def test_exec_records_the_sibling_and_the_record_outlives_wait(run_id: str) -> N
 
 
 @pytest.mark.integration
-def test_wait_is_idempotent_and_deletes_nothing(run_id: str) -> None:
+def test_wait_is_idempotent_and_deletes_nothing(run_id: str, new_jail_dir: NewJailDir) -> None:
     """Calling `wait()` twice returns the same status both times, and the
     record is still there after both (decision-181)."""
-    jail, process = _new_jail(run_id)
+    jail, process = _new_jail(run_id, new_jail_dir=new_jail_dir)
     try:
         sibling = jail.start(["true"])
         first = sibling.wait(timeout=5.0)
@@ -322,10 +313,10 @@ def test_wait_is_idempotent_and_deletes_nothing(run_id: str) -> None:
 
 
 @pytest.mark.integration
-def test_exit_status_propagates_and_control_is_zero(run_id: str) -> None:
+def test_exit_status_propagates_and_control_is_zero(run_id: str, new_jail_dir: NewJailDir) -> None:
     """AC #7: `wait()` on a command that exits 3 returns 3; the control,
     the same shape exiting 0, returns 0."""
-    jail, process = _new_jail(run_id)
+    jail, process = _new_jail(run_id, new_jail_dir=new_jail_dir)
     try:
         exec_three = jail.start(["bash", "-c", "exit 3"])
         assert exec_three.wait(timeout=5.0) == 3
@@ -342,7 +333,9 @@ def test_exit_status_propagates_and_control_is_zero(run_id: str) -> None:
 
 
 @pytest.mark.integration
-def test_an_interactive_start_is_not_offered_and_spawns_nothing(run_id: str) -> None:
+def test_an_interactive_start_is_not_offered_and_spawns_nothing(
+    run_id: str, new_jail_dir: NewJailDir
+) -> None:
     """AC #8, as decision-183 moved it. `exec(interactive=True)` refused,
     naming `PTY` (a launch feature no runtime here claims), and spawned
     nothing. `interactive` went with `exec` (SPEC.md section 9: a parameter
@@ -350,7 +343,7 @@ def test_an_interactive_start_is_not_offered_and_spawns_nothing(run_id: str) -> 
     take it: asking is a `TypeError` before anything is spawned, and no
     sibling is recorded for the attempt. `HostRuntime` still claims no
     `PTY`. The control: the same call without it succeeds and IS recorded."""
-    jail, process = _new_jail(run_id)
+    jail, process = _new_jail(run_id, new_jail_dir=new_jail_dir)
     try:
         assert _registered(jail, process) == []
         assert Capability.PTY not in HostRuntime().capabilities
@@ -375,13 +368,15 @@ def test_an_interactive_start_is_not_offered_and_spawns_nothing(run_id: str) -> 
 
 
 @pytest.mark.integration
-def test_fidelity_is_plain_and_the_sibling_runs_under_the_jails_wrap(run_id: str) -> None:
+def test_fidelity_is_plain_and_the_sibling_runs_under_the_jails_wrap(
+    run_id: str, new_jail_dir: NewJailDir
+) -> None:
     """AC #9: the empty stack's exec grades `ExecFidelity.PLAIN`, asserted
     as the enum member (not a string), and the sibling's argv is the jail's
     wrap prefix followed by its own -- SPEC.md §9's same-Spec claim, made
     checkable. (Until decision-183 the exec's handle carried a copy of the
     spec to compare; a `Process` carries none, its spec is its jail's.)"""
-    jail, process = _new_jail(run_id)
+    jail, process = _new_jail(run_id, new_jail_dir=new_jail_dir)
     try:
         sibling = jail.start(["true"])
         assert sibling.wait(timeout=5.0) == 0
@@ -398,7 +393,9 @@ def test_fidelity_is_plain_and_the_sibling_runs_under_the_jails_wrap(run_id: str
 
 
 @pytest.mark.integration
-def test_exec_is_a_sibling_with_its_own_pgid_and_workload_survives(run_id: str) -> None:
+def test_exec_is_a_sibling_with_its_own_pgid_and_workload_survives(
+    run_id: str, new_jail_dir: NewJailDir
+) -> None:
     """AC #10: the exec pid differs from the workload pid -- and, the
     discriminating half, the exec's OWN process group (read from
     `/bin/ps`, while it is still running) differs from `process._record.pgid`, not
@@ -414,7 +411,7 @@ def test_exec_is_a_sibling_with_its_own_pgid_and_workload_survives(run_id: str) 
     check after `wait()` is what actually proves the workload is
     untouched: still leading its OWN group (`process._record.pgid`, unchanged), not
     reparented into or absorbed by the exec's group."""
-    jail, process = _new_jail(run_id)
+    jail, process = _new_jail(run_id, new_jail_dir=new_jail_dir)
     try:
         assert jail.alive() is True
         workload_pgid_before = _ps_pgid(process.pid)

@@ -13,16 +13,13 @@ reaped. `workload_argv`'s run-id token is still embedded (belt and
 braces against a hang), so the session-teardown sweep would catch it if a
 test's own wait ever failed to return.
 
-Jail directories use a short `/tmp/bg<pid>es<n>` scratch root, never
-`tmp_path` (CLAUDE.md: `sun_path` is 104 bytes on darwin; the `es` infix
-avoids colliding with sibling integration files -- see `_new_jail_dir`'s
-own docstring below).
+Jail directories are `tests/conftest.py`'s `jail_dir`: short, under `/tmp`, new
+for each test and removed after it, never `tmp_path` (CLAUDE.md: `sun_path` is
+104 bytes on darwin).
 """
 
 from __future__ import annotations
 
-import itertools
-import os
 import subprocess
 import sys
 
@@ -34,8 +31,6 @@ from brig.mech.env_scrub import env_scrub
 from brig.run import IoPolicy
 from brig.stack import Stack
 from tests.conftest import launch, workload_argv
-
-_jail_counter = itertools.count()
 
 #: The env var name this project's spec author chose to KEEP (SCRUB mode's
 #: allow-list) -- deliberately not a real credential-shaped name, so a
@@ -52,19 +47,6 @@ _SET_KEY = "BRIG_TEST_SET_KEY"
 _SET_VALUE = "set-by-policy"
 
 _WAIT_TIMEOUT_S = 10.0
-
-
-def _new_jail_dir() -> str:
-    """A short scratch root, `/tmp/bg<pid>es<n>` -- never `tmp_path`. The
-    `es` infix (matching `test_kill_group.py`'s `kg`,
-    `test_teardown_exec.py`'s `te`, `test_jail_rehydration.py`'s `rh`)
-    keeps this file's jail dirs from colliding with another integration
-    file's plain `bg<pid>-<n>` counter when both run in the same session:
-    several sibling files never clean up their own jail dirs, and a
-    same-numbered path a sibling already populated fails a `not
-    os.path.exists(jail_dir)` assertion in THAT file for a directory THIS
-    file created, not the sibling's own bug."""
-    return f"/tmp/bg{os.getpid()}es{next(_jail_counter)}"
 
 
 def _parse_env_lines(text: str) -> dict[str, str]:
@@ -117,7 +99,7 @@ def _launch_and_collect_stdout(
 
 @pytest.mark.integration
 def test_env_scrub_hides_the_canary_and_forwards_the_allowlist(
-    run_id: str, monkeypatch: pytest.MonkeyPatch
+    run_id: str, monkeypatch: pytest.MonkeyPatch, jail_dir: str
 ) -> None:
     """AC #2: a workload launched through a stack containing `env_scrub`
     prints its own environment; the scrubbed canary name is ABSENT and the
@@ -132,7 +114,6 @@ def test_env_scrub_hides_the_canary_and_forwards_the_allowlist(
     monkeypatch.setenv(_CANARY_NAME, _CANARY_VALUE)
     monkeypatch.setenv(_ALLOWED_NAME, _ALLOWED_VALUE)
 
-    jail_dir = _new_jail_dir()
     spec = Spec(
         env=EnvPolicy(
             mode=EnvMode.SCRUB,
@@ -160,7 +141,7 @@ def test_env_scrub_hides_the_canary_and_forwards_the_allowlist(
 
 @pytest.mark.integration
 def test_allow_listed_name_absent_in_parent_stays_absent_not_empty(
-    run_id: str, monkeypatch: pytest.MonkeyPatch
+    run_id: str, monkeypatch: pytest.MonkeyPatch, jail_dir: str
 ) -> None:
     """An allow-listed name the LAUNCHING process never had at all must be
     ABSENT from the child, not silently defined as an empty string.
@@ -178,7 +159,6 @@ def test_allow_listed_name_absent_in_parent_stays_absent_not_empty(
     control rule for a test that can be green on a broken probe."""
     monkeypatch.delenv(_ALLOWED_NAME, raising=False)
 
-    jail_dir = _new_jail_dir()
     spec = Spec(
         env=EnvPolicy(
             mode=EnvMode.SCRUB, allow_names=(_ALLOWED_NAME,), set=((_SET_KEY, _SET_VALUE),)
@@ -199,7 +179,7 @@ def test_allow_listed_name_absent_in_parent_stays_absent_not_empty(
 
 @pytest.mark.integration
 def test_env_scrub_pass_mode_forwards_everything_and_applies_set(
-    run_id: str, monkeypatch: pytest.MonkeyPatch
+    run_id: str, monkeypatch: pytest.MonkeyPatch, jail_dir: str
 ) -> None:
     """PASS mode's own positive case (task-033's ruling: PASS confers
     everything): the "canary" here is not scrubbed by design -- present,
@@ -208,7 +188,6 @@ def test_env_scrub_pass_mode_forwards_everything_and_applies_set(
     docstring on why PASS routes `set` differently than SCRUB does)."""
     monkeypatch.setenv(_CANARY_NAME, _CANARY_VALUE)
 
-    jail_dir = _new_jail_dir()
     spec = Spec(env=EnvPolicy(mode=EnvMode.PASS, set=((_SET_KEY, _SET_VALUE),)))
     argv = workload_argv(run_id, "env")
     stdout = _launch_and_collect_stdout(spec=spec, argv=argv, jail_dir=jail_dir)
@@ -230,7 +209,7 @@ def test_env_scrub_pass_mode_forwards_everything_and_applies_set(
 
 @pytest.mark.integration
 def test_control_without_env_scrub_the_same_probe_sees_the_secret(
-    run_id: str, monkeypatch: pytest.MonkeyPatch
+    run_id: str, monkeypatch: pytest.MonkeyPatch, jail_dir: str
 ) -> None:
     """AC #3's permanent control: the identical Spec, identical probe
     (`env`, parsed the same way), through the EMPTY stack instead of
@@ -242,7 +221,6 @@ def test_control_without_env_scrub_the_same_probe_sees_the_secret(
     monkeypatch.setenv(_CANARY_NAME, _CANARY_VALUE)
     monkeypatch.setenv(_ALLOWED_NAME, _ALLOWED_VALUE)
 
-    jail_dir = _new_jail_dir()
     spec = Spec(
         env=EnvPolicy(
             mode=EnvMode.SCRUB,
@@ -280,7 +258,7 @@ _RECOVERY_SCRIPT = (
 
 @pytest.mark.integration
 def test_scrubbed_value_is_not_recoverable_from_inside_the_jail(
-    run_id: str, monkeypatch: pytest.MonkeyPatch
+    run_id: str, monkeypatch: pytest.MonkeyPatch, jail_dir: str
 ) -> None:
     """AC #5: the attempted-recovery evidence the grade honesty rule
     requires, run for real rather than only reasoned about -- reading
@@ -295,7 +273,6 @@ def test_scrubbed_value_is_not_recoverable_from_inside_the_jail(
     monkeypatch.setenv(_CANARY_NAME, _CANARY_VALUE)
     monkeypatch.setenv(_ALLOWED_NAME, _ALLOWED_VALUE)
 
-    jail_dir = _new_jail_dir()
     spec = Spec(env=EnvPolicy(mode=EnvMode.SCRUB, allow_names=(_ALLOWED_NAME,)))
     argv = workload_argv(run_id, _RECOVERY_SCRIPT)
     stdout = _launch_and_collect_stdout(spec=spec, argv=argv, jail_dir=jail_dir)
@@ -317,14 +294,14 @@ def test_scrubbed_value_is_not_recoverable_from_inside_the_jail(
 
 
 @pytest.mark.integration
-def test_axes_claim_is_the_env_axis_alone_end_to_end() -> None:
+def test_axes_claim_is_the_env_axis_alone_end_to_end(jail_dir: str) -> None:
     """A `Stack([env_scrub])` compiles with `env` claimed and every other
     axis falling back to `unenforced` -- the coverage step's own proof
     that `env_scrub` claims exactly one axis, exercised through the real
     `Stack.compile` path rather than reading `.axes` in isolation (the
     unit tier already covers that; see
     `tests/unit/test_env_scrub_compile.py::test_axes_is_exactly_env`)."""
-    ctx = CompileCtx(jail_dir=_new_jail_dir(), platform=sys.platform)
+    ctx = CompileCtx(jail_dir=jail_dir, platform=sys.platform)
     jail = Stack([env_scrub]).compile(Spec(), ctx=ctx)
     assert jail.report.axes[Axis.ENV].grade.value == "enforced"
     for axis in Axis:
@@ -336,6 +313,7 @@ def test_axes_claim_is_the_env_axis_alone_end_to_end() -> None:
 @pytest.mark.integration
 def test_portability_rendered_argv_runs_directly_via_usr_bin_env(
     monkeypatch: pytest.MonkeyPatch,
+    jail_dir: str,
 ) -> None:
     """AC #8: run the RENDERED argv directly (not through the launcher, not
     reasoned about) and confirm `/usr/bin/env` actually ran and the
@@ -345,7 +323,7 @@ def test_portability_rendered_argv_runs_directly_via_usr_bin_env(
     monkeypatch.setenv(_ALLOWED_NAME, _ALLOWED_VALUE)
     monkeypatch.setenv(_CANARY_NAME, _CANARY_VALUE)
 
-    ctx = CompileCtx(jail_dir=_new_jail_dir(), platform=sys.platform)
+    ctx = CompileCtx(jail_dir=jail_dir, platform=sys.platform)
     policy = EnvPolicy(
         mode=EnvMode.SCRUB, allow_names=(_ALLOWED_NAME,), set=((_SET_KEY, _SET_VALUE),)
     )

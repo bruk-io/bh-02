@@ -34,17 +34,13 @@ the NEW `tests/conftest.py` arm task-027 adds (see that module's docstring,
 "task-027's third arm"), and a token-bearing sibling would let the OLD arm
 catch the plant too, proving nothing about the new one specifically.
 
-Short `/tmp/bg<pid>te<n>` scratch roots throughout (`te` for
-teardown-exec, distinguishing this file's sequence from the other three
-integration files sharing the same pid -- see `test_kill_group.py`'s
-`_new_jail_dir` docstring for the collision this avoids), never `tmp_path`
-(`sun_path` is 104 bytes on darwin).
+Short scratch roots from `tests/conftest.py`'s `jail_dir` throughout, never
+`tmp_path` (`sun_path` is 104 bytes on darwin).
 """
 
 from __future__ import annotations
 
 import contextlib
-import itertools
 import json
 import os
 import signal
@@ -59,15 +55,6 @@ from brig.run import IoPolicy, Jail, Process, _records
 from brig.run.teardown import DEFAULT_GRACE_S, KillOutcome
 from brig.stack import CompiledJail
 from tests.conftest import destroy_with_grace, launch, teardown_group, workload_argv
-
-_jail_counter = itertools.count()
-
-
-def _new_jail_dir() -> str:
-    """A short scratch root, `/tmp/bg<pid>te<n>` -- never `tmp_path`. The
-    `te` infix keeps this file's sequence disjoint from the other three
-    integration files sharing this same `os.getpid()`."""
-    return f"/tmp/bg{os.getpid()}te{next(_jail_counter)}"
 
 
 def _identity_wrap(argv: tuple[str, ...]) -> tuple[str, ...]:
@@ -91,8 +78,7 @@ def _compiled_jail() -> CompiledJail:
     )
 
 
-def _launch(argv: list[str], *, jail_id: str) -> tuple[Jail, Process]:
-    jail_dir = _new_jail_dir()
+def _launch(argv: list[str], *, jail_id: str, jail_dir: str) -> tuple[Jail, Process]:
     return launch(
         _compiled_jail(),
         argv=argv,
@@ -103,11 +89,11 @@ def _launch(argv: list[str], *, jail_id: str) -> tuple[Jail, Process]:
     )
 
 
-def _new_jail(run_id: str, *, jail_id: str) -> tuple[Jail, Process]:
+def _new_jail(run_id: str, *, jail_id: str, jail_dir: str) -> tuple[Jail, Process]:
     """A jail whose first process is a `sleep 100` -- long-lived enough to
     outlive every test below, `run_id`-tagged so the leak sweep catches it
     if this test's own teardown ever fails."""
-    return _launch(workload_argv(run_id, "sleep 100"), jail_id=jail_id)
+    return _launch(workload_argv(run_id, "sleep 100"), jail_id=jail_id, jail_dir=jail_dir)
 
 
 def _teardown_group(process: Process) -> None:
@@ -202,13 +188,13 @@ def _registered(jail: Jail, first_process: Process) -> list[tuple[int, int, str]
 
 
 @pytest.mark.integration
-def test_live_jail_destroy_reaps_the_unwaited_exec_sibling(run_id: str) -> None:
+def test_live_jail_destroy_reaps_the_unwaited_exec_sibling(run_id: str, jail_dir: str) -> None:
     """AC #2: an exec sibling that is never waited on is gone after
     `jail.destroy()`, observed from OUTSIDE via `/bin/ps`. CONTROL, the
     same probe run BEFORE the kill: the sibling's pgid has at least one
     member -- without this, "gone" is also satisfied by a sibling that
     never started."""
-    jail, process = _new_jail(run_id, jail_id="jail-ac2")
+    jail, process = _new_jail(run_id, jail_id="jail-ac2", jail_dir=jail_dir)
     sibling: Process | None = None
     try:
         sibling = jail.start(workload_argv(run_id, "sleep 100"))
@@ -238,6 +224,7 @@ def test_live_jail_destroy_reaps_the_unwaited_exec_sibling(run_id: str) -> None:
 @pytest.mark.integration
 def test_a_jail_serialized_before_exec_reaps_the_sibling_in_a_separate_interpreter(
     run_id: str,
+    jail_dir: str,
 ) -> None:
     """AC #3: `to_dict()` the jail BEFORE any exec; start an unwaited
     long-lived sibling from the live jail; rehydrate that PRE-EXEC dict
@@ -251,7 +238,7 @@ def test_a_jail_serialized_before_exec_reaps_the_sibling_in_a_separate_interpret
     criterion in this file and fail only this one -- there is no live
     `Jail` object shared between this process and the child interpreter,
     only a dict written before the exec ever happened."""
-    jail, process = _new_jail(run_id, jail_id="jail-ac3")
+    jail, process = _new_jail(run_id, jail_id="jail-ac3", jail_dir=jail_dir)
     sibling: Process | None = None
     try:
         pre_exec_dict = jail.to_dict()
@@ -321,13 +308,13 @@ def test_a_jail_serialized_before_exec_reaps_the_sibling_in_a_separate_interpret
 
 
 @pytest.mark.integration
-def test_kill_report_shape_workload_then_one_exec_sibling_item(run_id: str) -> None:
+def test_kill_report_shape_workload_then_one_exec_sibling_item(run_id: str, jail_dir: str) -> None:
     """AC #4: `items[0].kind == "workload_group"`; exactly one further item
     per exec sibling with `kind == "exec_sibling"` (exact equality, never
     substring/startswith); `identity` equals that sibling's pgid rendered
     as text; `outcome` is `KillOutcome.ENDED` as the enum member, not its
     value."""
-    jail, process = _new_jail(run_id, jail_id="jail-ac4")
+    jail, process = _new_jail(run_id, jail_id="jail-ac4", jail_dir=jail_dir)
     sibling: Process | None = None
     try:
         sibling = jail.start(workload_argv(run_id, "sleep 100"))
@@ -358,7 +345,7 @@ def test_kill_report_shape_workload_then_one_exec_sibling_item(run_id: str) -> N
 
 
 @pytest.mark.integration
-def test_already_exited_sibling_reports_already_gone_fast(run_id: str) -> None:
+def test_already_exited_sibling_reports_already_gone_fast(run_id: str, jail_dir: str) -> None:
     """AC #5: a sibling that has ALREADY exited before `kill()` runs
     reports `ALREADY_GONE` -- not `FAILED`, not `ENDED`. The timing bound
     DISCRIMINATES: strictly less than ONE grace period (`DEFAULT_GRACE_S`,
@@ -367,7 +354,7 @@ def test_already_exited_sibling_reports_already_gone_fast(run_id: str) -> None:
     skips the sibling reap cannot conclude ANYTHING about that sibling in
     less than a full grace window (it would see a lingering zombie and
     burn the whole ladder before reporting `FAILED`)."""
-    jail, process = _new_jail(run_id, jail_id="jail-ac5")
+    jail, process = _new_jail(run_id, jail_id="jail-ac5", jail_dir=jail_dir)
     sibling: Process | None = None
     try:
         sibling = jail.start(workload_argv(run_id, "true"))
@@ -412,7 +399,9 @@ def test_already_exited_sibling_reports_already_gone_fast(run_id: str) -> None:
 
 
 @pytest.mark.integration
-def test_every_registered_sibling_reaches_its_own_kill_report_item(run_id: str) -> None:
+def test_every_registered_sibling_reaches_its_own_kill_report_item(
+    run_id: str, jail_dir: str
+) -> None:
     """AC #6: the returned `KillReport` names every group the jail owns,
     each as its own item with its own identity -- the workload group and
     the registered sibling, distinct, not a collapsed set.
@@ -424,7 +413,7 @@ def test_every_registered_sibling_reaches_its_own_kill_report_item(run_id: str) 
     that produced it. MUTATION PAIRING (deterministic): make
     `teardown.kill_named` tear down only `known` and none of the records it
     scans, and this test fails on every run."""
-    jail, process = _new_jail(run_id, jail_id="jail-ac6")
+    jail, process = _new_jail(run_id, jail_id="jail-ac6", jail_dir=jail_dir)
     sibling: Process | None = None
     try:
         sibling = jail.start(workload_argv(run_id, "sleep 100"))
@@ -451,7 +440,9 @@ def test_every_registered_sibling_reaches_its_own_kill_report_item(run_id: str) 
 
 
 @pytest.mark.integration
-def test_sigterm_ignoring_sibling_still_ends_via_sigkill_escalation(run_id: str) -> None:
+def test_sigterm_ignoring_sibling_still_ends_via_sigkill_escalation(
+    run_id: str, jail_dir: str
+) -> None:
     """AC #7: a sibling that installs `SIGTERM` to `SIG_IGN` is still
     reported `ENDED` -- only the `SIGKILL` rung can end it, which
     discriminates real escalation from a single `SIGTERM` send. CONTROL: a
@@ -459,7 +450,7 @@ def test_sigterm_ignoring_sibling_still_ends_via_sigkill_escalation(run_id: str)
     period -- without this control, the escalation case cannot distinguish
     "the SIGKILL rung actually ran" from "this always reports ENDED no
     matter what". Both asserted as the `KillOutcome` enum member."""
-    jail, process = _new_jail(run_id, jail_id="jail-ac7")
+    jail, process = _new_jail(run_id, jail_id="jail-ac7", jail_dir=jail_dir)
     ignoring: Process | None = None
     cooperative: Process | None = None
     try:
@@ -493,7 +484,7 @@ def test_sigterm_ignoring_sibling_still_ends_via_sigkill_escalation(run_id: str)
 
 
 @pytest.mark.integration
-def test_unwaited_exec_then_kill_leaks_nothing_task022_ac11(run_id: str) -> None:
+def test_unwaited_exec_then_kill_leaks_nothing_task022_ac11(run_id: str, jail_dir: str) -> None:
     """AC #14: task-022's own AC #11 reproduction (its verifier's exact
     plant: `jail.start(["sleep", "45"])`, never `wait()`-ed, then
     `kill()`), run under the fully-armed suite-wide sweep. task-022 could
@@ -506,7 +497,7 @@ def test_unwaited_exec_then_kill_leaks_nothing_task022_ac11(run_id: str) -> None
     reproduction exactly -- proving the product itself leaks nothing here,
     independent of which `tests/conftest.py` arm would or would not have
     seen it."""
-    jail, process = _new_jail(run_id, jail_id="jail-ac14")
+    jail, process = _new_jail(run_id, jail_id="jail-ac14", jail_dir=jail_dir)
     sibling: Process | None = None
     try:
         sibling = jail.start(["sleep", "45"])
@@ -540,7 +531,7 @@ def test_unwaited_exec_then_kill_leaks_nothing_task022_ac11(run_id: str) -> None
 
 
 @pytest.mark.integration
-def test_unwaited_bare_argv_sibling_is_reaped_by_kill(run_id: str) -> None:
+def test_unwaited_bare_argv_sibling_is_reaped_by_kill(run_id: str, jail_dir: str) -> None:
     """The mutation target for AC #8: a long-lived exec sibling with a
     BARE, token-less argv (`["sleep", "100"]`) -- `run_id` is accepted only
     so this test carries the same fixture-ordering shape as its neighbors
@@ -555,7 +546,7 @@ def test_unwaited_bare_argv_sibling_is_reaped_by_kill(run_id: str) -> None:
     check needs that leak to survive to. The workload group is still torn
     down defensively (`_teardown_group`) -- only the exec-sibling rung is
     what AC #8's plant disables."""
-    jail, process = _new_jail(run_id, jail_id="jail-ac8")
+    jail, process = _new_jail(run_id, jail_id="jail-ac8", jail_dir=jail_dir)
     try:
         sibling = jail.start(["sleep", "100"])
         sibling_pgid = _ps_pgid(sibling.pid)

@@ -68,7 +68,7 @@ same "drop one mechanism" shape as the M4 trio's `Stack([rlimits])`), and
 the forged claim is copied from a REAL `scratch_darwin().compile(spec,
 ctx=...)` -- never hand-built -- for the identical reason the M4 trio's own
 docstring states it. `BatteryVerdict`, `Jail`, `Jail.create` and `jail.start`,
-`Stack`, `degraded`, `_new_root`, `_teardown_group`, and `_probe` above are
+`Stack`, `degraded`, `_teardown_group`, and `_probe` above are
 all reused UNCHANGED, not reimplemented -- this is one file extended, not
 two files sharing a shape by accident (this task's own Deliverable: "M4's
 `test_probe_forgery.py` is plant-proved load-bearing... Carry its structure
@@ -78,7 +78,6 @@ onto `scratch_darwin()`").
 from __future__ import annotations
 
 import dataclasses
-import itertools
 import os
 import sys
 from collections.abc import Sequence
@@ -106,27 +105,16 @@ from brig.probe.batteries.env import CANARY_ENV_NAME, env_battery  # batteries: 
 from brig.probe.batteries.fs import fs_write_battery
 from brig.run import IoPolicy, Jail, Process, build_compile_ctx
 from brig.stack import Stack, degraded, scratch_darwin
-from tests.conftest import launch, teardown_group, workload_argv
-
-_jail_counter = itertools.count()
-
-
-def _new_root(run_id: str, tag: str) -> str:
-    """A short scratch root, `/tmp/bg<pid><tag><run_id[:8]><n>` -- never
-    `tmp_path` (`sun_path` is 104 bytes on darwin; CLAUDE.md's own trap
-    list). The `pf` infix (this file's own tag below) keeps this file's
-    counter from colliding with a sibling e2e file's own."""
-    return f"/tmp/bg{os.getpid()}{tag}{run_id[:8]}{next(_jail_counter)}"
+from tests.conftest import NewJailDir, launch, teardown_group, workload_argv
 
 
 def _launch(
-    stack: Stack, spec: Spec, argv: Sequence[str], *, jail_id: str, run_id: str
+    stack: Stack, spec: Spec, argv: Sequence[str], *, jail_id: str, run_id: str, jail_dir: str
 ) -> tuple[Jail, Process]:
     """`Spec -> preset/weakened Stack -> Jail.create -> jail.start`, exactly the
     public chain `.claude/rules/system-tests.md` names -- `stack.compile`
     and `Jail.create` are both public methods on public
     types, never an internal helper."""
-    jail_dir = _new_root(run_id, "pf")
     jail = stack.compile(spec)
     return launch(
         jail,
@@ -176,7 +164,7 @@ def _env_spec() -> Spec:
 
 @pytest.mark.e2e
 def test_a_weakened_stack_with_an_unchanged_claimed_report_is_caught(
-    run_id: str, monkeypatch: pytest.MonkeyPatch
+    run_id: str, monkeypatch: pytest.MonkeyPatch, jail_dir: str
 ) -> None:
     """AC #1 / #2 (EC3). Build a jail from `Stack([rlimits])` -- `degraded()`
     with `env_scrub` REMOVED -- then forge a `Jail` whose `report` and
@@ -211,7 +199,12 @@ def test_a_weakened_stack_with_an_unchanged_claimed_report_is_caught(
 
     weakened = Stack([rlimits])  # degraded() with env_scrub dropped
     jail, process = _launch(
-        weakened, spec, workload_argv(run_id, "sleep 100"), jail_id="pf-forgery", run_id=run_id
+        weakened,
+        spec,
+        workload_argv(run_id, "sleep 100"),
+        jail_id="pf-forgery",
+        run_id=run_id,
+        jail_dir=jail_dir,
     )
     try:
         assert jail.report.axes[Axis.ENV].grade is Grade.UNENFORCED, (
@@ -256,7 +249,7 @@ def test_a_weakened_stack_with_an_unchanged_claimed_report_is_caught(
 
 @pytest.mark.e2e
 def test_control_the_unforged_degraded_jail_is_consistent_on_the_same_battery(
-    run_id: str, monkeypatch: pytest.MonkeyPatch
+    run_id: str, monkeypatch: pytest.MonkeyPatch, jail_dir: str
 ) -> None:
     """AC #3. The IDENTICAL battery, against a real, unweakened `degraded()`
     jail carrying its own genuine report -- no substitution anywhere. This
@@ -272,6 +265,7 @@ def test_control_the_unforged_degraded_jail_is_consistent_on_the_same_battery(
         workload_argv(run_id, "sleep 100"),
         jail_id="pf-control-real",
         run_id=run_id,
+        jail_dir=jail_dir,
     )
     try:
         report = _probe(jail, env_battery(spec))
@@ -290,7 +284,7 @@ def test_control_the_unforged_degraded_jail_is_consistent_on_the_same_battery(
 
 @pytest.mark.e2e
 def test_control_the_weakened_stack_with_an_HONEST_report_does_not_contradict(
-    run_id: str, monkeypatch: pytest.MonkeyPatch
+    run_id: str, monkeypatch: pytest.MonkeyPatch, jail_dir: str
 ) -> None:
     """AC #4. The SAME weakened stack as the forgery test (`env_scrub`
     dropped), but carrying its OWN honestly-compiled report (`Axis.ENV`
@@ -320,6 +314,7 @@ def test_control_the_weakened_stack_with_an_HONEST_report_does_not_contradict(
         workload_argv(run_id, "sleep 100"),
         jail_id="pf-control-honest",
         run_id=run_id,
+        jail_dir=jail_dir,
     )
     try:
         report = _probe(jail, env_battery(spec))
@@ -358,26 +353,21 @@ def _scratch_fs_spec(workspace: str, hooks_dir: str) -> Spec:
     return Spec(fs=FsPolicy(write_allows=(workspace,), write_denies=(hooks_dir,)))
 
 
-def _seed_scratch_fs_targets(run_id: str) -> tuple[str, str, str]:
+def _seed_scratch_fs_targets(run_id: str, *, new_jail_dir: NewJailDir) -> tuple[str, str, str]:
     """`workspace`, `hooks_dir` (the `.git/hooks` carve-out INSIDE
     workspace -- must also land in `spec.fs.write_denies`, this module's own
     `_scratch_fs_spec` docstring), and `outside_writable` -- the HOST-
     resolved scratch paths `fs_write_battery` needs (doc-016 sec 7 deviation
-    4, task-062). The `pfsd` infix family below is THIS file's own --
-    deliberately distinct from `test_scratch_darwin_batteries.py`'s `sd*`
-    family (both use the same `run_id`+pid; a shared infix would let a
-    full `-m system` run's per-module counters collide on path, not merely
-    read alike)."""
-    workspace = _new_root(run_id, "pfsw")
+    4, task-062)."""
+    workspace = new_jail_dir()
     hooks_dir = os.path.join(workspace, ".git", "hooks")
     os.makedirs(hooks_dir, exist_ok=True)
-    outside_writable = _new_root(run_id, "pfso")
-    os.makedirs(outside_writable, exist_ok=True)
+    outside_writable = new_jail_dir()
     return workspace, hooks_dir, outside_writable
 
 
 def _launch_scratch(
-    stack: Stack, spec: Spec, argv: Sequence[str], *, jail_id: str, run_id: str
+    stack: Stack, spec: Spec, argv: Sequence[str], *, jail_id: str, run_id: str, jail_dir: str
 ) -> tuple[Jail, Process]:
     """Same public chain as this file's own `_launch`, but through
     `build_compile_ctx` (`platform=sys.platform`, i.e. `"darwin"` under this
@@ -387,7 +377,6 @@ def _launch_scratch(
     refusal); the weakened stack below (`rlimits` + `env_scrub`, no
     `seatbelt`) does not read `ctx.platform` at all, so one code path serves
     both without branching."""
-    jail_dir = _new_root(run_id, "pfsf")
     ctx = build_compile_ctx(spec, jail_dir=jail_dir, platform=sys.platform)
     jail = stack.compile(spec, ctx=ctx)
     return launch(
@@ -399,6 +388,7 @@ def _launch_scratch(
 @_darwin_only
 def test_a_weakened_scratch_darwin_stack_with_an_unchanged_claimed_fs_write_report_is_caught(
     run_id: str,
+    new_jail_dir: NewJailDir,
 ) -> None:
     """task-065 AC #5. Build a jail from `Stack([rlimits, env_scrub])` --
     `scratch_darwin()` with `seatbelt` REMOVED -- then forge a `Jail`
@@ -414,10 +404,12 @@ def test_a_weakened_scratch_darwin_stack_with_an_unchanged_claimed_fs_write_repo
     `scratch_darwin().compile(spec, ctx=...)` call against the SAME spec,
     never hand-built -- identical posture to the M4 trio above.
     """
-    workspace, hooks_dir, outside_writable = _seed_scratch_fs_targets(run_id)
+    workspace, hooks_dir, outside_writable = _seed_scratch_fs_targets(
+        run_id, new_jail_dir=new_jail_dir
+    )
     spec = _scratch_fs_spec(workspace, hooks_dir)
 
-    genuine_jail_dir = _new_root(run_id, "pfsg")
+    genuine_jail_dir = new_jail_dir()
     genuine_ctx = build_compile_ctx(spec, jail_dir=genuine_jail_dir, platform="darwin")
     genuine = scratch_darwin().compile(spec, ctx=genuine_ctx)
     genuine_fs_write_graded = genuine.report.axes[Axis.FS_WRITE]
@@ -435,7 +427,12 @@ def test_a_weakened_scratch_darwin_stack_with_an_unchanged_claimed_fs_write_repo
 
     weakened = Stack([rlimits, env_scrub])  # scratch_darwin() with seatbelt dropped
     jail, process = _launch_scratch(
-        weakened, spec, workload_argv(run_id, "sleep 100"), jail_id="pfsf-forgery", run_id=run_id
+        weakened,
+        spec,
+        workload_argv(run_id, "sleep 100"),
+        jail_id="pfsf-forgery",
+        run_id=run_id,
+        jail_dir=new_jail_dir(),
     )
     try:
         assert jail.report.axes[Axis.FS_WRITE].grade is Grade.UNENFORCED, (
@@ -483,13 +480,16 @@ def test_a_weakened_scratch_darwin_stack_with_an_unchanged_claimed_fs_write_repo
 @_darwin_only
 def test_control_the_unforged_scratch_darwin_jail_is_consistent_on_the_same_battery(
     run_id: str,
+    new_jail_dir: NewJailDir,
 ) -> None:
     """task-065 AC #5, control one. The IDENTICAL battery, against a real,
     unweakened `scratch_darwin()` jail carrying its own genuine report -- no
     substitution anywhere. Both altitudes: the battery-level `CONSISTENT`
     (with no contradictions) AND every DENIAL probe's own `Verdict.PASS`.
     """
-    workspace, hooks_dir, outside_writable = _seed_scratch_fs_targets(run_id)
+    workspace, hooks_dir, outside_writable = _seed_scratch_fs_targets(
+        run_id, new_jail_dir=new_jail_dir
+    )
     spec = _scratch_fs_spec(workspace, hooks_dir)
     jail, process = _launch_scratch(
         scratch_darwin(),
@@ -497,6 +497,7 @@ def test_control_the_unforged_scratch_darwin_jail_is_consistent_on_the_same_batt
         workload_argv(run_id, "sleep 100"),
         jail_id="pfsf-control-real",
         run_id=run_id,
+        jail_dir=new_jail_dir(),
     )
     try:
         report = _probe(jail, fs_write_battery(spec, outside_writable=outside_writable))
@@ -519,6 +520,7 @@ def test_control_the_unforged_scratch_darwin_jail_is_consistent_on_the_same_batt
 @_darwin_only
 def test_control_the_weakened_scratch_darwin_stack_with_an_HONEST_report_does_not_contradict(
     run_id: str,
+    new_jail_dir: NewJailDir,
 ) -> None:
     """task-065 AC #5, control two. The SAME weakened stack as the forgery
     test (`seatbelt` dropped), but carrying its OWN honestly-compiled report
@@ -529,7 +531,9 @@ def test_control_the_weakened_scratch_darwin_stack_with_an_HONEST_report_does_no
     `BatteryVerdict.CONSISTENT` -- a `FAIL` against an honestly `UNENFORCED`
     grade is consistency, not a contradiction (SPEC.md sec 12).
     """
-    workspace, hooks_dir, outside_writable = _seed_scratch_fs_targets(run_id)
+    workspace, hooks_dir, outside_writable = _seed_scratch_fs_targets(
+        run_id, new_jail_dir=new_jail_dir
+    )
     spec = _scratch_fs_spec(workspace, hooks_dir)
     weakened = Stack([rlimits, env_scrub])
     jail, process = _launch_scratch(
@@ -538,6 +542,7 @@ def test_control_the_weakened_scratch_darwin_stack_with_an_HONEST_report_does_no
         workload_argv(run_id, "sleep 100"),
         jail_id="pfsf-control-honest",
         run_id=run_id,
+        jail_dir=new_jail_dir(),
     )
     try:
         report = _probe(jail, fs_write_battery(spec, outside_writable=outside_writable))

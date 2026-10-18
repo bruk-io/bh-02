@@ -8,10 +8,11 @@ session's budget or names a model other than its type's (`child.asked_why`), its
 (`TYPE-N`, its state directory made, the session's `agents/NAME`, 0700), its rows written
 (`child.child_rows`), a slot waited for (`max_running` children at once; a note says it waits),
 the child mounted, its loop waited for, `loop.reply(prompt)` driven to its end or to its type's
-step limit, the events folded into its report (`child.report_of`), the child retired, and its
-usage shown through the parent's `output`, whatever ended the run, so it joins the session's
-totals. In the foreground the call waits for the report; with `background` it answers the
-child's name at once and `agent_wait` collects the report.
+step limit, the events folded into its report (`child.report_of`), the child retired, a note if its
+event log stopped being written (`eventlog.EventLog.stopped`, told once), and its usage shown
+through the parent's `output`, whatever ended the run, so it joins the session's totals. In the
+foreground the call waits for the report; with `background` it answers the child's name at once
+and `agent_wait` collects the report.
 
 A foreground run whose task is cancelled (Ctrl-C stopping the parent's reply, whether it waits
 on the call from the model or on one an input made, `tools.agent(...)`, which the python tool's
@@ -49,6 +50,7 @@ from subagents_cordis_plugin.child import (
     labelled,
     limited,
     listing,
+    log_stopped,
     lost,
     next_name,
     no_such_agent,
@@ -647,7 +649,8 @@ class Agents:
     async def _run(self, live: _Live, kind: AgentType, prompt: str, rows: Sequence[ChildRow]) -> str:
         """Run child `live` in a slot to its end, retire it, and show what it used, however it
         ends; a note says so when its realm was retired from outside (the row restarting). Its
-        events go to its event log, which says how it began and how it ended.
+        events go to its event log, which says how it began and how it ended; a log that stopped
+        being written (found by a write or by closing it) is told in one note, before the usage.
 
         Raises:
             Exception: what the child's reply raised that is not a recoverable failure (a bug).
@@ -684,6 +687,9 @@ class Agents:
                 await log.write(ended_record(report))
             finally:
                 await log.close()
+            if live.place is not None and (failed := log.stopped) is not None:
+                said = log_stopped(name, kind.name, str(live.place / LOG), failed)
+                await self._output.show(_shown({"type": "note", "text": said}))
             if (used := usage_event(report_of(events))) is not None:
                 await self._output.show(
                     _shown({"type": "note", "text": f"agent {name} ({kind.name}) ended; it used:"}, used)

@@ -32,17 +32,13 @@ alone, extended here to the composed two-mechanism stack the unit tier
 (`tests/unit/test_stack_compile.py`) can only reason about via argv shape,
 never actually run.
 
-`sun_path` is 104 bytes on darwin: every scratch path here is a short
-`/tmp/bg<pid>sm<n>` root, never `tmp_path` (CLAUDE.md's trap list; the `sm`
-infix -- "stack matrix" -- keeps this file's jail dirs from colliding with
-a sibling integration file's own counter, matching
-`tests/integration/test_env_scrub.py::_new_jail_dir`'s own convention).
+`sun_path` is 104 bytes on darwin: every scratch path here is a short root
+from `tests/conftest.py`'s `jail_dir`, never `tmp_path` (CLAUDE.md's trap
+list).
 """
 
 from __future__ import annotations
 
-import itertools
-import os
 import signal
 import sys
 import time
@@ -57,8 +53,6 @@ from brig.mech.rlimits import rlimits
 from brig.run import IoPolicy
 from brig.stack import Stack
 from tests.conftest import launch, workload_argv
-
-_jail_counter = itertools.count()
 
 #: Not on the allow-list -- must NOT reach the workload under either
 #: mechanism, let alone the composed stack.
@@ -79,10 +73,6 @@ _SPIN_LOOP_MARKER = "T037_SPIN_MARKER"
 _SPIN_LOOP = f"# {_SPIN_LOOP_MARKER}\nx = 0\nwhile True:\n    x += 1\n"
 
 
-def _new_jail_dir() -> str:
-    return f"/tmp/bg{os.getpid()}sm{next(_jail_counter)}"
-
-
 def _parse_env_lines(text: str) -> dict[str, str]:
     """Parse `NAME=VALUE` lines (as `/usr/bin/env` with no args prints)
     into a dict, split on the FIRST `=` only. Same shape as
@@ -98,7 +88,7 @@ def _parse_env_lines(text: str) -> dict[str, str]:
 
 @pytest.mark.integration
 def test_composed_stack_rlimits_outermost_workload_environ_still_scrubbed(
-    run_id: str, monkeypatch: pytest.MonkeyPatch
+    run_id: str, monkeypatch: pytest.MonkeyPatch, jail_dir: str
 ) -> None:
     """task-037 AC #7: under the REAL, matrix-ordered `Stack([env_scrub,
     rlimits])` (rlimits outermost, per the shipped matrix -- not asserted,
@@ -121,7 +111,6 @@ def test_composed_stack_rlimits_outermost_workload_environ_still_scrubbed(
     monkeypatch.setenv(_CANARY_NAME, _CANARY_VALUE)
     monkeypatch.setenv(_ALLOWED_NAME, _ALLOWED_VALUE)
 
-    jail_dir = _new_jail_dir()
     ctx = CompileCtx(jail_dir=jail_dir, platform=sys.platform)
     spec = Spec(
         limits=Limits(cpu_seconds=60),
@@ -177,6 +166,7 @@ def test_composed_stack_rlimits_outermost_workload_environ_still_scrubbed(
 @pytest.mark.integration
 def test_composed_stack_rlimits_cpu_cap_still_reaches_through_env_scrubs_pre_exec_images(
     run_id: str,
+    jail_dir: str,
 ) -> None:
     """task-037 AC #7: the rationale's OTHER consequence -- the actual
     security reason for `rlimits` outermost, not merely the ordering's
@@ -199,7 +189,6 @@ def test_composed_stack_rlimits_cpu_cap_still_reaches_through_env_scrubs_pre_exe
     to be forwarded to work.
     """
     assert int(signal.SIGXCPU) == 24  # platform pin, asserted not assumed
-    jail_dir = _new_jail_dir()
     ctx = CompileCtx(jail_dir=jail_dir, platform=sys.platform)
     spec = Spec(
         limits=Limits(cpu_seconds=1),

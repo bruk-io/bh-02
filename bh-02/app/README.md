@@ -7,7 +7,7 @@ process), inside a Textual TUI (`tui:ui`), with every part of the program a plug
 replaced while it runs. `bh_02` is the shell: `cli.py` (the `bh-02` command), `bootstrap.py`
 (`run()`: read every layer, boot, follow the chat row's `done`, unwind; its own `shell`, `host`
 and `session` rows), `sessions.py` (a session is `$XDG_STATE_HOME/bh-02/sessions/<id>/`, which holds `rows.jsonl`: the rows that
-reloaded or failed, which the shell hears and queues to a thread),
+reloaded or failed, which the shell hears and queues to a thread, after a line that marks the run's start),
 `watching.py` and `trajectory.py` with `viewing.py` (`bh-02 watch` and `bh-02 trajectory`, which read a session's files),
 the layer file (`bh-02.toml`) and `testing.py` (fake models). Every capability is a `*-cordis-plugin` workspace member
 (`../plugins/`) that a layer names by string; no package imports another, and they agree on the
@@ -106,7 +106,9 @@ rewrites it. A second run of the same session finds it taken and is refused (`se
 as `error: ...`, exit code 1) before any row starts, naming the pid. The operating system drops the
 lock with the process, so a crash leaves nothing to clear, and the descriptor is not inherited, so
 no child outlives the run holding it. The commands that only read a session (`sessions`,
-`trajectory`, `watch`) never take it.
+`trajectory`, `watch`) never take it; `watch` asks `sessions.running`, which reads the pid in the file
+and whether that process is alive (a lock tried and let go at once would make a bh-02 starting then find
+the session held), and ends its follow, saying so, when the run is gone and the agent's log has no end.
 
 What the rows depend on, which is what decides what reloads when:
 
@@ -180,13 +182,15 @@ is, a pure core and a thin shell:
   first `at`, else their modification time), each with its replies, their steps and calls, and
   each sub-agent under the call that started it, or after the conversations by its own times when no
   call names it, and its row reloads by time, each marked `first` when its row id is not in the records
-  before it (cordis has no first-load event, so a row's first load is recorded as a `reload`). `rendered`
+  before it in its run (cordis has no first-load event, so a row's first load is recorded as a `reload`;
+  a run is the records from the file's start or a `run` line to the next, and the `run` line is no
+  reload, so a resumed session's boot, all rows seen in the run before, is `first` again). `rendered`
   lays it out as lines, in local time, with every control character stripped, each row reload a line of
   its own before the first line that came after it, among the lines of the writer whose row it is (the
   session's, or the sub-agent's for `agents/NAME/...`), except that first loads which follow one another
   there, with no reload, failure or line of that writer's between, are one line (`row first load`, how
-  many rows and the time from the first to the last): the session's boot, and a sub-agent's rows coming
-  up, under its `sub-agent` line. While following, a run of them at the very end waits for something
+  many rows and the time from the first to the last): the session's boot (each run's, a resumed
+  session's too), and a sub-agent's rows coming up, under its `sub-agent` line. While following, a run of them at the very end waits for something
   after it, so it is printed once with its final count.
   `bh_02` imports no plugin (`plugin-layering`), so it reads the entries as TypedDicts of its own; a
   test holds them to what the agent plugin's loop writes (`test_trajectory_records.py`). A line that is
@@ -207,13 +211,15 @@ in a library both may import.
 The row reloads are kept by the shell, not read from the transcript: `run()` appends a listener to the
 runtime beside `--trace`'s (`_row_log`), which hears every row's lifecycle event, sub-agents' rows
 (`agents/NAME/...`) included, and for the two that count queues a line to `host_paths.Appender`, which
-writes it on a thread at 0600, so the event loop never waits on a disk. `reload` is a row's setup
+writes it on a thread at 0600, so the event loop never waits on a disk. The first line it writes, when
+it opens the log, is `{at, kind: "run"}` and names no row: a session resumed goes on in the same file
+(the appender appends), and the line is where one run's rows end and the next one's begin. `reload` is a row's setup
 beginning (it came up, was restarted, or a dependency was replaced) and `failed` its setup raising,
 with the error; cordis emits no `restart`, a restarted row's old fiber ends `unloading` and `inactive`
 and the new one begins with a `reload`; so does a row's first load, which the file does not mark, and
-the trajectory tells it by the row id (a row's first record in the file). A write that fails ends the
-log and not the run, and the shell says so once after the app has exited: the file, when it found the
-write failing, and the error. `--trace FILE` is the same stream in full, untimed and written on the
+the trajectory tells it by the row id (a row's first record in its run). A write that fails ends the
+log and not the run, and the shell says so once after the app has exited: the file, when its first
+write failed (the appender keeps that time), and the error. `--trace FILE` is the same stream in full, untimed and written on the
 loop, and stays as it was.
 
 ## The plugins

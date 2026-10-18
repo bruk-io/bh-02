@@ -3,9 +3,9 @@ person's directories are (`config_home`, `state_home`), every place reading a pa
 (`walked`), held against the roots the model may write (`roots`, `passes`), and a file beneath a
 root opened through no link (`directory_beneath`, `read_beneath`), and written or removed there
 (`write_beneath`, `remove_beneath`), or appended to off the event loop (`Appender`, which
-refuses a file replaced under it: `Replaced`)."""
+refuses a file replaced under it: `Replaced`, and keeps when its first failed write happened: `Failure`)."""
 
-from host_paths.appender import Appender, Replaced
+from host_paths.appender import Appender, Failure, Replaced
 from host_paths.beneath import (
     Link,
     Linked,
@@ -21,6 +21,7 @@ from host_paths.paths import MOST_LINKS, config_home, passes, roots, state_home,
 __all__ = [
     "MOST_LINKS",
     "Appender",
+    "Failure",
     "Link",
     "Linked",
     "NotOneFile",

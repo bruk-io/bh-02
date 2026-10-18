@@ -48,7 +48,6 @@ invocation.
 from __future__ import annotations
 
 import contextlib
-import itertools
 import json
 import os
 import pathlib
@@ -68,18 +67,6 @@ _RUNTIMES = {RuntimeKind.HOST: HostRuntime()}
 
 _HELPER = str(pathlib.Path(__file__).parent / "_rehydrate_and_kill_helper.py")
 _HELPER_TIMEOUT_S = 30.0
-
-_jail_counter = itertools.count()
-
-
-def _new_jail_dir() -> str:
-    """A short scratch root, `/tmp/bg<pid>rh<n>` -- never `tmp_path`
-    (CLAUDE.md: `sun_path` is 104 bytes on darwin). The `rh` (rehydration)
-    infix keeps this file's jail-dir sequence out of the shared,
-    order-dependent `/tmp/bg<pid>-<n>` namespace `test_kill_group.py`'s
-    docstring documents colliding across integration files that share one
-    pytest process."""
-    return f"/tmp/bg{os.getpid()}rh{next(_jail_counter)}"
 
 
 def _identity_wrap(argv: tuple[str, ...]) -> tuple[str, ...]:
@@ -112,11 +99,11 @@ def _compiled_jail(
 def _launch(
     argv: list[str],
     *,
+    jail_dir: str,
     jail_id: str = "jail-rehydration",
     spec: Spec | None = None,
     report: EnforcementReport | None = None,
 ) -> tuple[Jail, Process]:
-    jail_dir = _new_jail_dir()
     return launch(
         _compiled_jail(spec=spec, report=report),
         argv=argv,
@@ -206,7 +193,9 @@ def _run_helper(json_path: str, *extra_args: str) -> dict[str, object]:
 
 
 @pytest.mark.integration
-def test_rehydrated_handle_in_a_separate_process_kills_the_workload_tree(run_id: str) -> None:
+def test_rehydrated_handle_in_a_separate_process_kills_the_workload_tree(
+    run_id: str, jail_dir: str
+) -> None:
     """AC #2, #3, #4, #5, #7 -- the exit criterion, literally.
 
     A marked, child-spawning workload (`bash -c 'sleep 100 & wait'`-shaped,
@@ -219,7 +208,7 @@ def test_rehydrated_handle_in_a_separate_process_kills_the_workload_tree(run_id:
     handle's own `to_dict()` matches the original exactly (AC #4), and the
     parsed `KillReport` names the original pgid and `ENDED` (AC #7)."""
     argv = workload_argv(run_id, "sleep 100")
-    jail, process = _launch(argv)
+    jail, process = _launch(argv, jail_dir=jail_dir)
     leader_pid, child_pid, pgid = _positive_pre_assertion(process)
 
     original_dict = jail.to_dict()
@@ -279,7 +268,9 @@ def test_rehydrated_handle_in_a_separate_process_kills_the_workload_tree(run_id:
 
 
 @pytest.mark.integration
-def test_control_rehydrated_handle_without_kill_leaves_the_tree_alive(run_id: str) -> None:
+def test_control_rehydrated_handle_without_kill_leaves_the_tree_alive(
+    run_id: str, jail_dir: str
+) -> None:
     """AC #6, THE CONTROL. A second run of the SAME helper
     (`_rehydrate_and_kill_helper.py`), in `--no-kill` mode: it rehydrates
     the handle and reports `alive()`, but never calls `kill()`. The
@@ -290,7 +281,7 @@ def test_control_rehydrated_handle_without_kill_leaves_the_tree_alive(run_id: st
     deliberate) so this file's own control leak does not trip the suite's
     leak-check."""
     argv = workload_argv(run_id, "sleep 100")
-    jail, process = _launch(argv, jail_id="jail-rehydration-control")
+    jail, process = _launch(argv, jail_dir=jail_dir, jail_id="jail-rehydration-control")
     leader_pid, child_pid, pgid = _positive_pre_assertion(process)
 
     original_dict = jail.to_dict()
@@ -348,7 +339,9 @@ def test_control_rehydrated_handle_without_kill_leaves_the_tree_alive(run_id: st
 
 
 @pytest.mark.integration
-def test_rehydrated_round_trip_carries_a_channel_and_a_non_empty_detail(run_id: str) -> None:
+def test_rehydrated_round_trip_carries_a_channel_and_a_non_empty_detail(
+    run_id: str, jail_dir: str
+) -> None:
     """Non-vacuity closer for AC #4, same reasoning as
     `test_jail_launch.py`'s own `test_launch_writes_staged_files_and_
     handle_round_trips_channels_and_detail`: every other test in THIS file
@@ -369,7 +362,9 @@ def test_rehydrated_round_trip_carries_a_channel_and_a_non_empty_detail(run_id: 
     report = unenforced_report("m2: no mechanisms enforce anything yet")
 
     argv = workload_argv(run_id, "sleep 100")
-    jail, process = _launch(argv, jail_id="jail-rehydration-nonvacuous", spec=spec, report=report)
+    jail, process = _launch(
+        argv, jail_dir=jail_dir, jail_id="jail-rehydration-nonvacuous", spec=spec, report=report
+    )
     _leader_pid, child_pid, pgid = _positive_pre_assertion(process)
 
     # The channel and the non-empty detail are on the live handle before
@@ -417,7 +412,7 @@ def test_rehydrated_round_trip_carries_a_channel_and_a_non_empty_detail(run_id: 
 
 
 @pytest.mark.integration
-def test_handle_from_dict_refuses_version_one(run_id: str) -> None:
+def test_handle_from_dict_refuses_version_one(run_id: str, jail_dir: str) -> None:
     """AC #6 (task-046). A dict claiming `version: 1` -- otherwise a
     genuine, freshly-serialized handle dict, with only the version field
     rolled back -- refuses, its message naming BOTH the rejected version
@@ -433,7 +428,7 @@ def test_handle_from_dict_refuses_version_one(run_id: str) -> None:
     version 1" vacuous -- true of every input, not just a stale version).
     """
     argv = workload_argv(run_id, "sleep 5")
-    jail, process = _launch(argv, jail_id="jail-rehydration-version")
+    jail, process = _launch(argv, jail_dir=jail_dir, jail_id="jail-rehydration-version")
     try:
         d = jail.to_dict()
         # 6 since decision-181 (TASK-0079.26), 7 since decision-184 (TASK-0079.05),

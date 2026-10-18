@@ -43,9 +43,7 @@ the `Process` the launch returned and the exit status the waiter recorded.
 from __future__ import annotations
 
 import contextlib
-import itertools
 import os
-import shutil
 import signal
 import subprocess
 
@@ -56,13 +54,6 @@ from brig.run import IoPolicy, Process, _records
 from brig.run._spawn_pgid import spawn_pgid
 from brig.stack import CompiledJail
 from tests.conftest import launch, teardown_group, workload_argv
-
-_counter = itertools.count()
-
-
-def _new_jail_dir() -> str:
-    """A short scratch root, `/tmp/bg<pid>fs<n>` -- never `tmp_path`."""
-    return f"/tmp/bg{os.getpid()}fs{next(_counter)}"
 
 
 def _identity_wrap(argv: tuple[str, ...]) -> tuple[str, ...]:
@@ -84,8 +75,8 @@ def _compiled_jail() -> CompiledJail:
     )
 
 
-def _teardown_group(process: Process, jail_dir: str) -> None:
-    """Group-kill the workload and remove its jail directory. Hand-rolled
+def _teardown_group(process: Process) -> None:
+    """Group-kill the workload. Hand-rolled
     (`killpg`) rather than `Jail.destroy`: a test's cleanup path must not be
     the code under test. `process.wait()` blocks until the launcher's
     exit-waiter has reaped it (task-073)."""
@@ -95,7 +86,6 @@ def _teardown_group(process: Process, jail_dir: str) -> None:
     # backgrounded child survived silently and surfaced later against an
     # unrelated test. Thirteen modules carried that same body.
     teardown_group(process)
-    shutil.rmtree(jail_dir, ignore_errors=True)
 
 
 # ---------------------------------------------------------------------------
@@ -145,14 +135,13 @@ def test_spawn_pgid_of_a_live_child_reads_the_real_group() -> None:
 
 
 @pytest.mark.integration
-def test_hundred_fast_exec_siblings_all_record_and_end(run_id: str) -> None:
+def test_hundred_fast_exec_siblings_all_record_and_end(run_id: str, jail_dir: str) -> None:
     """AC #3: one hundred `/usr/bin/true` siblings through REAL
     sibling `jail.start`s -- each `wait()`s to 0, and the events file ends with
     exactly one EXEC (carrying `pgid == pid`) and one EXEC_END per sibling.
     Pre-fix, a single sibling exiting before its pgid read crashed the whole
     test (task-075's runs 13 and 23 each caught it on the FIRST loaded run);
     post-fix the fast path is exercised a hundred times per run."""
-    jail_dir = _new_jail_dir()
     jail, process = launch(
         _compiled_jail(),
         argv=workload_argv(run_id, "sleep 100"),
@@ -174,7 +163,7 @@ def test_hundred_fast_exec_siblings_all_record_and_end(run_id: str) -> None:
         assert len(siblings) == 100
         assert all(record.pgid == record.pid for record in siblings)
     finally:
-        _teardown_group(process, jail_dir)
+        _teardown_group(process)
 
 
 # ---------------------------------------------------------------------------
@@ -183,13 +172,12 @@ def test_hundred_fast_exec_siblings_all_record_and_end(run_id: str) -> None:
 
 
 @pytest.mark.integration
-def test_fast_workload_command_launches_and_records_exit_zero(run_id: str) -> None:
+def test_fast_workload_command_launches_and_records_exit_zero(run_id: str, jail_dir: str) -> None:
     """AC #4: the identical race one line earlier in `host.py` -- a
     workload command that exits before the launch's pgid read must still
     produce a `Process` whose record carries `pgid == pid`, and an honest exit status of
     0 (the exit-waiter reaps what already exited). Pre-fix, this crashed
     `launch()` with a bare `ProcessLookupError` under load."""
-    jail_dir = _new_jail_dir()
     jail, process = launch(
         _compiled_jail(),
         argv=workload_argv(run_id, "true"),
@@ -202,4 +190,4 @@ def test_fast_workload_command_launches_and_records_exit_zero(run_id: str) -> No
         assert process.wait(timeout=10.0) == 0
         assert process._record.pgid == process.pid
     finally:
-        _teardown_group(process, jail_dir)
+        _teardown_group(process)

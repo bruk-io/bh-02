@@ -86,6 +86,21 @@ def test_helper_is_jail_lifetime_and_carries_every_allowed_domain() -> None:
     assert f"{_JAIL}/{DECISIONS_FILE}" in helper.argv
 
 
+def test_the_proxy_declares_the_port_file_the_wrap_waits_for_as_its_ready_path() -> None:
+    """TASK-0150, decision-204: the runtime removes a helper's `ready_path` before it starts
+    the helper, so the file the wrap reads can't be an earlier jail's. That holds only if the
+    path the helper declares is the one the proxy publishes (`--port-file`) and the wrap waits
+    for, all three the same string."""
+    step = _step(("example.com",))
+    helper = step.helpers[0]
+    published = helper.argv[helper.argv.index("--port-file") + 1]
+    assert helper.ready_path == published == f"{_JAIL}/{PORT_FILE}"
+    script = step.wrap(("/bin/true",))[2]
+    assert f"[ ! -s '{helper.ready_path}' ]" in script, (
+        "the wrap waits for a file the runtime does not clear before the proxy starts"
+    )
+
+
 def test_an_empty_allow_list_still_starts_a_proxy_that_denies_everything() -> None:
     """Deny-all is a policy, not an absence of one. A mechanism that
     quietly declined to run here would leave the workload with no proxy

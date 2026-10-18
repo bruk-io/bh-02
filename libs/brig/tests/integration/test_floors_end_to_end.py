@@ -18,14 +18,13 @@ never pass merely because an axis was absent from the report").
 
 Every workload this file launches is built through `tests.conftest.
 workload_argv`, so a survivor is caught by the suite-wide leak-check
-without any registration. Jail/scratch directories use the short
-`/tmp/bg<pid>-<n>` root, never `tmp_path` (CLAUDE.md: `sun_path` is 104
-bytes on darwin).
+without any registration. Jail/scratch directories are short roots made by
+`tests/conftest.py`'s `new_jail_dir` (new for each, removed after the test),
+never `tmp_path` (CLAUDE.md: `sun_path` is 104 bytes on darwin).
 """
 
 from __future__ import annotations
 
-import itertools
 import os
 import subprocess
 import uuid
@@ -35,28 +34,7 @@ import pytest
 from brig.core import Axis, FloorViolation, Grade, Spec, require
 from brig.run import IoPolicy, Process
 from brig.stack import Stack
-from tests.conftest import launch, teardown_group, workload_argv
-
-_scratch_counter = itertools.count()
-
-
-def _new_scratch_root() -> str:
-    """A short, freshly-created scratch root, `/tmp/bg<pid>fe<n>` -- never
-    `tmp_path`. Created (not merely named) so `os.listdir` on it afterwards
-    is a real assertion about what did or didn't land inside, not about
-    whether the directory itself exists. The `fe` tag (this file's initials)
-    keeps this file's counter from colliding with the several sibling
-    integration files that build a scratch path from the SAME
-    `/tmp/bg<pid>-<n>` shape off their own independent, zero-based counter
-    (`test_jail_launch.py`, `test_exec.py`, `test_wait_ready.py`) -- harmless
-    for them, since only `HostRuntime.create`'s `exist_ok=True`
-    `os.makedirs` ever touches those paths, but this file calls
-    `os.makedirs(..., exist_ok=False)` BEFORE any launch, specifically so a
-    stale directory can never masquerade as "the scratch root started
-    empty"; that only works if the path is actually fresh."""
-    root = f"/tmp/bg{os.getpid()}fe{next(_scratch_counter)}"
-    os.makedirs(root, exist_ok=False)
-    return root
+from tests.conftest import NewJailDir, launch, teardown_group, workload_argv
 
 
 def _ps_lines_matching(token: str) -> list[str]:
@@ -93,7 +71,7 @@ def _teardown_group(process: Process) -> None:
 
 @pytest.mark.integration
 def test_floor_the_empty_stack_cannot_meet_refuses_and_nothing_is_created(
-    run_id: str,
+    run_id: str, new_jail_dir: NewJailDir
 ) -> None:
     """AC #2, #3: `Stack([]).compile(spec, require(fs_read=ENFORCED))`
     raises `FloorViolation` naming `fs_read`. Afterwards:
@@ -122,7 +100,7 @@ def test_floor_the_empty_stack_cannot_meet_refuses_and_nothing_is_created(
     (e.g. under the mutation below), the suite-wide conftest sweep would
     also catch it via `run_id`, independent of this test's own scan.
     """
-    scratch_root = _new_scratch_root()
+    scratch_root = new_jail_dir()
     jail_dir = os.path.join(scratch_root, "jail")
     marker = uuid.uuid4().hex
     argv = workload_argv(run_id, f": {marker}\nsleep 5")
@@ -173,7 +151,9 @@ def test_floor_the_empty_stack_cannot_meet_refuses_and_nothing_is_created(
 
 
 @pytest.mark.integration
-def test_ec5_control_satisfiable_floor_compiles_launches_and_spawns(run_id: str) -> None:
+def test_ec5_control_satisfiable_floor_compiles_launches_and_spawns(
+    run_id: str, new_jail_dir: NewJailDir
+) -> None:
     """AC #4: the SAME spec (`Spec()`) and the SAME shape of launch call as
     the refusal test above -- including an argv built the identical way
     (`workload_argv(run_id, ...)` with a per-test marker on line 2 of the
@@ -192,7 +172,7 @@ def test_ec5_control_satisfiable_floor_compiles_launches_and_spawns(run_id: str)
     "a denial test without a control cannot distinguish 'policy enforced'
     from 'probe broken'").
     """
-    scratch_root = _new_scratch_root()
+    scratch_root = new_jail_dir()
     jail_dir = os.path.join(scratch_root, "jail")
     marker = uuid.uuid4().hex
     argv = workload_argv(run_id, f": {marker}\nsleep 5")

@@ -30,10 +30,8 @@ task-061's own observed instrument, out of this task's scope.
 
 `sun_path` is not implicated here (no channel, no socket) but the jail_dir
 convention is followed anyway for consistency with every other integration
-file: a short `/tmp/bg<pid>sb<n>` scratch root, never `tmp_path`
-(CLAUDE.md's trap list; the `sb` infix -- "seatbelt" -- avoids colliding
-with a sibling integration file's own counter, matching
-`tests/integration/test_env_scrub.py::_new_jail_dir`'s own convention).
+file: a short scratch root from `tests/conftest.py`'s `jail_dir` /
+`new_jail_dir`, never `tmp_path` (CLAUDE.md's trap list).
 
 Darwin-gated at module level with a visible skip reason (the e2e tier's
 "skips are visible" rule, applied here even though this file is
@@ -44,7 +42,6 @@ any other platform.
 
 from __future__ import annotations
 
-import itertools
 import os
 import sys
 
@@ -55,23 +52,14 @@ from brig.mech.seatbelt import seatbelt
 from brig.run import IoPolicy
 from brig.run.compile_ctx import build_compile_ctx
 from brig.stack import Stack
-from tests.conftest import launch
+from tests.conftest import NewJailDir, launch
 
 pytestmark = pytest.mark.skipif(
     sys.platform != "darwin",
     reason="seatbelt/sandbox-exec is darwin-only (SPEC.md §6's seatbelt roster row)",
 )
 
-_jail_counter = itertools.count()
 _WAIT_TIMEOUT_S = 10.0
-
-
-def _new_jail_dir() -> str:
-    """A short scratch root, `/tmp/bg<pid>sk<n>` -- never `tmp_path`. The
-    `sk` infix keeps this file's jail dirs from colliding with another
-    integration file's own counter (same convention as
-    `test_env_scrub.py::_new_jail_dir`'s `es` infix)."""
-    return f"/tmp/bg{os.getpid()}sk{next(_jail_counter)}"
 
 
 def _run_seatbelt_and_capture(
@@ -107,7 +95,7 @@ def _run_seatbelt_and_capture(
 
 
 @pytest.mark.integration
-def test_build_compile_ctx_resolves_jail_dir_to_its_own_realpath() -> None:
+def test_build_compile_ctx_resolves_jail_dir_to_its_own_realpath(jail_dir: str) -> None:
     """`build_compile_ctx` (the run-layer helper task-059's Deliverable
     names) realpaths `jail_dir` itself before constructing the
     `CompileCtx`: the resulting `ctx.jail_dir` is the `/private/tmp` form
@@ -115,13 +103,16 @@ def test_build_compile_ctx_resolves_jail_dir_to_its_own_realpath() -> None:
     in. The control -- raw root and resolved root are different STRINGS --
     is what keeps this assertion non-vacuous on a host where `/tmp` and
     its realpath happen to coincide (this repo's own darwin host never
-    does, but the control makes that an observed fact, not an assumption)."""
-    jail_dir = _new_jail_dir()
-    ctx = build_compile_ctx(Spec(), jail_dir=jail_dir, platform="darwin")
+    does, but the control makes that an observed fact, not an assumption).
 
-    assert ctx.jail_dir == os.path.realpath(jail_dir)
+    The raw root is the fixture's directory by its `/tmp` name: the fixture's own
+    path is already resolved, so handing that in would not exercise the resolution."""
+    raw = os.path.join("/tmp", os.path.basename(jail_dir))
+    ctx = build_compile_ctx(Spec(), jail_dir=raw, platform="darwin")
+
+    assert ctx.jail_dir == os.path.realpath(raw) == jail_dir
     # Control: not vacuous -- the raw and resolved forms actually differ.
-    assert ctx.jail_dir != jail_dir
+    assert ctx.jail_dir != raw
     assert ctx.jail_dir.startswith("/private/tmp/")
 
 
@@ -132,7 +123,9 @@ def test_build_compile_ctx_resolves_jail_dir_to_its_own_realpath() -> None:
 
 
 @pytest.mark.integration
-def test_smoke_denied_writes_match_signature_and_the_allowed_write_succeeds() -> None:
+def test_smoke_denied_writes_match_signature_and_the_allowed_write_succeeds(
+    new_jail_dir: NewJailDir,
+) -> None:
     """Three real, separately-jailed `/bin/sh` launches:
 
     1. A write OUTSIDE `write_allows` entirely -- denied, and the captured
@@ -151,12 +144,11 @@ def test_smoke_denied_writes_match_signature_and_the_allowed_write_succeeds() ->
        fail to match the kernel's own symlink-resolved path check).
     """
     pattern = seatbelt.compile(
-        Spec(), build_compile_ctx(Spec(), jail_dir=_new_jail_dir(), platform="darwin")
+        Spec(), build_compile_ctx(Spec(), jail_dir=new_jail_dir(), platform="darwin")
     ).denial_signatures[0]
 
     # --- Case 1: outside write_allows entirely -------------------------
-    jail_dir_outside = _new_jail_dir()
-    os.makedirs(jail_dir_outside, exist_ok=True)
+    jail_dir_outside = new_jail_dir()
     spec_outside = Spec(fs=FsPolicy(write_allows=(f"{jail_dir_outside}/workspace",)))
     status_outside, _stdout_outside, stderr_outside = _run_seatbelt_and_capture(
         jail_dir=jail_dir_outside,
@@ -170,7 +162,7 @@ def test_smoke_denied_writes_match_signature_and_the_allowed_write_succeeds() ->
     )
 
     # --- Case 2: a write_denies carve-out inside write_allows -----------
-    jail_dir_carveout = _new_jail_dir()
+    jail_dir_carveout = new_jail_dir()
     workspace = f"{jail_dir_carveout}/workspace"
     hooks_dir = f"{workspace}/.git/hooks"
     os.makedirs(hooks_dir, exist_ok=True)
@@ -188,7 +180,7 @@ def test_smoke_denied_writes_match_signature_and_the_allowed_write_succeeds() ->
     )
 
     # --- Case 3: the control -- inside write_allows, not carved out -----
-    jail_dir_control = _new_jail_dir()
+    jail_dir_control = new_jail_dir()
     workspace_control = f"{jail_dir_control}/workspace"
     os.makedirs(workspace_control, exist_ok=True)
     spec_control = Spec(fs=FsPolicy(write_allows=(workspace_control,)))

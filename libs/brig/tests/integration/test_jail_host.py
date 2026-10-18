@@ -27,7 +27,7 @@ import shutil
 import subprocess
 import sys
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 
 import pytest
 
@@ -47,7 +47,7 @@ from brig.run import (
     _records,
 )
 from brig.stack import CompiledJail
-from tests.conftest import teardown_pgid, workload_argv
+from tests.conftest import NewJailDir, teardown_pgid, workload_argv
 
 pytestmark = pytest.mark.integration
 
@@ -117,16 +117,6 @@ def _kill_group(pgid: int) -> None:
     teardown_pgid(pgid)
 
 
-@pytest.fixture
-def jail_dir() -> Iterator[str]:
-    """A short scratch root with this file's own infix (`jh`)."""
-    path = f"/tmp/bg{os.getpid()}jh{next(_jail_counter)}"
-    try:
-        yield path
-    finally:
-        shutil.rmtree(path, ignore_errors=True)
-
-
 def _create(jail_dir: str, *, tether: int | None = None) -> Jail:
     return Jail.create(
         _compiled(),
@@ -174,13 +164,10 @@ def _elsewhere(jail: Jail, scratch: str, mode: str) -> dict[str, object]:
 
 
 @pytest.fixture
-def scratch() -> Iterator[str]:
-    path = f"/tmp/bg{os.getpid()}jx{next(_jail_counter)}"
-    os.makedirs(path)
-    try:
-        yield path
-    finally:
-        shutil.rmtree(path, ignore_errors=True)
+def scratch(new_jail_dir: NewJailDir) -> str:
+    """A second directory beside the test's `jail_dir`: where the dict is written for another
+    interpreter to read."""
+    return new_jail_dir()
 
 
 # ---------------------------------------------------------------------------
@@ -417,7 +404,6 @@ def test_a_refused_first_start_leaves_the_jail_whose_destroy_ends_its_helpers(
         argv=tuple(workload_argv(run_id, f": {marker}; sleep 100")),
         lifetime=HelperLifetime.JAIL_LIFETIME,
     )
-    os.makedirs(jail_dir, exist_ok=True)
     groups: list[int] = []
     try:
         jail = Jail.create(

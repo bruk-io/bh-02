@@ -23,17 +23,12 @@ within the test that spawned them -- by the time a test returns, nothing it
 exec'd is still alive to leak, so none of them need a `workload_argv` token
 (same posture as `tests/integration/test_rlimits.py`'s own docstring).
 
-Short `/tmp/bg<pid>ec<run_id[:8]><n>` scratch roots throughout (`ec` --
-"exec confinement" -- keeping this file's jail-dir sequence disjoint from
-every sibling integration file sharing the same `os.getpid()` across one
-pytest session), never `tmp_path` (`sun_path` is 104 bytes on darwin). The
-`run_id[:8]` salt is load-bearing, not decorative -- see `_new_jail_dir`'s
-own docstring for the confirmed collision it closes.
+Short scratch roots from `tests/conftest.py`'s `jail_dir` throughout, never
+`tmp_path` (`sun_path` is 104 bytes on darwin).
 """
 
 from __future__ import annotations
 
-import itertools
 import os
 import signal
 import sys
@@ -46,9 +41,7 @@ from brig.core.runtime import RuntimeKind
 from brig.mech import CompileCtx, Step
 from brig.run import ExecFidelity, ExecWrapNotAPrefix, IoPolicy, Jail, Process, _records
 from brig.stack import Stack, degraded
-from tests.conftest import launch, teardown_group, workload_argv
-
-_jail_counter = itertools.count()
+from tests.conftest import NewJailDir, launch, teardown_group, workload_argv
 
 #: Embedded as the spin loop's own first source line so it shows up in
 #: `/bin/ps`'s command column while the process is alive -- same
@@ -58,29 +51,6 @@ _SPIN_LOOP_MARKER = "T046_SPIN_MARKER"
 _SPIN_LOOP = f"# {_SPIN_LOOP_MARKER}\nx = 0\nwhile True:\n    x += 1\n"
 
 _WAIT_TIMEOUT_S = 10.0
-
-
-def _new_jail_dir(run_id: str) -> str:
-    """A short scratch root, `/tmp/bg<pid>ec<run_id[:8]><n>` -- never
-    `tmp_path` (`sun_path` is 104 bytes on darwin).
-
-    `run_id[:8]` (the session-scoped fixture's own fresh
-    `uuid.uuid4().hex`, never reused across a pytest invocation) is
-    load-bearing, not cosmetic: `os.getpid()` ALONE is not collision-free
-    across separate invocations sharing one long-lived shell session --
-    darwin's pid counter wraps (default max ~99998), and NOTHING here
-    deletes a `jail_dir` after its test ends, so an earlier invocation's
-    directory can still be sitting at the exact path a LATER invocation's
-    `os.getpid() + counter` combination reproduces. Confirmed directly (not
-    merely reasoned): pre-seeding a jail_dir's `events.jsonl` with a stale,
-    unmatched `EXEC` record under the SAME `jail_id` a later `_launch`
-    call also uses, then launching a real handle into that same directory
-    and calling `kill()`, makes `teardown.kill_named`'s own
-    `_live_exec_siblings` count the phantom record as one more live
-    sibling -- inflating `len(KillReport.items)` by one. The `run_id`
-    salt makes that specific collision structurally unreachable for this
-    file's own jail dirs, independent of pid reuse."""
-    return f"/tmp/bg{os.getpid()}ec{run_id[:8]}{next(_jail_counter)}"
 
 
 def _parse_env_lines(text: str) -> dict[str, str]:
@@ -99,14 +69,13 @@ def _parse_env_lines(text: str) -> dict[str, str]:
 
 
 def _launch(
-    stack: Stack, spec: Spec, argv: Sequence[str], *, jail_id: str, run_id: str
+    stack: Stack, spec: Spec, argv: Sequence[str], *, jail_id: str, run_id: str, jail_dir: str
 ) -> tuple[Jail, Process]:
     """Compile `stack` against `spec` and launch `argv` through the REAL
     `Jail.create` and `jail.start` -- no monkeypatching, no hand-built `CompiledJail`,
     the same real-mechanism posture `test_stack_matrix_ordering.py`
     establishes for the workload path, applied here to the path this task
     changes: `jail.start`."""
-    jail_dir = _new_jail_dir(run_id)
     ctx = CompileCtx(jail_dir=jail_dir, platform=sys.platform)
     jail = stack.compile(spec, ctx=ctx)
     return launch(
@@ -175,7 +144,7 @@ class _AppendingMechanism:
 
 @pytest.mark.integration
 def test_exec_sibling_does_not_see_the_scrubbed_canary(
-    run_id: str, monkeypatch: pytest.MonkeyPatch
+    run_id: str, monkeypatch: pytest.MonkeyPatch, jail_dir: str
 ) -> None:
     """AC #1: `degraded()` under `EnvPolicy(SCRUB, allow_names=("PATH",
     "HOME"))`, with a canary name NOT on that allow-list set in the
@@ -191,7 +160,12 @@ def test_exec_sibling_does_not_see_the_scrubbed_canary(
         env=EnvPolicy(mode=EnvMode.SCRUB, allow_names=("PATH", "HOME")),
     )
     jail, process = _launch(
-        degraded(), spec, _sleep_workload(run_id), jail_id="jail-t046-ac1", run_id=run_id
+        degraded(),
+        spec,
+        _sleep_workload(run_id),
+        jail_id="jail-t046-ac1",
+        run_id=run_id,
+        jail_dir=jail_dir,
     )
     try:
         sibling = jail.start(["/usr/bin/env"])
@@ -213,7 +187,7 @@ def test_exec_sibling_does_not_see_the_scrubbed_canary(
 
 @pytest.mark.integration
 def test_control_exec_sibling_under_the_empty_stack_does_see_the_canary(
-    run_id: str, monkeypatch: pytest.MonkeyPatch
+    run_id: str, monkeypatch: pytest.MonkeyPatch, jail_dir: str
 ) -> None:
     """AC #1's named control: the IDENTICAL probe, against `Stack([])`
     (the empty stack, `wrap_prefix == ()`), DOES see the canary -- the
@@ -223,7 +197,12 @@ def test_control_exec_sibling_under_the_empty_stack_does_see_the_canary(
     monkeypatch.setenv(canary_name, "should-be-visible")
 
     jail, process = _launch(
-        Stack([]), Spec(), _sleep_workload(run_id), jail_id="jail-t046-ac1-control", run_id=run_id
+        Stack([]),
+        Spec(),
+        _sleep_workload(run_id),
+        jail_id="jail-t046-ac1-control",
+        run_id=run_id,
+        jail_dir=jail_dir,
     )
     try:
         assert jail._base.wrap_prefix == ()
@@ -245,7 +224,7 @@ def test_control_exec_sibling_under_the_empty_stack_does_see_the_canary(
 
 
 @pytest.mark.integration
-def test_exec_sibling_is_subject_to_the_cpu_limit(run_id: str) -> None:
+def test_exec_sibling_is_subject_to_the_cpu_limit(run_id: str, jail_dir: str) -> None:
     """AC #2: `degraded()` under `Limits(cpu_seconds=1)`. An exec'd spin
     loop (`sys.executable -c <busy loop>`, absolute path -- no PATH
     forwarding needed to find it, sidestepping the env axis entirely) dies
@@ -255,7 +234,12 @@ def test_exec_sibling_is_subject_to_the_cpu_limit(run_id: str) -> None:
     assert int(signal.SIGXCPU) == 24  # platform pin, asserted not assumed
     spec = Spec(limits=Limits(cpu_seconds=1))
     jail, process = _launch(
-        degraded(), spec, _sleep_workload(run_id), jail_id="jail-t046-ac2", run_id=run_id
+        degraded(),
+        spec,
+        _sleep_workload(run_id),
+        jail_id="jail-t046-ac2",
+        run_id=run_id,
+        jail_dir=jail_dir,
     )
     try:
         sibling = jail.start([sys.executable, "-c", _SPIN_LOOP])
@@ -271,6 +255,7 @@ def test_exec_sibling_is_subject_to_the_cpu_limit(run_id: str) -> None:
 @pytest.mark.integration
 def test_control_exec_sibling_short_command_exits_zero_under_the_same_limit(
     run_id: str,
+    jail_dir: str,
 ) -> None:
     """AC #2's named control: under the SAME `Limits(cpu_seconds=1)` and
     the SAME jail, an exec'd command trivial enough to finish well inside
@@ -279,7 +264,12 @@ def test_control_exec_sibling_short_command_exits_zero_under_the_same_limit(
     invocation) could not pass this half."""
     spec = Spec(limits=Limits(cpu_seconds=1))
     jail, process = _launch(
-        degraded(), spec, _sleep_workload(run_id), jail_id="jail-t046-ac2-control", run_id=run_id
+        degraded(),
+        spec,
+        _sleep_workload(run_id),
+        jail_id="jail-t046-ac2-control",
+        run_id=run_id,
+        jail_dir=jail_dir,
     )
     try:
         sibling = jail.start(["/usr/bin/true"])
@@ -295,7 +285,9 @@ def test_control_exec_sibling_short_command_exits_zero_under_the_same_limit(
 
 
 @pytest.mark.integration
-def test_every_start_refuses_when_the_composed_wrap_is_not_a_pure_prefix(run_id: str) -> None:
+def test_every_start_refuses_when_the_composed_wrap_is_not_a_pure_prefix(
+    run_id: str, new_jail_dir: NewJailDir
+) -> None:
     """AC #3, as decision-181 (2026-10-12) moved it: a REAL `Stack` containing
     `_AppendingMechanism` (its `wrap` APPENDS a trailing token, so the suffix
     check fails) compiles, and `create` derives no prefix (`None`), so EVERY
@@ -309,7 +301,7 @@ def test_every_start_refuses_when_the_composed_wrap_is_not_a_pure_prefix(run_id:
     SECOND (empty-stack) launch where the start succeeds, DOES find a new
     entry -- without this, an empty scan on the refused jail would pass just
     as happily if the scan could never match anything at all."""
-    jail_dir = _new_jail_dir(run_id)
+    jail_dir = new_jail_dir()
     ctx = CompileCtx(jail_dir=jail_dir, platform=sys.platform)
     compiled = Stack([_AppendingMechanism()]).compile(Spec(), ctx=ctx)
 
@@ -327,7 +319,12 @@ def test_every_start_refuses_when_the_composed_wrap_is_not_a_pure_prefix(run_id:
     assert not os.path.exists(_records.procs_dir(jail_dir))
 
     control_jail, control_process = _launch(
-        Stack([]), Spec(), _sleep_workload(run_id), jail_id="jail-t046-ac3-control", run_id=run_id
+        Stack([]),
+        Spec(),
+        _sleep_workload(run_id),
+        jail_id="jail-t046-ac3-control",
+        run_id=run_id,
+        jail_dir=new_jail_dir(),
     )
     try:
         assert control_jail._base.wrap_prefix == ()
@@ -366,14 +363,19 @@ def test_every_start_refuses_when_the_composed_wrap_is_not_a_pure_prefix(run_id:
 
 
 @pytest.mark.integration
-def test_fidelity_is_equivalent_profile_under_a_composed_stack(run_id: str) -> None:
+def test_fidelity_is_equivalent_profile_under_a_composed_stack(run_id: str, jail_dir: str) -> None:
     """A non-empty, verified `wrap_prefix` grades `ExecFidelity.
     EQUIVALENT_PROFILE`, asserted as the enum member (SPEC.md §9: "A stack
     with no mechanisms grades PLAIN" -- the composed `degraded()` stack is
     not that case, and must not silently read as if it were)."""
     spec = Spec(limits=Limits(cpu_seconds=60))
     jail, process = _launch(
-        degraded(), spec, _sleep_workload(run_id), jail_id="jail-t046-fidelity", run_id=run_id
+        degraded(),
+        spec,
+        _sleep_workload(run_id),
+        jail_id="jail-t046-fidelity",
+        run_id=run_id,
+        jail_dir=jail_dir,
     )
     try:
         sibling = jail.start(["/usr/bin/true"])

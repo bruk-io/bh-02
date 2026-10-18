@@ -27,7 +27,6 @@ the start, and "signalled nothing" by a jail that never ran.
 
 from __future__ import annotations
 
-import itertools
 import os
 import subprocess
 import time
@@ -45,8 +44,6 @@ _RUNTIMES = {RuntimeKind.HOST: HostRuntime()}
 
 pytestmark = pytest.mark.integration
 
-_jail_counter = itertools.count()
-
 #: A stamp no live process can be carrying: the reading is prefixed by the
 #: platform that produced it, and neither prefix is this one. Using a
 #: syntactically alien value rather than a plausible-looking timestamp keeps
@@ -54,17 +51,7 @@ _jail_counter = itertools.count()
 _A_STAMP_NO_PROCESS_HAS = "never:this-is-not-any-process's-start-time"
 
 
-def _new_jail_dir() -> str:
-    """A short scratch root -- `sun_path` is 104 bytes on darwin. The `id`
-    infix is this file's alone, so it cannot collide with a sibling's
-    counter."""
-    path = f"/tmp/bg{os.getpid()}id{next(_jail_counter)}"
-    os.makedirs(path, exist_ok=True)
-    return path
-
-
-def _launch(run_id: str, body: str = "sleep 100") -> tuple[Jail, Process]:
-    jail_dir = _new_jail_dir()
+def _launch(run_id: str, body: str = "sleep 100", *, jail_dir: str) -> tuple[Jail, Process]:
     return launch(
         Stack([]).compile(Spec()),
         argv=workload_argv(run_id, body),
@@ -154,10 +141,10 @@ def test_an_unknown_stamp_degrades_to_a_pid_check_rather_than_a_false_mismatch()
 # ---------------------------------------------------------------------------
 
 
-def test_alive_reads_a_recycled_pid_as_gone(run_id: str) -> None:
+def test_alive_reads_a_recycled_pid_as_gone(run_id: str, jail_dir: str) -> None:
     """`alive()` asks two questions now. THE CONTROL is the first assertion:
     the same live jail, the same pid, the real stamp -- `True`."""
-    jail, process = _launch(run_id)
+    jail, process = _launch(run_id, jail_dir=jail_dir)
     try:
         _wait_for_the_group(process._record.pgid)
         assert jail.alive() is True, "CONTROL failed: the jail is not running"
@@ -168,7 +155,7 @@ def test_alive_reads_a_recycled_pid_as_gone(run_id: str) -> None:
         teardown_group(process)
 
 
-def test_interrupt_delivers_nothing_to_a_recycled_pid(run_id: str) -> None:
+def test_interrupt_delivers_nothing_to_a_recycled_pid(run_id: str, jail_dir: str) -> None:
     """`interrupt` returns `False` -- not delivered, because what this handle
     names is gone -- rather than sending a `SIGINT` into a group led by a
     stranger that happens to hold the number.
@@ -178,7 +165,7 @@ def test_interrupt_delivers_nothing_to_a_recycled_pid(run_id: str) -> None:
     control, in the same test: the unmodified handle returns `True` against
     that same group, so `False` is attributable to the stamp and not to this
     jail being unsignalable from the start."""
-    jail, process = _launch(run_id)
+    jail, process = _launch(run_id, jail_dir=jail_dir)
     try:
         _wait_for_the_group(process._record.pgid)
         before = _group_members(process._record.pgid)
@@ -198,6 +185,7 @@ def test_interrupt_delivers_nothing_to_a_recycled_pid(run_id: str) -> None:
 
 def test_kill_reports_already_gone_for_a_recycled_pid_and_signals_nothing(
     run_id: str,
+    jail_dir: str,
 ) -> None:
     """Teardown's ladder never reaches a rung. The item says `ALREADY_GONE`
     and its detail names WHY -- a start time that does not match -- so a
@@ -208,7 +196,7 @@ def test_kill_reports_already_gone_for_a_recycled_pid_and_signals_nothing(
     running after that report, and the unmodified handle then tears it down
     and reports `ENDED`. Without the second half, `ALREADY_GONE` would be
     indistinguishable from a jail that had died on its own."""
-    jail, process = _launch(run_id)
+    jail, process = _launch(run_id, jail_dir=jail_dir)
     try:
         _wait_for_the_group(process._record.pgid)
         assert _group_members(process._record.pgid), "CONTROL failed: the group is empty"
@@ -229,11 +217,11 @@ def test_kill_reports_already_gone_for_a_recycled_pid_and_signals_nothing(
         teardown_group(process)
 
 
-def test_the_launcher_records_a_real_stamp_on_every_handle(run_id: str) -> None:
+def test_the_launcher_records_a_real_stamp_on_every_handle(run_id: str, jail_dir: str) -> None:
     """The field is only worth comparing if a launch actually fills it. A
     `sleep 100` workload cannot have lost the read race, so `UNKNOWN` here
     means the launcher never took the reading at all."""
-    jail, process = _launch(run_id)
+    jail, process = _launch(run_id, jail_dir=jail_dir)
     try:
         _wait_for_the_group(process._record.pgid)
         assert process.start_time != identity.UNKNOWN

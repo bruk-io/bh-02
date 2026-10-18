@@ -80,8 +80,9 @@ Usage: bh-02 watch [OPTIONS] SESSION AGENT
   Follow one sub-agent's event log, read-only: SESSION is a session's id
   (`bh-02 sessions`) and AGENT the agent's name (`/agents` in the session says
   the command, such as `bh-02 watch 20261012-091500-ab12 general-1`). Stops
-  when the agent ends; Ctrl-C leaves it sooner. Nothing is written, and only
-  names bh-02 made are accepted.
+  when the agent ends, or when the session is no longer running (no bh-02 is
+  running it) and the log has no end; Ctrl-C leaves it sooner. Nothing is
+  written or locked, and only names bh-02 made are accepted.
 
 Options:
   --once  Print what the log holds now and stop, instead of following it.
@@ -95,6 +96,14 @@ text run together. It opens the file read-only, follows no link, and refuses a S
 that is not a name bh-02 made (a session id such as `20261012-091500-ab12`, an agent such as
 `general-1`), so neither can name a path. Anything the model wrote is shown as plain text, with
 no escape sequence. It works the same inside tmux or outside it.
+
+The follow ends at the agent's end. A log that never gets one (the bh-02 that ran the session crashed
+or was killed) would keep it going, so it also ends, saying that the session is no longer running,
+once the process that held the session (the pid in its `running.lock`) is gone. That is read, not
+locked: a lock taken and let go would refuse a bh-02 starting in that instant. It cannot see a bh-02
+in another pid namespace (a container sharing the state directory), where the process looks gone and
+the follow ends early, and it goes on while a process of that pid exists, so a pid a crash left that
+another process has since taken keeps it going until Ctrl-C.
 
 ## `bh-02 trajectory`
 
@@ -149,19 +158,26 @@ conversation 1  transcript.jsonl  2026-10-17 20:47:12.345
   printed in time order, before the first reply, step or call that came after it, at that line's
   indentation; one with nothing after it comes last. A sub-agent's rows (`agents/NAME/...`) are placed
   among that sub-agent's lines. There are three kinds:
-  - **`row first load`** is a row loading for the first time in the session: its row id is not in the
-    file before. The first loads that follow one another, with no reload or failure of that
-    writer's rows and none of its lines between, are one line with how many rows came up and the time
-    from the first to the last (`row first load  20:40:00.000  34 rows in 0.12s`): that is the session
-    starting, before your first reply, and under a `sub-agent` line the rows that sub-agent came up with.
-    A single row is named (`row first load NAME`). Rows that come up after your first reply, such as
-    ones a layer edit adds, are a line of their own, counted the same way. `rows.jsonl` has the names.
+  - **`row first load`** is a row loading for the first time in a run of the session: its row id is
+    not in the file since that run began. The first loads that follow one another, with no reload or
+    failure of that writer's rows and none of its lines between, are one line with how many rows came
+    up and the time from the first to the last (`row first load  20:40:00.000  34 rows in 0.12s`):
+    that is the run starting, before its first reply, and under a `sub-agent` line the rows that
+    sub-agent came up with. A single row is named (`row first load NAME`). Rows that come up after
+    your first reply, such as ones a layer edit adds, are a line of their own, counted the same way.
+    `rows.jsonl` has the names.
   - **`row reload NAME`** is a row that loaded again: it was restarted, as `/clear` does, or a
     dependency it uses was replaced (a `/model` switch, an edit to a layer). Each is a line.
   - **`row failed NAME`** is a row whose setup failed, with the error. Each is a line.
 
-  A session you `--resume` goes on in the same `rows.jsonl`, so the rows of the resumed run, which
-  were all seen before, are `row reload` lines.
+  A session you `--resume` goes on in the same `rows.jsonl`, and each run starts its part of it with
+  a line of its own, `{"at": ..., "kind": "run"}`, that names no row and prints nothing. The rows the
+  resumed run comes up with were all seen in the run before, and they are one `row first load` line
+  like the first run's: a `row reload` line is a row of the run you are in loading again.
+
+  A session with a conversation and no `rows.jsonl` has no row lines to print. The shell makes that
+  file at boot, before any reply, so it was removed or never written, and the first line says so:
+  `rows.jsonl not found: row reloads are not shown`.
 - **Conversations** are the session's transcript files: the backups `/clear` and `/compact` kept
   come first, in the order of their first `at` (else of the time they were copied), and the live
   `transcript.jsonl` is last. A conversation `/compact` began says so, with what you asked it to

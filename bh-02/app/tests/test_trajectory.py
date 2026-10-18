@@ -17,6 +17,7 @@ from bh_02.trajectory import Line, Trajectory, Transcript, is_conversation_file,
 type Json = Mapping[str, object]
 
 LIVE = "transcript.jsonl"
+NO_ROWS = "rows.jsonl not found: row reloads are not shown"
 # UTC-7: a time on the 18th at 03:47 UTC is the 17th at 20:47 here, so a line that shows the date
 # shows the person's day, not the file's
 LOCAL = datetime.timezone(datetime.timedelta(hours=-7))
@@ -479,6 +480,17 @@ def test_the_rows_file_is_read_into_the_trajectory_by_time_skipping_what_is_not_
     assert laid(file(CONVERSATION)).reloads == ()
 
 
+def test_a_conversation_with_no_rows_file_has_no_reloads_and_is_said_so_first() -> None:
+    """`rows` None is a session with no rows.jsonl, which is not the same as an empty one: that has no
+    reloads and is not said so. Only a session with a conversation is said so."""
+    missing = trajectory([file(CONVERSATION)])
+    assert missing.reloads is None
+    assert text(missing)[0] == NO_ROWS
+    assert NO_ROWS not in text(laid(file(CONVERSATION)))  # an empty rows file: found, no reloads
+    assert laid(file(CONVERSATION)).reloads == ()
+    assert text(trajectory([])) == []  # no conversation: nothing to say
+
+
 def reload_record(at: str, kind: str, row: str, **more: object) -> Json:
     return {"at": at, "kind": kind, "row": row} | more
 
@@ -758,6 +770,89 @@ def test_a_first_load_line_keeps_its_key_as_rows_come_up_and_the_files_grow() ->
         for line in rendered(laid(file(CONVERSATION), rows=more + jsonl(*came_up(BOOT, "loop"))), LOCAL)
     ]
     assert len(set(keys)) == len(keys)
+
+
+# --- runs -------------------------------------------------------------------------------------------------
+
+RESUME = BOOT + datetime.timedelta(hours=1)  # 21:40:00 here: a later run of the same session
+CAME_UP = ("loader", "loop", "transcript", "ui", "tools")
+
+
+def run_record(at: datetime.datetime) -> Json:
+    """The line the shell writes when it opens the log: a run's start, which names no row."""
+    return {"at": at.isoformat(timespec="milliseconds").replace("+00:00", "Z"), "kind": "run"}
+
+
+def test_a_resumed_runs_boot_is_one_line_like_the_first_and_a_restart_after_it_is_a_reload() -> None:
+    """A session resumed goes on in the same `rows.jsonl`: the rows of its second run were all seen in the
+    first, and the `run` line is what says the second run's start."""
+    rows = jsonl(
+        run_record(BOOT),
+        *came_up(BOOT, *CAME_UP),
+        run_record(RESUME),
+        *came_up(RESUME, *CAME_UP),
+        reload_record("2026-10-18T04:50:00.000Z", "reload", "loop"),  # a restart in the second run
+    )
+    lines = text(laid(file(CONVERSATION), rows=rows))
+    assert [line.strip() for line in lines if "row " in line] == [
+        "row first load  20:40:00.000  5 rows in 0.04s",
+        "row first load  21:40:00.000  5 rows in 0.04s",  # the resumed run's boot, one line
+        "row reload loop  21:50:00.000",  # a reload of a running session's row is still its own line
+    ]
+    assert not any("run" in line.split("  ")[0] for line in lines)  # the marker prints no line of its own
+
+
+def test_the_boots_of_two_runs_with_nothing_between_them_are_two_lines() -> None:
+    rows = jsonl(
+        run_record(BOOT),
+        *came_up(BOOT, *CAME_UP),
+        run_record(RESUME),  # the first run ended before it said anything, and the next one began
+        *came_up(RESUME, *CAME_UP),
+    )
+    assert text(laid(rows=rows)) == [
+        "row first load  2026-10-17 20:40:00.000  5 rows in 0.04s",
+        "row first load  2026-10-17 21:40:00.000  5 rows in 0.04s",
+    ]
+
+
+def test_the_rows_of_a_resumed_run_are_first_loads_again_a_sub_agents_and_a_failed_ones_too() -> None:
+    child = ("agents/general-1", "agents/general-1/loop")
+    first = [
+        run_record(BOOT),
+        *came_up(BOOT, "loader", "loop"),
+        *came_up(BOOT + datetime.timedelta(seconds=1), *child),
+        reload_record("2026-10-18T03:40:02.000Z", "failed", "model", error="boom"),
+    ]
+    second = [
+        run_record(RESUME),
+        *came_up(RESUME, "loader", "loop", "model"),  # "model" failed in the run before
+        *came_up(RESUME + datetime.timedelta(seconds=1), *child),
+    ]
+    reloads = laid(rows=jsonl(*first, *second)).reloads
+    assert [(r.run, r.kind, r.row, r.first) for r in reloads if r.run == 2] == [
+        (2, "reload", "loader", True),
+        (2, "reload", "loop", True),
+        (2, "reload", "model", True),
+        (2, "reload", "agents/general-1", True),
+        (2, "reload", "agents/general-1/loop", True),
+    ]
+    last = [(r.run, r.kind, r.row, r.first) for r in reloads if r.run == 1][-1]
+    assert last == (1, "failed", "model", False)  # a failure is never a first load
+
+
+def test_a_run_line_is_a_start_and_not_a_reload_and_one_that_is_not_a_time_starts_nothing() -> None:
+    rows = jsonl(
+        reload_record("2026-10-18T03:40:00.000Z", "reload", "loop"),
+        {"at": "yesterday", "kind": "run"},  # not a time: it is not a record, so no run began
+        reload_record("2026-10-18T03:41:00.000Z", "reload", "loop"),
+        run_record(datetime.datetime(2026, 10, 18, 3, 42, tzinfo=datetime.UTC)),
+        reload_record("2026-10-18T03:43:00.000Z", "reload", "loop"),
+    )
+    assert [(r.kind, r.row, r.first, r.run) for r in laid(rows=rows).reloads] == [
+        ("reload", "loop", True, 0),  # before any run line: the file's start is a run's start
+        ("reload", "loop", False, 0),
+        ("reload", "loop", True, 1),  # the run line starts the next run, and is not a reload of its own
+    ]
 
 
 def test_a_first_load_never_puts_a_control_character_on_the_terminal() -> None:

@@ -14,7 +14,7 @@ started and a short suffix, such as `20261008-225423-07f8`. It holds:
 | `session.toml` | the session's own layer: the model, and where the rows below keep their files. `/model` edits it. |
 | `transcript.jsonl` | the conversation, which the model is sent again at each step |
 | `events.jsonl` | what the screen showed, drawn again when you resume |
-| `rows.jsonl` | each row that loaded or failed, with the time (one JSON object a line, readable by you alone); `bh-02 trajectory` prints it, the first loads of a start as one line |
+| `rows.jsonl` | each row that loaded or failed, with the time (one JSON object a line, readable by you alone), after a `run` line that marks the start of each run of the session; `bh-02 trajectory` prints it, the first loads of a run's start as one line |
 | `meta.json` | the session's id, the directory it ran in, when it started, the model it started on, and any `--patch` files it started with |
 | `running.lock` | the lock the running bh-02 holds on the session, with its process id in it (see [One bh-02 at a time](#one-bh-02-at-a-time)) |
 | `claude/` | Claude Code's own state for the session, when the model is Claude |
@@ -35,7 +35,8 @@ lock is the operating system's, so it goes when the process does, however it end
 crashed or was killed leaves no stale lock, and `running.lock` staying in the directory means
 nothing. `bh-02 sessions`, `bh-02 trajectory` and `bh-02 watch` only read, take no lock and work on
 a session that is held; so does a second bh-02 that starts a new session, which is a session of its
-own.
+own. `bh-02 watch` reads the pid in `running.lock` to end its follow once the bh-02 running the
+session has gone ([the command line](../reference/command-line.md#bh-02-watch)).
 
 ## When bh-02 was killed mid-write
 
@@ -96,7 +97,8 @@ in tokens per second, the tokens used, what it cost and its settings, each call 
 made of it, how long you took to answer, how long it ran and the calls its input made, each sub-agent
 under the call that started it, each `/compact` with the summary step's time and cost, and the rows
 (from `rows.jsonl`) among the lines they fell between: the rows the session came up with as one line
-(how many, and how long they took to load), the same for the rows a sub-agent came up with under it,
+(how many, and how long they took to load), and the same again for each run that resumed it, since
+`bh-02 --resume` loads every row again; the same for the rows a sub-agent came up with under it,
 and each row that reloaded, as a `/clear` or a `/model` switch makes it, or failed as a line of its
 own, so they are not buried under the start. Times are your local time. Conversations come in order, the ones `/clear` and `/compact` kept first, and `--follow`
 carries on across either.

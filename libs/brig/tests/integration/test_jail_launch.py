@@ -12,7 +12,7 @@ suite-wide leak-check if teardown ever escapes are built through
 `tests.conftest.workload_argv`, which stamps the run's token into the
 FIRST line of the spawned script (see that function's docstring for why
 that placement, not appended after the body, is load-bearing). Jail
-directories use a short `/tmp/bg<pid>-<n>` scratch root, never `tmp_path`
+directories are short scratch roots from `tests/conftest.py`'s `jail_dir`, never `tmp_path`
 (CLAUDE.md: `sun_path` is 104 bytes on darwin -- task-021 will bind a
 socket inside a jail directory built the same way this file builds one, so
 this file establishes that convention rather than special-casing around
@@ -33,7 +33,6 @@ not what a green run of this fast a file demonstrates.
 from __future__ import annotations
 
 import contextlib
-import itertools
 import os
 import signal
 import subprocess
@@ -65,13 +64,6 @@ from brig.stack import CompiledJail
 from tests.conftest import launch, teardown_group, workload_argv
 
 _RUNTIMES = {RuntimeKind.HOST: HostRuntime()}
-
-_jail_counter = itertools.count()
-
-
-def _new_jail_dir() -> str:
-    """A short scratch root, `/tmp/bg<pid>-<n>` -- never `tmp_path`."""
-    return f"/tmp/bg{os.getpid()}-{next(_jail_counter)}"
 
 
 def _identity_wrap(argv: tuple[str, ...]) -> tuple[str, ...]:
@@ -132,7 +124,7 @@ def _launch(
     cwd: str,
     jail: CompiledJail | None = None,
     jail_id: str = "jail-under-test",
-    jail_dir: str | None = None,
+    jail_dir: str,
     io: IoPolicy | None = None,
 ) -> tuple[Jail, Process]:
     return launch(
@@ -141,7 +133,7 @@ def _launch(
         cwd=cwd,
         io=io,
         jail_id=jail_id,
-        jail_dir=jail_dir if jail_dir is not None else _new_jail_dir(),
+        jail_dir=jail_dir,
     )
 
 
@@ -203,11 +195,10 @@ def _kill_shared_pgid_workload(pid: int) -> None:
 
 
 @pytest.mark.integration
-def test_detached_workload_leads_its_own_process_group(run_id: str) -> None:
+def test_detached_workload_leads_its_own_process_group(run_id: str, jail_dir: str) -> None:
     """AC #2: the child's real pgid, read from `/bin/ps`, equals the
     child's own pid (it leads its own group) and differs from the pytest
     harness's own pgid, read the same way."""
-    jail_dir = _new_jail_dir()
     argv = workload_argv(run_id, "sleep 5")
     jail, process = _launch(argv, cwd=jail_dir, jail_dir=jail_dir)
     try:
@@ -242,14 +233,13 @@ def test_control_workload_without_new_session_shares_pytest_pgid(run_id: str) ->
 
 
 @pytest.mark.integration
-def test_stdio_lands_in_exactly_the_files_the_handle_names(run_id: str) -> None:
+def test_stdio_lands_in_exactly_the_files_the_handle_names(run_id: str, jail_dir: str) -> None:
     """AC #4: a known token on stdout, a different (non-overlapping) token
     on stderr -- exact content in each file, not substring containment."""
     out_token = "STDOUT-TOKEN-4f9c2a"
     err_token = "STDERR-TOKEN-7b31de"
     body = f"( printf '%s' '{out_token}'; printf '%s' '{err_token}' 1>&2 )"
     argv = workload_argv(run_id, body)
-    jail_dir = _new_jail_dir()
     jail, process = _launch(argv, cwd=jail_dir, jail_dir=jail_dir)
     try:
         process.wait(timeout=20.0)
@@ -269,12 +259,11 @@ def test_stdio_lands_in_exactly_the_files_the_handle_names(run_id: str) -> None:
 
 
 @pytest.mark.integration
-def test_launch_refuses_a_jail_that_requires_pty(run_id: str) -> None:
+def test_launch_refuses_a_jail_that_requires_pty(run_id: str, jail_dir: str) -> None:
     """AC #5: `requires` including `PTY` (which `HostRuntime` does
     NOT claim) raises from `Jail.create`, and the structured `missing` field
     -- not `str(exc)` -- names `PTY`. No process is spawned."""
     compiled = _compiled_jail(requires=frozenset({Capability.PTY}))
-    jail_dir = _new_jail_dir()
     with pytest.raises(LaunchRefused) as exc_info:
         Jail.create(
             compiled,
@@ -284,12 +273,15 @@ def test_launch_refuses_a_jail_that_requires_pty(run_id: str) -> None:
             jail_dir=jail_dir,
         )
     assert Capability.PTY in exc_info.value.missing
-    # Nothing was ever spawned or created for a refused jail.
-    assert not os.path.exists(jail_dir)
+    # Nothing was ever spawned or created for a refused jail: the directory it was
+    # offered (an empty one, which is what a fixture's is) is as it was.
+    assert os.listdir(jail_dir) == []
 
 
 @pytest.mark.integration
-def test_launch_refusal_control_new_process_group_is_within_capabilities(run_id: str) -> None:
+def test_launch_refusal_control_new_process_group_is_within_capabilities(
+    run_id: str, jail_dir: str
+) -> None:
     """AC #6: the control. A `CompiledJail` requiring only
     `NEW_PROCESS_GROUP` (which IS in `HostRuntime.capabilities`)
     launches successfully -- without this, the refusal test above cannot
@@ -297,7 +289,6 @@ def test_launch_refusal_control_new_process_group_is_within_capabilities(run_id:
     refuses"."""
     compiled = _compiled_jail(requires=frozenset({Capability.NEW_PROCESS_GROUP}))
     argv = workload_argv(run_id, "true")
-    jail_dir = _new_jail_dir()
     jail, process = _launch(argv, cwd=jail_dir, jail=compiled, jail_dir=jail_dir)
     try:
         process.wait(timeout=20.0)
@@ -312,7 +303,7 @@ def test_launch_refusal_control_new_process_group_is_within_capabilities(run_id:
 
 
 @pytest.mark.integration
-def test_known_at_compile_payloads_are_stamped_onto_the_handle(run_id: str) -> None:
+def test_known_at_compile_payloads_are_stamped_onto_the_handle(run_id: str, jail_dir: str) -> None:
     """AC #7. This AC used to read the first line of the jail's events file
     and assert it decoded to a `SPAWN` record carrying the wrapped argv,
     pid, pgid and cwd. decision-152 (2026-09-08) deleted that file, and the
@@ -327,7 +318,6 @@ def test_known_at_compile_payloads_are_stamped_onto_the_handle(run_id: str) -> N
     empty tuple, so this cannot pass by stamping something unconditionally.
     """
     argv = workload_argv(run_id, "true")
-    jail_dir = _new_jail_dir()
     compiled = _compiled_jail(sensors=(_FixedSensor("sensor-a"), _FixedSensor("sensor-b")))
     jail, process = _launch(
         argv, cwd=jail_dir, jail=compiled, jail_id="jail-sensor-evt", jail_dir=jail_dir
@@ -348,12 +338,11 @@ def test_known_at_compile_payloads_are_stamped_onto_the_handle(run_id: str) -> N
 
 
 @pytest.mark.integration
-def test_a_jail_with_no_sensors_stamps_nothing(run_id: str) -> None:
+def test_a_jail_with_no_sensors_stamps_nothing(run_id: str, jail_dir: str) -> None:
     """AC #7's control: the empty stack has no `EventSource` at all, so
     `compile_events` is empty -- the stamping above is a consequence of the
     sensors, not of launching."""
     argv = workload_argv(run_id, "true")
-    jail_dir = _new_jail_dir()
     jail, process = _launch(argv, cwd=jail_dir, jail_id="jail-no-sensor", jail_dir=jail_dir)
     try:
         process.wait(timeout=20.0)
@@ -368,14 +357,13 @@ def test_a_jail_with_no_sensors_stamps_nothing(run_id: str) -> None:
 
 
 @pytest.mark.integration
-def test_jail_round_trips_in_process_and_refuses_an_extra_key(run_id: str) -> None:
+def test_jail_round_trips_in_process_and_refuses_an_extra_key(run_id: str, jail_dir: str) -> None:
     """AC #8: `from_dict(jail.to_dict())` equals the original field for
     field (a `Jail` holds a runtime and compares by identity, so the fields
     and the dict are compared); `from_dict` on a dict carrying an unknown key
     raises. (The
     separate-process proof is task-023's, not claimed here.)"""
     argv = workload_argv(run_id, "sleep 5")
-    jail_dir = _new_jail_dir()
     jail, process = _launch(argv, cwd=jail_dir, jail_dir=jail_dir)
     try:
         d = jail.to_dict()
@@ -400,6 +388,7 @@ def test_jail_round_trips_in_process_and_refuses_an_extra_key(run_id: str) -> No
 @pytest.mark.integration
 def test_launch_writes_staged_files_and_jail_round_trips_channels_and_detail(
     run_id: str,
+    jail_dir: str,
 ) -> None:
     """Non-vacuity closer for the empty-stack defaults every other test in
     this file uses: an empty-stack `Spec` has no channels and
@@ -419,7 +408,6 @@ def test_launch_writes_staged_files_and_jail_round_trips_channels_and_detail(
     compiled = _compiled_jail(spec=spec, report=report, staged=staged)
 
     argv = workload_argv(run_id, "true")
-    jail_dir = _new_jail_dir()
     jail, process = _launch(argv, cwd=jail_dir, jail=compiled, jail_dir=jail_dir)
     try:
         process.wait(timeout=20.0)
@@ -483,11 +471,10 @@ def test_launch_writes_staged_files_and_jail_round_trips_channels_and_detail(
 
 
 @pytest.mark.integration
-def test_alive_is_true_while_running_false_after_kill_and_reap(run_id: str) -> None:
+def test_alive_is_true_while_running_false_after_kill_and_reap(run_id: str, jail_dir: str) -> None:
     """AC #9: `alive()` is true while the workload runs, and false after
     the test kills its group and reaps it."""
     argv = workload_argv(run_id, "sleep 5")
-    jail_dir = _new_jail_dir()
     jail, process = _launch(argv, cwd=jail_dir, jail_dir=jail_dir)
     try:
         assert jail.alive() is True
@@ -502,14 +489,15 @@ def test_alive_is_true_while_running_false_after_kill_and_reap(run_id: str) -> N
 
 
 @pytest.mark.integration
-def test_processes_name_the_pid_and_the_report_matches_the_compiled_jail(run_id: str) -> None:
+def test_processes_name_the_pid_and_the_report_matches_the_compiled_jail(
+    run_id: str, jail_dir: str
+) -> None:
     """AC #10: the jail's processes name the workload pid; its report
     matches the `CompiledJail`'s report exactly, all seven axes
     `UNENFORCED`. (`stat()` answered both until decision-183;
     `processes()` and `report` answer them now.)"""
     compiled = _compiled_jail()
     argv = workload_argv(run_id, "sleep 5")
-    jail_dir = _new_jail_dir()
     jail, process = _launch(argv, cwd=jail_dir, jail=compiled, jail_dir=jail_dir)
     try:
         assert process.pid in [p.pid for p in jail.processes()]
@@ -530,7 +518,7 @@ def test_processes_name_the_pid_and_the_report_matches_the_compiled_jail(run_id:
 
 
 @pytest.mark.integration
-def test_filled_seams_are_functional_not_stubs(run_id: str) -> None:
+def test_filled_seams_are_functional_not_stubs(run_id: str, jail_dir: str) -> None:
     """task-027 AC #10, decision-041's authorized positive replacement for
     task-019's retired AC #11 pin -- task-020, task-021 and task-022 have
     since filled the three seams that pin only ever proved were raising
@@ -548,7 +536,6 @@ def test_filled_seams_are_functional_not_stubs(run_id: str) -> None:
     never_binds = Channel(name="never-binds", kind=ChannelKind.LISTEN)
     compiled = _compiled_jail(spec=Spec(channels=(never_binds,)))
     argv = workload_argv(run_id, "sleep 5")
-    jail_dir = _new_jail_dir()
     jail, process = _launch(argv, cwd=jail_dir, jail=compiled, jail_dir=jail_dir)
     try:
         # a sibling start: functional, not a raising stub.
@@ -584,7 +571,7 @@ def test_filled_seams_are_functional_not_stubs(run_id: str) -> None:
 
 
 @pytest.mark.integration
-def test_a_workload_that_cannot_be_exec_d_fails_the_launch(run_id: str) -> None:
+def test_a_workload_that_cannot_be_exec_d_fails_the_launch(run_id: str, jail_dir: str) -> None:
     """The exit wrapper spawns the jail's argv as its own child, which moves
     the `exec` failure out of this process -- so `jail.start` reads a ready
     token back through a pipe and turns "the wrapper could not spawn it" into
@@ -598,7 +585,6 @@ def test_a_workload_that_cannot_be_exec_d_fails_the_launch(run_id: str) -> None:
     returns a process, so the refusal is attributable to the missing binary
     rather than to launch being broken.
     """
-    jail_dir = _new_jail_dir()
     missing = os.path.join(jail_dir, "no-such-binary")
     assert not os.path.exists(missing)
 

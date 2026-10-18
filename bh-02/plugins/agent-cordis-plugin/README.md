@@ -193,6 +193,15 @@ line then, and only once `jobs.settled()`), so `/clear` and `/compact` read and 
 with no write pending, and a reply that ends has left every entry of it in the file. A line that
 can't be written (a full disk) is not dropped: the next `append` and the flush raise it, and
 nothing after it is written, since a file with a hole in it would resume as another conversation.
+It is raised as `TranscriptWriteFailed`: an `OSError` with a `kind` (`transcript_write_failed`) and
+a `message`, so it is a recoverable failure (CONTRACTS.md: errors) and `chat:converse` shows it
+and carries on, where the writer's bare `OSError` ended bh-02 with a traceback and the
+conversation in memory lost. The message names the file, the error of the write, and what to do:
+free some space if the disk is full (or put right what the error says), then `/restart
+transcript`, which carries on from what the file holds; the entry that failed and the ones after
+it are not in it. Until then every `append`, `check`, `flush` and the row's leaving raise it, so
+the next message is refused before the model is asked. The row's leaving raises it too, and the
+restart goes on all the same.
 The transcript row enters its file, so a restart (or a retired sub-agent) writes what is queued
 and closes it.
 
@@ -206,10 +215,14 @@ path is the one it means (`host_paths.Replaced`), and `FileTranscript` says a re
 a recoverable failure (CONTRACTS.md: errors) and `chat:converse` shows it and carries on. The
 message names `/restart transcript`, which begins the conversation the file holds; until then
 every `append`, `flush` and the row's leaving raise it, nothing is written to the old file (the
-`.bak`) or the new one, and an entry refused by `append` is not kept in memory. The check is
-on the writing thread, so the refusal surfaces at the next `append` after it has run, not at the
-`append` that queued the entry: the first message after a failed restart may reach the model once
-before its step's entry is refused.
+`.bak`) or the new one, and an entry refused by `append` is not kept in memory. The appender's check
+is on its writing thread and made before a write, and nothing is queued between the rename and the
+first message after a failed restart, so the loop has the transcript look at its file first
+(`check()`, an optional capability of `FileTranscript` like `flush()`; `MemoryTranscript` has none),
+awaited at the start of a reply before it appends anything: the reply is refused before the model is
+asked and keeps nothing. The look is the one stat the thread makes, queued behind no write at that
+point (the reply before flushed) and awaited with the event loop free, so the event loop makes no
+stat and waits on no disk; it is no flush, so a reply still flushes once, at its end.
 
 A transcript file read when the row starts (a resume, or `/compact` reading it) may end in a
 write that was cut short: a process killed mid-write leaves a last line with no newline that is
@@ -233,10 +246,16 @@ the model for a summary in one step: the request is the loop's own (`loop.reques
 prompt the conversation began with, then the conversation) with the registered tools offered
 as with every step (`tools.specs()`), so a model server reuses its work on the conversation, then bh-02's message
 asking for the summary in plain text, for the model itself to carry on from, naming what its
-Python namespace holds (`asked`; `/compact WHAT TO KEEP` adds what the person wants kept). A
-call the step makes is never run, and a step that calls, is cut off, says nothing or refuses
-gives no summary (`stops.classify`): the answer says why (and what the step cost, as one
-`usage` event, which still counts) and nothing changes. A conversation that is only the last
+Python namespace holds (`asked`; `/compact WHAT TO KEEP` adds what the person wants kept). A call
+a crash left unanswered, in a session resumed and compacted before its next message (the loop
+answers it at its next reply, which `/compact` does not go through), is answered in that request
+as the loop would answer it (`loop.lost_answers`: `interrupted: bh-02 stopped before this call
+finished; it may have partly run`, a call record of the time alone, its `at` the time of the
+request), so the model is never sent a call with no result after it; the file's entries are not
+changed, and the new conversation does not hold the answers. A call the step makes is never run,
+and a step that calls, is cut off, says nothing or refuses gives no summary (`stops.classify`):
+the answer says why (and what the step cost, as one `usage` event, which still counts) and
+nothing changes. A conversation that is only the last
 summary, nothing said since, is not compacted again. A command runs in the chat row's task and
 Ctrl-C stops only a reply, so the step has `timeout` seconds, and a note says so as it begins
 (the row shows it itself, `output.show`, since the chat row shows a command's answer only once

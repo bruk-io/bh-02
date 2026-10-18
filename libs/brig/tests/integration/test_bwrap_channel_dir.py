@@ -23,10 +23,7 @@ Observed on the host with `os.path`, never through brig.
 from __future__ import annotations
 
 import os
-import shutil
 import sys
-import tempfile
-from collections.abc import Iterator
 
 import pytest
 
@@ -48,15 +45,6 @@ def _needs_bubblewrap() -> None:
             f"bwrap needs bubblewrap at {DEFAULT_BWRAP_PATH} on linux "
             f"(sys.platform is {sys.platform!r}); install the `bubblewrap` package"
         )
-
-
-@pytest.fixture
-def jail_dir() -> Iterator[str]:
-    path = tempfile.mkdtemp(prefix="bg-chan-")
-    try:
-        yield path
-    finally:
-        shutil.rmtree(path)
 
 
 def _spec() -> Spec:

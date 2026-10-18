@@ -46,10 +46,13 @@ The file is written on a thread, in order, so the screen never waits on a disk, 
 for the last write when a reply ends, however it ends. `/clear` and `/compact` run only after the
 reply before them, so they find every entry. The file, its backups and the session's directory are
 readable by you alone (0600 and 0700, not the umask's). A line that can't be written (a full disk)
-is an error at the end of that reply, not an entry quietly missing from the file. If `/clear` or
-`/compact` replaced the file and the restart that follows failed (you are told), the old conversation
-is still running over a file that now holds the new one: bh-02 writes nothing more to it, and
-the next message answers with an error that says `/restart transcript` begins the new conversation.
+is an error at the end of that reply, not an entry quietly missing from the file: bh-02 tells you
+which file, what failed and what to do (free some space, then `/restart transcript`, which carries
+on from what the file holds), writes nothing more to it until then, and the chat carries on. If
+`/clear` or `/compact` replaced the file and the restart that follows failed (you are told), the old
+conversation is still running over a file that now holds the new one: bh-02 writes nothing more to
+it, and the next message answers, before the model is asked, with an error that says
+`/restart transcript` begins the new conversation.
 
 ## Steps that don't count
 

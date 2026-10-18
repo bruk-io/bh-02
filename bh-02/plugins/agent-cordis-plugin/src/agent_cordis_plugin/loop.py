@@ -43,6 +43,7 @@ reply leaves at most one in flight, however often the loop reloads between them.
 
 import asyncio
 import contextlib
+import datetime
 import json
 from collections.abc import (
     AsyncGenerator,
@@ -99,6 +100,7 @@ __all__ = [
     "called",
     "malformed",
     "asides_for",
+    "lost_answers",
     "refusal",
     "request_for",
     "shown",
@@ -228,6 +230,17 @@ class _Flushable(Protocol):
     async def flush(self) -> None: ...
 
 
+@runtime_checkable
+class _Checkable(Protocol):
+    """What a transcript whose file can be replaced under it (`FileTranscript`) has besides
+    `Transcript`: `check()` returns once its writer has looked at the file and found it the one it
+    writes to, and raises what it is told of a file that is not. A reply asks it first, so a
+    refusal comes before the model is asked. A transcript that keeps the conversation in memory
+    has no such method and is asked for none (CONTRACTS.md: transcript)."""
+
+    async def check(self) -> None: ...
+
+
 _INTERRUPTED = "interrupted: the person stopped this call before it finished; it may have partly run"
 # What a call is answered with when the process that ran it died, found so when the session
 # resumes: bh-02 itself stopped, which no one asked, and what the call did is unknown.
@@ -330,6 +343,18 @@ def _unanswered_calls(messages: Sequence[Json]) -> list[Json]:
         elif role == "assistant":
             return [call for call in message.get("tool_calls") or () if call["id"] not in answered]
     return []
+
+
+def lost_answers(messages: Sequence[Json], at: datetime.datetime) -> list[dict[str, Any]]:
+    """The `tool` entries that answer each call a transcript's `messages` leave unanswered
+    (`_unanswered_calls`) with `_LOST`, in the calls' order, each with a call record of the time
+    alone (`at`): no answer, wait or run time was recorded, and none is known. The loop keeps them
+    in the transcript at its next reply (`_answer_the_unanswered`); `/compact` sends them with its
+    summary request and keeps nothing (`conversation.asked`), so both word and record them alike."""
+    return [
+        _answer(call, _LOST, [], call_record(at, None, None, None, None, ()))
+        for call in _unanswered_calls(messages)
+    ]
 
 
 def request_for(messages: Sequence[Json]) -> list[Json]:
@@ -520,6 +545,14 @@ class LoopModel:
     A command runs only after the reply before it has ended (the chat row reads its next line
     then), so `/clear` and `/compact` find every entry in the file, and a failed write is
     raised there at the latest.
+
+    A transcript whose file can be replaced under it (it has `check()`) is asked first thing in a
+    reply, before anything is appended, whether its file is still the one it writes to: the
+    writer looks at the file only before a write, so a file `/clear` or `/compact` replaced and
+    whose restart failed would otherwise be found at the step's entry, after the model had
+    answered once. The check is the writing thread's stat, awaited with the event loop free; it
+    waits for no write and the transcript is not flushed for it, so the flush stays one per reply.
+    A refused reply keeps nothing and the model is never asked.
     """
 
     def __init__(
@@ -694,12 +727,12 @@ class LoopModel:
         self._nested.append(_Made(nested_record(name, call.record()), tuple(asides)))
 
     def _answer_the_unanswered(self) -> None:
-        """Answer each call a process that died left unanswered (`_unanswered_calls`) with `_LOST`,
-        in the calls' order, so the conversation is whole before any request. The record of each
-        has the time alone, as a call the stop never reached has: no answer, wait or run time was
-        recorded, and none is known."""
-        for call in _unanswered_calls(self._transcript.messages):
-            self._transcript.append(_answer(call, _LOST, [], _Call(self._clock).record()))
+        """Keep the answer to each call a process that died left unanswered (`lost_answers`), in the
+        calls' order, so the conversation is whole before any request. The record of each has the
+        time alone, as a call the stop never reached has: no answer, wait or run time was recorded,
+        and none is known."""
+        for entry in lost_answers(self._transcript.messages, self._clock.now()):
+            self._transcript.append(entry)
 
     def _unanswered(self, message: str, dated: str | None, why: str, at: str) -> None:
         """Keep the person's message (that came `at`), answered with `why`: the reply ended before
@@ -712,7 +745,9 @@ class LoopModel:
         then flush the transcript, however the reply ended.
 
         Raises:
-            OSError: an entry could not be written to the transcript's file.
+            OSError: an entry could not be written to the transcript's file, or the file was
+                replaced under the transcript (checked before anything is appended or the model
+                asked).
         """
         try:
             # closed here, not left to the event loop to finalize: a reply the person stops must
@@ -723,6 +758,11 @@ class LoopModel:
         finally:
             await self._flushed()
 
+    async def _checked(self) -> None:
+        """Ask the transcript whether its file is still the one it writes to, when it can be asked."""
+        if isinstance(self._transcript, _Checkable):
+            await self._transcript.check()
+
     async def _flushed(self) -> None:
         """Wait for the transcript's writes, when it writes behind the loop."""
         if isinstance(self._transcript, _Flushable):
@@ -730,6 +770,7 @@ class LoopModel:
 
     async def _reply(self, message: str) -> AsyncGenerator[Json]:
         """`reply`, without the flush: run model steps until one answers the message."""
+        await self._checked()  # before anything is kept: a refused reply leaves no entry, asks no model
         self._answer_the_unanswered()  # first: however the reply ends, the conversation is whole
         came = self._clock.now()
         at, today = stamp(came), day_of(came)

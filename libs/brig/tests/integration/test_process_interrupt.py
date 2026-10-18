@@ -73,7 +73,6 @@ under test elsewhere in this suite.
 
 from __future__ import annotations
 
-import itertools
 import os
 import subprocess
 import sys
@@ -85,8 +84,6 @@ from brig.core import Spec
 from brig.run import Jail, Process
 from brig.stack import Stack
 from tests.conftest import launch, teardown_group, workload_argv
-
-_jail_counter = itertools.count()
 
 #: How long a test waits for a signalled group to actually clear. Generous
 #: against scheduling; short against the suite: a group that is going to
@@ -159,17 +156,7 @@ def _child_body(jail_dir: str, marker: str, ready: str, mode: str) -> str:
     return f"{sys.executable} {script} {marker} {ready} {mode}"
 
 
-def _new_jail_dir(run_id: str) -> str:
-    """A short scratch root -- `sun_path` is 104 bytes on darwin. The `ir`
-    infix is this file's alone, so it cannot collide with a sibling's
-    counter."""
-    path = f"/tmp/bg{os.getpid()}ir{run_id[:8]}{next(_jail_counter)}"
-    os.makedirs(path, exist_ok=True)
-    return path
-
-
-def _launch(argv: list[str], *, run_id: str) -> tuple[Jail, Process]:
-    jail_dir = _new_jail_dir(run_id)
+def _launch(argv: list[str], *, run_id: str, jail_dir: str) -> tuple[Jail, Process]:
     return launch(
         Stack([]).compile(Spec()),
         argv,
@@ -204,7 +191,7 @@ def _wait_until_empty(pgid: int, timeout: float = _SETTLE_S) -> bool:
     return not _group_members(pgid)
 
 
-def _launch_child(run_id: str, mode: str) -> tuple[Process, str]:
+def _launch_child(run_id: str, mode: str, *, jail_dir: str) -> tuple[Process, str]:
     """A jail whose backgrounded child is `_INTERRUPT_CHILD` in `mode`,
     returned only once that child has ARMED its `SIGINT` handler. Returns
     the first process and the marker path the child writes on arrival.
@@ -216,7 +203,6 @@ def _launch_child(run_id: str, mode: str) -> tuple[Process, str]:
     "the signal did not arrive" and would send the next reader hunting in
     `Process.interrupt`).
     """
-    jail_dir = _new_jail_dir(run_id)
     marker = os.path.join(jail_dir, "sigint-arrived")
     ready = os.path.join(jail_dir, "sigint-armed")
     _jail, process = launch(
@@ -262,13 +248,13 @@ def _wait_for_marker(marker: str) -> str:
 
 
 @pytest.mark.integration
-def test_interrupt_reaches_a_non_leader_member_of_the_group(run_id: str) -> None:
+def test_interrupt_reaches_a_non_leader_member_of_the_group(run_id: str, jail_dir: str) -> None:
     """Claim 1: the signal arrives at the BACKGROUNDED CHILD, which reports
     its own pid from inside its handler -- a pid that is not the leader's,
     which is what "group, not leader" means. CONTROL, in the same test: the
     group has at least two members BEFORE the interrupt, so "the child got
     it" is not satisfied by a workload that never forked one."""
-    process, marker = _launch_child(run_id, "exit")
+    process, marker = _launch_child(run_id, "exit", jail_dir=jail_dir)
     try:
         # Read, not waited on: `_launch_child` already blocked until the
         # child announced its arm, and a child that has armed has forked.
@@ -298,13 +284,14 @@ def test_interrupt_reaches_a_non_leader_member_of_the_group(run_id: str) -> None
 @pytest.mark.integration
 def test_interrupt_returns_true_for_a_workload_that_survives_the_signal(
     run_id: str,
+    jail_dir: str,
 ) -> None:
     """Claim 2: the child takes the signal, records it, and KEEPS RUNNING.
     `interrupt()` returns `True` anyway -- `True` is deliverability -- and
     the group is still non-empty afterwards, which is the half that proves
     the return value is not quietly claiming an outcome nothing verified.
     The marker is what keeps it non-vacuous: the signal really arrived."""
-    process, marker = _launch_child(run_id, "survive")
+    process, marker = _launch_child(run_id, "survive", jail_dir=jail_dir)
     try:
         assert process.interrupt() is True
         _wait_for_marker(marker)
@@ -319,12 +306,12 @@ def test_interrupt_returns_true_for_a_workload_that_survives_the_signal(
 
 
 @pytest.mark.integration
-def test_interrupt_returns_false_once_the_group_is_gone(run_id: str) -> None:
+def test_interrupt_returns_false_once_the_group_is_gone(run_id: str, jail_dir: str) -> None:
     """Claim 3, with its own control: the SAME process returns `True` while
     the group is there and `False` once it is not -- so `False` is
     attributable to the group's absence and not to this process being
     unsignalable from the start."""
-    _jail, process = _launch(workload_argv(run_id, "sleep 100"), run_id=run_id)
+    _jail, process = _launch(workload_argv(run_id, "sleep 100"), run_id=run_id, jail_dir=jail_dir)
     # A START wait, not a settle: the control below needs the group to be
     # THERE, and budgeting a process spawn at `_SETTLE_S` is the mistake the
     # module docstring's readiness note is about.

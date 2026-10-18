@@ -9,8 +9,6 @@ in the same jail, the control, the first process and a second sibling still
 run.
 """
 
-import itertools
-import os
 import signal
 import subprocess
 
@@ -23,15 +21,12 @@ from brig.run.teardown import KillOutcome
 from brig.stack import CompiledJail
 from tests.conftest import launch, teardown_group, workload_argv
 
-_jail_counter = itertools.count()
-
 
 def _identity_wrap(argv: tuple[str, ...]) -> tuple[str, ...]:
     return argv
 
 
-def _launch(run_id: str) -> tuple[Jail, Process]:
-    jail_dir = f"/tmp/bg{os.getpid()}ha{next(_jail_counter)}"
+def _launch(run_id: str, *, jail_dir: str) -> tuple[Jail, Process]:
     jail = CompiledJail(
         spec=Spec(),
         report=unenforced_report(),
@@ -66,8 +61,8 @@ def _live_members(pgid: int) -> list[int]:
 
 
 @pytest.mark.integration
-def test_stop_ends_one_siblings_group_and_leaves_the_rest(run_id: str) -> None:
-    jail, process = _launch(run_id)
+def test_stop_ends_one_siblings_group_and_leaves_the_rest(run_id: str, jail_dir: str) -> None:
+    jail, process = _launch(run_id, jail_dir=jail_dir)
     record = jail._record()
     supervisor = jail._runtime.supervisor(record)
     assert isinstance(supervisor, HostSupervisor)

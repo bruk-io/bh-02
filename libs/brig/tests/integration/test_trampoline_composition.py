@@ -49,17 +49,14 @@ one hop below whatever the launcher itself spawns (a trampoline that execs,
 or -- as here -- a wrapper's exec chain stacked in front of it), which is
 exactly the shape task-035 added that arm to see if it ever escaped teardown.
 
-`sun_path` is 104 bytes on darwin: every scratch path here is a short
-`/tmp/bg<pid>-t038-<n>` root, never `tmp_path` (CLAUDE.md's trap list;
-`tests/integration/test_jail_launch.py`'s own `_new_jail_dir` convention).
+`sun_path` is 104 bytes on darwin: every scratch path here is a short root
+from `tests/conftest.py`'s `jail_dir`, never `tmp_path` (CLAUDE.md's trap
+list).
 """
 
 from __future__ import annotations
 
 import dataclasses
-import itertools
-import os
-import shutil
 import signal
 import subprocess
 import sys
@@ -100,18 +97,6 @@ _PS_ARGV = ["/bin/ps", "-Ao", "pid=,command="]
 #: hang.
 _POLL_DEADLINE_SECONDS = 5.0
 _POLL_INTERVAL_SECONDS = 0.02
-
-_jail_counter = itertools.count()
-
-
-def _new_scratch_dir() -> str:
-    """A short `/tmp/bg<pid>-t038-<n>` root -- never `tmp_path` (sun_path is
-    104 bytes on darwin; CLAUDE.md's trap list). Used for both jail
-    directories and staged wrapper scripts; each test gets its own so
-    parallel runs (and this file's own several tests) never collide."""
-    path = f"/tmp/bg{os.getpid()}-t038-{next(_jail_counter)}"
-    os.makedirs(path, exist_ok=True)
-    return path
 
 
 def _stage_transparent_wrapper(scratch_dir: str) -> tuple[str, ...]:
@@ -197,23 +182,20 @@ def _poll_command_for_pid(pid: int, marker: str, deadline: float = _POLL_DEADLIN
         time.sleep(_POLL_INTERVAL_SECONDS)
 
 
-def _teardown(process: Process, scratch_dirs: list[str]) -> None:
+def _teardown(process: Process) -> None:
     """Hand-rolled group-kill, same posture as `test_jail_launch.py`'s
     `_teardown_group`: the KILL is not the code under test (`Jail.destroy()`),
     so a teardown bug here cannot hide behind that helper. The reap itself
     belongs to the launcher's exit-waiter (task-073); `process.wait()` blocks
     until that waiter has reaped and recorded the `EXIT` -- which is what
-    makes this call return only once the process table entry is gone. Also
-    removes every scratch directory this test staged, so nothing under
-    `/tmp` outlives the test."""
+    makes this call return only once the process table entry is gone. The
+    test's `jail_dir`, where it staged its wrappers, is removed after it."""
     # task-086: delegates to the ONE verified helper in tests/conftest.py.
     # The body that used to be inlined here -- killpg, then wait for the
     # LEADER -- verified nothing about the process GROUP, so an orphaned
     # backgrounded child survived silently and surfaced later against an
     # unrelated test. Thirteen modules carried that same body.
     teardown_group(process)
-    for scratch_dir in scratch_dirs:
-        shutil.rmtree(scratch_dir, ignore_errors=True)
 
 
 # ---------------------------------------------------------------------------
@@ -222,23 +204,22 @@ def _teardown(process: Process, scratch_dirs: list[str]) -> None:
 
 
 @pytest.mark.integration
-def test_baseline_unwrapped_spin_loop_dies_with_sigxcpu() -> None:
+def test_baseline_unwrapped_spin_loop_dies_with_sigxcpu(jail_dir: str) -> None:
     """AC #1: the reference behaviour EC3's "the same behavior" points at --
     a `cpu_seconds=1` spin loop, launched through the REAL `Stack([rlimits])`
     under the REAL `Jail.create` and `jail.start`, with NO wrapper at all, dies on
     `SIGXCPU` (signal 24)."""
     assert int(signal.SIGXCPU) == 24  # platform pin, asserted not assumed
-    scratch_dir = _new_scratch_dir()
     jail = Stack([rlimits]).compile(Spec(limits=Limits(cpu_seconds=1)), ctx=_CTX)
 
     start = time.monotonic()
     jail, process = launch(
         jail,
         argv=[sys.executable, "-c", _SPIN_LOOP],
-        cwd=scratch_dir,
+        cwd=jail_dir,
         io=IoPolicy(),
         jail_id="t038-baseline",
-        jail_dir=scratch_dir,
+        jail_dir=jail_dir,
     )
     try:
         status = process.wait(timeout=10.0)
@@ -248,7 +229,7 @@ def test_baseline_unwrapped_spin_loop_dies_with_sigxcpu() -> None:
         )
         assert wall_time < 10.0
     finally:
-        _teardown(process, [scratch_dir])
+        _teardown(process)
 
 
 # ---------------------------------------------------------------------------
@@ -257,14 +238,13 @@ def test_baseline_unwrapped_spin_loop_dies_with_sigxcpu() -> None:
 
 
 @pytest.mark.integration
-def test_wrapped_spin_loop_still_dies_with_sigxcpu() -> None:
+def test_wrapped_spin_loop_still_dies_with_sigxcpu(jail_dir: str) -> None:
     """AC #2: the SAME workload and the SAME stack as the baseline above,
     with the no-op wrapper prepended to the composed argv, terminates on
     `SIGXCPU` within the same tolerance -- EC3's composition smoke test
     itself."""
-    scratch_dir = _new_scratch_dir()
     jail = Stack([rlimits]).compile(Spec(limits=Limits(cpu_seconds=1)), ctx=_CTX)
-    wrapper_prefix = _stage_transparent_wrapper(scratch_dir)
+    wrapper_prefix = _stage_transparent_wrapper(jail_dir)
     wrapped_jail = _outer_wrap(jail, wrapper_prefix)
 
     workload = (sys.executable, "-c", _SPIN_LOOP)
@@ -274,10 +254,10 @@ def test_wrapped_spin_loop_still_dies_with_sigxcpu() -> None:
     jail, process = launch(
         wrapped_jail,
         argv=list(workload),
-        cwd=scratch_dir,
+        cwd=jail_dir,
         io=IoPolicy(),
         jail_id="t038-wrapped",
-        jail_dir=scratch_dir,
+        jail_dir=jail_dir,
     )
     try:
         assert process.argv == full_composed_argv
@@ -288,7 +268,7 @@ def test_wrapped_spin_loop_still_dies_with_sigxcpu() -> None:
         )
         assert wall_time < 10.0
     finally:
-        _teardown(process, [scratch_dir])
+        _teardown(process)
 
 
 # ---------------------------------------------------------------------------
@@ -297,7 +277,7 @@ def test_wrapped_spin_loop_still_dies_with_sigxcpu() -> None:
 
 
 @pytest.mark.integration
-def test_wrapper_is_transparent_and_actually_ran() -> None:
+def test_wrapper_is_transparent_and_actually_ran(jail_dir: str) -> None:
     """AC #3: the wrapper is transparent, proved not assumed -- the workload
     observes itself running as a DIRECT CHILD of the pid the launcher
     started, one generation and no more (`os.execvp`, all the way down,
@@ -323,12 +303,11 @@ def test_wrapper_is_transparent_and_actually_ran() -> None:
     process alive and makes the workload its GRANDchild.
     Evidence (scratch-copy-plus-sha256 round trip) is in the task notes.
     """
-    scratch_dir = _new_scratch_dir()
     # A generous limit: this workload exits almost immediately, so what it
     # is bounded by is not this test's subject (contrast the SIGXCPU tests
     # above, which need a tight one).
     jail = Stack([rlimits]).compile(Spec(limits=Limits(cpu_seconds=60)), ctx=_CTX)
-    wrapper_prefix = _WRAPPER_STAGER(scratch_dir)
+    wrapper_prefix = _WRAPPER_STAGER(jail_dir)
     wrapped_jail = _outer_wrap(jail, wrapper_prefix)
 
     marker_workload_src = (
@@ -340,10 +319,10 @@ def test_wrapper_is_transparent_and_actually_ran() -> None:
     jail, process = launch(
         wrapped_jail,
         argv=list(workload),
-        cwd=scratch_dir,
+        cwd=jail_dir,
         io=IoPolicy(),
         jail_id="t038-transparency",
-        jail_dir=scratch_dir,
+        jail_dir=jail_dir,
     )
     try:
         status = process.wait(timeout=10.0)
@@ -366,7 +345,7 @@ def test_wrapper_is_transparent_and_actually_ran() -> None:
             "the wrapper did not actually run"
         )
     finally:
-        _teardown(process, [scratch_dir])
+        _teardown(process)
 
 
 # ---------------------------------------------------------------------------
@@ -375,25 +354,24 @@ def test_wrapper_is_transparent_and_actually_ran() -> None:
 
 
 @pytest.mark.integration
-def test_control_wrapped_generous_limit_stays_alive_then_torn_down() -> None:
+def test_control_wrapped_generous_limit_stays_alive_then_torn_down(jail_dir: str) -> None:
     """AC #4: the SAME wrapped invocation as AC #2, with `cpu_seconds=60`
     instead of `1`, is still alive when checked, then is torn down. Without
     this, "the wrapped run died on SIGXCPU" cannot be told apart from "the
     wrapper broke the argv and something died for another reason" -- the
     same discriminating shape `test_rlimits.py`'s own generous-limit control
     uses."""
-    scratch_dir = _new_scratch_dir()
     jail = Stack([rlimits]).compile(Spec(limits=Limits(cpu_seconds=60)), ctx=_CTX)
-    wrapper_prefix = _stage_transparent_wrapper(scratch_dir)
+    wrapper_prefix = _stage_transparent_wrapper(jail_dir)
     wrapped_jail = _outer_wrap(jail, wrapper_prefix)
 
     jail, process = launch(
         wrapped_jail,
         argv=[sys.executable, "-c", _SPIN_LOOP],
-        cwd=scratch_dir,
+        cwd=jail_dir,
         io=IoPolicy(),
         jail_id="t038-control",
-        jail_dir=scratch_dir,
+        jail_dir=jail_dir,
     )
     try:
         # SYNCHRONIZED, not a single sample (task-042): this call traverses
@@ -404,7 +382,7 @@ def test_control_wrapped_generous_limit_stays_alive_then_torn_down() -> None:
         assert _SPIN_LOOP_MARKER in alive_command
         assert jail.alive() is True
     finally:
-        _teardown(process, [scratch_dir])
+        _teardown(process)
 
     # "Gone" half: no /bin/ps row for this pid survives teardown, and
     # Jail.alive() agrees. Genuinely synchronized already, not raced

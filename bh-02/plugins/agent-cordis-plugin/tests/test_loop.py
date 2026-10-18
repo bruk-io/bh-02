@@ -10,7 +10,7 @@ import threading
 import time
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 import pytest
 
@@ -26,6 +26,7 @@ from agent_cordis_plugin import (
     MemoryTranscript,
     OneAtATime,
     ToolBroker,
+    TranscriptWriteFailed,
     asides,
     changes,
     classify,
@@ -155,6 +156,10 @@ def _bare(entry: Json) -> dict[str, Any]:
 
 def call(id: str, name: str, **input: Any) -> Json:
     return {"type": "tool_call", "id": id, "name": name, "input": input}
+
+
+def _lines(path: Path) -> list[Json]:
+    return [json.loads(line) for line in path.read_text().splitlines()]
 
 
 async def _collect(model: LoopModel, message: str) -> str:
@@ -1217,6 +1222,48 @@ async def test_the_transcript_is_flushed_after_a_reply_cancelled_with_a_call_run
     assert transcript.flushed == [len(transcript.messages)]  # after the answers the stop appended
 
 
+class _Checking(_Flushing):
+    """A transcript whose file can be replaced under it, as `FileTranscript` is: what the loop had
+    appended each time it was asked to `check`, and `refuses` what it is told of a replaced file."""
+
+    def __init__(self, *, refuses: Exception | None = None) -> None:
+        super().__init__()
+        self.checked: list[int] = []
+        self._refuses = refuses
+
+    async def check(self) -> None:
+        await asyncio.sleep(0)  # the writer's look takes its turn, as a thread's does
+        self.checked.append(len(self.messages))
+        if self._refuses is not None:
+            raise self._refuses
+
+
+async def test_a_reply_asks_the_transcript_to_check_its_file_first_and_flushes_it_once() -> None:
+    """The check is the first thing a reply does, before it appends anything, and it is no flush:
+    the flush stays one, at the end of the reply, however many steps the reply has."""
+    transcript = _Checking()
+    scripted = Scripted([text("let me "), call("c1", "python", code="a")], [text("done")], [text("again")])
+    model = LoopModel(scripted, as_tool(Shouting()), transcript, Confined())
+    assert await _collect(model, "go") == "let me done"
+    first = len(transcript.messages)
+    assert transcript.checked == [0]  # once, before the reply appended anything
+    assert transcript.flushed == [first]  # once, with every entry of the reply in
+    assert await _collect(model, "and again") == "again"
+    assert transcript.checked == [0, first]  # the next reply checks as the conversation stood
+    assert transcript.flushed == [first, len(transcript.messages)]
+
+
+async def test_a_transcript_that_refuses_at_the_check_is_never_asked_a_model_step_or_an_entry() -> None:
+    refusal = OSError(errno.ESTALE, "the file was replaced")
+    transcript = _Checking(refuses=refusal)
+    scripted = Scripted([text("an answer nobody should read")])
+    model = LoopModel(scripted, as_tool(Shouting()), transcript, Confined())
+    with pytest.raises(OSError, match="the file was replaced"):
+        await _collect(model, "go")
+    assert scripted.requests == [] and transcript.messages == ()
+    assert transcript.checked == [0]
+
+
 async def test_a_transcript_that_keeps_the_conversation_in_memory_needs_no_flush() -> None:
     assert (
         await _collect(
@@ -1257,20 +1304,129 @@ async def test_a_reply_over_a_slow_disk_ends_with_every_entry_in_the_file(
     assert threading.get_ident() not in disk.threads  # none of it was written on the event loop
 
 
-async def test_a_reply_whose_entries_could_not_be_written_raises_it_rather_than_end_quietly(
+async def test_a_reply_costs_the_event_loop_no_stat_of_the_file_either(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def full(fd: int, data: bytes | memoryview) -> int:
-        raise OSError(errno.ENOSPC, "No space left on device")
+    """The check a reply makes of the file is the writing thread's stat: the event loop is free
+    while it runs and makes no stat of its own, as it makes no write."""
+    path = tmp_path / "transcript.jsonl"
+    path.touch()  # a file there to look at: a resumed session's, or the one an earlier reply made
+    seen: set[int] = set()
+    real = os.stat
 
-    monkeypatch.setattr(os, "write", full)
-    transcript = FileTranscript(str(tmp_path / "transcript.jsonl"))
-    model = LoopModel(Scripted([text("hi")]), as_tool(Shouting()), transcript, Confined())
-    with pytest.raises(OSError, match="No space left"):
-        await _collect(model, "go")
-    with pytest.raises(OSError, match="No space left"):  # and so does the next message's first entry
-        transcript.append({"role": "user", "content": "again"})
-    monkeypatch.undo()  # room again: nothing after the failed write is written, the file closes
-    with pytest.raises(OSError, match="No space left"):
+    def stat(file: Any, *args: Any, **kwargs: Any) -> os.stat_result:
+        if str(file) == str(path):
+            seen.add(threading.get_ident())
+        return real(file, *args, **kwargs)
+
+    async with FileTranscript(str(path)) as transcript:  # made before the stat is watched: its own
+        monkeypatch.setattr(os, "stat", stat)
+        await _collect(LoopModel(Scripted([text("hi")]), as_tool(Shouting()), transcript, Confined()), "go")
+        monkeypatch.undo()
+    assert seen and threading.get_ident() not in seen
+
+
+@runtime_checkable
+class Recoverable(Protocol):
+    """What `chat:converse` shows and carries on after (CONTRACTS.md: errors), as the family
+    declares it: the chat plugin's own, which this one may not import."""
+
+    kind: str
+    message: str
+
+
+class Undermining(Scripted):
+    """A model that, when it is asked, first waits for the transcript's file to hold every entry
+    so far (`flush`), then does something to the disk: the failure comes mid-reply, after a line
+    that reached the file and before the entry that answers."""
+
+    def __init__(
+        self, transcript: FileTranscript, undermine: Callable[[], None], *steps: Sequence[Json]
+    ) -> None:
+        super().__init__(*steps)
+        self._transcript, self._undermine = transcript, undermine
+
+    async def complete(self, messages: Sequence[Json], tools: Sequence[Json]) -> AsyncIterator[Json]:
+        await self._transcript.flush()
+        self._undermine()
+        async for chunk in super().complete(messages, tools):
+            yield chunk
+
+
+async def test_a_reply_whose_entries_could_not_be_written_is_a_recoverable_failure_with_nothing_after_it(
+    tmp_path: Path,
+) -> None:
+    """The file stops being writable in the middle of a reply (here its directory is moved and a
+    file put in its place: the writer's stat of the path fails, as a write to a full disk does;
+    no function of `os` is replaced). The reply ends with a failure `chat:converse` shows and
+    carries on after (`kind` and `message`), naming the file, what failed and the command that
+    begins again from the file. The line before the failure is in the file, and no line after it
+    reaches it, whether it is queued before the person has freed the space or after: the writer
+    keeps the failure and writes nothing more."""
+    directory, moved = tmp_path / "session", tmp_path / "moved"
+    directory.mkdir()
+    path = directory / "transcript.jsonl"
+
+    def undermine() -> None:
+        directory.rename(moved)
+        directory.write_text("in the way")  # a file where the directory was
+
+    transcript = FileTranscript(str(path))
+    model = Undermining(transcript, undermine, [text("an answer the file never gets")], [text("never asked")])
+    loop = LoopModel(model, as_tool(Shouting()), transcript, Confined())
+    with pytest.raises(OSError, match="Not a directory") as failed:
+        await _collect(loop, "go")
+    error = failed.value
+    assert isinstance(error, Recoverable) and isinstance(error, TranscriptWriteFailed)
+    assert error.kind == "transcript_write_failed"
+    assert str(path) in error.message and "Not a directory" in error.message
+    assert "free some space" in error.message and "/restart transcript" in error.message
+    written = [m["role"] for m in _lines(moved / "transcript.jsonl")]
+    assert written == ["tools", "user"]  # what the file held when the model was asked, no more
+    assert [m["role"] for m in transcript.messages] == ["tools", "user", "assistant"]  # the reply, in memory
+
+    # the chat carries on: the next message is refused with the same words, before the model is asked
+    asked = len(model.requests)
+    with pytest.raises(TranscriptWriteFailed, match="/restart transcript") as again:
+        await _collect(loop, "and again")
+    assert again.value.message == error.message and len(model.requests) == asked
+    with pytest.raises(TranscriptWriteFailed, match="/restart transcript"):
+        transcript.append({"role": "user", "content": "queued after"})
+    assert len(transcript.messages) == 3  # and not kept either
+
+    # room again: the failure stands, nothing is written after it, and the row's leaving says so
+    directory.unlink()
+    moved.rename(directory)
+    with pytest.raises(TranscriptWriteFailed, match="/restart transcript"):
+        await transcript.flush()
+    assert [m["role"] for m in _lines(path)] == ["tools", "user"]
+    with pytest.raises(TranscriptWriteFailed, match="/restart transcript"):
+        async with transcript:
+            pass
+    assert [m["role"] for m in _lines(path)] == ["tools", "user"]
+
+
+async def test_a_reply_over_a_file_that_is_a_directory_ends_with_the_failure_the_person_is_shown(
+    tmp_path: Path,
+) -> None:
+    """A write that fails at the first line (a directory stands where the file should be: nothing
+    is replaced in `os`, the writer's open of it fails): the reply ends with the failure, at an
+    `append` the thread had already failed before or at the flush at its end, whichever the thread
+    was first to; the file is named and so is the error of the open."""
+    path = tmp_path / "transcript.jsonl"
+    path.mkdir()
+    transcript = FileTranscript(str(path))
+    scripted = Scripted([text("hi")], [text("never asked")])
+    loop = LoopModel(scripted, as_tool(Shouting()), transcript, Confined())
+    with pytest.raises(TranscriptWriteFailed, match="Is a directory") as failed:
+        await _collect(loop, "go")
+    assert isinstance(failed.value, Recoverable)
+    assert failed.value.kind == "transcript_write_failed" and str(path) in failed.value.message
+    asked = len(scripted.requests)  # none or one, by whether the thread failed before the model was asked
+    with pytest.raises(TranscriptWriteFailed, match="/restart transcript"):
+        await _collect(loop, "and again")
+    assert len(scripted.requests) == asked  # the second message never reached the model
+    assert list(path.iterdir()) == []  # and nothing was written anywhere
+    with pytest.raises(TranscriptWriteFailed):  # the restart's leaving raises it too, and closes
         async with transcript:
             pass

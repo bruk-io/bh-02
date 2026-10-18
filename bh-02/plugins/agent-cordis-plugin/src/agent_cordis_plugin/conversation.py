@@ -7,13 +7,16 @@ and begins a new conversation from it. The request is the loop's own (`request_f
 the conversation began with, then the conversation, the registered tools offered as with every
 step), so a model server reuses its work on the conversation, followed by bh-02 asking for the
 summary in plain text: whatever the model calls is never run, and a step that calls rather than
-answers gives no summary. The summary then seeds the transcript's file (`seeded`, written whole
-by `transcript.rewrite`, the old file kept beside it), and the loop and its transcript restart:
-the new conversation holds no prompt yet, so the loop reads it afresh, folding in whatever
-changed since the old one began, and tells the date again. The python row is left alone, since
-the summary names what its namespace holds. `/clear` is the same rewrite with an empty
-conversation, and restarts the python row too (`clear`): nothing is lost for good, the old
-conversation is the `.bak` beside the file.
+answers gives no summary. A call a crash left unanswered, in a session resumed and compacted before
+its next message (the loop answers it at the next reply, which /compact never goes through), is
+answered in the request as the loop would answer it (`loop.lost_answers`, `asked`), so the model is
+never sent a call with no result after it; the file's entries are never changed. The summary then
+seeds the transcript's file (`seeded`, written whole by `transcript.rewrite`, the old file kept
+beside it), and the loop and its transcript restart: the new conversation holds no prompt yet, so
+the loop reads it afresh, folding in whatever changed since the old one began, and tells the date
+again. The python row is left alone, since the summary names what its namespace holds. `/clear` is
+the same rewrite with an empty conversation, and restarts the python row too (`clear`): nothing is
+lost for good, the old conversation is the `.bak` beside the file.
 
 The seed is also the record of the summary step (decision-0009, Conversations): its `user` entry
 says when the new conversation began (`at`) and what the person asked the summary to keep
@@ -29,20 +32,21 @@ queued in `jobs` (CONTRACTS.md: jobs), never run in the chat row's task, which i
 a restart that fails is told to the person, since the new conversation is written by then; the
 chat row reads its next line only once the restart is done, so the line reaches the new loop. The
 transcript left mounted by a restart that failed is the old conversation's over the new one's file,
-and refuses every entry (`transcript.TranscriptReplaced`, naming `/restart transcript`) rather than
-write it into either.
+and refuses the next reply before the model is asked (`transcript.TranscriptReplaced`, naming
+`/restart transcript`) rather than write it into either.
 The pure parts (`asked`, `seeded`, `kept_in`, `_is_seed`, `_unsaid`, `_unusable`, `_summed`,
 `_answer`, `_unchanged`, `_cleared`, `unrestarted`) decide; the rest reads, writes and asks.
 """
 
 import asyncio
+import datetime
 from collections.abc import AsyncGenerator, AsyncIterator, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
-from agent_cordis_plugin.loop import Model, Step, request_for
+from agent_cordis_plugin.loop import Model, Step, lost_answers, request_for
 from agent_cordis_plugin.records import Clock, StepRecord, settings_to_record, summed
 from agent_cordis_plugin.stops import ACT, ANSWERED, REFUSED, SILENT, TRUNCATED, UNDECODABLE, classify
 from agent_cordis_plugin.toolset import mode_of
@@ -223,11 +227,15 @@ def kept_in(row: str, mounted: object, state: str | None) -> str:
     return path
 
 
-def asked(messages: Sequence[Json], keep: str = "") -> list[Json]:
+def asked(messages: Sequence[Json], keep: str = "", *, at: datetime.datetime) -> list[Json]:
     """The summary request over a transcript's `messages`: the conversation as the loop sends it,
-    then bh-02 asking for the summary (and for what the person asks it to keep, if anything)."""
+    then bh-02 asking for the summary (and for what the person asks it to keep, if anything).
+    A call the transcript leaves unanswered (a process died mid-call) is answered in the request
+    as the loop answers it at its next reply, `loop.lost_answers` made at `at`, so every call has
+    a result; `messages` themselves are not changed."""
     ask = "\n\n".join([_ASK, *([_KEEP.format(keep.strip())] if keep.strip() else [])])
-    return [*request_for(messages), {"role": "user", "content": ask}]
+    whole = [*messages, *lost_answers(messages, at)]
+    return [*request_for(whole), {"role": "user", "content": ask}]
 
 
 def seeded(summary: str, keep: str, step: StepRecord) -> list[Json]:
@@ -402,8 +410,10 @@ async def compact_conversation(
     record: `seeded`), and queue the restart of the loop and the transcript; answer `_answer`'s
     events, or why nothing changed (`_unchanged`). `jobs` is the conversation row's queue and
     `worker` the work that runs it, which a restart of the row ends: then nothing is written,
-    since nothing would restart the rows. `clock` times the summary step (`summarise`)."""
+    since nothing would restart the rows. `clock` times the summary step (`summarise`) and dates the
+    answers the request gives a call a crash left unanswered (`asked`)."""
     row = config.transcript
+    clock = clock if clock is not None else Clock()
     try:
         path = kept_in(row, loader.rows.get(row), loader.status().get(row))
     except Unchanged as why:
@@ -421,7 +431,7 @@ async def compact_conversation(
     await output.show(_once({"type": "note", "text": _ASKING.format(timeout=config.timeout)}))
     try:
         summary, usage, step = await summarise(
-            model, asked(messages, args), list(tools.specs()), config.timeout, clock
+            model, asked(messages, args, at=clock.now()), list(tools.specs()), config.timeout, clock
         )
     except Unchanged as why:
         return _unchanged(str(why), why.usage)
