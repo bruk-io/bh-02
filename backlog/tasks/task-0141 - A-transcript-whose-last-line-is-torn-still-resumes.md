@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-18 12:15'
-updated_date: '2026-10-18 13:43'
+updated_date: '2026-10-18 13:47'
 labels:
   - agent
   - size-2
@@ -180,4 +180,70 @@ FAILED bh-02/plugins/agent-cordis-plugin/tests/test_agent_transcript.py::test_a_
 ```
 
 Round 2 (review round 1: the repro was not on record). Changed: the board only, no code. I put transcript.py back to its content before 80e157a in the working tree (git show 80e157a~1:bh-02/plugins/agent-cordis-plugin/src/agent_cordis_plugin/transcript.py), left test_agent_transcript.py as committed, ran record-check TASK-0141 --repro -- uv run pytest bh-02/plugins/agent-cordis-plugin/tests/test_agent_transcript.py -k torn_last_line from the repo root (exit 0 = the failure was recorded; the note above reads 'Repro at b5e975958a0a ... exited 1': 1 failed, 22 deselected, JSONDecodeError at construction in the old transcript.py line 85), then restored transcript.py from b5e9759 (git diff b5e9759 -- bh-02 is empty, tree clean). The recorded commit is b5e9759, the start of this round, so it stays an ancestor of the round's commit; the test file is byte-identical at b5e9759 and at 80e157a's tests (git diff --quiet b5e9759 -- the test file: exit 0). Seen passing on the restored code: the same command gives 1 passed, 22 deselected; the whole test_agent_transcript.py gave 23 passed. python3 <philosophy>/scripts/board-check close TASK-0141: 'ok: TASK-0141 can close' (exit 0). I did not run close-task: it sets Done, which is the reviewer's. The -k torn_last_line expression selects the one AC1 test; the other nine new tests were seen failing on the old code in round 1 but that run is not the recorded one. Left alone as not blocking: the _beside docstring's .bak-only example, telling the person a torn line was set aside, a concurrent appender's in-flight line (decision-0009). No code changed, so no member check was run; the reviewer's full scripts/check (exit 0, 3796 passed) stands for the unchanged code.
+
+Check `scripts/check` exited 0
+
+(31 earlier lines omitted)
+```text
+........................................................................ [ 33%]
+........................................................................ [ 34%]
+........................................................................ [ 36%]
+........................................................................ [ 38%]
+........................................................................ [ 40%]
+........................................................................ [ 42%]
+........................................................................ [ 44%]
+........................................................................ [ 46%]
+..........................................................s...s...ssss.. [ 47%]
+ss.s..ss.s.s....ss..ss..ss..ss.s.ssss..s................................ [ 49%]
+........................................................................ [ 51%]
+.................s...................................................... [ 53%]
+....................ssssssssssssssssssssssssssssssssssssssssssssssssssss [ 55%]
+ssssssssssssss....s...........................sssssssss...ss..........s. [ 57%]
+......................................................s................. [ 58%]
+........................................................................ [ 60%]
+....................................................................sss. [ 62%]
+........................................................................ [ 64%]
+........................................................................ [ 66%]
+........................................................................ [ 68%]
+........................................................................ [ 69%]
+........................................................................ [ 71%]
+........................................................................ [ 73%]
+........................................................................ [ 75%]
+........................................................................ [ 77%]
+........................................................................ [ 79%]
+........................................................................ [ 80%]
+........................................................................ [ 82%]
+........................................................................ [ 84%]
+........................................................................ [ 86%]
+........................................................................ [ 88%]
+........................................................................ [ 90%]
+........................................................................ [ 92%]
+........................................................................ [ 93%]
+........................................................................ [ 95%]
+........................................................................ [ 97%]
+........................................................................ [ 99%]
+........................                                                 [100%]
+3796 passed, 118 skipped in 200.54s (0:03:20)
+   ok
+== gates
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+== (root)
+   ok
+== libs/brig
+   ok
+== libs/cordis
+   ok
+== libs/cordis-helpers
+   ok
+== libs/host-paths
+   ok
+   ok
+== docs
+INFO    -  Cleaning site directory
+INFO    -  Building documentation to directory: /home/user/bh-02/site
+INFO    -  Documentation built in 4.62 seconds
+   ok
+== tokens
+   skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
+```
 <!-- SECTION:NOTES:END -->
