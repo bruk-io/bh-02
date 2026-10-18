@@ -106,4 +106,6 @@ INFO    -  Documentation built in 3.86 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+Review (not closed): full scripts/check exit 0 (3806 passed, 118 skipped; gates, docs ok), all three ACs met and ticked, no code findings. close-task refused: a bug needs its repro recorded (record-check TASK-0142 --repro -- <test failing before the fix>, e.g. tests/test_agent_unanswered_calls.py at 0af979a) or a 'No repro:' note. The worker's planted-failure note is not a recorded repro; the worker should record one at the pre-fix commit, then this closes.
 <!-- SECTION:NOTES:END -->
