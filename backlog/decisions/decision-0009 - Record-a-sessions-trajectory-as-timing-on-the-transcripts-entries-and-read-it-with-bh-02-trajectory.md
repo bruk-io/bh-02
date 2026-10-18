@@ -95,6 +95,8 @@ A call:
 
 The shell already hears every lifecycle event (`bootstrap.py`). It keeps `reload`, `restart` and `failed` in the session, through the appender: `<session>/rows.jsonl`, one `{at, kind, row, error?}` a line, sub-agent rows (`agents/NAME/...`) included. `--trace FILE` stays as it is.
 
+**When the row log stops** (TASK-0149, ruled 2026-10-18 by Fable at the owner's request): the shell says so once, after the app exits (TASK-0145), and that line also goes to `--trace FILE` as a `report:` line. Nothing else keeps it. The ui's `events.jsonl` is the ui's alone and the trajectory does not read it. The transcript is what the model is sent, and the loop is its one writer. A failure that stops `rows.jsonl` (a full disk, the directory gone) stops its siblings too. The trajectory says only what its files prove: it does not guess that reloads are missing.
+
 ### Reading
 
 `bh-02 trajectory [ID]` (the id as `--resume` takes it; the directory's newest by default) prints a session's trajectory.
