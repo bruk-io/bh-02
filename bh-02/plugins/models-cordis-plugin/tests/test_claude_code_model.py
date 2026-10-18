@@ -386,16 +386,18 @@ async def test_a_conversation_claude_code_never_saw_is_written_as_a_session_and_
     tmp_path: Path,
 ) -> None:
     h = _Harness(tmp_path, [FakeStep([_text("you said a")])])
+    openai_step = {  # begun on an OpenAI-compatible model, then `/model` to Claude
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [{"id": "old1", "type": "function", "function": {"name": "python", "arguments": "{}"}}],
+    }
     messages = [
         {"role": "user", "content": "a"},
         {
             "role": "assistant",
             "content": "",
             "tool_calls": [{"id": "old1", "name": "python", "input": {}}],
-            "provider": {
-                "role": "assistant",
-                "content": [{"type": "tool_use", "id": "old1", "name": "python", "input": {}}],
-            },
+            "provider": openai_step,
         },
         {"role": "tool", "content": "r", "call_id": "old1"},
         {"role": "assistant", "content": "ok"},

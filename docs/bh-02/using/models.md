@@ -140,8 +140,8 @@ without a `base_url` reaches other Claude models on your subscription by their i
 `/model router/meta-llama/llama-4` works without a table for it. The name is split at the first `/`,
 so an id may hold more of them, and `:`.
 
-A table with an `id` of its own is from before endpoints: bh-02 refuses it and shows how to move the
-id under the table's `models`. An endpoint's name may not hold `/`.
+A table with an `id` of its own is refused, since a table is an endpoint and its models are under
+it: bh-02 shows how to move the id under the table's `models`. An endpoint's name may not hold `/`.
 
 ### Claude through a gateway
 

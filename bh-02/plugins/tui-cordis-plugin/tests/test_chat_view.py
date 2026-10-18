@@ -229,12 +229,9 @@ async def test_what_is_shown_is_kept_and_drawn_again_by_the_next_app(tmp_path: P
     assert json.loads(path.read_text().splitlines()[-1]) == {"type": "user", "text": "again"}
 
 
-async def test_a_reply_end_written_now_closes_its_reply_and_counts_its_usage_when_resumed(
-    tmp_path: Path,
-) -> None:
-    """The ui writes `reply_end` where a reply's stream ends and reads only that tag back (a file
-    from before the rename is not read, TASK-0137): a resume keeps two replies' text apart and
-    counts a stopped reply's output as uncounted."""
+async def test_a_reply_end_closes_its_reply_and_counts_its_usage_when_resumed(tmp_path: Path) -> None:
+    """The ui writes `reply_end` where a reply's stream ends and reads it back: a resume keeps two
+    replies' text apart and counts a stopped reply's output as uncounted."""
     path = tmp_path / "events.jsonl"
     stopped = {"type": "usage", "input_tokens": 900, "output_tokens": 0, "partial": True}
     first = BhApp(history=History(str(path)))

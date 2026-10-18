@@ -88,9 +88,8 @@ def _blank(part: str) -> bool:
 
 def latest(entries: Iterable[Mapping[str, Any]]) -> str | None:
     """The prompt as the transcript's `system` entries, in order, say the model was last told it:
-    an entry with `edits` is the reading before it with those applied; any other is a reading
-    kept whole, its `content` (a conversation's first, and every one in a transcript kept before
-    the loop kept edits). None when there are none.
+    the first is the reading kept whole (its `content`), and each later one is the reading before
+    it with its `edits` applied. None when there are none.
 
     Only the loop writes `edits`, but the transcript is a file a person can edit or damage: an
     entry whose edits `edits` could not have made is passed over, the reading before it standing,
@@ -98,9 +97,9 @@ def latest(entries: Iterable[Mapping[str, Any]]) -> str | None:
     reading, so the entries replay to what it told from then on."""
     reading: str | None = None
     for entry in entries:
-        if "edits" not in entry:
+        if reading is None:
             reading = str(entry.get("content") or "")
-        elif (applied := _applied(reading or "", entry["edits"])) is not None:
+        elif (applied := _applied(reading, entry.get("edits"))) is not None:
             reading = applied
     return reading
 

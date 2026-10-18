@@ -309,8 +309,8 @@ jail does), not the program's, which may end while a server it started in a sess
 the jail running. A session that crashed, or
 stopped while another ran, leaves its record, and the next bh-02 jail to start with none running
 removes what it names: only an empty directory still marked as that jail's, never one the person has
-put something in or made again since, and nothing a record names by path alone (an empty directory
-there may be the person's: `test_a_record_with_unmarked_paths_removes_nothing_it_can_t_prove`). A
+put something in or made again since (an empty directory the person made at a recorded path
+carries no mark, so it stays: `test_a_record_with_unmarked_paths_removes_nothing_it_can_t_prove`). A
 record whose process group still runs is left alone, placeholders and all, until it has ended
 (removing one would detach that jail's mount; the moment between a killed bh-02 and its jail ending,
 below, is such a time: `test_the_sweep_leaves_a_record_whose_process_group_still_runs`, and a program

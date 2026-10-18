@@ -14,10 +14,7 @@ recorded (`recorded`), leaving closes the file.
 
 `/clear` reaches the ui as a `cleared` event (CONTRACTS.md: event), recorded like any other:
 the file keeps what came before it (so a resume's usage totals are the ones shown live, the
-session's running totals) and a replay starts after the last one. A session made before
-`cleared` existed also lists this file in `commands:operator`'s `forget`, which empties it
-underneath the app; the next write notices and puts a `carried` entry first, holding what the
-forgotten entries counted and added up to.
+session's running totals) and a replay starts after the last one.
 """
 
 import contextlib
@@ -107,13 +104,6 @@ def compacted(entries: Iterable[Entry], keep: int) -> list[Entry] | None:
     return [_carried_entry(_carried_count(carried_before) + start, used), *shown[start:]]
 
 
-def _counted(entries: Iterable[Entry]) -> int:
-    """How many entries `entries` stand for, as `replayable` counts them: each streamed run
-    as one, and what each `carried` entry says it holds."""
-    joined = merged(entries)
-    return sum(1 for e in joined if e.get("type") != _CARRIED) + _carried_count(joined)
-
-
 def _carried_entry(count: int, used: frame.Usage) -> Entry:
     """The entry that stands for `count` entries no longer in the file, and their usage."""
     entry: dict[str, Any] = {
@@ -144,8 +134,6 @@ class History:
         self.warning: str | None = None
         self.recorded: tuple[Entry, ...] = ()
         self._file: IO[str] | None = None
-        self._count = 0  # entries the file stands for, as `_counted` counts them
-        self._used = frame.Usage()  # and the usage they add up to
 
     async def __aenter__(self) -> History:
         """Read what was recorded so far into `recorded`, as the ui row starts; a file grown
@@ -156,7 +144,6 @@ class History:
         if trimmed is not None and self._rewrite(trimmed):
             recorded = trimmed
         self.recorded = tuple(recorded)
-        self._count, self._used = _counted(recorded), frame.total_usage(recorded)
         return self
 
     async def __aexit__(self, *exc: object) -> None:
@@ -193,25 +180,16 @@ class History:
 
     def record(self, entry: Entry) -> None:
         """Append one entry; a line at a time, so a crash loses at most the one being written.
-
-        The file is opened for appending, so `/clear` emptying it underneath is fine: the next
-        write lands at the new end, after a `carried` entry for what was forgotten. Anything
-        JSON can't hold is written as its `str`."""
+        Anything JSON can't hold is written as its `str`."""
         if self.failed is not None:
             return
         try:
             if self._file is None:
                 Path(self.path).parent.mkdir(parents=True, exist_ok=True)
                 self._file = open(self.path, "a", buffering=1, encoding="utf-8")  # noqa: SIM115
-            if self._count and os.fstat(self._file.fileno()).st_size == 0:  # emptied underneath
-                self._file.write(json.dumps(_carried_entry(self._count, self._used)) + "\n")
             self._file.write(json.dumps(entry, default=str) + "\n")
         except OSError as error:
             self.failed = f"history is not being kept ({self.path}): {error.strerror or error}"
-            return
-        self._count += 1
-        if entry.get("type") == "usage":
-            self._used = frame.add_usage(self._used, entry)
 
     def close(self) -> None:
         """Close the file, if it was opened."""

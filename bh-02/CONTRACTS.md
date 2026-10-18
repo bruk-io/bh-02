@@ -146,7 +146,7 @@ message     {"role": "user" | "assistant" | "tool", "content": str,
                                     instructions, each after a blank line),
              "asides"?: [str, ...] (tool: the asides its content tells, sorted; `[]` for none, and
                                     for a call that never ran. Every `tool` entry the loop writes
-                                    has it: one without is from before, its asides only in `content`),
+                                    has it),
              "feedback"?: str      (user: the loop telling the model why its last step didn't count),
              "today"?: str         (user: the date told with it, `2026-10-07`; its content then
                                     starts `(Today's date: 2026-10-07.)` and a blank line, before
@@ -218,8 +218,7 @@ usage total {"input_tokens": int, "output_tokens": int, "cache_read_input_tokens
 system entry
             {"role": "system", "content": str}
                         a prompt told whole: a transcript's first, the one every request begins
-                        with (and each later one, in a transcript from before the loop kept edits,
-                        which resumes as it is)
+                        with
             {"role": "system", "edits": [{"at": int, "drop": int, "add": [str, ...]}, ...]}
                         a later prompt, as what turns the one before it into this one, by
                         paragraph (split at every blank line, exactly): from paragraph `at`, `drop`
@@ -229,8 +228,7 @@ system entry
 tools entry {"role": "tools", "tools": [tool spec, ...]}   the list a conversation began with
             {"role": "tools", "added"?: [tool spec, ...], "removed"?: [str, ...],
              "redefined"?: [tool spec, ...]}   a later change, each in name order, only those
-                        there are (a transcript from before the loop kept them begins its list at
-                        its next request). The loop's own
+                        there are. The loop's own
 tool call   {"id": str, "name": str, "input": Mapping}
 chunk       {"type": "text", "text": str}
             {"type": "tool_call", "id": str, "name": str, "input": Mapping, "error"?: str}

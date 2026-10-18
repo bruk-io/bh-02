@@ -61,9 +61,9 @@ bh-02 sessions
 ```
 
 This lists the sessions started in the current directory, newest first, one line each: the id, when
-it started, and the model it started on (its stack; an earlier bh-02's session says `claude` or
-`ollama`, and one that started with no model named (no `--model`, no `default` in the models file) or whose
-`default` couldn't be used says `default`: it follows that default, and the first message says what
+it started, and the model it started on (its stack; a session that started with no model named (no
+`--model`, no `default` in the models file) or whose `default` couldn't be used says `default`: it
+follows that default, and the first message says what
 to write or what is wrong with it), then `patched:` and the names of any
 `--patch` files it started with (`patched: echo.toml`). That label is what the session started on,
 not always the model that answered: `/model` switches, a patch can replace the `loop` row, and a

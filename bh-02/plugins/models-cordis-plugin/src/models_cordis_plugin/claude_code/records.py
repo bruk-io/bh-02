@@ -4,9 +4,9 @@ Claude Code keeps a session as JSON lines under `<CLAUDE_CONFIG_DIR>/projects/<c
 one record per message, each naming its parent (`parentUuid`), so a linear conversation is a
 chain. `records_for` is the transcript as that chain (pure): a user line as string content, a
 tool message as a user record holding one `tool_result`, an assistant message from its
-`provider` blocks as received (thinking and its signature included; a tool name gets the
-`mcp__bh__` prefix Claude Code gave it, so a session from before this provider replays too), or
-from its text and calls when there is none. Every assistant record names the resolved model id:
+`provider` blocks as received (thinking and its signature included, a tool name as Claude Code
+sent it, `mcp__bh__` prefix and all), or from its text and calls, which get that prefix, when
+there is none. Every assistant record names the resolved model id:
 with an alias (`sonnet`) in it, Claude Code resent the whole conversation uncached (measured).
 
 The record format is Claude Code's own and undocumented (the CLI the SDK pins, README.md); the
@@ -57,17 +57,10 @@ def session_file(config_dir: Path, session: str) -> Path | None:
     return found[0] if found else None
 
 
-def _prefixed(block: Json) -> dict[str, Any]:
-    out = dict(block)
-    if out.get("type") == "tool_use" and not str(out.get("name", "")).startswith("mcp__"):
-        out["name"] = f"mcp__{SERVER}__{out.get('name')}"
-    return out
-
-
 def _assistant(message: Json) -> list[dict[str, Any]]:
     provider = message.get("provider")
     if isinstance(provider, Mapping) and isinstance(provider.get("content"), list):
-        return [_prefixed(block) for block in provider["content"]]
+        return [dict(block) for block in provider["content"]]
     text = str(message.get("content") or "")
     blocks: list[dict[str, Any]] = [{"type": "text", "text": text}] if text.strip() else []
     return blocks + [

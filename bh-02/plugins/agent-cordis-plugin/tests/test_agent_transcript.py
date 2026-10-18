@@ -263,8 +263,8 @@ def test_a_last_line_that_is_not_utf_8_is_torn_too(tmp_path: Path) -> None:
 
 @pytest.mark.usefixtures("open_umask")
 def test_rewrite_makes_the_new_file_and_the_backup_readable_by_their_owner_alone(tmp_path: Path) -> None:
-    """Whatever mode the file had (an older session's, 0644), what `rewrite` makes is 0600, the
-    new conversation and the old one kept beside it."""
+    """Whatever mode the file had (0644, say), what `rewrite` makes is 0600, the new conversation
+    and the old one kept beside it."""
     path = tmp_path / "transcript.jsonl"
     path.write_text(json.dumps({"role": "user", "content": "old"}) + "\n")
     path.chmod(0o644)

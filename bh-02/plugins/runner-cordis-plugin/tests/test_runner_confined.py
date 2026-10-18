@@ -1016,32 +1016,31 @@ async def test_a_linux_jail_ends_when_the_host_renames_over_a_write_deny_and_a_n
 def test_a_jail_s_record_of_its_placeholders_is_in_bh_02_s_state_directory() -> None:
     assert records_dir({"XDG_STATE_HOME": "/x"}, "/home/me") == "/x/bh-02/jails"
     assert records_dir({}, "/home/me") == "/home/me/.local/state/bh-02/jails"
-    made = [("/w/.git/hooks", "12:1700000000000000000"), ("/w/.git", None)]
+    made = [("/w/.git/hooks", "12:1700000000000000000"), ("/w/.git", "mark:bh-j-1")]
     assert recorded(record_text(made)) == made
     assert recorded("not json") == [] and recorded('{"made": 3}') == []  # a broken record names none
+    damaged = '{"made": [["/w/a", null], ["/w/b", 7], ["/w/c", "mark:bh-j-1"]]}'
+    assert recorded(damaged) == [("/w/c", "mark:bh-j-1")]  # an entry with no way to know it names none
 
 
 def test_only_a_placeholder_still_as_the_jail_made_it_is_removed(tmp_path: Path) -> None:
     """Empty and unchanged: removed, deepest first. One the person put a file in, one they
-    replaced with a directory of their own (even on the same inode), and one recorded by path
-    alone (an older record, with nothing to prove a jail made it) are kept."""
-    ours, early, filled, theirs = (tmp_path / n for n in ("ours", "early", "filled", "theirs"))
-    for path in (ours, early / "inner", filled, theirs):
+    replaced with a directory of their own (even on the same inode), one the person made at a
+    path recorded by its mark (it carries none) and one already gone are kept or passed over."""
+    ours, filled, theirs, made_since = (tmp_path / n for n in ("ours", "filled", "theirs", "made_since"))
+    for path in (ours, filled, theirs, made_since):
         path.mkdir(parents=True)
     made = [(str(p), identity(p.stat())) for p in (ours, filled, theirs)]
-    made += [(str(early / "inner"), None), (str(early), None), (str(tmp_path / "gone"), None)]
+    made += [(str(made_since), "mark:bh-j-1"), (str(tmp_path / "gone"), "mark:bh-j-1")]
     (filled / "mine.txt").write_text("x")
     theirs.rmdir()
     time.sleep(0.05)  # the person's own comes later: a later change time, on the kernel's clock tick
     theirs.mkdir()
     remove_placeholders(made)
-    assert sorted(p.name for p in tmp_path.iterdir()) == ["early", "filled", "theirs"]
-    assert (early / "inner").is_dir()
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["filled", "made_since", "theirs"]
 
 
 def test_a_placeholder_is_known_by_the_jail_s_mark_else_by_its_identity() -> None:
-    assert not still_made(None, "1:2", None)  # by path alone: nothing proves a jail made it
-    assert not still_made(None, "1:2", "bh-j-1")
     assert still_made("mark:bh-j-1", "1:2", "bh-j-1") and not still_made("mark:bh-j-1", "1:2", None)
     assert not still_made("mark:bh-j-1", "1:2", "bh-j-2")  # another jail's
     assert still_made("1:2", "1:2", None) and not still_made("1:2", "1:3", None)
@@ -2205,10 +2204,10 @@ async def test_a_jail_start_cancelled_while_it_launches_ends_what_the_launch_sta
 async def test_a_record_with_unmarked_paths_removes_nothing_it_can_t_prove(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A record by path alone (what a crash between writing a record and marking left, before
-    placeholders were marked as they were made): the person has since made an empty directory
-    at one of its paths. The sweep can't tell it from a placeholder, so it leaves it, and the
-    record goes."""
+    """A record written before its placeholders were made (a crash between writing it and marking
+    them, so each is known by the mark it would have carried): the person has since made an empty
+    directory at one of its paths. It carries no mark, so the sweep can't tell it from a
+    placeholder and leaves it, and the record goes."""
     _needs_bwrap()
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     project = tmp_path / "project"
@@ -2217,7 +2216,9 @@ async def test_a_record_with_unmarked_paths_removes_nothing_it_can_t_prove(
     records = tmp_path / "state" / "bh-02" / "jails"
     records.mkdir(parents=True)
     record = records / "bh-j-crashed.json"
-    record.write_text(record_text([(str(mine), None), (str(project / "gone"), None)]))
+    record.write_text(
+        record_text([(str(mine), "mark:bh-j-crashed"), (str(project / "gone"), "mark:bh-j-crashed")])
+    )
     one = BrigJail(BrigConfig(), Host(), lock=str(tmp_path / "jails.lock"))
     sock_dir = Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"))
     endpoint = str(sock_dir / "k.sock")
@@ -2227,9 +2228,9 @@ async def test_a_record_with_unmarked_paths_removes_nothing_it_can_t_prove(
 
 
 def test_a_record_names_the_jail_s_process_group() -> None:
-    text = record_text([("/w/.claude", None)], 4242)
-    assert recorded_group(text) == 4242 and recorded(text) == [("/w/.claude", None)]
-    assert recorded_group(record_text([("/w/.claude", None)])) is None  # before bwrap started
+    text = record_text([("/w/.claude", "mark:bh-j-1")], 4242)
+    assert recorded_group(text) == 4242 and recorded(text) == [("/w/.claude", "mark:bh-j-1")]
+    assert recorded_group(record_text([("/w/.claude", "mark:bh-j-1")])) is None  # before bwrap started
     assert recorded_group("not json") is None
 
 

@@ -172,17 +172,3 @@ async def test_a_whole_transcript_is_sent_unchanged_and_nothing_is_added_to_it(
     assert list(sent) == [*request_for(old), new]  # the old conversation bit for bit, then the message
     assert transcript.messages[: len(old)] == tuple(old)
     assert not any(str(m.get("content", "")).startswith("interrupted:") for m in transcript.messages)
-
-
-async def test_a_step_an_older_bh_02_resumed_with_its_call_unanswered_is_left_as_it_was(
-    tmp_path: Path,
-) -> None:
-    """The person's message came after the call, so an answer appended now would follow it: no
-    more whole than it was. The entries already written are never changed."""
-    old = [*cut("c1", "c2", answered_ids=["c1"]), {"role": "user", "content": "hello?", "at": START}]
-    transcript, stepped = resumed(tmp_path, old)
-    model = Recording()
-    await reply(transcript, stepped, model, "carry on")
-    (sent,) = model.requests
-    assert list(sent) == [*request_for(old), transcript.messages[len(old)]]
-    assert [m["call_id"] for m in sent if m["role"] == "tool"] == ["c1"]

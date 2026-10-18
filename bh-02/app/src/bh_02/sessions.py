@@ -87,7 +87,7 @@ class Session:
     id: str
     dir: Path
     cwd: str
-    stack: str  # the model it started on (an earlier bh-02's: `claude` or `ollama`, its provider)
+    stack: str  # the model it started on
     created: str
     patches: tuple[str, ...] = ()  # the --patch files it started with (by name)
 

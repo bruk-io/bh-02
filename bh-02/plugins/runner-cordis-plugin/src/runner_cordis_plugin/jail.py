@@ -697,7 +697,7 @@ def identity(found: os.stat_result) -> str:
     return f"{found.st_ino}:{found.st_ctime_ns}"
 
 
-def record_text(made: Sequence[tuple[str, str | None]], group: int | None = None) -> str:
+def record_text(made: Sequence[tuple[str, str]], group: int | None = None) -> str:
     """A jail's record of its placeholders: each path, deepest first, with how the directory
     there is known to be the jail's (`mark:<jail id>`, else its `identity`), so a later sweep
     removes only a directory the jail made; and once bubblewrap is started, its process group,
@@ -708,12 +708,13 @@ def record_text(made: Sequence[tuple[str, str | None]], group: int | None = None
     return json.dumps(whole) + "\n"
 
 
-def recorded(text: str) -> list[tuple[str, str | None]]:
-    """The placeholders a record names (`record_text`); nothing for a record that can't be read
-    as one, which is then only removed."""
+def recorded(text: str) -> list[tuple[str, str]]:
+    """The placeholders a record names (`record_text`), each with how the jail knows it; nothing
+    for a record that can't be read as one, which is then only removed, and none for an entry that
+    names no way to know it (a record edited or damaged), since nothing proves a jail made it."""
     try:
         made = json.loads(text)["made"]
-        return [(str(path), found if isinstance(found, str) else None) for path, found in made]
+        return [(str(path), found) for path, found in made if isinstance(found, str)]
     except ValueError, KeyError, TypeError:
         return []
 
@@ -728,20 +729,17 @@ def recorded_group(text: str) -> int | None:
     return group if isinstance(group, int) else None
 
 
-def still_made(was: str | None, found: str, mark: str | None) -> bool:
+def still_made(was: str, found: str, mark: str | None) -> bool:
     """Whether a directory is still the placeholder a jail recorded as `was`: its `MARK` (the
     jail's id, in an extended attribute the jail set on it as it made it), or where the
     filesystem takes none, its `identity`. A mark survives what is added and removed under it;
-    the person's own directory has none. A path recorded alone (None: an older bh-02's record,
-    written before its placeholders were marked) proves nothing, so nothing there is removed."""
-    if was is None:
-        return False
+    the person's own directory has none."""
     if was.startswith("mark:"):
         return mark == was.removeprefix("mark:")
     return was == found
 
 
-def remove_placeholders(made: Sequence[tuple[str, str | None]]) -> None:
+def remove_placeholders(made: Sequence[tuple[str, str]]) -> None:
     """Remove each placeholder a jail made (deepest first) that is still what it made (an empty
     directory, `still_made`). One the person has put something in, or replaced with one of their
     own, stays. Only once no jail can have mounted over it: removed while a jail lives, it stops
@@ -810,7 +808,7 @@ class _Jailed:
         self._wire = wire
         self._tether = tether
         self._jail_dir = jail_dir
-        self._made: list[tuple[str, str | None]] = list(made)
+        self._made: list[tuple[str, str]] = list(made)
         self._lock = lock
         self._record = record
         self._stopping: asyncio.Future[None] | None = None
@@ -886,7 +884,7 @@ class _Jailed:
         shutil.rmtree(self._jail_dir, ignore_errors=True)
 
 
-def _clear_up(lock: int, made: Sequence[tuple[str, str | None]], record: str | None) -> None:
+def _clear_up(lock: int, made: Sequence[tuple[str, str]], record: str | None) -> None:
     """Remove what a jail that is gone made (`made`) and its record, if `lock` can be taken
     exclusively: no other bh-02 jail runs, so none has mounted over them. Else they stay, with
     the record, for the next jail to start with none running."""

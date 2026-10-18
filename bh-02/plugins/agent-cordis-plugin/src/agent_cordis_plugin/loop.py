@@ -273,8 +273,8 @@ def _listed(names: Sequence[str]) -> str:
 
 def _undated(messages: Sequence[Json], today: str) -> bool:
     """Whether the model is yet to be told `today`: the transcript has told it no date (a new
-    conversation, or one begun before the loop told dates), or the last one it told (a user
-    entry's `today`) is another day's (a conversation run past midnight, or resumed later)."""
+    conversation, or one `/compact` began), or the last one it told (a user entry's `today`) is
+    another day's (a conversation run past midnight, or resumed later)."""
     told = next((str(m["today"]) for m in reversed(messages) if m.get("today")), None)
     return told != today
 
@@ -321,14 +321,10 @@ def _unanswered_calls(messages: Sequence[Json]) -> list[Json]:
     """The calls a transcript's `messages` leave without an answer, in the calls' order: those of
     its last `assistant` entry that no `tool` entry after it answers. A step's entry is appended
     before its calls run, and a reply that ends answers every one, so only a process that died
-    mid-call leaves any. None when a `user` entry follows that step: an older bh-02 resumed it as
-    it was, and an answer appended after the person's message would not make the conversation
-    whole, only another way of broken."""
+    mid-call leaves any."""
     answered: set[str] = set()
     for message in reversed(messages):
         role = message.get("role")
-        if role == "user":
-            return []
         if role == "tool":
             answered.add(str(message.get("call_id")))
         elif role == "assistant":

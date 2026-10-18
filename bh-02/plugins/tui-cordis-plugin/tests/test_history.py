@@ -56,36 +56,6 @@ def test_entries_are_appended_a_line_each_and_read_back(tmp_path: Path) -> None:
     assert len(again) == 2  # the lines it can't read are skipped
 
 
-def test_emptied_underneath_the_next_entry_lands_at_the_new_end(tmp_path: Path) -> None:
-    """`/clear` empties the session's history files while the app has this one open."""
-    path = tmp_path / "events.jsonl"
-    history = History(str(path))
-    history.record({"type": "user", "text": "old"})
-    path.write_text("")
-    history.record({"type": "user", "text": "new"})
-    history.close()
-    forgot = {"type": "carried", "entries": 1, "input_tokens": 0, "output_tokens": 0}
-    assert History(str(path)).read() == [forgot, {"type": "user", "text": "new"}]
-
-
-async def test_clear_forgets_the_entries_but_not_the_session_s_usage(tmp_path: Path) -> None:
-    """A resume after `/clear` adds up to the same usage the status bar showed live."""
-    path = tmp_path / "events.jsonl"
-    used = {"type": "usage", "input_tokens": 100, "output_tokens": 10, "cost_usd": 0.25}
-    path.write_text(json.dumps({"type": "user", "text": "before"}) + "\n" + json.dumps(used) + "\n")
-    async with History(str(path)) as history:
-        history.record({"type": "text", "text": "this run"})
-        history.record(used)
-        path.write_text("")  # /clear
-        history.record({"type": "user", "text": "after"})
-        history.record(used)
-    again = History(str(path)).read()
-    assert frame.total_usage(again) == frame.Usage(300, 30, 0.75)
-    assert [e["type"] for e in again] == ["carried", "user", "usage"]
-    replay = replayable(again, 400)
-    assert replay.skipped == 4 and replay.entries[0] == {"type": "user", "text": "after"}
-
-
 def test_a_replay_starts_after_the_last_clear_and_the_usage_before_it_still_counts() -> None:
     used = {"type": "usage", "input_tokens": 100, "output_tokens": 10}
     entries = [

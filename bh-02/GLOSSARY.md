@@ -39,7 +39,7 @@ As [cordis's README](../libs/cordis/README.md) defines them (its "Concepts").
 - **harness** (in brig's docs and tests): the program that starts the jails, such as bh-02; in brig's tests, the test run itself (`harness_pid`).
 - **the shell**: `bh_02` (`app/`): the `bh-02` command, which reads the layers, boots them and waits for the chat to end.
 - **layer files**: `bh-02.toml` (the whole harness), a session's `session.toml`, and your `--patch` files, applied in that order.
-- **stack** (a session's): the model a session started on, kept in its `meta.json` and listed by `bh-02 sessions` (an earlier bh-02's session: `claude` or `ollama`); not always the model that answered.
+- **stack** (a session's): the model a session started on, kept in its `meta.json` and listed by `bh-02 sessions`; not always the model that answered.
 - **stack** (brig's): the mechanisms brig composes into one jail; bh-02's runner uses `scratch_darwin()` (Seatbelt) on macOS and `strict_linux()` (bubblewrap) on Linux (`stack_for`).
 - **stack** (a fiber's, in cordis): the undos a fiber has recorded, run last first when it unloads.
 - **loop** (row and key): the agent loop, `agent:loop`: sends the conversation to the model, runs each call it asks for through its tool, and nudges a step that didn't count ([The loop](../docs/bh-02/how-it-works/loop.md)).

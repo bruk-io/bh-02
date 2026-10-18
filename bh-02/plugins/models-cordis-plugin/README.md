@@ -465,7 +465,8 @@ and the next request rebuilds. `records.py` writes the transcript as a new Claud
 session file, and a new process resumes it:
 - the file is a linear `parentUuid` chain;
 - `provider` blocks go in verbatim, thinking signatures included;
-- tool names get `mcp__bh__`, so an older session that ran on the Messages API rebuilds too;
+- a tool name is kept as Claude Code sent it (`mcp__bh__python`), and the calls of a step with no
+  `provider` message (another provider's, rebuilt from its text and calls) get `mcp__bh__`;
 - every record carries the resolved model id, since with an alias Claude Code re-cached the
   whole conversation (measured);
 - each rebuild gets a new session id.

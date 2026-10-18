@@ -59,9 +59,7 @@ read) with that result, the rest (the one at the approval question included) wit
 run), so the next reply begins by answering each call of the last step that no `tool` entry follows
 (`_unanswered_calls`) with `interrupted: bh-02 stopped before this call finished; it may have partly
 run`, in the calls' order and before any request, with a call record of the time alone: so a
-resumed conversation is whole and no provider is sent a call with no result after it. A step the
-person's message already follows (an older bh-02 resumed it as it was) is left alone: an answer
-appended after the message would not make it whole. A call a tool's own call makes (an input's
+resumed conversation is whole and no provider is sent a call with no result after it. A call a tool's own call makes (an input's
 `tools.NAME(...)`) runs the same way: the loop row serves it through the `tools` broker (`tools.serve(loop.nested)`, `tools.call`), so it is put
 to the rule and the person as the model's own would be, run through the tool its name has now,
 and given to `asides`, whose asides go with the result of the call that made it (`_nested`, one
@@ -83,8 +81,7 @@ the call's own result, and a `note` for each of those asides, by its first line.
 row of its own, depending on nothing, so neither the loop nor a row adding to it reloads the
 other; a row that adds to it (`memory:on_touch`) depends on `transcript`, so `/clear` starts it
 afresh and it tells a new conversation again; it reads its `messages` too, so a resumed one is
-not told again an aside a `tool` entry's `asides` hold (an entry without them, from before the
-loop kept them or from when it called them `notes`, is searched; CONTRACTS.md: transcript).
+not told again an aside a `tool` entry's `asides` hold (CONTRACTS.md: transcript).
 
 Each model step is classified by `stops.classify` (pure; the table is in its docstring): only
 `act` runs calls, only `answered` ends the reply, and a
@@ -113,9 +110,7 @@ where it starts, how many are gone and what stands there now, `{"at", "drop", "a
 session where extensions load, the branch switches or CLAUDE.md is edited keeps the prompt in its
 transcript once, not once per change. What the model was last told is the first entry with
 each later one's edits applied in turn (`prompt.latest`, pure), which the loop works out when it
-meets a transcript it has not read and then keeps up itself. A transcript from before the loop
-kept edits has every reading whole; `latest` takes those as they are, so it resumes unchanged
-and its next change is kept as edits from its last whole reading. An entry whose edits `edits`
+meets a transcript it has not read and then keeps up itself. An entry whose edits `edits`
 could not have made (a transcript edited by hand or damaged) is passed over, the reading before
 it standing, so the session still answers and its next change is kept as edits from that one. Only the first entry reaches a
 model, as `{"role": "system", "content"}`; the edits are the loop's own. A loop that reloads (a
@@ -293,5 +288,5 @@ so). Both commands' restarts are queued in `jobs` (CONTRACTS.md: jobs), never ru
 row's task, which they reload; the chat row reads its next line once they are done. A restart
 that fails is told to the person (the jobs row's `output.notice`), since the new conversation
 is written by then. Both are one row's, beside the transcript they rewrite, rather than the operator's:
-the operator keeps not depending on the model, and nothing outside the row (once the
-operator's `forget`) has to be kept in step with the transcript row's file.
+the operator keeps not depending on the model, and nothing outside the row has to be kept in
+step with the transcript row's file.
