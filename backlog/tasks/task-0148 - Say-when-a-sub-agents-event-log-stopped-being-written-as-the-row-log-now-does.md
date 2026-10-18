@@ -3,7 +3,7 @@ id: TASK-0148
 title: >-
   Say when a sub-agent's event log stopped being written, as the row log now
   does
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-18 12:33'
@@ -294,4 +294,6 @@ INFO    -  Documentation built in 4.28 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+Review round 3 (reviewer): closed. Full scripts/check exit 0 (record-check --tier full, recorded above); no files changed by the check. ACs #1-#3 met: wiring/eventlog/child tests with no monkeypatch, repro recorded (pre-fix source fails assert 0 == 1). Chat test fix sound and test-only. Follow-ups: TASK-0162 (two other chat sleep-based tests); DRAFT-0008 superseded by round 1's fix, for the owner to drop. No new findings.
 <!-- SECTION:NOTES:END -->
