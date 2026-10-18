@@ -26,7 +26,7 @@ Follow-up from TASK-0145. A child's events.jsonl (subagents plugin, eventlog.py)
 <!-- AC:BEGIN -->
 - [x] #1 A sub-agent whose event log stops after a failed write, or at its close, is said once as a note through the parent's output.show when its run ends, naming the file, when the failure was found, the error, and that bh-02 watch shows nothing after it and must be left with Ctrl-C
 - [x] #2 A run whose logs never failed, or whose log could not be opened (already a note), says nothing new
-- [ ] #3 Subagents tests with no monkeypatch: the file removed under the appender mid-run (Replaced) gives one note, a healthy run none; scripts/check passes
+- [x] #3 Subagents tests with no monkeypatch: the file removed under the appender mid-run (Replaced) gives one note, a healthy run none; scripts/check passes
 <!-- AC:END -->
 
 ## Implementation Plan
