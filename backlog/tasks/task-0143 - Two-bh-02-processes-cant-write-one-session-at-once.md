@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-18 12:15'
-updated_date: '2026-10-18 14:12'
+updated_date: '2026-10-18 14:16'
 labels:
   - app
   - size-3
@@ -42,4 +42,70 @@ Order: (1) sessions.py: a pure-ish 'held' context manager that opens '<session d
 Changed: bh-02/app/src/bh_02/sessions.py (Held, held(): O_RDWR|O_CREAT 0600 running.lock in the session dir, fcntl.flock LOCK_EX|LOCK_NB, then the pid written; Held names the pid and says to leave the other bh-02 first; the pid-less fallback covers the window between locking and writing), cli.py (main holds the session in an ExitStack through _run; _session takes it for a new session right after create and for a resume BEFORE its layer is read or --model rewrites it; Held is printed as 'error: ...' exit 1; discard and the farewell run after release), root pyproject (impure budget: sessions:held), tests (new bh-02/app/tests/test_session_lock.py, one real-launch test in test_real_launch.py), docs (sessions.md, command-line.md, GLOSSARY, app README). sessions/trajectory/watch never import held. Evidence: AC1 - test_session_lock.py: held twice in one process is refused, free after the block; a holder process SIGKILLed with a child still alive leaves the session resumable (OS release, fd not inherited); the real-launch test kills a running bh-02 with SIGKILL and the next --resume comes up. AC2 - a holder in another process: bh-02 --resume ID --model claude/haiku --trace F exits 1 with 'error: session ID is held by bh-02 process PID ... Leave that bh-02 first', F never created (no row started), session.toml unchanged, no farewell, the session still listed; the real-launch test (first bh-02 running in a pty, second --resume refused naming its pid, nothing drawn). PLANTED: with the fcntl.flock call replaced by pass, 4 of the 5 lock tests fail (the fifth only checks the file), and the real run's exit_code is 0 instead of 1; with the hold moved after set_model in _session, the 'session.toml unchanged' assertion fails (layer rewritten). Both restored. AC3 - test_sessions_trajectory_and_watch_read_a_held_session_as_before: sessions, trajectory ID and watch ID NAME --once all exit 0 with their output while another process holds it, and the lock file still names the holder afterwards. Ran: uv run pytest bh-02/app/tests/test_session_lock.py (5 passed); test_real_launch.py::test_a_running_bh_02_holds... passed; scripts/check bh-02/app (with gates and docs): format, lint, types, tests 336 passed 1 skipped (bwrap), all five gates, docs build ok (tokens skipped: no bh-01). Left for the reviewer: the 'scripts/check passes' half of AC3, so #3 is unticked.
 
 Correction to the evidence above: the planted violation (flock replaced by pass) was run against test_session_lock.py only, where the CLI refusal test failed with exit_code 0 != 1; the real-launch test was run unplanted (passed) and not seen failing. scripts/arch-check --no-fix also run after the root pyproject change: all five gates ok.
+
+Check `scripts/check` exited 0
+
+(31 earlier lines omitted)
+```text
+........................................................................ [ 32%]
+........................................................................ [ 34%]
+........................................................................ [ 36%]
+........................................................................ [ 38%]
+........................................................................ [ 40%]
+........................................................................ [ 42%]
+........................................................................ [ 43%]
+........................................................................ [ 45%]
+........................................................................ [ 47%]
+....s.s..ssss.s.ss..ss....s..ss..s..ss..ss..ss.s..sssss................. [ 49%]
+........................................................................ [ 51%]
+..........................................s............................. [ 53%]
+.......................................s.sssssssssssssssssssssssssssssss [ 54%]
+sssssssssssssssssssssssssssssssssss........................ssssssssssss. [ 56%]
+......................................................................s. [ 58%]
+........................................................................ [ 60%]
+........................................................................ [ 62%]
+..........sss........................................................... [ 64%]
+........................................................................ [ 65%]
+........................................................................ [ 67%]
+........................................................................ [ 69%]
+........................................................................ [ 71%]
+........................................................................ [ 73%]
+........................................................................ [ 75%]
+........................................................................ [ 76%]
+........................................................................ [ 78%]
+........................................................................ [ 80%]
+........................................................................ [ 82%]
+........................................................................ [ 84%]
+........................................................................ [ 86%]
+........................................................................ [ 87%]
+........................................................................ [ 89%]
+........................................................................ [ 91%]
+........................................................................ [ 93%]
+........................................................................ [ 95%]
+........................................................................ [ 97%]
+........................................................................ [ 98%]
+........................................                                 [100%]
+3812 passed, 118 skipped in 199.16s (0:03:19)
+   ok
+== gates
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+== (root)
+   ok
+== libs/brig
+   ok
+== libs/cordis
+   ok
+== libs/cordis-helpers
+   ok
+== libs/host-paths
+   ok
+   ok
+== docs
+INFO    -  Cleaning site directory
+INFO    -  Building documentation to directory: /home/user/bh-02/site
+INFO    -  Documentation built in 3.95 seconds
+   ok
+== tokens
+   skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
+```
 <!-- SECTION:NOTES:END -->
