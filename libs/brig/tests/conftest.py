@@ -1014,9 +1014,10 @@ def _remove_tree(path: str) -> None:
 
 
 @contextlib.contextmanager
-def _jail_dirs() -> Iterator[NewJailDir]:
+def jail_dirs() -> Iterator[NewJailDir]:
     """What `new_jail_dir` is: a call that makes a jail directory, each of which is removed, with
-    what the jail left in it, when the block ends."""
+    what the jail left in it, when the block ends. For a helper that has no fixture to ask for one
+    (`tests/supervised_jail.py`'s probes, which run once and are cached)."""
     made: list[str] = []
 
     def make() -> str:
@@ -1053,7 +1054,7 @@ def new_jail_dir() -> Iterator[NewJailDir]:
     A test that needs a directory asks for `jail_dir`; one that needs several, or a helper that
     makes its own, takes this factory.
     """
-    with _jail_dirs() as make:
+    with jail_dirs() as make:
         yield make
 
 
@@ -1064,39 +1065,34 @@ def jail_dir(new_jail_dir: NewJailDir) -> str:
 
 
 @pytest.fixture
-def make_oci_jail(run_id: str) -> Iterator[Callable[..., Jail]]:
+def make_oci_jail(run_id: str, new_jail_dir: NewJailDir) -> Iterator[Callable[..., Jail]]:
     """`make(spec, jail_id=None, ...)` makes a container jail (`tests/oci_jail.py`): its id carries
     this run's token, which the session's container sweep looks for, and every jail made is
-    destroyed, and must end, when the test is done. Skips, naming `docker info`, where there is no
-    Docker daemon to run it on."""
+    destroyed, and must end, when the test is done; its jail directory (`new_jail_dir`'s, unless the
+    test names one) is removed after. Skips, naming `docker info`, where there is no Docker daemon
+    to run it on."""
     from tests import oci_jail
 
     oci_jail.needs_docker()
-    made: list[tuple[Jail, str]] = []
+    made: list[Jail] = []
 
     def make(
         spec: Any = None, *, jail_id: str | None = None, jail_dir: str | None = None, **more: Any
     ) -> Jail:
         from brig.core import Spec
 
-        directory = oci_jail.new_jail_dir() if jail_dir is None else jail_dir
-        try:
-            jail = oci_jail.make(
-                Spec(fs=oci_jail.allow_list()) if spec is None else spec,
-                directory,
-                jail_id=f"oci-{run_id}-{uuid.uuid4().hex[:8]}" if jail_id is None else jail_id,
-                **more,
-            )
-        except BaseException:
-            shutil.rmtree(directory, ignore_errors=True)
-            raise
-        made.append((jail, directory))
+        jail = oci_jail.make(
+            Spec(fs=oci_jail.allow_list()) if spec is None else spec,
+            new_jail_dir() if jail_dir is None else jail_dir,
+            jail_id=f"oci-{run_id}-{uuid.uuid4().hex[:8]}" if jail_id is None else jail_id,
+            **more,
+        )
+        made.append(jail)
         return jail
 
     yield make
     failed: list[str] = []
-    for jail, directory in made:
+    for jail in made:
         report = jail.destroy()
         failed += [str(item) for item in report.items if item.outcome.value == "FAILED"]
-        shutil.rmtree(directory, ignore_errors=True)
     assert not failed, f"a container jail could not be destroyed at teardown: {failed}"

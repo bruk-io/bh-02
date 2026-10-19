@@ -32,13 +32,12 @@ from brig.core.runtime import Scope
 from brig.run import Jail, KillOutcome
 from brig.run import _supervised as supervised
 from tests import control_battery as battery
+from tests.conftest import NewJailDir
 from tests.control_battery import Cell, Survivor
 from tests.supervised_jail import (
-    cleanup,
     create_jail,
     needs_a_supervised_jail,
     needs_namespaces,
-    new_jail_dir,
     sh,
 )
 
@@ -61,11 +60,11 @@ Make = Callable[..., Jail]
 
 
 @pytest.fixture
-def make(mode: str) -> Iterator[Make]:
+def make(mode: str, new_jail_dir: NewJailDir) -> Iterator[Make]:
     """`make()` is a fresh supervised jail of the mode under test; `make(namespaces=False)` one
     with the block of decision-195 planted, whatever the mode. Every jail made is destroyed, and
-    must end, when the test is done."""
-    made: list[tuple[Jail, str]] = []
+    must end, when the test is done; the directories are removed after, by `new_jail_dir`."""
+    made: list[Jail] = []
 
     def build(*, namespaces: bool | None = None) -> Jail:
         jail_dir = new_jail_dir()
@@ -74,14 +73,13 @@ def make(mode: str) -> Iterator[Make]:
             namespaces=(mode == "namespaces") if namespaces is None else namespaces,
             jail_id="battery",
         )
-        made.append((jail, jail_dir))
+        made.append(jail)
         return jail
 
     yield build
-    for jail, jail_dir in made:
+    for jail in made:
         report = jail.destroy()
         assert not [item for item in report.items if item.outcome is KillOutcome.FAILED], report
-        cleanup(jail_dir)
 
 
 def _what_the_host_saw(cells: tuple[Cell, ...]) -> dict[tuple[Scope, Survivor], tuple[bool, ...]]:

@@ -36,13 +36,11 @@ from brig.run import (
 )
 from brig.run._supervised import host_pid_of
 from brig.run._supervisor_program import SUPERVISOR_SOURCE
-from tests.conftest import tether_has_ended
+from tests.conftest import NewJailDir, tether_has_ended
 from tests.supervised_jail import (
-    cleanup,
     create_jail,
     instance_group,
     needs_a_supervised_jail,
-    new_jail_dir,
     process_state,
     run_to_end,
     running_with,
@@ -72,6 +70,7 @@ def _ended(jail) -> None:  # type: ignore[no-untyped-def]
 
 def test_a_request_the_supervisor_does_not_answer_destroys_the_jail_at_its_deadline(
     monkeypatch: pytest.MonkeyPatch,
+    new_jail_dir: NewJailDir,
 ) -> None:
     monkeypatch.setattr(supervised, "REQUEST_TIMEOUT_S", 1.0)
     jail_dir = new_jail_dir()
@@ -101,11 +100,11 @@ def test_a_request_the_supervisor_does_not_answer_destroys_the_jail_at_its_deadl
         assert all(item.outcome is not KillOutcome.FAILED for item in report.items), report
     finally:
         _ended(jail)
-        cleanup(jail_dir)
 
 
 def test_the_same_stop_resumed_within_the_deadline_is_answered_and_the_jail_lives(
     monkeypatch: pytest.MonkeyPatch,
+    new_jail_dir: NewJailDir,
 ) -> None:
     """The control: it is the missed deadline that ends the jail, not the stop."""
     monkeypatch.setattr(supervised, "REQUEST_TIMEOUT_S", 20.0)
@@ -133,7 +132,6 @@ def test_the_same_stop_resumed_within_the_deadline_is_answered_and_the_jail_live
         assert victim.wait(10) == expected and jail.alive()
     finally:
         _ended(jail)
-        cleanup(jail_dir)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -142,7 +140,7 @@ def test_the_same_stop_resumed_within_the_deadline_is_answered_and_the_jail_live
 
 
 def test_a_process_is_not_allowed_to_run_until_its_record_is_written(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, new_jail_dir: NewJailDir
 ) -> None:
     workspace = tmp_path / "ws"
     workspace.mkdir()
@@ -168,7 +166,6 @@ def test_a_process_is_not_allowed_to_run_until_its_record_is_written(
         assert ran.exists()
     finally:
         _ended(jail)
-        cleanup(jail_dir)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -182,31 +179,29 @@ _LIVE_STOP = "        self.deliver(entry, signal.SIGTERM)\n"
 
 def test_a_supervisor_that_imports_after_it_is_ready_fails_the_request_that_needed_the_import(
     monkeypatch: pytest.MonkeyPatch,
+    new_jail_dir: NewJailDir,
 ) -> None:
     assert SUPERVISOR_SOURCE.count(_LIVE_STOP) == 1
     planted = SUPERVISOR_SOURCE.replace(_LIVE_STOP, "        import colorsys\n" + _LIVE_STOP)
     marker, sleep = unique_sleep()
     jail_dir = new_jail_dir()
+    monkeypatch.setattr(host, "SUPERVISOR_SOURCE", planted)
+    jail = create_jail(jail_dir)  # the planted program says it is ready: the import is lazy
     try:
-        monkeypatch.setattr(host, "SUPERVISOR_SOURCE", planted)
-        jail = create_jail(jail_dir)  # the planted program says it is ready: the import is lazy
-        try:
-            item = jail.start(sleep).stop().items[0]
-            assert item.outcome is KillOutcome.FAILED
-            assert "'colorsys' was not imported before" in item.detail, item.detail
-            assert running_with(marker), "the stop that was refused must not have stopped it"
-        finally:
-            _ended(jail)
-        # The control: the program as shipped does the same stop.
-        monkeypatch.setattr(host, "SUPERVISOR_SOURCE", SUPERVISOR_SOURCE)
-        marker, sleep = unique_sleep()
-        jail = create_jail(new_jail_dir(), jail_id="shipped")
-        try:
-            assert jail.start(sleep).stop().items[0].outcome is KillOutcome.ENDED
-        finally:
-            _ended(jail)
+        item = jail.start(sleep).stop().items[0]
+        assert item.outcome is KillOutcome.FAILED
+        assert "'colorsys' was not imported before" in item.detail, item.detail
+        assert running_with(marker), "the stop that was refused must not have stopped it"
     finally:
-        cleanup(jail_dir)
+        _ended(jail)
+    # The control: the program as shipped does the same stop.
+    monkeypatch.setattr(host, "SUPERVISOR_SOURCE", SUPERVISOR_SOURCE)
+    marker, sleep = unique_sleep()
+    jail = create_jail(new_jail_dir(), jail_id="shipped")
+    try:
+        assert jail.start(sleep).stop().items[0].outcome is KillOutcome.ENDED
+    finally:
+        _ended(jail)
 
 
 #: A Python whose `ctypes` and `traceback` do not load `warnings` for the supervisor, which
@@ -223,32 +218,30 @@ _REHEARSAL_CALL = "    supervisor.rehearse()\n"
 
 def test_a_program_found_by_name_starts_where_the_interpreter_loads_nothing_early(
     monkeypatch: pytest.MonkeyPatch,
+    new_jail_dir: NewJailDir,
 ) -> None:
     assert SUPERVISOR_SOURCE.count(_TOP_IMPORT) == SUPERVISOR_SOURCE.count(_REHEARSAL_CALL) == 1
     assert SUPERVISOR_SOURCE.count(_BEFORE_MAIN) == 1
     unloaded = SUPERVISOR_SOURCE.replace(_BEFORE_MAIN, _UNLOAD_WARNINGS)
     naive = unloaded.replace(_TOP_IMPORT, "").replace(_REHEARSAL_CALL, "")
     jail_dir = new_jail_dir()
+    monkeypatch.setattr(host, "SUPERVISOR_SOURCE", unloaded)
+    jail = create_jail(jail_dir)
     try:
-        monkeypatch.setattr(host, "SUPERVISOR_SOURCE", unloaded)
-        jail = create_jail(jail_dir)
-        try:
-            assert run_to_end(jail.start(["sh", "-c", "echo found by name"])) == (
-                0,
-                "found by name\n",
-            )
-        finally:
-            _ended(jail)
-        # The planted bug: with neither the import nor the rehearsal, the same start is refused.
-        monkeypatch.setattr(host, "SUPERVISOR_SOURCE", naive)
-        jail = create_jail(new_jail_dir(), jail_id="naive")
-        try:
-            with pytest.raises(WorkloadSpawnFailed, match="'warnings' was not imported before"):
-                jail.start(["sh", "-c", "echo found by name"])
-        finally:
-            _ended(jail)
+        assert run_to_end(jail.start(["sh", "-c", "echo found by name"])) == (
+            0,
+            "found by name\n",
+        )
     finally:
-        cleanup(jail_dir)
+        _ended(jail)
+    # The planted bug: with neither the import nor the rehearsal, the same start is refused.
+    monkeypatch.setattr(host, "SUPERVISOR_SOURCE", naive)
+    jail = create_jail(new_jail_dir(), jail_id="naive")
+    try:
+        with pytest.raises(WorkloadSpawnFailed, match="'warnings' was not imported before"):
+            jail.start(["sh", "-c", "echo found by name"])
+    finally:
+        _ended(jail)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -256,33 +249,30 @@ def test_a_program_found_by_name_starts_where_the_interpreter_loads_nothing_earl
 # ---------------------------------------------------------------------------------------------
 
 
-def test_a_supervisor_that_cannot_start_ends_the_instance_and_says_what_it_said() -> None:
+def test_a_supervisor_that_cannot_start_ends_the_instance_and_says_what_it_said(
+    new_jail_dir: NewJailDir,
+) -> None:
     jail_dir = new_jail_dir()
-    try:
-        with pytest.raises(SupervisorFailed) as raised:
-            create_jail(jail_dir, channel=True, python="/usr/bin/python3.99")
-        message = str(raised.value)
-        assert "python3.99" in message and "control socket closed" in message, message
-        assert os.path.join(jail_dir, "supervisor", "stderr.log") in message
-        # Nothing of it is left: the instance was ended before the error came.
-        assert until(lambda: running_with(os.path.basename(jail_dir)) == [])
-    finally:
-        cleanup(jail_dir)
+    with pytest.raises(SupervisorFailed) as raised:
+        create_jail(jail_dir, channel=True, python="/usr/bin/python3.99")
+    message = str(raised.value)
+    assert "python3.99" in message and "control socket closed" in message, message
+    assert os.path.join(jail_dir, "supervisor", "stderr.log") in message
+    # Nothing of it is left: the instance was ended before the error came.
+    assert until(lambda: running_with(os.path.basename(jail_dir)) == [])
 
 
 def test_a_supervisor_that_speaks_another_protocol_is_refused_and_ended(
     monkeypatch: pytest.MonkeyPatch,
+    new_jail_dir: NewJailDir,
 ) -> None:
     other = SUPERVISOR_SOURCE.replace("PROTOCOL = 2\n", "PROTOCOL = 99\n", 1)
     assert other != SUPERVISOR_SOURCE
     jail_dir = new_jail_dir()
-    try:
-        monkeypatch.setattr(host, "SUPERVISOR_SOURCE", other)
-        with pytest.raises(SupervisorFailed, match="speaks protocol 99 and this brig speaks 2"):
-            create_jail(jail_dir, channel=True)
-        assert until(lambda: running_with(os.path.basename(jail_dir)) == [])
-    finally:
-        cleanup(jail_dir)
+    monkeypatch.setattr(host, "SUPERVISOR_SOURCE", other)
+    with pytest.raises(SupervisorFailed, match="speaks protocol 99 and this brig speaks 2"):
+        create_jail(jail_dir, channel=True)
+    assert until(lambda: running_with(os.path.basename(jail_dir)) == [])
 
 
 # ---------------------------------------------------------------------------------------------
@@ -290,7 +280,9 @@ def test_a_supervisor_that_speaks_another_protocol_is_refused_and_ended(
 # ---------------------------------------------------------------------------------------------
 
 
-def test_a_wait_in_flight_does_not_hold_up_a_start_from_another_thread() -> None:
+def test_a_wait_in_flight_does_not_hold_up_a_start_from_another_thread(
+    new_jail_dir: NewJailDir,
+) -> None:
     jail_dir = new_jail_dir()
     jail = create_jail(jail_dir)
     marker, sleep = unique_sleep()
@@ -320,7 +312,6 @@ def test_a_wait_in_flight_does_not_hold_up_a_start_from_another_thread() -> None
         assert waited == [-signal.SIGKILL if slow.namespaces else -signal.SIGTERM]
     finally:
         _ended(jail)
-        cleanup(jail_dir)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -328,7 +319,9 @@ def test_a_wait_in_flight_does_not_hold_up_a_start_from_another_thread() -> None
 # ---------------------------------------------------------------------------------------------
 
 
-def test_a_start_on_a_jail_whose_tether_has_ended_is_refused_before_anything_is_made() -> None:
+def test_a_start_on_a_jail_whose_tether_has_ended_is_refused_before_anything_is_made(
+    new_jail_dir: NewJailDir,
+) -> None:
     jail_dir = new_jail_dir()
     watched, tether = os.pipe()
     jail = create_jail(jail_dir, tether=watched)
@@ -348,7 +341,6 @@ def test_a_start_on_a_jail_whose_tether_has_ended_is_refused_before_anything_is_
     finally:
         os.close(ours)
         _ended(jail)
-        cleanup(jail_dir)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -375,7 +367,9 @@ def test_host_pid_of_names_a_process_by_its_pidfd_and_not_one_that_has_gone() ->
         child.wait()
 
 
-def test_a_jail_that_is_destroyed_answers_no_more_requests_and_says_so() -> None:
+def test_a_jail_that_is_destroyed_answers_no_more_requests_and_says_so(
+    new_jail_dir: NewJailDir,
+) -> None:
     from brig.run import SupervisorGone
 
     jail_dir = new_jail_dir()
@@ -386,4 +380,3 @@ def test_a_jail_that_is_destroyed_answers_no_more_requests_and_says_so() -> None
             jail.start(["/bin/true"])
     finally:
         _ended(jail)
-        cleanup(jail_dir)

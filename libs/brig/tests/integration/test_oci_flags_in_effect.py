@@ -13,9 +13,8 @@ import dataclasses
 import os
 import shutil
 import sys
-import tempfile
 import uuid
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -24,6 +23,7 @@ from brig.core import Axis, Limits, Spec
 from brig.mech import Oci
 from brig.run import Jail, build_compile_ctx
 from brig.stack import Stack
+from tests.conftest import NewJailDir
 from tests.oci_jail import IMAGE, allow_list, container_of, docker, exec_in
 
 pytestmark = pytest.mark.integration
@@ -64,9 +64,9 @@ class _Tree:
 
 
 @pytest.fixture
-def tree() -> Iterator[_Tree]:
-    reference = os.path.realpath(tempfile.mkdtemp(prefix="bg-oci-ref-", dir="/tmp"))
-    workspace = os.path.realpath(tempfile.mkdtemp(prefix="bg-oci-ws-", dir="/tmp"))
+def tree(new_jail_dir: NewJailDir) -> _Tree:
+    reference = new_jail_dir()
+    workspace = new_jail_dir()
     Path(reference, "f.txt").write_text("reference\n")
     os.makedirs(f"{workspace}/.git/hooks")
     os.makedirs(f"{workspace}/private")
@@ -87,9 +87,7 @@ def tree() -> Iterator[_Tree]:
         ),
         limits=Limits(cpu_seconds=1),
     )
-    yield _Tree(reference, workspace, spec)
-    shutil.rmtree(reference, ignore_errors=True)
-    shutil.rmtree(workspace, ignore_errors=True)
+    return _Tree(reference, workspace, spec)
 
 
 def _out(container: str, script: str) -> tuple[int, str]:
@@ -166,7 +164,7 @@ def test_the_read_carve_outs_mask_what_exists_inside_a_root(
 
 
 def test_the_pins_keep_a_directory_with_a_carve_out_in_it_from_being_renamed_away(
-    make_oci_jail: Make, tree: _Tree
+    make_oci_jail: Make, tree: _Tree, new_jail_dir: NewJailDir
 ) -> None:
     """decision-168 on Docker: `mv .git .git-moved` would let the workload build a new `.git` with
     a hooks directory of its own where a host `git` reads it. With the pin it is busy; without, in
@@ -176,7 +174,7 @@ def test_the_pins_keep_a_directory_with_a_carve_out_in_it_from_being_renamed_awa
     assert code != 0 and "busy" in text.lower(), text
     assert os.path.isdir(f"{tree.workspace}/.git/hooks")
 
-    ctx = build_compile_ctx(tree.spec, jail_dir=tempfile.mkdtemp(dir="/tmp"), platform=sys.platform)
+    ctx = build_compile_ctx(tree.spec, jail_dir=new_jail_dir(), platform=sys.platform)
     plan = Stack([Oci(IMAGE, interpreter=None)]).compile(tree.spec, ctx=ctx).container
     assert plan is not None
     pin = f"type=bind,src={tree.workspace}/.git,dst={tree.workspace}/.git"

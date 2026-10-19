@@ -14,7 +14,6 @@ container, and an untethered jail outlives the same kill.
 from __future__ import annotations
 
 import os
-import shutil
 import signal
 import subprocess
 import sys
@@ -26,7 +25,8 @@ import pytest
 
 from brig.core import EnvPolicy, Spec
 from brig.run import Jail, KillOutcome
-from tests.oci_jail import allow_list, container_of, docker, inspect, new_jail_dir
+from tests.conftest import NewJailDir
+from tests.oci_jail import allow_list, container_of, docker, inspect
 from tests.supervised_jail import running_with, until
 
 pytestmark = pytest.mark.integration
@@ -61,23 +61,23 @@ _GONE_WITHIN_S = 30.0
 
 
 @pytest.fixture
-def embedders(run_id: str) -> Iterator[Callable[..., tuple[subprocess.Popen[str], str]]]:
+def embedders(
+    run_id: str, new_jail_dir: NewJailDir
+) -> Iterator[Callable[..., tuple[subprocess.Popen[str], str]]]:
     """`start(tethered=...)` is a stand-in embedder with a container jail, and its container's id.
-    Every embedder is killed and every container removed afterwards."""
+    Every embedder is killed and every container removed afterwards, then its jail directory."""
     from tests import oci_jail
 
     oci_jail.needs_docker()
     started: list[tuple[subprocess.Popen[str], str]] = []
-    directories: list[str] = []
 
     def start(*, tethered: bool) -> tuple[subprocess.Popen[str], str]:
-        directories.append(new_jail_dir())
         process = subprocess.Popen(
             [
                 sys.executable,
                 "-c",
                 _EMBEDDER,
-                directories[-1],
+                new_jail_dir(),
                 f"oci-{run_id}-{uuid.uuid4().hex[:8]}",
                 "1" if tethered else "0",
                 oci_jail.IMAGE,
@@ -96,8 +96,6 @@ def embedders(run_id: str) -> Iterator[Callable[..., tuple[subprocess.Popen[str]
         process.kill()
         process.wait()
         docker("rm", "-f", "--", container)
-    for directory in directories:
-        shutil.rmtree(directory, ignore_errors=True)
 
 
 def _running(container: str) -> bool:
