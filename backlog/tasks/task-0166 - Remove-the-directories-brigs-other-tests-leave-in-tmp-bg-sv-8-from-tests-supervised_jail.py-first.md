@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-18 23:15'
-updated_date: '2026-10-19 00:48'
+updated_date: '2026-10-19 00:49'
 labels:
   - brig
   - size-2
@@ -103,4 +103,6 @@ INFO    -  Documentation built in 3.73 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+No repro: the bug is a directory left in /tmp after a run, not a failing test; its repro is the before/after ls -A /tmp comparison of AC1, which the worker saw fail with the leak planted back (one new bg-sv-<8>) and the reviewer saw pass on the final tree (nothing new).
 <!-- SECTION:NOTES:END -->
