@@ -1,7 +1,7 @@
 ---
 id: TASK-0162
 title: 'Make chat''s two other sleep-based tests wait for their condition, not 10 ms'
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-18 20:33'
@@ -179,4 +179,6 @@ INFO    -  Documentation built in 3.92 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+Review: closed. Full scripts/check exited 0 (recorded). Both criteria met: the two named tests wait via _until on the event they assert; the skewed pre-fix run fails 2, the fixed run passes under skew and -n auto. No repro: note accepted. Nit: the absence check in test_what_a_command_holds... uses one loop turn (asyncio.sleep(0)), a weak guard, explained in notes; not filed. Remaining fixed sleeps already filed as TASK-0168.
 <!-- SECTION:NOTES:END -->
