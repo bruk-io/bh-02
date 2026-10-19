@@ -1,12 +1,21 @@
 """The chat row on a runtime: a port swap, a failure reaching the bootstrap."""
 
 import asyncio
+from collections.abc import Callable
 
 import pytest
 
 from chat_cordis_plugin.testing import Echo, Noted, Queued, Screen, Typed
 from chat_cordis_plugin.wiring import converse
 from cordis import Effects, Inspection, Runtime, State, bind, component
+
+
+async def _until(condition: Callable[[], bool]) -> None:
+    """Wait for what a test needs to have happened, not for a time to pass (as test_chat.py's
+    helper of the same name does: a fixed sleep ends before the work does on a busy machine)."""
+    async with asyncio.timeout(10):
+        while not condition():
+            await asyncio.sleep(0.01)
 
 
 def model_row(what: object) -> object:
@@ -54,8 +63,7 @@ async def test_replacing_the_ui_restarts_the_loop_and_keeps_the_conversation() -
     rt.mount(commands_row, id="commands")
     chat = rt.mount(converse, id="chat")
     await rt.settle()
-    await asyncio.sleep(0.01)
-    assert first.shown == ["to the first "]
+    await _until(lambda: first.shown == ["to the first "])
 
     await ui.retire()  # the chat row waits: its ports are gone
     await rt.settle()
@@ -87,8 +95,7 @@ async def test_what_a_command_left_for_the_model_survives_the_chat_row_s_restart
     rt.mount(held_commands, id="commands")
     chat = rt.mount(converse, id="chat")
     await rt.settle()
-    await asyncio.sleep(0.01)
-    assert commands.ran == ["!git diff"]
+    await _until(lambda: commands.ran == ["!git diff"])
     await loop.retire()  # a model switch: the chat row goes down with the loop
     await rt.settle()
     assert chat.state is State.INACTIVE
@@ -158,7 +165,7 @@ async def test_a_line_typed_during_a_restart_a_command_queued_reaches_the_new_lo
     rt.mount(commands_and_jobs, id="commands")
     rt.mount(converse, id="chat")
     await rt.settle()
-    await asyncio.sleep(0.01)
+    await _until(lambda: {"type": "note", "text": "cleared"} in screen.events)  # /clear answered
     assert first.seen == []  # waiting on the restart, not reading `again`
     await loop.retire()  # the restart: the chat row goes down with the loop, holding no line
     rt.mount(model_row(second), id="loop")
