@@ -3,7 +3,7 @@ id: TASK-0164
 title: >-
   A reused jail_dir's proxy-decisions.jsonl carries an earlier jail's egress
   decisions into a new jail's records
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-18 22:30'
@@ -177,4 +177,6 @@ FAILED libs/brig/tests/integration/test_egress_decisions.py::test_a_new_jail_nev
 ```
 
 Round 1 review fix (blocking finding: the repro was not recorded). No code or test changed. In the working tree only (index untouched) I put libs/brig/src/brig/mech/connect_proxy.py, mech/contract.py and run/host.py back to their 0a618087 (pre-fix) content with git restore --source=0a61808 --worktree, ran record-check TASK-0164 --repro -- uv run pytest libs/brig/tests/integration/test_egress_decisions.py::test_a_new_jail_never_reads_an_earlier_jails_egress_decisions at HEAD 706980e (the test file committed and clean), and it failed with 'this jail's records hold a decision an earlier jail's proxy made: ['earlier-jail.test', '127.0.0.1']' (record exit 0: failure recorded in the note above). Then git restore --worktree put the three files back to HEAD (git status clean, git diff HEAD empty). The same test passes on the fixed code: the file's 7 tests pass. board-check close TASK-0164 now reports 'can close'. The repro test file is unchanged since 706980e, so close-task's edited-repro check holds. Left for the reviewer: running close-task (a worker never sets Done).
+
+Review round 2 (independent): closed. The only blocking finding from round 1, an unrecorded repro, is resolved: the repro is on the task, failing on the pre-fix source at 706980e with the earlier jail's host in this jail's records. Since that review, the commits change the task file only. The full scripts/check exit 0 recorded earlier still holds for this code. AC1-3 met. No other findings, no drafts.
 <!-- SECTION:NOTES:END -->
