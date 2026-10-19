@@ -3,7 +3,7 @@ id: TASK-0166
 title: >-
   Remove the directories brig's other tests leave in /tmp: bg-sv-<8> from
   tests/supervised_jail.py first
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-18 23:15'
@@ -105,4 +105,6 @@ INFO    -  Documentation built in 3.73 seconds
 ```
 
 No repro: the bug is a directory left in /tmp after a run, not a failing test; its repro is the before/after ls -A /tmp comparison of AC1, which the worker saw fail with the leak planted back (one new bg-sv-<8>) and the reviewer saw pass on the final tree (nothing new).
+
+Review (reviewer, not the worker): closed. AC1 reproduced: ls -A /tmp before and after one integration+e2e run (336 passed, 108 skipped), comm -13 lists nothing new. AC2: full scripts/check exited 0 (recorded above), no files changed by it. Diff read: supervised_jail's bare mkdtemp and cleanup() gone, probes use conftest.jail_dirs(), make_oci_jail and the oci tree fixture take new_jail_dir; remaining mkdtemp calls are removed by their own fixtures. Docker-tier changes verified by reading only (no daemon here). No findings filed.
 <!-- SECTION:NOTES:END -->
