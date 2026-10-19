@@ -419,3 +419,111 @@ def test_a_ready_file_that_cannot_be_removed_refuses_the_create_before_any_helpe
         )
     finally:
         jail.destroy()
+
+
+@pytest.mark.parametrize(
+    "lifetime", [HelperLifetime.JAIL_LIFETIME, HelperLifetime.LAUNCH_SCOPED], ids=lambda e: e.name
+)
+def test_a_log_an_earlier_jail_left_is_gone_before_the_helper_starts(
+    run_id: str, lifetime: HelperLifetime, jail_dir: str
+) -> None:
+    """TASK-0164, decision-205: the jail directory is reused, and a helper that appends
+    its records to a file (the proxy's decisions) would append to an earlier jail's, which a
+    reader from byte 0 takes for this one's. `create` removes the declared `log_path` before
+    it starts the helper.
+
+    Observed from the helper's side, as in the ready-file test above: at its start the log
+    was `absent`, and the one line it then appends is the only line in the file. THE
+    CONTROLS: the log was planted and was there when `create` was called, and a neighbour
+    the helper does not declare survives."""
+    log = os.path.join(jail_dir, "helper.log.jsonl")
+    neighbour = os.path.join(jail_dir, "neighbour")
+    saw = os.path.join(jail_dir, "saw")
+    done = os.path.join(jail_dir, "done")
+    for path, text in ((log, "earlier jail's line\n"), (neighbour, "kept")):
+        with open(path, "w") as fh:
+            fh.write(text)
+    assert _read(log) == "earlier jail's line\n", "the earlier jail's log was not planted"
+
+    probe = (
+        f"if [ -e {log} ]; then printf present > {saw}; else printf absent > {saw}; fi; "
+        f"echo this-jail >> {log}; printf done > {done}"
+    )
+    helper = Helper(
+        name="logger",
+        argv=(
+            ("/bin/sh", "-c", probe)
+            if lifetime is HelperLifetime.LAUNCH_SCOPED
+            else tuple(workload_argv(run_id, f"{{ {probe}; sleep 30; }}"))
+        ),
+        lifetime=lifetime,
+        log_path=log,
+    )
+    jail, _process = _launch(_jail((helper,)), run_id, jail_dir)
+    try:
+        assert _wait_until(lambda: _read(done) == "done"), (
+            f"the helper never wrote; it found {_read(saw)!r} at its start"
+        )
+        assert _read(saw) == "absent", (
+            f"the helper started with an earlier jail's log in place: it found {_read(saw)!r}"
+        )
+        assert _read(log) == "this-jail\n", (
+            f"the log holds more than this launch wrote: {_read(log)!r}"
+        )
+        assert _read(neighbour) == "kept", "the removal took a file the helper did not declare"
+    finally:
+        jail.destroy()
+
+
+def test_a_log_that_cannot_be_removed_refuses_the_create_before_any_helper_starts(
+    run_id: str, jail_dir: str
+) -> None:
+    """The ready-file refusal's twin for `log_path` (decision-205): a declared log that is
+    there and cannot be removed (here a directory) is an `OSError` from `create` with a note
+    saying what to do, and NO helper has started, the one declared before the stubborn one
+    included.
+
+    THE CONTROL, in the same test: with the directory gone, the same helpers start and the
+    first one runs, so the refusal was the directory's."""
+    log = os.path.join(jail_dir, "helper.log.jsonl")
+    ran = os.path.join(jail_dir, "first-ran")
+    os.mkdir(log)
+
+    first = Helper(
+        name="first",
+        argv=tuple(workload_argv(run_id, f"touch {ran}; sleep 30")),
+        lifetime=HelperLifetime.JAIL_LIFETIME,
+    )
+    second = Helper(
+        name="second",
+        argv=tuple(workload_argv(run_id, "sleep 30")),
+        lifetime=HelperLifetime.JAIL_LIFETIME,
+        log_path=log,
+    )
+    with pytest.raises(OSError) as refused:
+        Jail.create(
+            _jail((first, second)),
+            runtime=HostRuntime(),
+            cwd=jail_dir,
+            jail_id="jail-log-stuck",
+            jail_dir=jail_dir,
+        )
+    assert any("remove it, or choose another jail directory" in n for n in refused.value.__notes__)
+    assert any(log in n and "appends its records to" in n for n in refused.value.__notes__)
+    time.sleep(0.5)
+    assert not os.path.exists(ran), "a helper started although the create was refused"
+
+    os.rmdir(log)
+    jail = Jail.create(
+        _jail((first, second)),
+        runtime=HostRuntime(),
+        cwd=jail_dir,
+        jail_id="jail-log-stuck",
+        jail_dir=jail_dir,
+    )
+    try:
+        assert _wait_until(lambda: os.path.exists(ran)), (
+            "the control jail did not start its first helper either"
+        )
+    finally:
+        jail.destroy()

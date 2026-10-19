@@ -332,6 +332,33 @@ def test_helper_ready_path_is_absent_by_default_and_must_be_absolute() -> None:
 
 
 @pytest.mark.unit
+def test_helper_log_path_is_absent_by_default_and_must_be_absolute() -> None:
+    """`log_path` (decision-205) is the file the helper appends its records to, which the
+    runtime removes before it starts the helper; `None` for a helper that keeps none. Like
+    `ready_path`, a relative one would name a file under the launcher's working directory, so
+    it is refused on construction, and the error names which field."""
+    plain = brig.mech.Helper(
+        name="h", argv=("true",), lifetime=brig.mech.HelperLifetime.LAUNCH_SCOPED
+    )
+    assert plain.log_path is None
+    named = brig.mech.Helper(
+        name="h",
+        argv=("true",),
+        lifetime=brig.mech.HelperLifetime.JAIL_LIFETIME,
+        log_path="/jail/h.jsonl",
+    )
+    assert named.log_path == "/jail/h.jsonl"
+    assert named.ready_path is None
+    with pytest.raises(ValueError, match=r"Helper\.log_path must be an absolute path"):
+        brig.mech.Helper(
+            name="h",
+            argv=("true",),
+            lifetime=brig.mech.HelperLifetime.JAIL_LIFETIME,
+            log_path="jail/h.jsonl",
+        )
+
+
+@pytest.mark.unit
 def test_compile_ctx_has_required_fields() -> None:
     """CompileCtx has jail_dir and platform fields."""
     ctx = brig.mech.CompileCtx(jail_dir="/tmp/jail", platform="linux")
