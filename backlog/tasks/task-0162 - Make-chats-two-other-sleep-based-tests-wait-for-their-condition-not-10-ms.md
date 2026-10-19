@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-18 20:33'
-updated_date: '2026-10-19 00:11'
+updated_date: '2026-10-19 00:13'
 labels:
   - chat
   - size-1
@@ -28,11 +28,7 @@ Found fixing DRAFT-0008 under TASK-0148. With an event loop whose clock runs 5 m
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-1. Baseline (done): scratch plugin at /tmp/claude-0/-home-user/a0d5191d-f6a5-53e2-ae9a-0fb260cd6c48/scratchpad/skewclock.py (not in the repo) patches BaseEventLoop.time to add 5 ms on every read. At HEAD under it, test_the_stop_notice... fails at line 107 and test_what_a_command_holds... at line 220; the 17 other chat tests pass, including all of test_chat_wiring.py (also at 50 ms).
-2. test_chat.py: _until (already there) waits for: the reply running (Endless records that it started) and the stop notice (the note as the last event) in test_the_stop_notice...; the reply running (model.seen) and commands.ran == ["!pytest"] after go is set in test_what_a_command_holds.... The one mid-reply check is an absence (no command runs during a reply): no event can be waited for, so it gets one loop turn (sleep(0), which uses no clock) instead of a timed sleep; a line read during the reply would run within that turn.
-3. test_chat_wiring.py: the three asyncio.sleep(0.01) lines. Lines ~57 and ~90 precede a positive assertion: wait on that value. Line ~161 precedes an absence (first.seen == []) that is only meaningful after /clear's answer is shown; wait for that note on screen, then check. _until is copied into this module: importing it from test_chat would reach a private name of another test module, and a public helper would grow the shipped testing module for one caller.
-4. Left alone: test_chat.py sleeps in test_a_command_running_when_the_person_leaves... and test_a_command_that_answers... are outside the named scope; they pass under the skew. Filed as a follow-up task if still unfixed.
-Proof: each named test seen failing at HEAD under SKEW_MS=5 (done), passing after; the whole file passing under SKEW_MS=5 and 50; then no skew; then -n auto --dist loadgroup; then ruff format/check, mypy on the file, scripts/check chat-cordis-plugin (once, first run with gates and docs). Not run: full scripts/check.
+Round 2, review finding 1 only: close-task refuses a bug without a repro. No code or test file changes; the fix is one 'No repro:' note (the form board.py accepts), with the reason the repro cannot be committed (the skew plugin is a process-wide fault injector, lives in the scratchpad, and the fixed tests pass without it). Steps: (1) copy the pre-fix test_chat.py (c6ebc32^) into the scratchpad and run its two named tests with and without the skew plugin, to put real results in the note; (2) append the note, starting its line with 'No repro:'; (3) run board-check close TASK-0162 to see the gate passes, without closing; (4) squash to one commit from e08c2fd. Round 1's plan is in git history at e08c2fd. Proof: the two pre-fix runs and the board-check output, in the notes. Criteria 1 and 2 stay as ticked; no Done.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -108,4 +104,13 @@ INFO    -  Documentation built in 4.41 seconds
 ```
 
 Review: not closed. Full scripts/check exit 0 and both criteria are met on the evidence, but close-task refuses: a bug needs its repro recorded (record-check TASK-0162 --repro -- <test>) or a 'No repro:' note. The repro uses a scratch skew-clock plugin outside the repo, so the worker should record a No repro: note saying so (or commit the plugin as a fixture).
+
+No repro: the failure needs the event loop's clock to run ahead of real time, as a stalled machine's does. The only thing in this work that does that is a scratch plugin kept outside the repo, /tmp/claude-0/-home-user/a0d5191d-f6a5-53e2-ae9a-0fb260cd6c48/scratchpad/skewclock.py (not committed). It patches asyncio's BaseEventLoop.time to add SKEW_MS (default 5) on every read, so it is a process-wide clock fault loaded with `-p skewclock`, not a test. The chat tests do not load it, and without it the pre-fix tests pass, so `record-check --repro -- <test>` would refuse the run as a repro that passed. A committed fixture would need a repro test that fails at the pre-fix code and is left unchanged by the fix; the fix edits test_chat.py, so the repro would have to be a new test file covering the same two behaviours. That is more than this fix, so the repro is the skewed run recorded below. Limit: nothing in the suite guards these two waits, so a return to a fixed sleep passes unless the run is under the plugin.
+
+Round 2 re-run, to check the claims above: the pre-fix test_chat.py (git show c6ebc32^:bh-02/plugins/chat-cordis-plugin/tests/test_chat.py, copied to /tmp/claude-0/-home-user/a0d5191d-f6a5-53e2-ae9a-0fb260cd6c48/scratchpad/repro/test_chat_prefix.py), its two named tests (-k "stop_notice_carries_the_notes or what_a_command_holds_never"), from /home/user/bh-02 with uv run pytest -q -o asyncio_mode=auto -p no:cacheprovider:
+- with the plugin (PYTHONPATH=/tmp/claude-0/-home-user/a0d5191d-f6a5-53e2-ae9a-0fb260cd6c48/scratchpad/repro, -p skewclock): 2 failed, exit 1: test_chat_prefix.py:107 (the stop notice not yet shown) and :220 (commands.ran == []).
+- without the plugin: 2 passed, exit 0.
+No code or test file changed in this round.
+
+Round 2 close gate: board-check close TASK-0162 printed 'ok: TASK-0162 can close' and exited 0 (run before the task was closed; the task is still In Progress, close-task was not run, the reviewer closes it). Changed in round 2: this task's notes and its implementation plan only. Commits from the backlog CLI for those edits are squashed into one commit on top of e08c2fd.
 <!-- SECTION:NOTES:END -->
