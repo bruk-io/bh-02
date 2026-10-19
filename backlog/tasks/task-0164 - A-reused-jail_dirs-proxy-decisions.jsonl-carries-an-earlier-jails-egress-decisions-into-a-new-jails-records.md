@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-18 22:30'
-updated_date: '2026-10-19 00:25'
+updated_date: '2026-10-19 00:26'
 labels:
   - brig
   - size-2
@@ -107,4 +107,6 @@ INFO    -  Documentation built in 3.95 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+Review (independent): not closed. Full scripts/check exit 0 (3908 passed, 118 skipped, gates and docs ok), recorded on the task, no files changed. AC1-3 met on the evidence. close-task refused: a bug closes with its repro recorded (record-check TASK-0164 --repro -- uv run pytest libs/brig/tests/integration/test_egress_decisions.py::test_a_new_jail_never_reads_an_earlier_jails_egress_decisions, run on the pre-fix code), or a 'No repro:' note. The worker saw it fail before the change but did not record it; the reviewer cannot rerun it failing without changing code. Once recorded, this closes with no other findings.
 <!-- SECTION:NOTES:END -->
