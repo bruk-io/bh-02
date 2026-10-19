@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-18 23:15'
-updated_date: '2026-10-19 00:30'
+updated_date: '2026-10-19 00:34'
 labels:
   - brig
   - size-2
@@ -35,4 +35,70 @@ TASK-0151 moved every brig integration and e2e test to conftest's jail_dir / new
 
 <!-- SECTION:NOTES:BEGIN -->
 Retired the scratch sweep. Removed libs/brig/tests/scratch_sweep.py, libs/brig/tests/unit/test_scratch_sweep.py, and from libs/brig/tests/conftest.py the session-scoped autouse _scratch_sweep fixture and pytest_addoption (--sweep-aged); reworded the _JAIL_DIR_PREFIX comment that cited the sweep. Evidence no test makes a /tmp/bg<pid> root: grep of libs/brig/tests, bh-02, scripts for prefix="bg" / /tmp/bg followed by a pid expression finds only conftest's spawn registry path f"/tmp/bg{harness_pid}-spawnreg" (a file). Every other mkdtemp prefix is bg- / bg-oci- / bg-else- / bg-outside- (a dash after bg, outside predicate 2 arm a), and tests/unit/test_no_test_names_a_directory_from_its_pid.py (kept) refuses a new test that names a path from getpid(), so the sweep is not the net for a future one either. Spawn registry: /tmp/bg<pid>-spawnreg is untouched; the sweep never removed it (predicate 3 spared it, it is a file) and nothing else does, so it stays as it was. Docs: SPEC.md, WORKFLOW.md, README.md, MILESTONES.md do not describe the scratch sweep or cite decision-121 (WORKFLOW.md's 'leak sweep' is the /bin/ps process sweep, a different fixture, kept), so no spec text changes and no new decision (test-only change). Runs: uv run pytest libs/brig/tests/unit + test_jail_dir_fixture.py -n auto: 1035 passed, 3 skipped, and /tmp/bg* listing identical before and after; uv run pytest libs/brig/tests/unit -q --sweep-aged now exits with pytest's unrecognized-argument usage error (option gone); scripts/check libs/brig exit 0 (1368 passed, 111 skipped; format, lint, mypy, gates, docs ok). Nothing to plant: this removes a fixture rather than adding a gate.
+
+Check `scripts/check` exited 0
+
+(32 earlier lines omitted)
+```text
+........................................................................ [ 34%]
+........................................................................ [ 35%]
+........................................................................ [ 37%]
+........................................................................ [ 39%]
+........................................................................ [ 41%]
+........................................................................ [ 43%]
+........................................................................ [ 44%]
+........................................................................ [ 46%]
+.........................................................ss...ssss.s...s [ 48%]
+..sss.ss....ss..ss.s.s.s.s..ss.ss.ss........s........................... [ 50%]
+........................................................................ [ 52%]
+........................................................................ [ 53%]
+..........................ssssssssssssssssssssssssssssssssssssssssssssss [ 55%]
+sssssssssssssssssssss.............................ssssssssssss.......... [ 57%]
+........................................................................ [ 59%]
+........................................................................ [ 61%]
+....................................................s................... [ 62%]
+......ss..s............................................................. [ 64%]
+........................................................................ [ 66%]
+........................................................................ [ 68%]
+........................................................................ [ 70%]
+........................................................................ [ 71%]
+........................................................................ [ 73%]
+........................................................................ [ 75%]
+........................................................................ [ 77%]
+........................................................................ [ 79%]
+........................................................................ [ 80%]
+........................................................................ [ 82%]
+........................................................................ [ 84%]
+........................................................................ [ 86%]
+........................................................................ [ 88%]
+........................................................................ [ 89%]
+........................................................................ [ 91%]
+........................................................................ [ 93%]
+........................................................................ [ 95%]
+........................................................................ [ 97%]
+........................................................................ [ 98%]
+..............................................                           [100%]
+3890 passed, 118 skipped in 192.42s (0:03:12)
+   ok
+== gates
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+== (root)
+   ok
+== libs/brig
+   ok
+== libs/cordis
+   ok
+== libs/cordis-helpers
+   ok
+== libs/host-paths
+   ok
+   ok
+== docs
+INFO    -  Cleaning site directory
+INFO    -  Building documentation to directory: /home/user/bh-02/site
+INFO    -  Documentation built in 3.94 seconds
+   ok
+== tokens
+   skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
+```
 <!-- SECTION:NOTES:END -->
