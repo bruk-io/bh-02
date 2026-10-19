@@ -3,7 +3,7 @@ id: TASK-0163
 title: >-
   Sub-agent log-stopped note: say bh-02 watch ends with the session, not only by
   Ctrl-C
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-18 20:58'
@@ -114,4 +114,6 @@ INFO    -  Documentation built in 4.05 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+Review (reviewer, not the worker): closed. Full scripts/check exited 0, no files changed by it. Note, README, CONTRACTS.md asker row and both tests say watch ends when the session is no longer running or on Ctrl-C. Nit, not filed: child.py:558 docstring 'since the log never ends, ends when...' leaves the subject of 'ends' unclear (watch is meant). README watch bullet already queued as TASK-0167.
 <!-- SECTION:NOTES:END -->
