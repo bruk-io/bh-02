@@ -984,10 +984,8 @@ def run_id() -> Iterator[str]:
 
 
 #: What a test's jail directory is named: `/tmp/bg-<eight random characters>`, `tempfile.mkdtemp`'s
-#: own. The dash keeps it out of the scratch sweep's reach (`_scratch_sweep` takes the roots whose
-#: name after `bg` begins with the harness pid), and the whole path is 16 characters, short because
-#: the proxy's port file, the channel sockets (`sun_path` is 104 bytes on darwin) and the leak
-#: sweep's truncated argv all carry it.
+#: own. The whole path is 16 characters, short because the proxy's port file, the channel sockets
+#: (`sun_path` is 104 bytes on darwin) and the leak sweep's truncated argv all carry it.
 _JAIL_DIR_PREFIX = "bg-"
 
 #: What the `new_jail_dir` fixture is: a call that makes another jail directory.
@@ -1016,9 +1014,10 @@ def _remove_tree(path: str) -> None:
 
 
 @contextlib.contextmanager
-def _jail_dirs() -> Iterator[NewJailDir]:
+def jail_dirs() -> Iterator[NewJailDir]:
     """What `new_jail_dir` is: a call that makes a jail directory, each of which is removed, with
-    what the jail left in it, when the block ends."""
+    what the jail left in it, when the block ends. For a helper that has no fixture to ask for one
+    (`tests/supervised_jail.py`'s probes, which run once and are cached)."""
     made: list[str] = []
 
     def make() -> str:
@@ -1055,7 +1054,7 @@ def new_jail_dir() -> Iterator[NewJailDir]:
     A test that needs a directory asks for `jail_dir`; one that needs several, or a helper that
     makes its own, takes this factory.
     """
-    with _jail_dirs() as make:
+    with jail_dirs() as make:
         yield make
 
 
@@ -1066,96 +1065,34 @@ def jail_dir(new_jail_dir: NewJailDir) -> str:
 
 
 @pytest.fixture
-def make_oci_jail(run_id: str) -> Iterator[Callable[..., Jail]]:
+def make_oci_jail(run_id: str, new_jail_dir: NewJailDir) -> Iterator[Callable[..., Jail]]:
     """`make(spec, jail_id=None, ...)` makes a container jail (`tests/oci_jail.py`): its id carries
     this run's token, which the session's container sweep looks for, and every jail made is
-    destroyed, and must end, when the test is done. Skips, naming `docker info`, where there is no
-    Docker daemon to run it on."""
+    destroyed, and must end, when the test is done; its jail directory (`new_jail_dir`'s, unless the
+    test names one) is removed after. Skips, naming `docker info`, where there is no Docker daemon
+    to run it on."""
     from tests import oci_jail
 
     oci_jail.needs_docker()
-    made: list[tuple[Jail, str]] = []
+    made: list[Jail] = []
 
     def make(
         spec: Any = None, *, jail_id: str | None = None, jail_dir: str | None = None, **more: Any
     ) -> Jail:
         from brig.core import Spec
 
-        directory = oci_jail.new_jail_dir() if jail_dir is None else jail_dir
-        try:
-            jail = oci_jail.make(
-                Spec(fs=oci_jail.allow_list()) if spec is None else spec,
-                directory,
-                jail_id=f"oci-{run_id}-{uuid.uuid4().hex[:8]}" if jail_id is None else jail_id,
-                **more,
-            )
-        except BaseException:
-            shutil.rmtree(directory, ignore_errors=True)
-            raise
-        made.append((jail, directory))
+        jail = oci_jail.make(
+            Spec(fs=oci_jail.allow_list()) if spec is None else spec,
+            new_jail_dir() if jail_dir is None else jail_dir,
+            jail_id=f"oci-{run_id}-{uuid.uuid4().hex[:8]}" if jail_id is None else jail_id,
+            **more,
+        )
+        made.append(jail)
         return jail
 
     yield make
     failed: list[str] = []
-    for jail, directory in made:
+    for jail in made:
         report = jail.destroy()
         failed += [str(item) for item in report.items if item.outcome.value == "FAILED"]
-        shutil.rmtree(directory, ignore_errors=True)
     assert not failed, f"a container jail could not be destroyed at teardown: {failed}"
-
-
-def pytest_addoption(parser: pytest.Parser) -> None:
-    """Add --sweep-aged option for session-level scratch cleanup."""
-    parser.addoption(
-        "--sweep-aged",
-        action="store_true",
-        default=False,
-        help="Sweep aged scratch roots (default: False)",
-    )
-
-
-@pytest.fixture(scope="session", autouse=True)
-def _scratch_sweep(request: pytest.FixtureRequest) -> Iterator[None]:
-    """Session-scoped fixture that sweeps this run's scratch roots at teardown.
-
-    Takes a snapshot of existing scratch roots before tests run and removes,
-    after tests complete, only roots absent from that snapshot whose
-    pid-bearing suffix STARTS WITH str(harness_pid) (decision-121 predicate
-    2, arm a -- a prefix match, never a substring match anywhere in the
-    name). With --sweep-aged, also removes roots older than 1 day regardless
-    of origin.
-
-    Pre-existing roots (present in the snapshot) are always spared, and the
-    spawn registry file is spared by predicate 3 (isdir). Named rather than
-    hidden: the pid-prefix match is not collision-proof -- a concurrent
-    sibling session's root is still swept if that sibling's pid decimal
-    string literally begins with this run's harness_pid string. That is
-    decision-121's predicate as specified, not a gap this fixture papers
-    over.
-    """
-    from tests.scratch_sweep import roots_to_sweep, snapshot_roots, sweep_roots
-
-    harness_pid = os.getpid()
-    scratch_dir = "/tmp"
-    prefix = "bg"
-
-    # Take snapshot before any tests run
-    snapshot = snapshot_roots(scratch_dir, prefix=prefix)
-
-    yield
-
-    # Sweep after all tests
-    sweep_aged = request.config.getoption("--sweep-aged")
-    roots = roots_to_sweep(
-        scratch_dir,
-        snapshot=snapshot,
-        prefix=prefix,
-        harness_pid=harness_pid,
-        now=time.time(),
-        sweep_aged=sweep_aged,
-    )
-
-    failures = sweep_roots(roots)
-    if failures:
-        for line in failures:
-            print(line)

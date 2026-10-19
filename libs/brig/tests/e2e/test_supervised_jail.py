@@ -32,7 +32,6 @@ import os
 import signal
 import subprocess
 import sys
-import tempfile
 import time
 from pathlib import Path
 
@@ -50,13 +49,12 @@ from brig.run import (
     group_alive,
 )
 from brig.run._supervisor_program import SUPERVISOR_SOURCE
+from tests.conftest import NewJailDir
 from tests.supervised_jail import (
     INTERPRETER,
-    cleanup,
     create_jail,
     instance_group,
     needs_a_supervised_jail,
-    new_jail_dir,
     process_state,
     python,
     run_to_end,
@@ -93,7 +91,9 @@ def _ended(jail: Jail) -> None:
 # ---------------------------------------------------------------------------------------------
 
 
-def test_several_processes_share_the_jails_one_instance_and_another_jail_does_not() -> None:
+def test_several_processes_share_the_jails_one_instance_and_another_jail_does_not(
+    new_jail_dir: NewJailDir,
+) -> None:
     """In a jail whose processes have no namespaces of their own (the block planted; uid 0 is
     this too), they are in the one instance's: decision-192. With namespaces they are not, and
     `tests/e2e/test_process_namespaces.py` is where that is shown."""
@@ -119,10 +119,11 @@ def test_several_processes_share_the_jails_one_instance_and_another_jail_does_no
     finally:
         _ended(one)
         _ended(other)
-        cleanup(first_dir, second_dir)
 
 
-def test_a_process_of_the_jail_is_a_process_of_the_host_in_a_group_of_its_own() -> None:
+def test_a_process_of_the_jail_is_a_process_of_the_host_in_a_group_of_its_own(
+    new_jail_dir: NewJailDir,
+) -> None:
     """`Process.pid` is the process itself in the host's pid namespace, leader of its own group:
     the identity every host-side check asks about (`alive`, the dial, a rehydrated teardown)."""
     jail_dir = new_jail_dir()
@@ -138,7 +139,6 @@ def test_a_process_of_the_jail_is_a_process_of_the_host_in_a_group_of_its_own() 
         assert jail.alive(), "stopping one process must not end the jail"
     finally:
         _ended(jail)
-        cleanup(jail_dir)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -170,9 +170,9 @@ with open("/.brig-supervisor.py") as f:
 """
 
 
-def test_the_supervisor_is_pid_1_isolated_with_an_empty_environment_and_a_read_only_source() -> (
-    None
-):
+def test_the_supervisor_is_pid_1_isolated_with_an_empty_environment_and_a_read_only_source(
+    new_jail_dir: NewJailDir,
+) -> None:
     """Read from a process that can see PID 1: one with no namespaces of its own (the block
     planted). With them it can't, which is the namespaces' test."""
     jail_dir = new_jail_dir()
@@ -204,25 +204,23 @@ def test_the_supervisor_is_pid_1_isolated_with_an_empty_environment_and_a_read_o
                 assert "brig supervisor: PID 1" not in path.read_text(errors="ignore")[:4096]
     finally:
         _ended(jail)
-        cleanup(jail_dir)
 
 
-def test_a_spec_that_does_not_mount_the_interpreter_is_refused_and_the_control_is_not() -> None:
+def test_a_spec_that_does_not_mount_the_interpreter_is_refused_and_the_control_is_not(
+    new_jail_dir: NewJailDir,
+) -> None:
     from brig.core import FsPolicy, ReadModel, Spec
     from brig.mech.bwrap import InterpreterNotMounted
     from brig.run.compile_ctx import build_compile_ctx
     from brig.stack import strict_linux
 
     jail_dir = new_jail_dir()
-    try:
-        bare = Spec(fs=FsPolicy(read_model=ReadModel.ALLOW_LIST, read_allows=("/bin",)))
-        ctx = build_compile_ctx(bare, jail_dir=jail_dir, platform=sys.platform)
-        with pytest.raises(InterpreterNotMounted, match="/usr/bin/python3"):
-            strict_linux().compile(bare, ctx=ctx)
-        # The control: the same Spec, under an interpreter it does mount, compiles.
-        assert strict_linux("/bin/python3").compile(bare, ctx=ctx).supervisor is not None
-    finally:
-        cleanup(jail_dir)
+    bare = Spec(fs=FsPolicy(read_model=ReadModel.ALLOW_LIST, read_allows=("/bin",)))
+    ctx = build_compile_ctx(bare, jail_dir=jail_dir, platform=sys.platform)
+    with pytest.raises(InterpreterNotMounted, match="/usr/bin/python3"):
+        strict_linux().compile(bare, ctx=ctx)
+    # The control: the same Spec, under an interpreter it does mount, compiles.
+    assert strict_linux("/bin/python3").compile(bare, ctx=ctx).supervisor is not None
 
 
 # ---------------------------------------------------------------------------------------------
@@ -253,7 +251,9 @@ _A_ZOMBIE_OF_ITS_OWN = (
 )
 
 
-def test_the_supervisor_reaps_orphans_and_the_scan_would_see_a_zombie() -> None:
+def test_the_supervisor_reaps_orphans_and_the_scan_would_see_a_zombie(
+    new_jail_dir: NewJailDir,
+) -> None:
     jail_dir = new_jail_dir()
     jail = create_jail(jail_dir)
     try:
@@ -273,7 +273,6 @@ def test_the_supervisor_reaps_orphans_and_the_scan_would_see_a_zombie() -> None:
         assert out.strip() not in ("[]", ""), out
     finally:
         _ended(jail)
-        cleanup(jail_dir)
 
 
 _SIGNAL_THE_INIT = (
@@ -282,7 +281,9 @@ _SIGNAL_THE_INIT = (
 )
 
 
-def test_signals_from_inside_the_jail_do_not_reach_the_supervisor_but_the_hosts_do() -> None:
+def test_signals_from_inside_the_jail_do_not_reach_the_supervisor_but_the_hosts_do(
+    new_jail_dir: NewJailDir,
+) -> None:
     """From a process that can see PID 1 (no namespaces of its own: the block planted). With
     them `kill 1` reaches the process itself, which is its own PID 1."""
     jail_dir, other_dir = new_jail_dir(), new_jail_dir()
@@ -317,7 +318,6 @@ def test_signals_from_inside_the_jail_do_not_reach_the_supervisor_but_the_hosts_
     finally:
         _ended(jail)
         _ended(control)
-        cleanup(jail_dir, other_dir)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -354,7 +354,9 @@ print(held)
 """
 
 
-def test_a_process_of_the_jail_can_not_read_attach_to_or_take_from_the_supervisor() -> None:
+def test_a_process_of_the_jail_can_not_read_attach_to_or_take_from_the_supervisor(
+    new_jail_dir: NewJailDir,
+) -> None:
     """From a process that can see PID 1 (no namespaces of its own: the block planted); with
     them the supervisor is not in its pid namespace at all."""
     jail_dir = new_jail_dir()
@@ -367,10 +369,11 @@ def test_a_process_of_the_jail_can_not_read_attach_to_or_take_from_the_superviso
         assert "ptrace attach -1 1" in out, out  # -1, EPERM
     finally:
         _ended(jail)
-        cleanup(jail_dir)
 
 
-def test_no_process_the_supervisor_starts_holds_the_control_socket() -> None:
+def test_no_process_the_supervisor_starts_holds_the_control_socket(
+    new_jail_dir: NewJailDir,
+) -> None:
     jail_dir = new_jail_dir()
     jail = create_jail(jail_dir)
     try:
@@ -386,7 +389,6 @@ def test_no_process_the_supervisor_starts_holds_the_control_socket() -> None:
         assert status == 0 and out.strip() in ("0", "1"), out
     finally:
         _ended(jail)
-        cleanup(jail_dir)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -394,7 +396,9 @@ def test_no_process_the_supervisor_starts_holds_the_control_socket() -> None:
 # ---------------------------------------------------------------------------------------------
 
 
-def test_stdio_the_host_opened_reaches_the_process_though_the_jail_cannot_see_the_path() -> None:
+def test_stdio_the_host_opened_reaches_the_process_though_the_jail_cannot_see_the_path(
+    new_jail_dir: NewJailDir,
+) -> None:
     jail_dir = new_jail_dir()
     jail = create_jail(jail_dir)
     try:
@@ -414,7 +418,6 @@ def test_stdio_the_host_opened_reaches_the_process_though_the_jail_cannot_see_th
         assert os.path.exists(path) and path.startswith(os.path.realpath(jail_dir))
     finally:
         _ended(jail)
-        cleanup(jail_dir)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -448,7 +451,9 @@ def _marker() -> str:
     return unique_sleep()[0]
 
 
-def test_end_of_file_on_the_control_socket_ends_everything_a_setsid_child_included() -> None:
+def test_end_of_file_on_the_control_socket_ends_everything_a_setsid_child_included(
+    new_jail_dir: NewJailDir,
+) -> None:
     dead_dir, kept_dir = new_jail_dir(), new_jail_dir()
     dead_markers = (_marker(), _marker(), _marker())
     kept_markers = (_marker(), _marker(), _marker())
@@ -476,7 +481,6 @@ def test_end_of_file_on_the_control_socket_ends_everything_a_setsid_child_includ
         for host in (dying, surviving):
             host.kill()
             host.wait(10)
-        cleanup(dead_dir, kept_dir)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -536,7 +540,9 @@ def _stand_in_host_with_a_helper(
 
 
 @pytest.mark.parametrize("tethered", [False, True], ids=["untethered", "tethered"])
-def test_a_helper_ends_with_a_creator_killed_as_the_jails_processes_do(tethered: bool) -> None:
+def test_a_helper_ends_with_a_creator_killed_as_the_jails_processes_do(
+    tethered: bool, new_jail_dir: NewJailDir
+) -> None:
     """The helper runs on the host, outside the jail's namespaces, so the supervisor's end-of-file
     does not reach it: it is tethered to the creator by a descriptor of its own. The control is
     the second creator, alive, whose helper and process both run until it is killed too."""
@@ -567,10 +573,11 @@ def test_a_helper_ends_with_a_creator_killed_as_the_jails_processes_do(tethered:
             host.kill()
             host.wait(10)
         _kill_markers(*dead, *kept)  # a helper that outlived its creator is not left behind
-        cleanup(dead_dir, kept_dir)
 
 
-def test_a_helper_ends_with_a_supervised_jail_nobody_holds_any_more() -> None:
+def test_a_helper_ends_with_a_supervised_jail_nobody_holds_any_more(
+    new_jail_dir: NewJailDir,
+) -> None:
     jail_dir = new_jail_dir()
     helper_marker, process_marker = _marker(), _marker()
 
@@ -586,10 +593,9 @@ def test_a_helper_ends_with_a_supervised_jail_nobody_holds_any_more() -> None:
         assert until(lambda: not running_with(helper_marker), 15.0), "its helper outlived it"
     finally:
         _kill_markers(helper_marker, process_marker)
-        cleanup(jail_dir)
 
 
-def test_a_tether_still_ends_a_supervised_jail_whose_host_lives() -> None:
+def test_a_tether_still_ends_a_supervised_jail_whose_host_lives(new_jail_dir: NewJailDir) -> None:
     """decision-167's tether runs outside everything and is independent of the socket: the write
     end of the tether closed ends the jail while this process still holds its end of the socket."""
     jail_dir = new_jail_dir()
@@ -608,10 +614,9 @@ def test_a_tether_still_ends_a_supervised_jail_whose_host_lives() -> None:
         assert control > 1
     finally:
         _ended(jail)
-        cleanup(jail_dir)
 
 
-def test_a_jail_nobody_holds_any_more_ends() -> None:
+def test_a_jail_nobody_holds_any_more_ends(new_jail_dir: NewJailDir) -> None:
     """The rule, stated: a supervised jail lives as long as the object that holds its end of the
     socket, tether or none (decision-191)."""
     jail_dir = new_jail_dir()
@@ -623,13 +628,10 @@ def test_a_jail_nobody_holds_any_more_ends() -> None:
         assert until(lambda: bool(running_with(marker)))
         return instance_group(jail)
 
-    try:
-        group = make()
-        gc.collect()
-        assert until(lambda: not running_with(marker), 15.0), "the jail outlived its object"
-        assert group > 1
-    finally:
-        cleanup(jail_dir)
+    group = make()
+    gc.collect()
+    assert until(lambda: not running_with(marker), 15.0), "the jail outlived its object"
+    assert group > 1
 
 
 # ---------------------------------------------------------------------------------------------
@@ -640,6 +642,7 @@ def test_a_jail_nobody_holds_any_more_ends() -> None:
 @pytest.mark.parametrize("namespaces", [True, False], ids=["as-the-host-gives", "no-namespaces"])
 def test_start_wait_interrupt_and_stop_are_requests_the_supervisor_answers(
     namespaces: bool,
+    new_jail_dir: NewJailDir,
 ) -> None:
     jail_dir = new_jail_dir()
     jail = create_jail(jail_dir, namespaces=namespaces)
@@ -677,10 +680,11 @@ def test_start_wait_interrupt_and_stop_are_requests_the_supervisor_answers(
         assert running.wait(5) == (-signal.SIGKILL if running.namespaces else -signal.SIGTERM)
     finally:
         _ended(jail)
-        cleanup(jail_dir)
 
 
-def test_a_failed_exec_is_a_failed_start_with_its_reason_and_the_jail_goes_on() -> None:
+def test_a_failed_exec_is_a_failed_start_with_its_reason_and_the_jail_goes_on(
+    new_jail_dir: NewJailDir,
+) -> None:
     jail_dir = new_jail_dir()
     jail = create_jail(jail_dir)
     try:
@@ -694,10 +698,11 @@ def test_a_failed_exec_is_a_failed_start_with_its_reason_and_the_jail_goes_on() 
         assert run_to_end(jail.start(sh("echo and on"))) == (0, "and on\n")
     finally:
         _ended(jail)
-        cleanup(jail_dir)
 
 
-def test_a_status_learned_is_kept_and_answered_after_the_jail_is_gone() -> None:
+def test_a_status_learned_is_kept_and_answered_after_the_jail_is_gone(
+    new_jail_dir: NewJailDir,
+) -> None:
     jail_dir = new_jail_dir()
     jail = create_jail(jail_dir)
     try:
@@ -708,7 +713,6 @@ def test_a_status_learned_is_kept_and_answered_after_the_jail_is_gone() -> None:
         assert process.wait(1) == 7
     finally:
         _ended(jail)
-        cleanup(jail_dir)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -716,7 +720,9 @@ def test_a_status_learned_is_kept_and_answered_after_the_jail_is_gone() -> None:
 # ---------------------------------------------------------------------------------------------
 
 
-def test_destroy_reports_the_processes_then_the_instance_and_leaves_nothing() -> None:
+def test_destroy_reports_the_processes_then_the_instance_and_leaves_nothing(
+    new_jail_dir: NewJailDir,
+) -> None:
     jail_dir = new_jail_dir()
     jail = create_jail(jail_dir)
     marker, sleep = unique_sleep()
@@ -746,7 +752,6 @@ def test_destroy_reports_the_processes_then_the_instance_and_leaves_nothing() ->
         assert all(item.outcome is KillOutcome.ALREADY_GONE for item in again.items), again
     finally:
         _ended(jail)
-        cleanup(jail_dir)
 
 
 # A program that answers SIGTERM by saying it came and carrying on, which a program that
@@ -771,6 +776,7 @@ while True:
 @pytest.mark.parametrize("grace", [0, 0.6], ids=["at-once", "with-grace"])
 def test_destroy_at_once_sends_no_sigterm_and_ends_the_instance_first_a_setsid_child_included(
     grace: float,
+    new_jail_dir: NewJailDir,
 ) -> None:
     """decision-193. Two programs ignore SIGTERM (each starts another in a session of its own),
     and `destroy(grace=0)` ends the jail with the kernel's end of its namespace: none of them is
@@ -779,7 +785,7 @@ def test_destroy_at_once_sends_no_sigterm_and_ends_the_instance_first_a_setsid_c
     grace period of 0.6 s: every group is sent SIGTERM first (the handlers ran) and each of the
     two waits out the grace period, so it takes longer than that."""
     jail_dir = new_jail_dir()
-    workspace = tempfile.mkdtemp(prefix="bg-ws-", dir="/tmp")
+    workspace = new_jail_dir()
     Path(workspace, "stubborn.py").write_text(_STUBBORN)
     jail = create_jail(jail_dir, workspace=workspace)
     names = (f"a{_marker()}", f"b{_marker()}")
@@ -821,10 +827,11 @@ def test_destroy_at_once_sends_no_sigterm_and_ends_the_instance_first_a_setsid_c
             assert elapsed > 2 * grace, f"two programs ignoring SIGTERM took {elapsed:.2f} s"
     finally:
         _ended(jail)
-        cleanup(jail_dir, workspace)
 
 
-def test_the_instance_group_names_the_jail_whose_program_ended_and_the_jail_did_not() -> None:
+def test_the_instance_group_names_the_jail_whose_program_ended_and_the_jail_did_not(
+    new_jail_dir: NewJailDir,
+) -> None:
     """decision-193. A program starts another in a session of its own and ends: its own group is
     gone and the jail, which the other holds, is not. `Jail.instance_group` is the group that holds
     PID 1, found in the process table the way the other tests find it, and it lives as long as the
@@ -849,10 +856,11 @@ def test_the_instance_group_names_the_jail_whose_program_ended_and_the_jail_did_
         assert until(lambda: not running_with(marker), 5.0)
     finally:
         _ended(jail)
-        cleanup(jail_dir)
 
 
-def test_a_rehydrated_supervised_jail_can_be_destroyed_and_nothing_else() -> None:
+def test_a_rehydrated_supervised_jail_can_be_destroyed_and_nothing_else(
+    new_jail_dir: NewJailDir,
+) -> None:
     jail_dir = new_jail_dir()
     jail = create_jail(jail_dir)
     marker, sleep = unique_sleep()
@@ -876,10 +884,9 @@ def test_a_rehydrated_supervised_jail_can_be_destroyed_and_nothing_else() -> Non
         assert not jail.alive()
     finally:
         _ended(jail)
-        cleanup(jail_dir)
 
 
-def test_the_report_names_what_the_supervisor_does_not_grade() -> None:
+def test_the_report_names_what_the_supervisor_does_not_grade(new_jail_dir: NewJailDir) -> None:
     """The three mechanism axes are enforced; of the two axes the runtime grades, `control` is
     `enforced` at the jail scope, which the control battery proves (decision-201,
     tests/e2e/test_control_battery.py), and `channel_exclusivity` stays `unenforced`, which
@@ -893,4 +900,3 @@ def test_the_report_names_what_the_supervisor_does_not_grade() -> None:
         assert axes["channel_exclusivity"] is Grade.UNENFORCED
     finally:
         _ended(jail)
-        cleanup(jail_dir)

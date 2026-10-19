@@ -19,7 +19,6 @@ import json
 import os
 import subprocess
 import sys
-import tempfile
 from typing import Any
 
 import pytest
@@ -98,10 +97,6 @@ def inspect(container_id: str) -> dict[str, Any] | None:
 def exec_in(container_id: str, script: str) -> subprocess.CompletedProcess[str]:
     """`script` run with `sh -c` inside the container by `docker exec`, the test's own door."""
     return docker("exec", container_id, "sh", "-c", script)
-
-
-def new_jail_dir() -> str:
-    return tempfile.mkdtemp(prefix="bg-oci-", dir="/tmp")
 
 
 def allow_list(**fs: Any) -> FsPolicy:

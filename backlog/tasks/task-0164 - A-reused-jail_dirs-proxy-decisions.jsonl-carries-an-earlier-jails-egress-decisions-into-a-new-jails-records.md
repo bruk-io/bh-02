@@ -3,9 +3,11 @@ id: TASK-0164
 title: >-
   A reused jail_dir's proxy-decisions.jsonl carries an earlier jail's egress
   decisions into a new jail's records
-status: To Do
-assignee: []
+status: Done
+assignee:
+  - '@claude'
 created_date: '2026-10-18 22:30'
+updated_date: '2026-10-19 00:27'
 labels:
   - brig
   - size-2
@@ -21,7 +23,160 @@ Found while fixing TASK-0150 (decision-204 removes a helper's declared ready fil
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A SPEC.md decision paragraph rules how a new jail never reads an earlier jail's egress decisions, naming this task and ending (Ruled YYYY-MM-DD, decision-N.)
-- [ ] #2 A test plants a proxy-decisions.jsonl holding an earlier jail's line in the jail_dir before Jail.create and shows the new jail's egress_decisions return none of it; it is seen failing before the change and passing after
-- [ ] #3 scripts/check libs/brig passes
+- [x] #1 A SPEC.md decision paragraph rules how a new jail never reads an earlier jail's egress decisions, naming this task and ending (Ruled YYYY-MM-DD, decision-N.)
+- [x] #2 A test plants a proxy-decisions.jsonl holding an earlier jail's line in the jail_dir before Jail.create and shows the new jail's egress_decisions return none of it; it is seen failing before the change and passing after
+- [x] #3 scripts/check libs/brig passes
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1. Write the failing test first: in libs/brig/tests/integration/test_egress_decisions.py plant a proxy-decisions.jsonl holding an earlier jail's allow line in the jail_dir before Jail.create (launch), run a real denied request, and assert read_egress_decisions returns only this jail's deny, none of the planted line (controls: file planted and present at create; this jail's own deny is returned). Run on unchanged code: must fail. Unit tests: Helper.log_path default None/absolute-only; connect_proxy declares its decisions file as log_path equal to --log.
+2. SPEC.md first: decision-205 paragraph next to decision-204 ruling option 1 (Helper.log_path, create removes it before the helper starts) and why not the reader's cursor at create (state a rehydrated jail would need persisted, race with an earlier proxy, file only grows) or the jail id in the name (compile has no jail id; ids can be reused; files accumulate); amend decision-204 'not covered' and the Helper lifetimes sentence to point at it.
+3. Code: mech/contract.py Helper.log_path (+absolute guard); mech/connect_proxy.py declares log_path=log_path; run/host.py generalises _remove_ready_files to remove ready_path and log_path of every helper before any starts.
+4. Proof: new test fails before (planted line read), passes after; mutation: drop the removal call -> test fails. scripts/check libs/brig once at the end.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Ruling: libs/brig/SPEC.md section 6, decision-205 (2026-10-19), option 1 (same shape as decision-204): Helper gains log_path beside ready_path; HostRuntime.create removes every helper's declared ready_path and log_path (renamed _remove_declared_files in run/host.py) before any helper starts, LAUNCH_SCOPED included; a link is removed not followed; an unremovable path is an OSError from create with a note, nothing started. connect_proxy declares its decisions file (the --log argument) as log_path. Why not the reader's cursor at the end (the cursor is the embedder's and stateless, so the jail would carry an offset a rehydrated jail must read, or each embedder measures; old lines stay for cursor 0; file grows) nor the jail id in the name (compile() is pure and has no id, only jail_dir and platform; ids can repeat in a reused dir; a file per jail; decisions_path changes for callers). decision-204's 'not covered' sentence and the Helper lifetimes sentence now point at decision-205. Code: mech/contract.py, mech/connect_proxy.py, run/host.py. Tests: integration/test_egress_decisions.py::test_a_new_jail_never_reads_an_earlier_jails_egress_decisions (plants an earlier jail's allow line for earlier-jail.test in proxy-decisions.jsonl before Jail.create; controls: the plant is read as a decision before create, and this jail's own deny for 127.0.0.1 comes back; asserts hosts == ['127.0.0.1']); integration/test_helpers.py (stale log gone at the helper's own start for JAIL_LIFETIME and LAUNCH_SCOPED and the file then holds only this launch's line, neighbour kept; an unremovable log refuses create with no helper started, same-test control); unit tests for Helper.log_path (default None, absolute only, error names the field) and for connect_proxy declaring --log's path as log_path. Evidence, AC2 seen failing: on the unchanged code (SPEC and test only) the new egress test failed with 'this jail's records hold a decision an earlier jail's proxy made: [earlier-jail.test, 127.0.0.1]'; after the change the file's 7 tests pass. Mutation checks (scratch copy plus sha256, restored, hashes match d4563aaa... and 80ec427b...): removing log_path=log_path from connect_proxy fails the egress test and the unit test; removing the log_path entry from the removal pass fails the egress test and the three new test_helpers cases. The tests use HostRuntime and no bwrap, so they run here (not skipped). AC3: scripts/check libs/brig exit 0 (format, lint, mypy strict, 1386 passed 111 skipped, gates all ok, docs ok; tokens skipped, no bh-01). The full scripts/check was not run.
+
+Check `scripts/check` exited 0
+
+(32 earlier lines omitted)
+```text
+........................................................................ [ 33%]
+........................................................................ [ 35%]
+........................................................................ [ 37%]
+........................................................................ [ 39%]
+........................................................................ [ 41%]
+........................................................................ [ 42%]
+........................................................................ [ 44%]
+........................................................................ [ 46%]
+......................................................s..ss...ssss.s.s.s [ 48%]
+......ss..ss..sss.ss.s.s..ss..sss...s......s............................ [ 50%]
+........................................................................ [ 51%]
+........................................................................ [ 53%]
+..............................ssssssssssssssssssssssssssssssssssssssssss [ 55%]
+sssssssssssssssssssssssss............................sssssssss..s......s [ 57%]
+.......s......................................................s......... [ 59%]
+........................................................................ [ 60%]
+........................................................................ [ 62%]
+...sss.................................................................. [ 64%]
+........................................................................ [ 66%]
+........................................................................ [ 67%]
+........................................................................ [ 69%]
+........................................................................ [ 71%]
+........................................................................ [ 73%]
+........................................................................ [ 75%]
+........................................................................ [ 76%]
+........................................................................ [ 78%]
+........................................................................ [ 80%]
+........................................................................ [ 82%]
+........................................................................ [ 84%]
+........................................................................ [ 85%]
+........................................................................ [ 87%]
+........................................................................ [ 89%]
+........................................................................ [ 91%]
+........................................................................ [ 93%]
+........................................................................ [ 94%]
+........................................................................ [ 96%]
+........................................................................ [ 98%]
+................................................................         [100%]
+3908 passed, 118 skipped in 192.73s (0:03:12)
+   ok
+== gates
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+== (root)
+   ok
+== libs/brig
+   ok
+== libs/cordis
+   ok
+== libs/cordis-helpers
+   ok
+== libs/host-paths
+   ok
+   ok
+== docs
+INFO    -  Cleaning site directory
+INFO    -  Building documentation to directory: /home/user/bh-02/site
+INFO    -  Documentation built in 3.95 seconds
+   ok
+== tokens
+   skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
+```
+
+Review (independent): not closed. Full scripts/check exit 0 (3908 passed, 118 skipped, gates and docs ok), recorded on the task, no files changed. AC1-3 met on the evidence. close-task refused: a bug closes with its repro recorded (record-check TASK-0164 --repro -- uv run pytest libs/brig/tests/integration/test_egress_decisions.py::test_a_new_jail_never_reads_an_earlier_jails_egress_decisions, run on the pre-fix code), or a 'No repro:' note. The worker saw it fail before the change but did not record it; the reviewer cannot rerun it failing without changing code. Once recorded, this closes with no other findings.
+
+Repro at 706980e35ab9, test files: libs/brig/tests/integration/test_egress_decisions.py; command: `uv run pytest libs/brig/tests/integration/test_egress_decisions.py::test_a_new_jail_never_reads_an_earlier_jails_egress_decisions -q -p no:cacheprovider` exited 1
+
+(3 earlier lines omitted)
+```text
+________ test_a_new_jail_never_reads_an_earlier_jails_egress_decisions _________
+
+run_id = '421332c15a814b0882ad2af341860b52'
+origin = <tests.integration.test_egress_decisions._Origin object at 0x7f6313349550>
+jail_dir = '/tmp/bg-yqq9mg29'
+
+    def test_a_new_jail_never_reads_an_earlier_jails_egress_decisions(
+        run_id: str, origin: _Origin, jail_dir: str
+    ) -> None:
+        """TASK-0164, decision-205. A jail directory is reused (decision-181) and the proxy
+        appends to `proxy-decisions.jsonl`, so a new jail's reader, which starts at byte 0,
+        folded an earlier jail's allow and deny lines into its own records: a denial attributed
+        to an action that never made the call. `create` now removes the file a helper declares
+        as its `log_path` before it starts the helper.
+    
+        The earlier jail's line is planted BEFORE `Jail.create`, in the proxy's own record
+        shape, naming a host this jail never contacts. This jail then makes one request the
+        policy refuses (`127.0.0.1`, while only `localhost` is permitted), and the reader
+        returns that one deny and nothing of the planted line.
+    
+        THE CONTROLS, in this test: the plant is there when `create` is called and the reader
+        reads it as a decision (so "none of it" is the removal's doing, not a line the reader
+        would have skipped anyway), and this jail's own deny does come back (so an empty
+        answer, a reader or a proxy that broke, cannot pass for the fix)."""
+        earlier = "earlier-jail.test"
+        planted = decisions_path(jail_dir)
+        with open(planted, "w", encoding="utf-8") as decisions:
+            decisions.write(_earlier_jails_line(earlier))
+        before = read_egress_decisions(jail_dir, "jail-before-create")
+        assert [e.data["host"] for e in before.events] == [earlier], (
+            "the earlier jail's line was not planted, or the reader does not take it for a decision"
+        )
+    
+        jail, process = _run(
+            jail_dir,
+            ("localhost",),
+            _fetch(f"http://127.0.0.1:{origin.port}/x", os.path.join(jail_dir, "got")),
+            run_id,
+        )
+        try:
+            deadline = time.monotonic() + _IDLE_S
+            events = ()
+            while time.monotonic() < deadline:
+                events = read_egress_decisions(jail.jail_dir, jail.jail_id).events
+                if any(e.data["egress_decision"] == "deny" for e in events):
+                    break
+                time.sleep(0.05)
+    
+            hosts = [e.data["host"] for e in events]
+            assert "127.0.0.1" in hosts, f"this jail's own deny never came back: {hosts!r}"
+>           assert earlier not in hosts, (
+                f"this jail's records hold a decision an earlier jail's proxy made: {hosts!r}"
+            )
+E           AssertionError: this jail's records hold a decision an earlier jail's proxy made: ['earlier-jail.test', '127.0.0.1']
+E           assert 'earlier-jail.test' not in ['earlier-jail.test', '127.0.0.1']
+
+libs/brig/tests/integration/test_egress_decisions.py:376: AssertionError
+=========================== short test summary info ============================
+FAILED libs/brig/tests/integration/test_egress_decisions.py::test_a_new_jail_never_reads_an_earlier_jails_egress_decisions
+1 failed in 0.39s
+```
+
+Round 1 review fix (blocking finding: the repro was not recorded). No code or test changed. In the working tree only (index untouched) I put libs/brig/src/brig/mech/connect_proxy.py, mech/contract.py and run/host.py back to their 0a618087 (pre-fix) content with git restore --source=0a61808 --worktree, ran record-check TASK-0164 --repro -- uv run pytest libs/brig/tests/integration/test_egress_decisions.py::test_a_new_jail_never_reads_an_earlier_jails_egress_decisions at HEAD 706980e (the test file committed and clean), and it failed with 'this jail's records hold a decision an earlier jail's proxy made: ['earlier-jail.test', '127.0.0.1']' (record exit 0: failure recorded in the note above). Then git restore --worktree put the three files back to HEAD (git status clean, git diff HEAD empty). The same test passes on the fixed code: the file's 7 tests pass. board-check close TASK-0164 now reports 'can close'. The repro test file is unchanged since 706980e, so close-task's edited-repro check holds. Left for the reviewer: running close-task (a worker never sets Done).
+
+Review round 2 (independent): closed. The only blocking finding from round 1, an unrecorded repro, is resolved: the repro is on the task, failing on the pre-fix source at 706980e with the earlier jail's host in this jail's records. Since that review, the commits change the task file only. The full scripts/check exit 0 recorded earlier still holds for this code. AC1-3 met. No other findings, no drafts.
+<!-- SECTION:NOTES:END -->

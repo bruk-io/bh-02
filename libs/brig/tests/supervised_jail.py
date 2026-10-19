@@ -5,6 +5,10 @@ scratch workspace, created through `HostRuntime`, so its PID 1 is brig's supervi
 system's `python3`. Everything a test learns about it, it learns the way the leak sweep does:
 from the host with `/bin/ps` and `/proc`, or from inside, by a process the test started.
 
+This module makes no directory a test is left to remove: a test's jail directory (and its
+workspace) is `tests/conftest.py`'s `new_jail_dir`, removed when the test is done, and the two
+cached probes below take theirs from `jail_dirs`, removed when they have answered.
+
 `needs_a_supervised_jail` is the skip, an autouse-style fixture body rather than a module-level
 `skipif`, for the reason `tests/e2e/test_strict_linux_journey.py` gives.
 """
@@ -15,10 +19,8 @@ import dataclasses
 import functools
 import os
 import re
-import shutil
 import subprocess
 import sys
-import tempfile
 import time
 import uuid
 from collections.abc import Sequence
@@ -37,6 +39,7 @@ from brig.mech.bwrap import DEFAULT_BWRAP_PATH
 from brig.run import HostRuntime, Jail, Process
 from brig.run.compile_ctx import build_compile_ctx
 from brig.stack import CompiledJail, strict_linux
+from tests.conftest import jail_dirs
 
 INTERPRETER = "/usr/bin/python3"
 SYSTEM_ROOTS = ("/bin", "/usr", "/lib", "/lib64", "/etc")
@@ -51,10 +54,6 @@ def needs_a_supervised_jail() -> None:
         )
     if not os.path.exists(INTERPRETER):
         pytest.skip(f"the jail's supervisor runs under {INTERPRETER}, which is not there")
-
-
-def new_jail_dir() -> str:
-    return tempfile.mkdtemp(prefix="bg-sv-", dir="/tmp")
 
 
 def spec_for(
@@ -130,14 +129,13 @@ def create_jail(
 def namespaces_here() -> tuple[bool, str]:
     """Whether a jail made here gives its processes namespaces of their own, and when not the
     supervisor's reason, asked of a real jail once: what a test that needs them skips on."""
-    jail_dir = new_jail_dir()
-    jail = create_jail(jail_dir, jail_id="asked")
-    try:
-        process = jail.start(["/bin/true"])
-        return process.namespaces, process.control.detail
-    finally:
-        jail.destroy()
-        cleanup(jail_dir)
+    with jail_dirs() as new_jail_dir:
+        jail = create_jail(new_jail_dir(), jail_id="asked")
+        try:
+            process = jail.start(["/bin/true"])
+            return process.namespaces, process.control.detail
+        finally:
+            jail.destroy()
 
 
 @functools.cache
@@ -147,10 +145,9 @@ def the_kernel_gives_namespaces_in_a_jail(*, blocked_jail: bool = False) -> bool
     not of brig's supervisor: an observation made without the code under test, so that a
     supervisor that wrongly finds none is told from a host that gives none. `blocked_jail` asks
     it of the jail with the block of decision-195 planted (`blocked`)."""
-    jail_dir = new_jail_dir()
-    try:
+    with jail_dirs() as new_jail_dir:
         spec = spec_for()
-        ctx = build_compile_ctx(spec, jail_dir=jail_dir, platform=sys.platform)
+        ctx = build_compile_ctx(spec, jail_dir=new_jail_dir(), platform=sys.platform)
         compiled = strict_linux(INTERPRETER).compile(spec, ctx=ctx)
         argv = (
             "/usr/bin/unshare",
@@ -168,8 +165,6 @@ def the_kernel_gives_namespaces_in_a_jail(*, blocked_jail: bool = False) -> bool
         # bwrap reads its stdin to the end for the `--ro-bind-data` the supervisor's program is
         done = subprocess.run(wrap(argv), input=b"x", capture_output=True, check=False)
         return done.returncode == 0
-    finally:
-        cleanup(jail_dir)
 
 
 def needs_namespaces() -> None:
@@ -186,11 +181,6 @@ def needs_namespaces() -> None:
             f"(unshare(1) made them) and brig's supervisor found none: {why}"
         )
     pytest.skip(f"this jail gives its processes no namespaces of their own here: {why}")
-
-
-def cleanup(jail_dir: str, *workspaces: str) -> None:
-    for path in (jail_dir, *workspaces):
-        shutil.rmtree(path, ignore_errors=True)
 
 
 def run_to_end(process: Process, timeout: float = 20.0) -> tuple[int, str]:

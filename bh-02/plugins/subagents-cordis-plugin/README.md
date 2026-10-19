@@ -226,9 +226,9 @@ runs.
   appender's own time, taken on its thread; `EventLog.stopped`, found by a write or, when no write
   heard of it, by closing the log), and when the child's run ends one note through the parent's
   `output.show` (`child.log_stopped`, once, before the usage note) names the file, when the write
-  failed, the error, and that `bh-02 watch`, which ends only at the `agent_end` record the stopped log
-  never writes, shows nothing after it and must be left with Ctrl-C. The note is kept in the ui's
-  history, so a resume shows it again. A session kept in memory has no log; a log that can't be
+  failed, the error, and that `bh-02 watch` shows nothing after it and never sees the `agent_end` the
+  stopped log never writes: it ends when the session is no longer running, or on Ctrl-C. The note is
+  kept in the ui's history, so a resume shows it again. A session kept in memory has no log; a log that can't be
   made is said in a note (the only one), and the child runs without one; a log that never failed
   says nothing (`test_a_log_removed_under_a_running_child_is_said_once_when_it_ends_before_its_usage`).
 - **`bh-02 watch SESSION AGENT`** (the app's, `bh_02.watching`) renders one log read-only, follows it

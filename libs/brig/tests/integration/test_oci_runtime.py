@@ -13,13 +13,11 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import stat
 import subprocess
-import tempfile
 import threading
 import uuid
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from typing import Any
 
 import pytest
@@ -32,27 +30,13 @@ from brig.runtime.oci import (
     OciRuntime,
     OciUnavailable,
 )
+from tests.conftest import NewJailDir
 from tests.oci_jail import IMAGE, allow_list, container_of, docker, inspect
 from tests.oci_jail import make as oci_make
 
 pytestmark = pytest.mark.integration
 
 Make = Callable[..., Jail]
-
-
-@pytest.fixture
-def scratch() -> Iterator[Callable[[], str]]:
-    """`scratch()` is a fresh directory under /tmp; all are removed afterwards."""
-    made: list[str] = []
-
-    def new() -> str:
-        path = os.path.realpath(tempfile.mkdtemp(prefix="bg-oci-ws-", dir="/tmp"))
-        made.append(path)
-        return path
-
-    yield new
-    for path in made:
-        shutil.rmtree(path, ignore_errors=True)
 
 
 def _containers_labelled(jail_id: str) -> list[str]:
@@ -69,9 +53,9 @@ def _item(report: Any, kind: str) -> Any:
 
 
 def test_the_container_is_labelled_and_has_the_flags_the_spec_compiled(
-    make_oci_jail: Make, scratch: Callable[[], str]
+    make_oci_jail: Make, new_jail_dir: NewJailDir
 ) -> None:
-    reference, workspace = scratch(), scratch()
+    reference, workspace = new_jail_dir(), new_jail_dir()
     spec = Spec(
         fs=allow_list(read_allows=(reference,), write_allows=(workspace,)),
         limits=Limits(cpu_seconds=9),
@@ -204,11 +188,11 @@ def test_no_value_of_the_environment_is_ever_in_an_argv(
 
 
 def test_the_env_file_is_mode_0600_while_docker_reads_it_and_gone_after(
-    make_oci_jail: Make, monkeypatch: pytest.MonkeyPatch
+    make_oci_jail: Make, monkeypatch: pytest.MonkeyPatch, new_jail_dir: NewJailDir
 ) -> None:
     monkeypatch.setenv("BRIG_OCI_TOKEN", "in-the-file")
     spec = Spec(fs=allow_list(), env=EnvPolicy(allow_names=("BRIG_OCI_TOKEN",)))
-    jail_dir = tempfile.mkdtemp(prefix="bg-oci-", dir="/tmp")
+    jail_dir = new_jail_dir()
     at_create: list[tuple[str, int, int, str]] = []
     real_run = subprocess.run
 
@@ -232,30 +216,24 @@ def test_the_env_file_is_mode_0600_while_docker_reads_it_and_gone_after(
 
 
 def test_a_create_that_fails_leaves_no_env_file_and_no_container(
-    make_oci_jail: Make, monkeypatch: pytest.MonkeyPatch
+    make_oci_jail: Make, monkeypatch: pytest.MonkeyPatch, new_jail_dir: NewJailDir
 ) -> None:
     monkeypatch.setenv("BRIG_OCI_TOKEN", "must-not-stay")
     spec = Spec(fs=allow_list(), env=EnvPolicy(allow_names=("BRIG_OCI_TOKEN",)))
-    jail_dir, jail_id = (
-        tempfile.mkdtemp(prefix="bg-oci-", dir="/tmp"),
-        f"oci-fail-{uuid.uuid4().hex[:8]}",
-    )
-    try:
-        with pytest.raises(OciCreateFailed, match="docker create failed") as caught:
-            oci_make(spec, jail_dir, jail_id=jail_id, image="brig-no-such-image:0")
-        assert "must-not-stay" not in str(caught.value)
-        assert os.listdir(jail_dir) == ["chan"]
-        assert _containers_labelled(jail_id) == []
-    finally:
-        shutil.rmtree(jail_dir, ignore_errors=True)
+    jail_dir, jail_id = new_jail_dir(), f"oci-fail-{uuid.uuid4().hex[:8]}"
+    with pytest.raises(OciCreateFailed, match="docker create failed") as caught:
+        oci_make(spec, jail_dir, jail_id=jail_id, image="brig-no-such-image:0")
+    assert "must-not-stay" not in str(caught.value)
+    assert os.listdir(jail_dir) == ["chan"]
+    assert _containers_labelled(jail_id) == []
 
 
 def test_an_env_file_path_that_is_a_link_is_replaced_never_written_through(
-    make_oci_jail: Make, monkeypatch: pytest.MonkeyPatch
+    make_oci_jail: Make, monkeypatch: pytest.MonkeyPatch, new_jail_dir: NewJailDir
 ) -> None:
     """A stale file or a planted link at the env file's path: the secret goes to a fresh file."""
     monkeypatch.setenv("BRIG_OCI_TOKEN", "secret-value")
-    jail_dir = tempfile.mkdtemp(prefix="bg-oci-", dir="/tmp")
+    jail_dir = new_jail_dir()
     victim = os.path.join(jail_dir, "victim")
     with open(victim, "w", encoding="utf-8") as victim_file:
         victim_file.write("untouched")
@@ -438,7 +416,7 @@ def test_a_closed_tether_is_refused_before_anything_is_made(make_oci_jail: Make)
 
 
 def test_a_start_that_fails_removes_the_container_and_the_watcher_before_it_raises(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, new_jail_dir: NewJailDir
 ) -> None:
     """`docker create` and `docker start` succeeded and the container is not running (the command is
     not in the image, so `--init` ends it at once): the container is removed and the tether watcher
@@ -454,7 +432,7 @@ def test_a_start_that_fails_removes_the_container_and_the_watcher_before_it_rais
 
     oci_jail.needs_docker()
     spec = Spec(fs=allow_list())
-    jail_dir = tempfile.mkdtemp(prefix="bg-oci-", dir="/tmp")
+    jail_dir = new_jail_dir()
     jail_id = f"oci-nostart-{uuid.uuid4().hex[:8]}"
     ctx = build_compile_ctx(spec, jail_dir=jail_dir, platform=sys.platform)
     compiled = Stack([Oci(IMAGE, interpreter=None)]).compile(spec, ctx=ctx)
@@ -483,4 +461,3 @@ def test_a_start_that_fails_removes_the_container_and_the_watcher_before_it_rais
     finally:
         os.close(read_end)
         os.close(write_end)
-        shutil.rmtree(jail_dir, ignore_errors=True)

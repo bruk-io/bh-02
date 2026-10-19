@@ -101,6 +101,17 @@ def test_the_proxy_declares_the_port_file_the_wrap_waits_for_as_its_ready_path()
     )
 
 
+def test_the_proxy_declares_the_decisions_file_it_appends_to_as_its_log_path() -> None:
+    """TASK-0164, decision-205: the runtime removes a helper's `log_path` before it starts the
+    helper, so a reused jail directory's decisions file can't hold an earlier jail's lines.
+    That holds only if the path the helper declares is the one the proxy appends to (`--log`)
+    and the reader folds in (`DECISIONS_FILE` under the jail directory), all three the same
+    string."""
+    helper = _step(("example.com",)).helpers[0]
+    appended = helper.argv[helper.argv.index("--log") + 1]
+    assert helper.log_path == appended == f"{_JAIL}/{DECISIONS_FILE}"
+
+
 def test_an_empty_allow_list_still_starts_a_proxy_that_denies_everything() -> None:
     """Deny-all is a policy, not an absence of one. A mechanism that
     quietly declined to run here would leave the workload with no proxy

@@ -40,7 +40,9 @@ shell may be running, so a `proxy.port` left by an earlier jail would be read at
 workload pointed at a dead port, or at a foreign listener. The helper therefore declares the
 port file as its `ready_path`, and the runtime removes it before it starts the proxy
 (decision-204, TASK-0150): the wrap checks nothing about where the file came from, because
-the only file that can be there is this launch's.
+the only file that can be there is this launch's. The decisions file is declared the same way,
+as the helper's `log_path` (decision-205, TASK-0164): the proxy appends to it, so one an
+earlier jail left would put that jail's decisions in this jail's records.
 
 **Why the wait is in the wrap and not a `LAUNCH_SCOPED` helper.** Both
 work: `_start_helpers` processes helpers in declared order, so a
@@ -274,6 +276,7 @@ class ConnectProxy:
                     argv=_render_helper_argv(self._python, port_path, log_path, policy),
                     lifetime=HelperLifetime.JAIL_LIFETIME,
                     ready_path=port_path,
+                    log_path=log_path,
                 ),
             ),
             requires=frozenset(),

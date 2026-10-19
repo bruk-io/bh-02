@@ -317,3 +317,65 @@ def test_a_whole_line_that_is_not_the_proxys_record_is_loud(run_id: str, jail_di
     with pytest.raises(ValueError) as exc_info:
         read_egress_decisions(jail_dir, "jail-bogus")
     assert "does not have the proxy's shape" in str(exc_info.value)
+
+
+def _earlier_jails_line(host: str) -> str:
+    """One decision line in the proxy's own record shape, as an earlier jail's proxy
+    wrote it: `read_egress_decisions` refuses a line that is not whole and well formed,
+    so a plant of any other shape would fail the test for the wrong reason."""
+    return (
+        f'{{"detail": "", "decision": "allow", "host": "{host}", '
+        '"kind": "egress", "monotonic": 1.5, "port": 443}\n'
+    )
+
+
+def test_a_new_jail_never_reads_an_earlier_jails_egress_decisions(
+    run_id: str, origin: _Origin, jail_dir: str
+) -> None:
+    """TASK-0164, decision-205. A jail directory is reused (decision-181) and the proxy
+    appends to `proxy-decisions.jsonl`, so a new jail's reader, which starts at byte 0,
+    folded an earlier jail's allow and deny lines into its own records: a denial attributed
+    to an action that never made the call. `create` now removes the file a helper declares
+    as its `log_path` before it starts the helper.
+
+    The earlier jail's line is planted BEFORE `Jail.create`, in the proxy's own record
+    shape, naming a host this jail never contacts. This jail then makes one request the
+    policy refuses (`127.0.0.1`, while only `localhost` is permitted), and the reader
+    returns that one deny and nothing of the planted line.
+
+    THE CONTROLS, in this test: the plant is there when `create` is called and the reader
+    reads it as a decision (so "none of it" is the removal's doing, not a line the reader
+    would have skipped anyway), and this jail's own deny does come back (so an empty
+    answer, a reader or a proxy that broke, cannot pass for the fix)."""
+    earlier = "earlier-jail.test"
+    planted = decisions_path(jail_dir)
+    with open(planted, "w", encoding="utf-8") as decisions:
+        decisions.write(_earlier_jails_line(earlier))
+    before = read_egress_decisions(jail_dir, "jail-before-create")
+    assert [e.data["host"] for e in before.events] == [earlier], (
+        "the earlier jail's line was not planted, or the reader does not take it for a decision"
+    )
+
+    jail, process = _run(
+        jail_dir,
+        ("localhost",),
+        _fetch(f"http://127.0.0.1:{origin.port}/x", os.path.join(jail_dir, "got")),
+        run_id,
+    )
+    try:
+        deadline = time.monotonic() + _IDLE_S
+        events = ()
+        while time.monotonic() < deadline:
+            events = read_egress_decisions(jail.jail_dir, jail.jail_id).events
+            if any(e.data["egress_decision"] == "deny" for e in events):
+                break
+            time.sleep(0.05)
+
+        hosts = [e.data["host"] for e in events]
+        assert "127.0.0.1" in hosts, f"this jail's own deny never came back: {hosts!r}"
+        assert earlier not in hosts, (
+            f"this jail's records hold a decision an earlier jail's proxy made: {hosts!r}"
+        )
+        assert hosts == ["127.0.0.1"], hosts
+    finally:
+        jail.destroy()

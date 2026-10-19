@@ -115,22 +115,32 @@ class Helper:
                     directory's file from an earlier jail can never be read as
                     this launch's: it exists only because this helper wrote it. An
                     absolute path, like the rest of a compiled jail's.
+        log_path: The file the helper appends its records to, which something else
+                  folds in from a byte offset (the egress proxy's decisions), or
+                  `None` for a helper that keeps none. Not the runtime's own capture
+                  of the helper's output (`helper-<name>.log`). The runtime removes it
+                  before it starts the helper (SPEC.md §6, decision-205), so a reused
+                  jail directory's lines from an earlier jail can never be read as
+                  this launch's: it holds only what this helper wrote. An absolute
+                  path.
     """
 
     name: str
     argv: tuple[str, ...]
     lifetime: HelperLifetime
     ready_path: str | None = None
+    log_path: str | None = None
 
     def __post_init__(self) -> None:
         # A plain str.startswith check for the reason `StagedFile.__post_init__` gives: no `os`
         # here. A relative path would name a file under the launcher's working directory, and
         # the runtime would remove that one instead.
-        if self.ready_path is not None and not self.ready_path.startswith("/"):
-            raise ValueError(
-                f"Helper.ready_path must be an absolute path, got: {self.ready_path!r}; "
-                "name the file under the compile context's jail_dir"
-            )
+        for declared, path in (("ready_path", self.ready_path), ("log_path", self.log_path)):
+            if path is not None and not path.startswith("/"):
+                raise ValueError(
+                    f"Helper.{declared} must be an absolute path, got: {path!r}; "
+                    "name the file under the compile context's jail_dir"
+                )
 
 
 @dataclass(frozen=True, slots=True)

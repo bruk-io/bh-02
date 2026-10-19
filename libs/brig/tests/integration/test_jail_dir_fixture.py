@@ -41,7 +41,7 @@ def test_a_jail_dir_is_new_empty_short_and_resolved(
 
 
 def test_every_directory_made_is_removed_with_what_is_in_it() -> None:
-    with conftest._jail_dirs() as make:
+    with conftest.jail_dirs() as make:
         first, second = make(), make()
         os.makedirs(os.path.join(first, "procs", "0123456789abcdef"))
         Path(first, "procs", "0123456789abcdef", "record.json").write_text("{}")
@@ -70,7 +70,7 @@ def test_a_directory_written_into_while_it_is_removed_is_removed_in_the_end(
             Path(path, "supervisor", "exit").write_text("0")
         after_each_try.append(os.path.lexists(path))
 
-    with conftest._jail_dirs() as make:
+    with conftest.jail_dirs() as make:
         path = make()
         monkeypatch.setattr(shutil, "rmtree", removing_while_something_writes)
 

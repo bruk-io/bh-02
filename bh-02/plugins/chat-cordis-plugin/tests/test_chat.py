@@ -94,19 +94,24 @@ async def test_the_stop_notice_carries_the_notes_rows_have_for_it() -> None:
     agents still running) are shown as notes; a reply that ends on its own shows none."""
 
     class Endless:
+        def __init__(self) -> None:
+            self.started = False
+
         async def reply(self, message: str) -> AsyncIterator[dict[str, Any]]:
+            self.started = True
             await asyncio.Event().wait()
             yield {}  # pragma: no cover
 
-    screen, typed, commands = Screen(), Typed("first"), Noted()
-    commands.stops = ["2 background agents still run; /agents stop ends them"]
-    session = asyncio.create_task(converse(Endless(), typed, screen, commands))
-    await asyncio.sleep(0.01)
+    notice = "2 background agents still run; /agents stop ends them"
+    model, screen, typed, commands = Endless(), Screen(), Typed("first"), Noted()
+    commands.stops = [notice]
+    session = asyncio.create_task(converse(model, typed, screen, commands))
+    await _until(lambda: model.started)  # the reply is running
     typed.interrupt()
-    await asyncio.sleep(0.01)
+    await _until(lambda: {"type": "note", "text": notice} in screen.events)  # the notes are shown
     assert screen.events[-2:] == [
         {"type": "stop", "reason": "interrupted"},
-        {"type": "note", "text": "2 background agents still run; /agents stop ends them"},
+        {"type": "note", "text": notice},
     ]
     typed.type(None)
     await asyncio.wait_for(session, 1)
@@ -211,13 +216,14 @@ async def test_what_a_command_holds_never_reaches_a_reply_already_running() -> N
 
     model, screen, commands, typed = Gated(), Screen(), Noted(), Typed("first")
     session = asyncio.create_task(converse(model, typed, screen, commands))
-    await asyncio.sleep(0.01)
+    await _until(lambda: model.seen == ["first"])  # the reply is running
     typed.type("!pytest")
-    await asyncio.sleep(0.01)
+    # An absence has no event to wait for. The chat reads no line while a reply runs, so one turn
+    # of the loop (no clock to race) is enough for a read during the reply to run `!pytest`.
+    await asyncio.sleep(0)
     assert commands.ran == [] and model.seen == ["first"]  # the reply is running: nothing else is
     model.go.set()
-    await asyncio.sleep(0.01)
-    assert commands.ran == ["!pytest"]
+    await _until(lambda: commands.ran == ["!pytest"])
     typed.type("why did it fail?")
     typed.type(None)
     await asyncio.wait_for(session, 1)

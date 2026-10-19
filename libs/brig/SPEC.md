@@ -897,13 +897,69 @@ port on; or the wrap checks that the file it reads came from this launch. Ruled:
   brig reads it.
 - **Unchanged.** The file's name and format, the proxy's publishing, the wrap's wait and its
   bound, the helper lifetimes and their tether (decision-199), the grades, and the `oci`
-  runtime, which refuses helpers. Not covered: the proxy's decisions file
-  (`proxy-decisions.jsonl`) is appended to, so a reused directory keeps an earlier jail's
-  lines in it; it is evidence and not the boundary (§11), and TASK-0164 tracks it. A
-  process that can write the jail directory while `create` runs can plant a file after the
-  removal, which is the trust decision-181's records already place in the directory.
+  runtime, which refuses helpers. Not covered here: the proxy's decisions file
+  (`proxy-decisions.jsonl`) is appended to, so a reused directory kept an earlier jail's
+  lines in it; it is evidence and not the boundary (§11), and decision-205 (TASK-0164)
+  closes it the same way. A process that can write the jail directory while `create` runs
+  can plant a file after the removal, which is the trust decision-181's records already
+  place in the directory.
 
 Implementing task: TASK-0150. (Ruled 2026-10-18, decision-204.)
+
+**A helper's declared log is removed before the helper starts, so a jail never reads an
+earlier jail's egress decisions (2026-10-19, decision-205).** Found 2026-10-18 while fixing
+TASK-0150, which decision-204 names as not covered. The proxy appends one JSON line per
+decision to `<jail_dir>/proxy-decisions.jsonl` (opened per write in append mode, created by
+its first line), and `read_egress_decisions` (`brig.run.egress`) folds the file into the
+embedder's records from a byte cursor that starts at 0. A jail directory is reused
+(decision-181: `make_channel_dir` keeps an earlier jail's directory, `clear_earlier_records`
+clears only `procs/`), so a new jail's first read returned the lines an earlier jail's proxy
+had written: an allow or a deny attributed to an action of this jail that never made the
+call. It is evidence and not the boundary (law 8, §11), so no denial was ever lost or
+invented in the filter, but a record that blames this jail's action for another jail's
+denial is a wrong audit trail, and an embedder cannot tell the lines apart. Three ways to
+close it were on the table: the runtime removes a helper's declared log before it starts the
+helper; the reader starts its cursor at the file's end when the jail is created; or the file's
+name carries the jail id. Ruled:
+
+- **The first: a `Helper` declares the file it appends its records to, and `create` removes
+  that file before it starts the helper.** `Helper` gains `log_path` beside `ready_path` (an
+  absolute path, `None` where the helper keeps no such file; not the runtime's own capture of
+  a helper's output, `helper-<name>.log`), `connect_proxy` declares its decisions file, and
+  `create` removes each helper's `log_path` in the same pass, and with the same rules, as its
+  `ready_path` (decision-204): before any helper is started, `LAUNCH_SCOPED` ones included;
+  a link at the path is removed, not followed; a path that cannot be removed (a directory, a
+  refusal) is an `OSError` from `create` with a note, before anything of the jail is
+  started. After it the file can exist only because the helper wrote it in this launch, so the
+  reader finds no file until the proxy's first decision, which it already answers as nothing
+  new (cursor unchanged), and from then on only this jail's lines.
+- **Why this one.** It is decision-204's shape, one rule of the runtime for the two files a
+  helper leaves in a directory that outlives it, and a file that is not there holds nothing
+  to misread. The reader, the file's name and format and the cursor's meaning stay as they
+  were, so no embedder changes. Against the cursor at the end: the cursor is the embedder's
+  (`read_egress_decisions(jail_dir, jail_id, cursor=...)` keeps no state), so starting past
+  the old lines means the jail measures the file at `create` and carries the offset for as
+  long as it lives, in a record a rehydrated jail in another process must also read
+  (decision-132), or every embedder measures it for itself before `create`; the old lines
+  stay in the file for any reader at the default cursor 0, and the file grows with every jail
+  that ever used the directory. Against the jail id in the name: `compile()` is pure and
+  renders once, before `create`, and its `CompileCtx` carries a `jail_dir` and a platform,
+  not an id, so the mechanism cannot name a file with one; an id is the embedder's choice and
+  a reused directory can see one twice, which would leave the same bug for those; and the
+  directory would collect a file per jail, with `decisions_path(jail_dir)` changed for every
+  caller.
+- **Unchanged.** The file's name and format, the proxy's appending (it creates the file when
+  it first writes), the reader and its cursor, `ready_path` and the port file, the helper
+  lifetimes and their tether (decision-199), the grades, and the `oci` runtime, which refuses
+  helpers. An earlier jail's lines are gone from the directory once a new jail is created in
+  it: they were that jail's records, for its embedder to read while it lived, and a line lost
+  weakens an audit trail and never a denial (law 8). Two live jails sharing one directory
+  stays outside decision-181's reuse, which follows an earlier jail's end: a proxy still
+  running there would append to the file `create` unlinked, and its lines would never reach
+  this jail's reader. A process that can write the jail directory while `create` runs can
+  plant a file after the removal, the trust decision-204 already names.
+
+Implementing task: TASK-0164. (Ruled 2026-10-19, decision-205.)
 
 **The egress filter is a standalone process, outside the layer DAG.**
 `connect_proxy` is the only mechanism whose enforcement is a process rather
@@ -946,8 +1002,9 @@ data in this shape; M4's probe engine builds the subject.)
 **Helper lifetimes** are declared, not improvised: `JAIL_LIFETIME` (dies when
 the jailed tree dies — implemented by pipe-EOF or pid-watch, the mechanism
 chooses; since decision-199 both, §8), `LAUNCH_SCOPED` (gone before the workload runs).
-A helper that publishes a file when it is ready declares it (`ready_path`), and `create`
-removes it before the helper starts (decision-204).
+A helper that publishes a file when it is ready declares it (`ready_path`), and one that
+appends records to a file a reader folds in declares that (`log_path`); `create` removes
+both before the helper starts (decisions 204 and 205).
 
 Planned roster (platforms in parentheses; grades are the *ceiling* each can
 honestly earn):

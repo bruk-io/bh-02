@@ -20,7 +20,6 @@ import os
 import random
 import re
 import signal
-import tempfile
 import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -30,13 +29,12 @@ import pytest
 import brig.run.teardown as teardown
 from brig.core import Grade
 from brig.run import ExecFidelity, HostRuntime, Jail, KillOutcome, Process, RuntimeKind
+from tests.conftest import NewJailDir
 from tests.supervised_jail import (
     blocked,
-    cleanup,
     create_jail,
     needs_a_supervised_jail,
     needs_namespaces,
-    new_jail_dir,
     python,
     running_with,
     sh,
@@ -67,17 +65,18 @@ Rig = Callable[..., tuple[Jail, str]]
 
 
 @pytest.fixture
-def make(mode: str) -> Iterator[Rig]:
+def make(mode: str, new_jail_dir: NewJailDir) -> Iterator[Rig]:
     """`make(channel=..., scratch=...)` is a jail of the mode under test and a workspace in
     which processes leave each other files to look for. Everything it made is ended, and
-    nothing it names is allowed to be left, when the test is done."""
-    made: list[tuple[Jail, str, str]] = []
+    nothing it names is allowed to be left, when the test is done: the jails are destroyed
+    here, and the directories removed after, by `new_jail_dir`."""
+    made: list[Jail] = []
 
     def build(
         *, channel: bool = False, scratch: bool = False, jail_id: str = "probed"
     ) -> tuple[Jail, str]:
         jail_dir = new_jail_dir()
-        workspace = tempfile.mkdtemp(prefix="bg-ws-", dir="/tmp")
+        workspace = new_jail_dir()
         os.chmod(workspace, 0o777)
         jail = create_jail(
             jail_dir,
@@ -87,14 +86,13 @@ def make(mode: str) -> Iterator[Rig]:
             namespaces=mode == "namespaces",
             jail_id=jail_id,
         )
-        made.append((jail, jail_dir, workspace))
+        made.append(jail)
         return jail, workspace
 
     yield build
-    for jail, jail_dir, workspace in made:
+    for jail in made:
         report = jail.destroy()
         assert not [i for i in report.items if i.outcome is KillOutcome.FAILED], report
-        cleanup(jail_dir, workspace)
 
 
 def _isolated(mode: str) -> bool:
@@ -695,7 +693,9 @@ def test_the_process_scope_is_graded_and_says_whether_namespaces_hold_and_why(
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="uid 0 is the fallback of every test here")
-def test_a_blocked_nested_user_namespace_is_a_graded_fallback_not_a_failed_start() -> None:
+def test_a_blocked_nested_user_namespace_is_a_graded_fallback_not_a_failed_start(
+    new_jail_dir: NewJailDir,
+) -> None:
     """The planted block, by its name: bwrap told to refuse a nested user namespace. The jail
     starts, a process in it starts, and the grade says what the host would not give, in the words
     of the call that was refused. The control: the same jail unblocked (when the host gives them)."""
@@ -727,4 +727,3 @@ def test_a_blocked_nested_user_namespace_is_a_graded_fallback_not_a_failed_start
         )
     finally:
         jail.destroy()
-        cleanup(jail_dir)
