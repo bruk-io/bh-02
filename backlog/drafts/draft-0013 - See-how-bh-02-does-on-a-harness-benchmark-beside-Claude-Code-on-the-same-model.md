@@ -1,5 +1,5 @@
 ---
-id: DRAFT-0010
+id: DRAFT-0013
 title: >-
   See how bh-02 does on a harness benchmark, beside Claude Code on the same
   model
