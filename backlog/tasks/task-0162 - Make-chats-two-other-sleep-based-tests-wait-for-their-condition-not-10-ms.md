@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-18 20:33'
-updated_date: '2026-10-19 00:10'
+updated_date: '2026-10-19 00:11'
 labels:
   - chat
   - size-1
@@ -106,4 +106,6 @@ INFO    -  Documentation built in 4.41 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+Review: not closed. Full scripts/check exit 0 and both criteria are met on the evidence, but close-task refuses: a bug needs its repro recorded (record-check TASK-0162 --repro -- <test>) or a 'No repro:' note. The repro uses a scratch skew-clock plugin outside the repo, so the worker should record a No repro: note saying so (or commit the plugin as a fixture).
 <!-- SECTION:NOTES:END -->
