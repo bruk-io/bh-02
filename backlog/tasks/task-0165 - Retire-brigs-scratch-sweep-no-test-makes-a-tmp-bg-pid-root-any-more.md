@@ -1,7 +1,7 @@
 ---
 id: TASK-0165
 title: 'Retire brig''s scratch sweep: no test makes a /tmp/bg<pid> root any more'
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-18 23:15'
@@ -101,4 +101,6 @@ INFO    -  Documentation built in 3.94 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+Review: closed. Diff removes scratch_sweep.py, test_scratch_sweep.py, _scratch_sweep and --sweep-aged from libs/brig/tests/conftest.py, rewords the _JAIL_DIR_PREFIX comment; no leftover references outside the backlog. Full scripts/check exit 0, no files reformatted. No findings.
 <!-- SECTION:NOTES:END -->
