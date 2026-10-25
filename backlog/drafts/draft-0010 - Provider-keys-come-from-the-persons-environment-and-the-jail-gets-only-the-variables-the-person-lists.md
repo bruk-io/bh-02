@@ -6,6 +6,7 @@ title: >-
 status: Draft
 assignee: []
 created_date: '2026-10-25 17:39'
+updated_date: '2026-10-25 17:51'
 labels: []
 dependencies: []
 priority: medium
@@ -32,7 +33,7 @@ The `local.env` rule exists so a key never reaches code the model writes. The ja
 ## Decisions already made (with the person, 2026-10-25)
 
 - `key` becomes one object: exactly one source (`env`, `cmd` or `op`), plus an optional `ttl_ms` that is valid only with `cmd` or `op`. A bare string is refused. `key_command` and `key_ttl_ms` go away.
-- `env` reads the process environment. `local.env` is retired.
+- `env` reads the process environment. `local.env` is retired, `CLAUDE_CODE_OAUTH_TOKEN` included: a `claude-code` endpoint without a `base_url` takes `key = { env = "CLAUDE_CODE_OAUTH_TOKEN" }` (or `cmd`/`op`) and hands it only to the Claude Code CLI it starts.
 - The jail keeps its allow-list; it gets a standing home in the person's config directory (`~/.config/bh-02/`), not only a `--patch` layer. The runner plugin owns it, not the models file.
 - `--no-jail` does not scrub provider keys. The docs say so plainly.
 - A `claude-code` gateway endpoint takes `cmd` (and `op`, as `op read`), run by the Claude Code CLI. bh-02 never holds that key. `env` is refused there, with a message saying why.
@@ -42,7 +43,6 @@ The `local.env` rule exists so a key never reaches code the model writes. The ja
 
 - [ ] Where in `~/.config/bh-02/` does the runner's allow-list live (its own file, or a runner section of a config file), and how is it protected from the model, as the models file is today?
 - [ ] Should startup refuse an allow-list that names a variable a `key = { env = ... }` also reads, so one line cannot leak a provider key into the jail?
-- [ ] Where does `CLAUDE_CODE_OAUTH_TOKEN` come from once `local.env` is gone (the process environment, handed only to the CLI)?
 - [ ] Every process bh-02 spawns (the Python worker, the extensions process, `cmd` shells, the startup check): which already get an explicit environment, and which inherit bh-02's whole one?
 - [ ] Is `op` worth its own source, or is `cmd = "op read ..."` enough?
 <!-- SECTION:DESCRIPTION:END -->
