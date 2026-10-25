@@ -55,18 +55,17 @@ def _own_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _endpoint(tmp_path: Path, base_url: str, key: str | None = None) -> str:
-    """A models file naming `base_url` as the endpoint `local`; its path."""
-    extra = 'key = "LOCAL_KEY"\n' if key else ""
+    """A models file naming `base_url` as the endpoint `local`, whose key (when `key`) is the
+    environment variable LOCAL_KEY; its path."""
+    extra = 'key = { env = "LOCAL_KEY" }\n' if key else ""
     path = tmp_path / "models.toml"
     path.write_text(f'[local]\nprovider = "openai"\ndiscover = true\nbase_url = "{base_url}"\n{extra}')
     return str(path)
 
 
 def _catalog(tmp_path: Path, base_url: str, *, get: Any = httpx_get, key: str | None = None) -> Catalog:
+    """The catalog over that file; `key` makes the endpoint read the variable LOCAL_KEY (the test sets it)."""
     row: dict[str, Any] = {"models": _endpoint(tmp_path, base_url, key)}
-    if key:
-        (tmp_path / "local.env").write_text(f"LOCAL_KEY={key}\n", encoding="utf-8")
-        row["env_file"] = str(tmp_path / "local.env")
     return Catalog(_Loader(_Entry("model", "models:model", row)), get=get)
 
 
@@ -82,7 +81,10 @@ async def test_the_real_get_lists_what_a_server_serves(tmp_path: Path) -> None:
     assert [(r["method"], r["path"]) for r in server.requests] == [("GET", "/v1/models")]  # one request
 
 
-async def test_the_key_is_sent_in_the_header_only_and_a_wrong_one_says_so_without_it(tmp_path: Path) -> None:
+async def test_the_key_is_sent_in_the_header_only_and_a_wrong_one_says_so_without_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("LOCAL_KEY", _KEY)
     with StubServer(key=_KEY, models=["m"]) as server:
         good = _catalog(tmp_path, server.base_url, key=_KEY)
         await good.refresh()
@@ -94,12 +96,12 @@ async def test_the_key_is_sent_in_the_header_only_and_a_wrong_one_says_so_withou
     with StubServer(key="sk-another-0000", models=["m"]) as server:
         wrong = _catalog(other, server.base_url, key=_KEY)
         said = str(await _switch(other, wrong).run(""))
-    assert _names(wrong) == [] and "HTTP 401: it wants a key, or refused the one named" in said
+    assert _names(wrong) == [] and "HTTP 401: it wants a key, or refused the one its `key` gives" in said
     assert _KEY not in said and "cdef" not in said
 
 
-async def test_a_key_line_that_cannot_go_in_a_header_is_one_line_under_the_list_and_asks_nothing(
-    tmp_path: Path,
+async def test_a_key_that_cannot_go_in_a_header_is_one_line_under_the_list_and_asks_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """TASK-0095: a header carries printable ASCII; httpx2 raises `UnicodeEncodeError` for anything else,
     which `/model` used to let out. The endpoint says why instead (never the key), and the server is
@@ -107,15 +109,16 @@ async def test_a_key_line_that_cannot_go_in_a_header_is_one_line_under_the_list_
     for n, key in enumerate(("sk-caf" + chr(0xE9) + "-0123", "sk-tab\there")):
         directory = tmp_path / f"key{n}"
         directory.mkdir()
+        monkeypatch.setenv("LOCAL_KEY", key)
         with StubServer(models=["m"]) as server:
             catalog = _catalog(directory, server.base_url, key=key)
             said = str(await _switch(directory, catalog).run(""))  # nothing raises out of /model
-        env = directory / "local.env"
         (line,) = [s for s in said.splitlines() if s.startswith("  local: ")]
         assert line == (
-            f"  local: no list from {server.base_url}/models (model 'local' names the key LOCAL_KEY, whose "
-            f"line in {env} holds a character a request header can't carry (a key is printable ASCII). "
-            "Fix that line, then try again.); its models are not listed"
+            f"  local: no list from {server.base_url}/models (model 'local''s key from the environment "
+            "variable LOCAL_KEY holds a character a request header can't carry (a key is one line of "
+            "printable ASCII). Check what the variable holds, fix it, then try again.); "
+            "its models are not listed"
         )
         assert key not in said and _names(catalog) == [] and server.requests == []
 

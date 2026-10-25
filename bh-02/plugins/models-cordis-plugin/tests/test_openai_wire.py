@@ -337,7 +337,7 @@ def test_only_data_lines_are_events() -> None:
         (
             401,
             "authentication_failed",
-            "model 'local' sends no key; if the endpoint needs one, add `key = \"NAME\"`",
+            "model 'local' sends no key; if the endpoint needs one, add `key = { env = \"NAME\" }`",
         ),
         (
             404,
@@ -356,10 +356,19 @@ def test_an_http_failure_is_recoverable_and_says_what_to_do(status: int, kind: s
     assert error.message.startswith(f"http://h/v1/chat/completions answered HTTP {status}: server words")
 
 
-def test_a_refused_key_names_its_line_of_local_env() -> None:
+def test_a_refused_key_names_its_environment_variable() -> None:
     keyed = Where("router", "https://r/v1/chat/completions", "m", "OPENROUTER_API_KEY", "/c/models.toml")
     error = http_error(401, "no", keyed)
-    assert "check the key OPENROUTER_API_KEY in local.env" in error.message
+    assert "check the environment variable OPENROUTER_API_KEY" in error.message
+    assert "local.env" not in error.message
+
+
+def test_a_refused_command_key_names_its_command() -> None:
+    keyed = Where(
+        "router", "https://r/v1/chat/completions", "m", None, "/c/models.toml", "op read 'op://v/i/f'"
+    )
+    error = http_error(401, "no", keyed)
+    assert "check what model 'router''s key command prints (run `op read 'op://v/i/f'`" in error.message
 
 
 def test_parallel_calls_a_server_sends_each_at_index_0_are_told_apart_by_their_ids() -> None:

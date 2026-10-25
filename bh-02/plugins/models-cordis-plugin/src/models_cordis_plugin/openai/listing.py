@@ -102,9 +102,7 @@ def read_listing(got: Reply | Down) -> Listed | Unlisted:
     if isinstance(got, Down):
         return Unlisted(got.why)
     if got.status in (401, 403):
-        return Unlisted(
-            f"HTTP {got.status}: it wants a key, or refused the one named (`key` names a line of local.env)"
-        )
+        return Unlisted(f"HTTP {got.status}: it wants a key, or refused the one its `key` gives")
     if got.status == 404:
         return Unlisted("HTTP 404: it has no /models; name its models in tables of their own")
     if 300 <= got.status < 400:

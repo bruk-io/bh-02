@@ -30,6 +30,7 @@ from models_cordis_plugin.named import (
     environ,
     in_project,
     intended,
+    key_spec,
     models_file,
     parsed,
     read_models,
@@ -136,8 +137,8 @@ def resolved(config: ModelConfig) -> Named:
 
 
 def _provided(named: Named, config: ModelConfig, searched: Sequence[str]) -> Any:
-    """The provider's value for `named`: not entered yet. `searched`: where `local.env` is
-    looked for when the config names no `env_file` (the `host` value's `credentials`)."""
+    """The provider's value for `named`: not entered yet. `searched`: where the claude-code
+    provider looks for `local.env` when the config names no `env_file` (the `host` value's `credentials`)."""
     if named.provider == CLAUDE_CODE:
         return ClaudeCodeModel(
             ClaudeCodeConfig(
@@ -151,7 +152,7 @@ def _provided(named: Named, config: ModelConfig, searched: Sequence[str]) -> Any
             )
         )
     if named.provider == OPENAI:
-        return OpenAIModel(named, config.env_file, searched=searched)
+        return OpenAIModel(named)
     module, _, attribute = named.provider.partition(":")
     try:
         factory = cast(
@@ -175,14 +176,12 @@ def _provided(named: Named, config: ModelConfig, searched: Sequence[str]) -> Any
 
 
 def _gateway(table: Mapping[str, Any]) -> Gateway | None:
-    """The gateway a claude-code model's table names (`base_url` and `key_command`, which `problem`
-    has checked come together), or None: the subscription."""
-    url, command, ttl = table.get("base_url"), table.get("key_command"), table.get("key_ttl_ms")
-    if not isinstance(url, str) or not isinstance(command, str):
+    """The gateway a claude-code model's table names (`base_url` and a `key` of `cmd` or `op`, which
+    `problem` has checked come together), or None: the subscription."""
+    url, spec = table.get("base_url"), key_spec(table.get("key"))
+    if not isinstance(url, str) or spec is None or (command := spec.command) is None:
         return None
-    return Gateway(
-        url, command, ttl if isinstance(ttl, int) else None, table.get("experimental_betas") is not False
-    )
+    return Gateway(url, command, spec.ttl_ms, table.get("experimental_betas") is not False)
 
 
 @contextlib.asynccontextmanager

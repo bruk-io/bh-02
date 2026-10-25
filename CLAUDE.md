@@ -58,10 +58,11 @@ bh-02's Claude credential is `CLAUDE_CODE_OAUTH_TOKEN` (`claude setup-token` mak
 `local.env` (git-ignored, at the repository root). The model row (`models:model`, its
 claude-code provider) reads that file itself and hands the token only to the Claude Code CLI it
 starts. Without it bh-02 still starts, and each message answers with an error saying where to
-put one. A claude-code endpoint with a `base_url` and a `key_command` (a company's gateway) needs
-no token: the CLI runs that command itself. An OpenAI-compatible endpoint in the models file may
-name another line of `local.env` as its `key`, or a `key_command`, which the row reads or runs per
-request and sends only as that request's header.
+put one. A claude-code endpoint with a `base_url` and a `key` of `cmd` or `op` (a company's gateway)
+needs no token: the CLI runs that command itself. An OpenAI-compatible endpoint in the models
+file has a `key = { env = "NAME" }` (a variable of bh-02's process environment, never `local.env`),
+`{ cmd = "..." }` or `{ op = "op://..." }` (with an optional `ttl_ms`), which the row reads or runs
+per request and sends only as that request's header.
 
 Formatting and fixing happen by default. A `PostToolUse` hook in `.claude/settings.json` runs
 `ruff format` and `ruff check --fix` on every `.py` file Claude writes or edits, so don't

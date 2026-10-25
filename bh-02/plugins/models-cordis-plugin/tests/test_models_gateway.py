@@ -1,6 +1,7 @@
 """Claude Code through a gateway: the settings layer that sends the CLI's requests there with its
-key from a command, the environment with no token in it, the provider starting the CLI with both
-over a fake session, and what a refused key says. No process, no network, no credential."""
+key from a command (`key = { cmd }` or `{ op }`), the environment with no token in it, the provider
+starting the CLI with both over a fake session, and what a refused key says. No process, no network,
+no credential."""
 
 import json
 from collections.abc import Mapping, Sequence
@@ -74,5 +75,5 @@ async def test_the_provider_starts_claude_code_with_the_layer_and_needs_no_local
 def test_a_refused_key_through_a_gateway_names_its_command_not_the_subscription_token() -> None:
     error = failure_of("authentication_failed", "Invalid API key", _GATEWAY)
     assert error.kind == "authentication_failed"
-    assert "https://gateway.example/anthropic refused the key its key_command printed" in error.message
+    assert "https://gateway.example/anthropic refused the key its `key` command printed" in error.message
     assert "`print-a-token`" in error.message and "setup-token" not in error.message

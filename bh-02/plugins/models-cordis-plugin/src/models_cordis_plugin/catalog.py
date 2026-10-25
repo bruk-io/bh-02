@@ -29,7 +29,7 @@ from models_cordis_plugin.named import (
     derived,
     find,
     from_file,
-    key_name,
+    key_spec,
     named_models,
     not_a_model,
     problem,
@@ -40,8 +40,8 @@ from models_cordis_plugin.openai import (
     Ask,
     Discovery,
     Get,
-    Key,
     Listed,
+    ListingKey,
     Unlisted,
     headers_for,
     httpx_get,
@@ -66,20 +66,17 @@ class Entries(Protocol):
 
 
 class Catalog:
-    """The `models` value over one loader and the model row's id (module docstring); `searched`
-    is where `local.env` is looked for (the `host` value's `credentials`)."""
+    """The `models` value over one loader and the model row's id (module docstring)."""
 
     def __init__(
         self,
         loader: Entries,
         row: str = "model",
-        searched: Sequence[str] = (),
         get: Get = httpx_get,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._loader = loader
         self._row = row
-        self._searched = tuple(searched)
         self._discovery = Discovery(get, clock)
         self._refreshing = asyncio.Lock()  # one refresh at a time: a second finds the first's listing
 
@@ -203,7 +200,7 @@ class Catalog:
         except ModelsError:
             return
         wanted = {
-            _key(host): partial(_ask, host, config.env_file, self._searched)
+            _key(host): partial(_ask, host)
             for host in models
             if host.endpoint and host.table.get("discover") is True and problem(host) is None
         }
@@ -231,8 +228,8 @@ class Catalog:
 
     def check(self, name: str) -> str | None:
         """Why the model row can't switch to `name`, said so the person can fix it; None when
-        it can. A model whose key names a line local.env doesn't have is refused here, not at
-        its first message (the line is only looked for, never read out)."""
+        it can. A model whose key reads a variable bh-02's environment doesn't have is refused here,
+        not at its first message (the variable is only looked for, never read out)."""
         config = self._config()
         if config is None:
             entry = self._entry()
@@ -256,7 +253,7 @@ class Catalog:
             )
         if (why := not_a_model(found)) is not None:
             return why
-        return missing_key(found, config.env_file, self._searched) if found.provider == OPENAI else None
+        return missing_key(found) if found.provider == OPENAI else None
 
 
 def _listed(named: Named, current: bool, default: str | None) -> dict[str, Any]:
@@ -282,23 +279,20 @@ def _default(named: Named, standing: Intended | None) -> str | None:
     return standing.origin if standing is not None and named.name == standing.name else None
 
 
-def _key(host: Named) -> Key:
-    """What an endpoint's listing is kept under: its base_url and how it gets its key (the name of its
-    key's line, or its key_command)."""
-    command = host.table.get("key_command")
-    return str(host.table.get("base_url")), command if isinstance(command, str) else key_name(
-        host.table.get("key")
-    )
+def _key(host: Named) -> ListingKey:
+    """What an endpoint's listing is kept under: its base_url and where its key comes from."""
+    spec = key_spec(host.table.get("key"))
+    return str(host.table.get("base_url")), None if spec is None else spec.label
 
 
-async def _ask(host: Named, env_file: str | None, searched: Sequence[str]) -> Ask | Unlisted:
-    """The request for an endpoint's models: where, and the headers with its key, read from
-    local.env or printed by its key_command now (`openai.headers_for`: header only). A key that
-    can't be had is no request: it is the endpoint's answer, said so the person can fix it."""
-    if (why := missing_key(host, env_file, searched)) is not None:
+async def _ask(host: Named) -> Ask | Unlisted:
+    """The request for an endpoint's models: where, and the headers with its key, read from the
+    environment or printed by its command now (`openai.headers_for`: header only). A key that can't
+    be had is no request: it is the endpoint's answer, said so the person can fix it."""
+    if (why := missing_key(host)) is not None:
         return Unlisted(why)
     try:
-        headers = await headers_for(host, env_file, searched)
+        headers = await headers_for(host)
     except ModelsError as error:
         return Unlisted(error.message)
     headers["Accept"] = "application/json"

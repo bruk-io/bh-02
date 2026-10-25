@@ -54,12 +54,12 @@ class CatalogConfig:
 
 
 @component(provides=("models",))
-async def catalog(*, loader: Entries, host: Credentials, config: CatalogConfig) -> Effects:
+async def catalog(*, loader: Entries, config: CatalogConfig) -> Effects:
     """Fills a `models` row: `use = "models:catalog"`. The models there are and which one the
     model row names, read fresh from the layers and the models file each time; it depends on
-    the loader and `host` (where a key's `local.env` is looked for), neither of which a
-    `/model` replaces, so a switch never reloads it, nor `/model` itself, nor the status bar."""
-    yield bind("models", Catalog(loader, config.model_row, host.credentials))
+    the loader, which a `/model` does not replace, so a switch never reloads it, nor `/model` itself,
+    nor the status bar."""
+    yield bind("models", Catalog(loader, config.model_row))
 
 
 @component

@@ -93,7 +93,7 @@ macOS, and on Linux with bubblewrap installed (the `bubblewrap` package); elsewh
 ```sh
 git clone https://github.com/bruk-io/bh-02 && cd bh-02
 uv sync --all-packages
-claude setup-token                        # the subscription's token; a gateway (base_url, key_command) needs none
+claude setup-token                        # the subscription's token; a gateway (base_url, key) needs none
 echo 'CLAUDE_CODE_OAUTH_TOKEN=<the token>' > local.env && chmod 600 local.env   # git-ignored
 cd ~/some/project && ~/path/to/bh-02/.venv/bin/bh-02
 ```
@@ -132,7 +132,8 @@ models = { sonnet = { id = "sonnet" }, opus = { id = "opus" } }
 [local]
 provider = "openai"
 base_url = "http://localhost:11434/v1"
-key = "SOME_API_KEY"          # optional: the name of a line in local.env, never the key itself
+key = { env = "SOME_API_KEY" } # optional: where its key comes from: { env = "NAME" } (a variable of the environment
+                              # bh-02 starts in), { cmd = "..." } or { op = "op://..." }, with an optional ttl_ms
 models = { qwen = { id = "qwen3-coder" } }
 ```
 

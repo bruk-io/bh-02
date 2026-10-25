@@ -6,10 +6,11 @@ that file itself (`parse_env`, pure, over one read) and hands the value to the C
 through the SDK options' `env`: never into bh-02's own `os.environ`, so no other child (the
 Python process, the jail) can inherit it.
 
-Through a gateway (a claude-code endpoint with `base_url` and `key_command`), bh-02 holds no
-credential at all: the CLI is given a settings layer of its own (`gateway_settings`, the SDK's
-`settings`, which is `--settings`) naming the gateway as `ANTHROPIC_BASE_URL` and the command as
-its `apiKeyHelper`, which the CLI runs and runs again when the key's `key_ttl_ms` is up. The
+Through a gateway (a claude-code endpoint with `base_url` and a `key` of `cmd` or `op`), bh-02 holds
+no credential at all: the CLI is given a settings layer of its own (`gateway_settings`, the SDK's
+`settings`, which is `--settings`) naming the gateway as `ANTHROPIC_BASE_URL` and the command (the
+`cmd`, or `op read <reference>`) as its `apiKeyHelper`, which the CLI runs and runs again when the
+key's `ttl_ms` is up. The
 token's variable is set empty (`gateway_env`), so a token in bh-02's own environment never reaches
 that CLI. The layer is all the CLI reads of settings: the person's own still are not.
 
@@ -44,25 +45,26 @@ _FIXED: Final[Mapping[str, str]] = {
 @dataclass(frozen=True, slots=True)
 class Gateway:
     """Where the CLI sends its requests instead of Anthropic (`base_url`, an Anthropic-compatible
-    API), the command that prints its key (`key_command`, Claude Code's `apiKeyHelper`), how long a
-    key is used (`key_ttl_ms`; Claude Code's own default when None), and whether the CLI may send
+    API), the command that prints its key (`command`: the `key`'s `cmd`, or `op read <reference>`;
+    Claude Code's `apiKeyHelper`), how long a key is used (`ttl_ms`; Claude Code's own default,
+    300000, when None), and whether the CLI may send
     Anthropic's experimental beta headers (`experimental_betas`: false for a gateway that refuses
     them)."""
 
     base_url: str
-    key_command: str
-    key_ttl_ms: int | None = None
+    command: str
+    ttl_ms: int | None = None
     experimental_betas: bool = True
 
 
 def gateway_settings(gateway: Gateway) -> str:
     """The settings layer, as JSON, that sends the CLI's requests through `gateway`."""
     env = {"ANTHROPIC_BASE_URL": gateway.base_url}
-    if gateway.key_ttl_ms is not None:
-        env["CLAUDE_CODE_API_KEY_HELPER_TTL_MS"] = str(gateway.key_ttl_ms)
+    if gateway.ttl_ms is not None:
+        env["CLAUDE_CODE_API_KEY_HELPER_TTL_MS"] = str(gateway.ttl_ms)
     if not gateway.experimental_betas:
         env["CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS"] = "1"
-    return json.dumps({"apiKeyHelper": gateway.key_command, "env": env})
+    return json.dumps({"apiKeyHelper": gateway.command, "env": env})
 
 
 def gateway_env(config_dir: str) -> ChildEnv:

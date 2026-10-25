@@ -1,12 +1,12 @@
-"""A key an endpoint's `key_command` prints: for an openai endpoint whose key is not a line of
-`local.env` but comes from a helper (a company's token tool, a password manager), the same way
-Claude Code's `apiKeyHelper` gets one.
+"""A key an openai endpoint's `key` prints, with a `cmd` or an `op`: a helper (a company's token
+tool, a password manager), the same way Claude Code's `apiKeyHelper` gets one.
 
-The command runs as the person, through their shell, with bh-02's environment and no input, when a
-request needs a key; what it prints on stdout, trimmed, is the key. It is never held anywhere but
-the request headers it goes into (the openai provider keeps those for `key_ttl_ms`, as Claude Code
-keeps its helper's key), and an error about it names the command, never what it printed. Only the
-models file may name one (`named`: never a layer's `extra`), as only it may name a factory.
+The command (`KeySpec.command`: the `cmd`, or `op read <reference>`) runs as the person, through
+their shell, with bh-02's environment and no input, when a request needs a key; what it prints on
+stdout, trimmed, is the key. It is never held anywhere but the request headers it goes into (the
+openai provider keeps those for the key's `ttl_ms`, as Claude Code keeps its helper's key), and an
+error about it names the command, never what it printed. Only the models file may name one (`named`:
+never a layer's `extra`), as only it may name a factory.
 """
 
 import asyncio
@@ -14,11 +14,8 @@ from typing import Final
 
 from models_cordis_plugin.named import ModelsError
 
-__all__ = ["DEFAULT_TTL_MS", "command_key"]
+__all__ = ["command_key"]
 
-DEFAULT_TTL_MS: Final = (
-    300_000  # how long a printed key is used when `key_ttl_ms` is unset (Claude Code's own)
-)
 _DEADLINE: Final = 60.0  # seconds: a first `npx` run downloads its package
 
 
@@ -58,9 +55,9 @@ async def command_key(name: str, command: str, *, deadline: float = _DEADLINE) -
 
 
 def _failed(name: str, command: str, what: str) -> str:
-    """What the person is told when `name`'s key_command gives no key (`what` happened), never
+    """What the person is told when `name`'s key command gives no key (`what` happened), never
     anything it printed."""
     return (
-        f"{name!r}'s key_command `{command}` {what}, so the request has no key. Run it in a terminal to "
-        "see why, fix it or its key_command in the models file, then send the message again."
+        f"{name!r}'s key command `{command}` {what}, so the request has no key. Run it in a terminal to "
+        "see why, fix its `key` in the models file, then send the message again."
     )

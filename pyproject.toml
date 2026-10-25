@@ -101,12 +101,18 @@ src = [
     "bh-02/app/tests",
     "bh-02/plugins/agent-cordis-plugin/src",
     "bh-02/plugins/agent-cordis-plugin/tests",
+    "bh-02/plugins/brig-cordis-plugin/src",
+    "bh-02/plugins/brig-cordis-plugin/tests",
     "bh-02/plugins/chat-cordis-plugin/src",
     "bh-02/plugins/chat-cordis-plugin/tests",
     "bh-02/plugins/commands-cordis-plugin/src",
     "bh-02/plugins/commands-cordis-plugin/tests",
+    "bh-02/plugins/context-cordis-plugin/src",
+    "bh-02/plugins/context-cordis-plugin/tests",
     "bh-02/plugins/extensions-cordis-plugin/src",
     "bh-02/plugins/extensions-cordis-plugin/tests",
+    "bh-02/plugins/kernel-cordis-plugin/src",
+    "bh-02/plugins/kernel-cordis-plugin/tests",
     "bh-02/plugins/memory-cordis-plugin/src",
     "bh-02/plugins/memory-cordis-plugin/tests",
     "bh-02/plugins/models-cordis-plugin/src",
@@ -298,17 +304,16 @@ exclude = [
     "models_cordis_plugin.catalog:Catalog.problem", "models_cordis_plugin.catalog:Catalog.default_problem",
     # the same value's endpoints (`discover = true`): `endpoints` reads the models file afresh, as
     # `listed` does, and says what `refresh` kept; `refresh` reads it too, then asks each endpoint for
-    # its models, the one place a server is asked; `_ask` makes one request, reading the key's line of
-    # local.env (or running its key_command) into its headers; `httpx_get` is the real `Get`, that
+    # its models, the one place a server is asked; `_ask` makes one request, reading the key's variable
+    # (or running its cmd or op) into its headers; `httpx_get` is the real `Get`, that
     # request over httpx2
     "models_cordis_plugin.catalog:Catalog.endpoints", "models_cordis_plugin.catalog:Catalog.refresh",
     "models_cordis_plugin.catalog:_ask", "models_cordis_plugin.openai.discovery:httpx_get",
-    # an OpenAI-compatible model: one streamed HTTP call per step, and its key read from local.env,
-    # or printed by its key_command (`headers_for` runs it; `_headers` keeps them for key_ttl_ms)
-    "models_cordis_plugin.openai.client:authorization",
+    # an OpenAI-compatible model: one streamed HTTP call per step, and its key read from the
+    # environment, or printed by its cmd or op (`headers_for` runs it; `_headers` keeps them for ttl_ms)
     "models_cordis_plugin.openai.client:headers_for",
     "models_cordis_plugin.openai.client:OpenAIModel._headers",
-    "models_cordis_plugin.openai.client:missing_key",  # /model looks for the key's line, reads no value out
+    "models_cordis_plugin.openai.client:missing_key",  # /model looks for the key's variable, reads no value out
     "models_cordis_plugin.openai.client:OpenAIModel.complete",
     # the stand-in OpenAI-compatible server tests run the provider against: its socket
     "models_cordis_plugin.openai.testing:_Handler.*",

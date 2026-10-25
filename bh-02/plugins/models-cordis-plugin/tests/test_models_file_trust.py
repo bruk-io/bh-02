@@ -1,6 +1,6 @@
 """What the models file is trusted with, and where that stops: a models file in the project
 (which the model's code can write) is not read, however it got there, and is said to be where
-the file's problems are said; an `openai` model's key never names the Claude Code token."""
+the file's problems are said; an `openai` model's key never reads the Claude Code token."""
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,7 +21,7 @@ from models_cordis_plugin import (
     problem,
     resolved,
 )
-from models_cordis_plugin.openai import OpenAIModel, authorization
+from models_cordis_plugin.openai import OpenAIModel, headers_for
 from models_cordis_plugin.openai.testing import StubServer
 
 _FILE = """\
@@ -207,32 +207,40 @@ def test_a_models_file_outside_the_project_is_read_and_has_no_problem(
     assert resolved(ModelConfig(default="ollama/llama", cwd=str(project))).provider == "openai"
 
 
-def _keyed(key: str) -> Named:
-    """The endpoint `m`, whose one model is `m/x`, with `key`."""
-    table = {"provider": "openai", "base_url": "https://h/v1", "key": key, "models": {"x": {"id": "x"}}}
+def _keyed(variable: str) -> Named:
+    """The endpoint `m`, whose one model is `m/x`, with a key read from the environment variable
+    `variable`."""
+    table = {
+        "provider": "openai",
+        "base_url": "https://h/v1",
+        "key": {"env": variable},
+        "models": {"x": {"id": "x"}},
+    }
     (named,) = [m for m in combined({"m": table}, "/c/models.toml", {}) if m.name == "m"]
     return named
 
 
-async def test_a_key_naming_the_claude_code_token_is_refused_and_never_sent(tmp_path: Path) -> None:
-    env = tmp_path / "local.env"
-    env.write_text("CLAUDE_CODE_OAUTH_TOKEN=fake-token-for-tests\nOTHER_KEY=fake-other\n")
+async def test_a_key_reading_the_claude_code_token_is_refused_and_never_sent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "fake-token-for-tests")
+    monkeypatch.setenv("OTHER_KEY", "fake-other")
     named = _keyed("CLAUDE_CODE_OAUTH_TOKEN")
     said = str(problem(named))
-    assert said.startswith("'m' (/c/models.toml): key may not name CLAUDE_CODE_OAUTH_TOKEN")
+    assert said.startswith("'m' (/c/models.toml): key may not read CLAUDE_CODE_OAUTH_TOKEN")
     assert "the Claude Code CLI alone" in said and "fake-token-for-tests" not in said
     with pytest.raises(ModelsError) as raised:
         chosen("m/x", [named], "/c/models.toml")
     assert raised.value.kind == "model_config"
     with pytest.raises(ModelsError) as sent:  # the last wall, at the request itself
-        authorization(named, str(env))
+        await headers_for(named)
     assert sent.value.kind == "model_config" and "fake-token-for-tests" not in sent.value.message
     with StubServer() as stub:
         table = {**named.table, "base_url": stub.base_url, "id": "x"}
         del table["models"]
-        async with OpenAIModel(Named("m/x", "openai", "x", table, "/c/models.toml"), str(env)) as model:
+        async with OpenAIModel(Named("m/x", "openai", "x", table, "/c/models.toml")) as model:
             with pytest.raises(ModelsError):
                 async for _ in model.complete([{"role": "user", "content": "hi"}], []):
                     pass
     assert stub.requests == []  # nothing reached the server
-    assert problem(_keyed("OTHER_KEY")) is None  # another line is the endpoint's own
+    assert problem(_keyed("OTHER_KEY")) is None  # another variable is the endpoint's own

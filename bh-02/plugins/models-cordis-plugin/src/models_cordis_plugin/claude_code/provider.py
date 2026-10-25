@@ -214,8 +214,8 @@ def failure_of(error: str | None, detail: str, gateway: Gateway | None = None) -
     if kind == "authentication_failed" and gateway is not None:
         return ClaudeCodeError(
             kind,
-            f"The gateway {gateway.base_url} refused the key its key_command printed. Run "
-            f"`{gateway.key_command}` in a terminal to check it prints a key, then send the message again.",
+            f"The gateway {gateway.base_url} refused the key its `key` command printed. Run "
+            f"`{gateway.command}` in a terminal to check it prints a key, then send the message again.",
         )
     if kind == "authentication_failed":
         return ClaudeCodeError(kind, message)  # Claude Code's own advice (`/login`) is not bh-02's

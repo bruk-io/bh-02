@@ -137,7 +137,7 @@ class _Loader:
 
 
 async def test_the_catalog_row_binds_the_models_over_the_loader() -> None:
-    effects = await drive(catalog(loader=_Loader(), host=_Host(), config=CatalogConfig()))
+    effects = await drive(catalog(loader=_Loader(), config=CatalogConfig()))
     assert [(e.name, e.args[0]) for e in effects] == [("bind", "models")]
     bound = effects[0].args[1]
     assert isinstance(bound, Catalog) and bound.current() == {"name": "sub/haiku", "provider": "claude-code"}
