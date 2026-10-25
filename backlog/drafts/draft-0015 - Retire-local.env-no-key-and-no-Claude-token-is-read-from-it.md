@@ -4,9 +4,11 @@ title: 'Retire local.env: no key and no Claude token is read from it'
 status: Draft
 assignee: []
 created_date: '2026-10-25 17:57'
+updated_date: '2026-10-25 17:57'
 labels:
   - size-5
-dependencies: []
+dependencies:
+  - DRAFT-0014
 parent_task_id: TASK-0169
 type: task
 ---
@@ -29,3 +31,9 @@ The Claude subscription token follows: a `claude-code` endpoint without a `base_
 - [ ] #4 The jail docs state that under `--no-jail` provider keys in the process environment reach the model's code, and the unconfined runner still passes them.
 - [ ] #5 get-started, the jail docs, README.md, docs/bh-02/using/models.md and GLOSSARY.md no longer tell the person to create `local.env`, and scripts/check passes.
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Blocked by DRAFT-0014: the retired `local.env` is replaced by the `key` object, so the key must read the process environment first.
+<!-- SECTION:NOTES:END -->
