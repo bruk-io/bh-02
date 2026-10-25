@@ -45,6 +45,6 @@ bh-02 reaches Claude only through the Claude Code CLI (the `claude-code` provide
 - [ ] #2 An `anthropic-api` model name works in `--model`, `/model` and the models file's `default` the same way a `claude-code` or `openai` one does.
 - [ ] #3 The API key reaches only the request to the provider: not the Python worker's or the jail's environment, not a log, a transcript or an error message.
 - [ ] #4 A missing or refused key is a message that names the endpoint and what to write in its `key`, and `/model` with another name gets the person going again.
-- [ ] #5 A `claude-code` endpoint without a `base_url` is unchanged from DRAFT-0010: its token comes from `key` and goes only to the CLI.
+- [ ] #5 A `claude-code` endpoint without a `base_url` is unchanged from TASK-0169: its token comes from `key` and goes only to the CLI.
 - [ ] #6 docs/bh-02/using/models.md, the models plugin README and GLOSSARY.md describe both Claude providers and when to pick each, and scripts/check passes.
 <!-- AC:END -->
