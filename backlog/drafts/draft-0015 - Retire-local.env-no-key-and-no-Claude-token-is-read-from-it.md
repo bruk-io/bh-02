@@ -4,11 +4,11 @@ title: 'Retire local.env: no key and no Claude token is read from it'
 status: Draft
 assignee: []
 created_date: '2026-10-25 17:57'
-updated_date: '2026-10-25 17:57'
+updated_date: '2026-10-25 18:02'
 labels:
   - size-5
 dependencies:
-  - DRAFT-0014
+  - TASK-0169.03
 parent_task_id: TASK-0169
 type: task
 ---
@@ -35,5 +35,5 @@ The Claude subscription token follows: a `claude-code` endpoint without a `base_
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Blocked by DRAFT-0014: the retired `local.env` is replaced by the `key` object, so the key must read the process environment first.
+Blocked by TASK-0169.03: the retired `local.env` is replaced by the `key` object, so the key must read the process environment first.
 <!-- SECTION:NOTES:END -->
