@@ -1,0 +1,31 @@
+---
+id: DRAFT-0015
+title: 'Retire local.env: no key and no Claude token is read from it'
+status: Draft
+assignee: []
+created_date: '2026-10-25 17:57'
+labels:
+  - size-5
+dependencies: []
+parent_task_id: TASK-0169
+type: task
+---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+`local.env` holds provider keys and `CLAUDE_CODE_OAUTH_TOKEN`, and a lot of bh-02 is built around keeping the jail from reading it: the `hide = ["local.env"]` default, the credential lists, the `host` `secrets`, the "adding your credential mid-session" and `/release` flow, and the get-started step (TASK-0169). Keys now come from the person's environment through `key` (see the `key`-object task), so `local.env` has no purpose left. Retire it with no backwards compatibility: nothing reads an old file, no test pins it, and the notes say what stops working.
+
+The Claude subscription token follows: a `claude-code` endpoint without a `base_url` takes `key = { env = "CLAUDE_CODE_OAUTH_TOKEN" }` (or `cmd`/`op`) and hands it only to the Claude Code CLI it starts, never to the Python worker, a jail or bh-02's other children.
+
+`--no-jail` does not scrub provider keys from the environment, and the jail docs say so plainly.
+<!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [ ] #1 No code path reads `local.env` for a model key or for `CLAUDE_CODE_OAUTH_TOKEN`; a leftover `local.env` is ignored, and the change's notes say which setups stop working.
+- [ ] #2 A `claude-code` endpoint without a `base_url` and with `key = { env = "CLAUDE_CODE_OAUTH_TOKEN" }` answers a message, and a test shows the token reaches only the Claude Code CLI's environment, not the Python worker's.
+- [ ] #3 The `hide = ["local.env"]` default, the credential-list and `host` `secrets` entries for `local.env`, and the `/release` and mid-session-credential flows built on it are removed or reworded, with tests updated to match and none pinning the old behaviour.
+- [ ] #4 The jail docs state that under `--no-jail` provider keys in the process environment reach the model's code, and the unconfined runner still passes them.
+- [ ] #5 get-started, the jail docs, README.md, docs/bh-02/using/models.md and GLOSSARY.md no longer tell the person to create `local.env`, and scripts/check passes.
+<!-- AC:END -->
