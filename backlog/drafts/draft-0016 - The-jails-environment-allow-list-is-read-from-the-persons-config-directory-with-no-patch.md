@@ -6,9 +6,12 @@ title: >-
 status: Draft
 assignee: []
 created_date: '2026-10-25 17:57'
+updated_date: '2026-10-25 17:57'
 labels:
   - size-3
-dependencies: []
+dependencies:
+  - DRAFT-0012
+  - DRAFT-0013
 parent_task_id: TASK-0169
 type: task
 ---
@@ -29,3 +32,9 @@ Depends on the design task (file, format, how it composes with a layer) and the 
 - [ ] #4 The behaviour the design record chose for startup refusing an allow-list that names a variable a `key = { env = ... }` reads is implemented and tested.
 - [ ] #5 The jail docs and the runner plugin README describe the file, its location and how it composes with a layer, and scripts/check passes.
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Blocked by DRAFT-0013 (the file, its format and how it composes with a layer) and DRAFT-0012 (which processes inherit the whole environment, so the docs state the exposure truthfully).
+<!-- SECTION:NOTES:END -->
