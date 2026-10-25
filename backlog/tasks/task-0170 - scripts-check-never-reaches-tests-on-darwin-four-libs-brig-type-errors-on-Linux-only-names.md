@@ -1,9 +1,9 @@
 ---
-id: DRAFT-0019
+id: TASK-0170
 title: >-
   scripts/check never reaches tests on darwin: four libs/brig type errors on
   Linux-only names
-status: Draft
+status: To Do
 assignee: []
 created_date: '2026-10-25 21:02'
 labels: []
