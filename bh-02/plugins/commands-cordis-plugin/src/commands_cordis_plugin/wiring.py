@@ -3,7 +3,7 @@ they ask for; the operator's commands registered into the broker; and `!`, a she
 the prefix claimed in it."""
 
 import functools
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from typing import Protocol, runtime_checkable
 
 from commands_cordis_plugin.jobs import Jobs
@@ -55,19 +55,31 @@ async def registry() -> Effects:
     yield bind("commands", Commands())
 
 
+@runtime_checkable
+class _Keyed(Protocol):
+    """What the shell-command row needs of the `host` value: `key_envs`, each variable an
+    endpoint of the models file reads as its key (CONTRACTS.md: host)."""
+
+    @property
+    def key_envs(self) -> Mapping[str, Sequence[str]]: ...
+
+
 @component
-async def shell_command(*, commands: _Claimant, config: ShellCommandConfig) -> Effects:
+async def shell_command(*, commands: _Claimant, config: ShellCommandConfig, host: _Keyed) -> Effects:
     """Fills a `shell-command` row: `use = "commands:shell_command"`. A line starting with `!`
     (`prefix`) runs as a shell command, as the person, in the project (`cwd`), its output
     captured and stopped at its `timeout`; what it printed is shown, and the model reads it with
-    the person's next message. It claims the prefix in `commands`, which only a layer's row can:
-    an extension reaches `commands` through its `register` alone."""
+    the person's next message, so the command's environment lacks the variables the models file's
+    keys read (`host.key_envs`), as it lacks `ANTHROPIC_*` and `CLAUDE*`. It claims the prefix in
+    `commands`, which only a layer's row can: an extension reaches `commands` through its
+    `register` alone."""
     spec: CommandSpec = {
         "name": "shell",
         "help": "run COMMAND in your shell, here, as you; the model reads its output with your next message",
         "usage": "COMMAND",
     }
-    yield acquire(commands.claim, config.prefix, spec, functools.partial(run_line, config=config))
+    run = functools.partial(run_line, config=config, withheld=frozenset(host.key_envs))
+    yield acquire(commands.claim, config.prefix, spec, run)
 
 
 @component
