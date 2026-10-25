@@ -6,12 +6,12 @@ title: >-
 status: Draft
 assignee: []
 created_date: '2026-10-25 17:57'
-updated_date: '2026-10-25 17:57'
+updated_date: '2026-10-25 18:02'
 labels:
   - size-3
 dependencies:
-  - DRAFT-0012
-  - DRAFT-0013
+  - TASK-0169.01
+  - TASK-0169.02
 parent_task_id: TASK-0169
 type: task
 ---
@@ -36,5 +36,5 @@ Depends on the design task (file, format, how it composes with a layer) and the 
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Blocked by DRAFT-0013 (the file, its format and how it composes with a layer) and DRAFT-0012 (which processes inherit the whole environment, so the docs state the exposure truthfully).
+Blocked by TASK-0169.02 (the file, its format and how it composes with a layer) and TASK-0169.01 (which processes inherit the whole environment, so the docs state the exposure truthfully).
 <!-- SECTION:NOTES:END -->
