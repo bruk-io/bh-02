@@ -16,8 +16,8 @@ import tempfile
 import threading
 import time
 import uuid
-from collections.abc import Iterator, Sequence
-from dataclasses import dataclass
+from collections.abc import Iterator, Mapping, Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -74,6 +74,8 @@ class Host:
     trusted: tuple[str, ...] = ()
     code: tuple[str, ...] = ()
     auto_memory: str = ""
+    key_envs: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+    models_file: str = ""
 
 
 def test_the_project_s_auto_memory_directory_is_a_root_an_input_may_write() -> None:

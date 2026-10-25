@@ -2,8 +2,10 @@
 workspace that imports brig) or not at all; the rule for what runs unasked (`approval`); and
 `/release`, which asks each owner to stop its own program and lets go of what the runner holds."""
 
+from runner_cordis_plugin import allowlist
 from runner_cordis_plugin.approval import Approval, Graded, is_confined
 from runner_cordis_plugin.jail import (
+    BASELINE_ENV,
     MARK,
     SYSTEM_READABLE,
     BrigConfig,
@@ -43,6 +45,7 @@ from runner_cordis_plugin.unconfined import UNENFORCED, Unjailed
 from runner_cordis_plugin.wiring import approval, confined, release, unconfined
 
 __all__ = [
+    "BASELINE_ENV",
     "MARK",
     "SYSTEM_READABLE",
     "UNENFORCED",
@@ -56,6 +59,7 @@ __all__ = [
     "Started",
     "Tripwire",
     "Unjailed",
+    "allowlist",
     "allowlisted",
     "approval",
     "confined",

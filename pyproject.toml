@@ -229,6 +229,8 @@ exclude = [
     "bh_02.cli:_run", "bh_02.cli:_writer.write",               # --trace FILE
     "bh_02.cli:_launch",                                      # makes the project's auto memory directory
     "bh_02.bootstrap:project_of",                             # reads .git: a worktree's main repository
+    "bh_02.bootstrap:models_keys",                            # reads the models file for the variables its keys read (host.key_envs); the pure part is key_variables
+    "runner_cordis_plugin.allowlist:read",                    # reads the person's runner.toml (the jail's environment list); the pure parts are parsed and effective
     # the session's rows.jsonl: a listener that reads the clock and queues each kept lifecycle event
     # to host_paths.Appender (a thread writes it), and `run`, which mounts it around the composition
     "bh_02.bootstrap:_row_log", "bh_02.bootstrap:_row_log.hear", "bh_02.bootstrap:run",

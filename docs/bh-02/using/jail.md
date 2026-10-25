@@ -93,9 +93,39 @@ config = { allow = ["CLAUDE.md", "AGENTS.md", ".git/config"] }
 | `write` | where inputs may write, `["."]` (the project) by default |
 | `deny` | more paths inputs may not write |
 | `hide` | files inside the project that inputs may not read, none by default |
-| `env` | the environment variables that survive the scrub |
+| `env` | the environment variables that survive the scrub; it replaces the list below, baseline included |
 
-A `config` in a layer replaces the row's whole config, so give every setting you want.
+A `config` in a layer replaces the row's whole config, so give every setting you want. The
+exception is `env`: a layer that leaves it out takes the list from your `runner.toml` (below).
+
+## Which environment variables the model's code sees
+
+The jail starts the model's code with an empty environment and adds back `PATH`, `HOME`, `LANG`,
+`LC_ALL` and `TERM`, and nothing else. A provider key you exported for a model's
+`key = { env = ... }` is in bh-02's own environment and **not** in the code's. To let more through
+(a `GITHUB_TOKEN` for `gh`, an `AWS_PROFILE`), list the names, never values, in
+`~/.config/bh-02/runner.toml` (`$XDG_CONFIG_HOME/bh-02/runner.toml`):
+
+```toml
+env = ["GITHUB_TOKEN", "AWS_PROFILE"]
+```
+
+- The names are added to the five above, for every session and with no `--patch`.
+- A layer whose `runner` config sets `env` replaces this list (and the five: a layer's `env` is the
+  whole list), and the jail says so when it starts. A layer that leaves `env` out takes the file's.
+- The file is read like the models file: one in the project, or reached through a link into it, is
+  not read, because the model's code could have written it. The jail then passes the five alone and
+  tells you where to put it (outside the project; if you run bh-02 from your home directory, set
+  `XDG_CONFIG_HOME` somewhere else). No file leaves the five.
+- A file that is not TOML, has a key other than `env`, or lists something that is not a variable
+  name is refused with a message saying what to fix, and bh-02 does not start the runner on it.
+- A name that a `key = { env = ... }` in your models file reads is refused at startup, naming the
+  variable, the endpoint and both files: the jail would hand that key to the model's code. Remove
+  it from `runner.toml` (or the layer), or change the key. (The models file checked is the default
+  one; a model row `models` setting naming another is not.)
+- `--no-jail` ignores the file: the unconfined runner passes bh-02's environment, as above.
+
+The model's code cannot write the file: bh-02's config directory is not writable in the jail.
 
 ## On Linux
 

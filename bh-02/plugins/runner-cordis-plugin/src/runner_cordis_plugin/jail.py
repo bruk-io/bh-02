@@ -112,6 +112,7 @@ from runner_cordis_plugin.tripwire import Tripwire
 
 __all__ = [
     "MARK",
+    "BASELINE_ENV",
     "SYSTEM_READABLE",
     "BrigConfig",
     "BrigJail",
@@ -186,6 +187,10 @@ class Host(Protocol):
     def auto_memory(self) -> str: ...
 
 
+#: The variables the jail always lets through: what a program needs to run at all.
+BASELINE_ENV: tuple[str, ...] = ("PATH", "HOME", "LANG", "LC_ALL", "TERM")
+
+
 @dataclass(frozen=True, slots=True)
 class BrigConfig:
     """`write`: where an input may write besides its scratch dir (relative to the python row's root).
@@ -194,13 +199,14 @@ class BrigConfig:
     by default the project's guidance files, which editing is ordinary work. The rest stay denied:
     they can run code outside the jail later (hooks, shell rc files, editor and Claude settings).
     `hide`: paths it may not read (relative to the root; none by default). `env`: the variables that
-    survive the scrub."""
+    survive the scrub; None (unset) is `BASELINE_ENV` plus the names of the person's `runner.toml`
+    (`allowlist.effective`), a list here replaces that whole list."""
 
     write: Sequence[str] = (".",)
     deny: Sequence[str] = ()
     allow: Sequence[str] = ("CLAUDE.md", "AGENTS.md")
     hide: Sequence[str] = ()
-    env: Sequence[str] = ("PATH", "HOME", "LANG", "LC_ALL", "TERM")
+    env: Sequence[str] | None = None
 
 
 def spec_for(
@@ -290,7 +296,11 @@ def spec_for(
                 *hidden,
             ),
         ),
-        env=EnvPolicy(mode=EnvMode.SCRUB, allow_names=tuple(config.env), set=(("TMPDIR", scratch),)),
+        env=EnvPolicy(
+            mode=EnvMode.SCRUB,
+            allow_names=tuple(BASELINE_ENV if config.env is None else config.env),
+            set=(("TMPDIR", scratch),),
+        ),
         channels=(Channel(name="program", kind=ChannelKind.LISTEN),),
     )
 
@@ -1000,9 +1010,11 @@ class BrigJail:
         platform: str = host_platform,
         lock: str | None = None,
         interpreters: Sequence[str] | None = None,
+        note: str = "",
     ) -> None:
         self._config = config
         self._host = host
+        self._note = note
         self._platform = platform
         self._lock = lock if lock is not None else _LOCK.format(uid=os.getuid())
         self._interpreters = host_interpreters() if interpreters is None else tuple(interpreters)
@@ -1209,11 +1221,11 @@ class BrigJail:
             w for w in spec.fs.write_allows if not Path(w).is_relative_to(jail_dir) and w != socket_dir
         )
         if self._platform != "linux":
-            return _Facts(report, writes=writes)
+            return _Facts(report, self._note, writes=writes)
         trees = (*spec.fs.read_allows, *spec.fs.write_allows)
         return _Facts(
             report,
-            notice_for(self._platform, held(spec, absent)),
+            "\n".join(filter(None, (self._note, notice_for(self._platform, held(spec, absent))))),
             told_reads(trees, (jail_dir, socket_dir)),
             writes,
         )

@@ -32,12 +32,14 @@ from bh_02.bootstrap import (
     config_directories,
     layers,
     memory_directory,
+    models_keys,
     project_of,
     read_layers,
     run,
     unreadable,
 )
 from cordis.loader import read_layer
+from host_paths import config_home
 
 __all__ = ["main"]
 
@@ -320,6 +322,10 @@ def _launch(
     code = code_directories(code_packages(ep.module for ep in entry_points(group="cordis.plugins")))
     memory = memory_directory(project_of(Path.cwd().resolve()), os.environ, Path.home())
     Path(memory).mkdir(mode=0o700, parents=True, exist_ok=True)
+    # the models file the model row reads (its default place), and the variables its keys read: the
+    # runner refuses an environment list that names one
+    models = config_home(os.environ, Path.home()) / "bh-02" / "models.toml"
+    keys = models_keys(models, Path.cwd())
     try:
         asyncio.run(
             run(
@@ -332,6 +338,8 @@ def _launch(
                 trusted=trusted,
                 code=code,
                 auto_memory=memory,
+                key_envs=keys,
+                models_file=str(models),
             )
         )
     except CompositionError as error:

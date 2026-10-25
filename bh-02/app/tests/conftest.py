@@ -322,6 +322,8 @@ async def host_seen(*, host: Any, config: Mapping[str, Any]) -> Effects:
         "secrets": list(host.secrets),
         "trusted": list(host.trusted),
         "code": list(host.code),
+        "key_envs": {name: list(endpoints) for name, endpoints in host.key_envs.items()},
+        "models_file": host.models_file,
     }
     Path(config["out"]).write_text(json.dumps(seen))
     return

@@ -6,8 +6,9 @@ import datetime
 import json
 import os
 import re
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Mapping
-from dataclasses import asdict, dataclass
+import tomllib
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Mapping, Sequence
+from dataclasses import asdict, dataclass, field
 from importlib import resources
 from importlib.resources.abc import Traversable
 from importlib.util import find_spec
@@ -18,7 +19,7 @@ from bh_02.sessions import Listing
 from cordis import Booted, Effects, Event, Inspection, Row, Runtime, bind, boot, component, enter
 from cordis.composition import Entry, compose
 from cordis.loader import read_layer, resolve
-from host_paths import Appender, config_home, state_home
+from host_paths import Appender, config_home, passes, roots, state_home
 
 __all__ = [
     "CompositionError",
@@ -26,6 +27,8 @@ __all__ = [
     "NotStarted",
     "Recoverable",
     "code_directories",
+    "key_variables",
+    "models_keys",
     "code_packages",
     "config_directories",
     "memory_directory",
@@ -85,6 +88,39 @@ class _Host:
     trusted: tuple[str, ...] = ()
     code: tuple[str, ...] = ()
     auto_memory: str = ""
+    key_envs: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+    models_file: str = ""
+
+
+def key_variables(text: str) -> dict[str, tuple[str, ...]]:
+    """The variables the models file's endpoints read as their key (`key = { env = "NAME" }`, the
+    `host` value's `key_envs`), each to the endpoints that read it. The runner refuses an
+    environment list naming one (decision-0010): the jail would hand that key to the model's code.
+    Pure and lenient: a file that is not TOML, a table without such a key, or an `env` that is no
+    text adds nothing here; the models plugin says what is wrong with the file itself."""
+    try:
+        data = tomllib.loads(text)
+    except tomllib.TOMLDecodeError:
+        return {}
+    found: dict[str, list[str]] = {}
+    for name, table in data.items():
+        key = table.get("key") if isinstance(table, dict) else None
+        variable = key.get("env") if isinstance(key, dict) else None
+        if isinstance(variable, str):
+            found.setdefault(variable, []).append(name)
+    return {variable: tuple(names) for variable, names in found.items()}
+
+
+def models_keys(path: Path, project: Path) -> dict[str, tuple[str, ...]]:
+    """`key_variables` of the models file at `path`: none when there is no file, it can't be read,
+    or it is in the `project` or reached through a link into it (the models plugin does not read
+    it either: the model's code could have written it)."""
+    if passes(path, roots(project)):
+        return {}
+    try:
+        return key_variables(path.read_text(encoding="utf-8"))
+    except OSError, UnicodeDecodeError:
+        return {}
 
 
 def unreadable(states: Iterable[str]) -> tuple[str, ...]:
@@ -408,6 +444,8 @@ async def run(
     trusted: Iterable[str] = (),
     code: Iterable[str] = (),
     auto_memory: str = "",
+    key_envs: Mapping[str, Sequence[str]] | None = None,
+    models_file: str = "",
 ) -> None:
     """Boot, wait for the chat row's own work to end (CONTRACTS.md: `done`), then unwind.
 
@@ -458,6 +496,8 @@ async def run(
         "trusted": list(trusted),
         "code": list(code),
         "auto_memory": auto_memory,
+        "key_envs": {variable: list(names) for variable, names in (key_envs or {}).items()},
+        "models_file": models_file,
     }
     last = [
         *overrides,

@@ -14,7 +14,7 @@ from click.testing import CliRunner
 import cordis
 import memory_cordis_plugin
 from bh_02 import main
-from bh_02.bootstrap import code_directories, code_packages, config_directories
+from bh_02.bootstrap import code_directories, code_packages, config_directories, key_variables, models_keys
 
 
 def test_the_bh_02_command_boots_keeping_inputs_from_reading_the_sessions_state(
@@ -135,3 +135,71 @@ def test_a_package_s_code_is_where_it_is_installed_as_named_and_as_it_resolves(
         "python_cordis_plugin",
         "a",
     )
+
+
+_MODELS = (
+    '[openrouter]\nprovider = "openai"\nbase_url = "https://openrouter.ai/api/v1"\n'
+    'key = { env = "OPENROUTER_API_KEY" }\n'
+    '[local]\nprovider = "openai"\nbase_url = "http://localhost:1/v1"\n'
+)
+
+
+def test_key_variables_are_the_envs_the_models_file_s_keys_read_with_their_endpoints() -> None:
+    both = _MODELS + '[again]\nprovider = "openai"\nkey = { env = "OPENROUTER_API_KEY" }\n'
+    assert key_variables(both) == {"OPENROUTER_API_KEY": ("openrouter", "again")}
+    assert key_variables('default = "x"\n[c]\nkey = { cmd = "print-it" }\n[d]\nkey = { env = 1 }') == {}
+    assert key_variables("not [toml") == {}
+
+
+def test_the_bh_02_command_boots_handing_the_jail_the_variables_the_models_file_s_keys_read(
+    composition: Callable[..., Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`host.key_envs` and `host.models_file`: what the runner compares its environment list with
+    (decision-0010). A models file inside the project is not read, so adds nothing."""
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    config = tmp_path / "xdg"
+    (config / "bh-02").mkdir(parents=True)
+    (config / "bh-02" / "models.toml").write_text(_MODELS)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(config))
+    work = tmp_path / "work"
+    work.mkdir()
+    monkeypatch.chdir(work)
+    seen = tmp_path / "seen.json"
+    patch = composition(
+        '[[plugin]]\nid = "loop"\nuse = "fragile:echo_model"\n'
+        '[[plugin]]\nid = "ui"\nuse = "fragile:one_message_recorded_ui"\n'
+        f'[[plugin]]\nid = "probe"\nuse = "fragile:host_seen"\nconfig = {{ out = "{seen}" }}\n'
+    )
+    result = CliRunner().invoke(main, ["--no-jail", "--patch", str(patch)])
+    assert result.exit_code == 0, result.output
+    booted = json.loads(seen.read_text())
+    assert booted["key_envs"] == {"OPENROUTER_API_KEY": ["openrouter"]}
+    assert booted["models_file"] == str(config / "bh-02" / "models.toml")
+    monkeypatch.chdir(tmp_path)  # the config directory is now in the project
+    assert models_keys(config / "bh-02" / "models.toml", tmp_path) == {}
+
+
+def test_the_bh_02_command_refuses_to_start_a_jail_whose_list_names_a_variable_a_key_reads(
+    composition: Callable[..., Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """decision-0010: the runner row stops at launch, and the message names the variable, the
+    endpoint and both files."""
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    config = tmp_path / "xdg"
+    (config / "bh-02").mkdir(parents=True)
+    (config / "bh-02" / "models.toml").write_text(_MODELS)
+    (config / "bh-02" / "runner.toml").write_text('env = ["OPENROUTER_API_KEY"]\n')
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(config))
+    work = tmp_path / "work"
+    work.mkdir()
+    monkeypatch.chdir(work)
+    patch = composition(
+        '[[plugin]]\nid = "loop"\nuse = "fragile:echo_model"\n'
+        '[[plugin]]\nid = "ui"\nuse = "fragile:one_message_recorded_ui"\n'
+        '[[plugin]]\nid = "runner"\nuse = "runner:confined"\n'
+    )
+    result = CliRunner().invoke(main, ["--patch", str(patch)])
+    assert result.exit_code == 1, result.output
+    assert "OPENROUTER_API_KEY" in result.output and "'openrouter'" in result.output
+    assert str(config / "bh-02" / "runner.toml") in result.output
+    assert str(config / "bh-02" / "models.toml") in result.output
