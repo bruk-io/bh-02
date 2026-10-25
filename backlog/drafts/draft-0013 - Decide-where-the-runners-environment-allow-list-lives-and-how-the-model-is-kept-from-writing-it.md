@@ -1,0 +1,30 @@
+---
+id: DRAFT-0013
+title: >-
+  Decide where the runner's environment allow-list lives and how the model is
+  kept from writing it
+status: Draft
+assignee: []
+created_date: '2026-10-25 17:57'
+labels:
+  - size-3
+dependencies: []
+parent_task_id: TASK-0169
+type: design
+---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+The runner's `env` setting lists the variables that survive the jail's scrub (PATH, HOME, LANG, LC_ALL, TERM by default). Today it can only be set in a `--patch` layer, per launch (TASK-0169). The person wants it to have a standing home in their config directory, `~/.config/bh-02/`, owned by the runner plugin and not the models file. A file there is trusted, so the model must not be able to write it, as is already true of the models file (a file inside the project, or reached through a link into it, is not read).
+
+Decide, as a decision record: whether it is its own file or a runner section of a shared config file, its format and name, how it composes with a `--patch` layer's runner config (which today replaces the row's whole config), and whether startup refuses an allow-list that names a variable a `key = { env = ... }` in the models file also reads, so one line cannot leak a provider key into the jail.
+<!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [ ] #1 A decision record names the file, its location under `~/.config/bh-02/` and its format, and says why one shape over the alternatives considered.
+- [ ] #2 The record says how the file and a `--patch` layer's runner config combine (replace, merge or refuse) and what the person sees when both set `env`.
+- [ ] #3 The record says whether startup refuses an allow-list that names a variable a `key = { env = ... }` reads, and the message the person would see.
+- [ ] #4 The record says how the file is kept from the model's code (the existing rule for the models file, or what differs) and what happens when it sits inside the project.
+<!-- AC:END -->
