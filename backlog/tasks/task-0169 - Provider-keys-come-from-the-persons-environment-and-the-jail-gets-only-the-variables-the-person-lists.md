@@ -6,7 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-10-25 17:39'
-updated_date: '2026-10-25 17:56'
+updated_date: '2026-10-25 18:03'
 labels:
   - size-8
 dependencies: []
@@ -59,3 +59,15 @@ The `local.env` rule exists so a key never reaches code the model writes. The ja
 - [ ] #7 Under `--no-jail`, provider keys in the process environment are not scrubbed, and the jail docs state that this exposes them to the model's code.
 - [ ] #8 README.md, docs/bh-02/using/models.md, the jail docs, get-started, GLOSSARY.md and the models plugin README describe the new `key` object, the environment source and the allow-list's home, and scripts/check passes.
 <!-- AC:END -->
+
+## Comments
+
+<!-- COMMENTS:BEGIN -->
+created: 2026-10-25 18:03
+
+---
+
+Spike TASK-0169.01 result: every spawn site is tabulated in its implementation notes. The jail is a real allow-list (`env -i` + `allow_names`), so a provider key in bh-02's environment does not reach the model's code unless listed. One unexpected exposure: `!COMMAND` passes the whole environment less ANTHROPIC_*/CLAUDE* and its output goes to the model; filed as a child task.
+
+---
+<!-- COMMENTS:END -->
