@@ -6,6 +6,7 @@ title: >-
 status: Draft
 assignee: []
 created_date: '2026-10-25 17:52'
+updated_date: '2026-10-25 17:53'
 labels: []
 dependencies:
   - DRAFT-0010
@@ -28,11 +29,11 @@ bh-02 reaches Claude only through the Claude Code CLI (the `claude-code` provide
 ## Decisions already made (with the person, 2026-10-25)
 
 - Two providers for Claude: `claude-code` (as today, taking `CLAUDE_CODE_OAUTH_TOKEN`) and a new `anthropic-api` provider that takes an Anthropic API key.
-- Both take their credential through the `key` object from DRAFT-0010 (`env`, `cmd` or `op`). This work starts after DRAFT-0010, which retires `local.env`.
+- Both take their credential through the `key` object from DRAFT-0010 (`env`, `cmd` or `op`), written in the provider's own endpoint table in `models.toml`. Neither goes in the runner's `env` allow-list: that list is what the jail lets through to the model's code, and these credentials must never be on it.
+- This work starts after DRAFT-0010, which retires `local.env`.
 
 ## Open questions
 
-- [ ] The person said the credentials come "in the runner's env config". The runner's `env` is the list of variables the jail lets through to the model's code, so naming a token there would hand it to that code. Is the intent the models file's `key = { env = ... }` instead? (Assumed so here.)
 - [ ] Does `anthropic-api` run the agent loop itself (Messages API, tool use, streaming) or wrap the SDK? What does it share with the openai provider?
 - [ ] Does it take a `base_url`, for a proxy or a gateway that speaks Anthropic's API?
 - [ ] Does it discover its models (`GET /v1/models`) as the openai provider does with `discover = true`?
