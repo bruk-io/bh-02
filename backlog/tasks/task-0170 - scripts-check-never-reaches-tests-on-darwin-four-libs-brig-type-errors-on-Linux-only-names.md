@@ -3,9 +3,10 @@ id: TASK-0170
 title: >-
   scripts/check never reaches tests on darwin: four libs/brig type errors on
   Linux-only names
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-25 21:02'
+updated_date: '2026-10-25 21:28'
 labels: []
 dependencies: []
 type: bug
@@ -31,3 +32,13 @@ Cost: every worker and reviewer on macOS either scopes the check to one member (
 - [ ] #1 scripts/check on macOS reaches its tests, gates and docs steps and reports them, with no type error from a Linux-only name in libs/brig
 - [ ] #2 The chosen fix keeps the Linux behaviour type-checked rather than silencing the modules wholesale, and a note says which approach was taken and why
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Approach: an explicit `sys.platform != "linux"` guard at the three Linux-only call sites (commit 3ee5f3e), not a mypy `platform` setting and not a per-module override. `brig/run/host.py:_source_fd` raises OSError (its docstring already said it raises when not on Linux), `brig/run/dial.py:_pidfd_alive` answers False (a pidfd is Linux's, so elsewhere no process is held), `brig/runtime/_oci_agent.py:accept_hello` raises AgentStartFailed. This keeps the Linux path fully type-checked on Linux (mypy analyses it there) and the code matches its own docstring; a `platform = "linux"` setting would have stopped mypy looking at the darwin branches, and a module override would have silenced three modules wholesale.
+
+Evidence: `uv run mypy` -> Success on 208 files (host platform, darwin); `uv run mypy --platform linux` -> Success on 208 files; brig unit tests for dial, peer, pidfd, accept_hello pass; `scripts/arch-check --no-fix` ok for every gate. Pre-existing and unrelated: `libs/brig/tests/unit/test_process_namespaces_pure.py` fails to collect on darwin (`signal.SIGRTMIN`).
+
+Correction to the draft's premise, from the TASK-0169.01 review: `scripts/check` starts every step at once and reports in order, so a types failure does not stop tests, gates and docs; the earlier runs never reached them because stray test runs held the jail lock. AC #1 is therefore a question about a full run on a quiet machine; one is running now and its result goes here.
+<!-- SECTION:NOTES:END -->
