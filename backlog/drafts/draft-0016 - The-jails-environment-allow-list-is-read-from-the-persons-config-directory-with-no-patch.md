@@ -1,0 +1,31 @@
+---
+id: DRAFT-0016
+title: >-
+  The jail's environment allow-list is read from the person's config directory,
+  with no --patch
+status: Draft
+assignee: []
+created_date: '2026-10-25 17:57'
+labels:
+  - size-3
+dependencies: []
+parent_task_id: TASK-0169
+type: task
+---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+The runner's `env` allow-list (the variables the jail lets through to the model's code) can only be set in a `--patch` layer today, so it is per launch and easy to forget (TASK-0169). Give it a standing home under `~/.config/bh-02/`, read by the runner plugin, as the design task decides. This is the user-facing way to say which environment variables the model's code may see, now that provider keys come from the process environment.
+
+Depends on the design task (file, format, how it composes with a layer) and the spike (which processes inherit the whole environment).
+<!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [ ] #1 With the allow-list file present and no `--patch`, the jailed worker's environment holds exactly the runner's baseline plus the variables the file names, and a test shows a provider key exported in the shell and not listed is absent from it.
+- [ ] #2 The model's code cannot write the file, shown by a test of the same kind as the models file's; a file inside the project or reached through a link into it is not read, and the person is told where to put it.
+- [ ] #3 A missing file leaves the runner's current default (PATH, HOME, LANG, LC_ALL, TERM); a malformed file is refused with a message that says what to fix.
+- [ ] #4 The behaviour the design record chose for startup refusing an allow-list that names a variable a `key = { env = ... }` reads is implemented and tested.
+- [ ] #5 The jail docs and the runner plugin README describe the file, its location and how it composes with a layer, and scripts/check passes.
+<!-- AC:END -->
