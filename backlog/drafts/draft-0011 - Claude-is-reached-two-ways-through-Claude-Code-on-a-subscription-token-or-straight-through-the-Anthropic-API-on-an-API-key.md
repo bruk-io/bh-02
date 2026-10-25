@@ -6,10 +6,10 @@ title: >-
 status: Draft
 assignee: []
 created_date: '2026-10-25 17:52'
-updated_date: '2026-10-25 17:53'
+updated_date: '2026-10-25 17:57'
 labels: []
 dependencies:
-  - DRAFT-0010
+  - TASK-0169
 priority: medium
 type: intent
 ---
@@ -29,8 +29,8 @@ bh-02 reaches Claude only through the Claude Code CLI (the `claude-code` provide
 ## Decisions already made (with the person, 2026-10-25)
 
 - Two providers for Claude: `claude-code` (as today, taking `CLAUDE_CODE_OAUTH_TOKEN`) and a new `anthropic-api` provider that takes an Anthropic API key.
-- Both take their credential through the `key` object from DRAFT-0010 (`env`, `cmd` or `op`), written in the provider's own endpoint table in `models.toml`. Neither goes in the runner's `env` allow-list: that list is what the jail lets through to the model's code, and these credentials must never be on it.
-- This work starts after DRAFT-0010, which retires `local.env`.
+- Both take their credential through the `key` object from TASK-0169 (`env`, `cmd` or `op`), written in the provider's own endpoint table in `models.toml`. Neither goes in the runner's `env` allow-list: that list is what the jail lets through to the model's code, and these credentials must never be on it.
+- This work starts after TASK-0169, which retires `local.env`.
 
 ## Open questions
 
