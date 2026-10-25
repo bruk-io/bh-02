@@ -94,7 +94,7 @@ macOS, and on Linux with bubblewrap installed (the `bubblewrap` package); elsewh
 git clone https://github.com/bruk-io/bh-02 && cd bh-02
 uv sync --all-packages
 claude setup-token                        # the subscription's token; a gateway (base_url, key) needs none
-echo 'CLAUDE_CODE_OAUTH_TOKEN=<the token>' > local.env && chmod 600 local.env   # git-ignored
+export CLAUDE_CODE_OAUTH_TOKEN=<the token>   # or from direnv, `op run`, your profile: the endpoint's `key` names it
 cd ~/some/project && ~/path/to/bh-02/.venv/bin/bh-02
 ```
 
@@ -105,10 +105,10 @@ uv tool install --editable ./bh-02/app    # every plugin installed from the chec
 cd ~/some/project && bh-02
 ```
 
-The plugins and libraries are installed from the checkout itself, so `local.env` at its root is
-still found. After a pull that adds or renames a plugin, or changes a dependency, run the same
-command with `--reinstall`: a command reads its plugins from what is installed, so until then a row
-naming a renamed plugin is reported as unresolved.
+The plugins and libraries are installed from the checkout itself. After a pull that adds or renames a
+plugin, or changes a dependency, run the same command with `--reinstall`: a command reads its
+plugins from what is installed, so until then a row naming a renamed plugin is reported as
+unresolved.
 
 The model acts in Python, at a REPL of its own that persists for this run of bh-02. In the sandbox its
 code runs without asking: it can write inside
@@ -125,8 +125,9 @@ one inside it (bh-02 run from your home directory, say) is not read, and `/model
 ```toml
 default = "claude/sonnet"
 
-[claude]                      # Claude through Claude Code, with the subscription token in local.env
+[claude]                      # Claude through Claude Code, with the subscription token from your environment
 provider = "claude-code"
+key = { env = "CLAUDE_CODE_OAUTH_TOKEN" }
 models = { sonnet = { id = "sonnet" }, opus = { id = "opus" } }
 
 [local]
@@ -194,7 +195,7 @@ quietly enforces less than you asked for is worse than none; brig says exactly w
 
 brig stands alone: it imports only the standard library, knows nothing of cordis or bh-02, and
 has its own architecture gate. bh-02 reaches it through one plugin, the runner's `runner:confined`, which turns
-bh-02's rules into a `Spec`: the project writable, bh-02's own files and credentials not, no
+bh-02's rules into a `Spec`: the project writable, bh-02's own files and the sessions' state not, no
 network. bh-02's status bar shows the grades it got (`jail: jailed fs_write ✓ network ✓ ...`).
 bh-02 wires brig's macOS stack (seatbelt) and its Linux one (bubblewrap).
 [`libs/brig/SPEC.md`](libs/brig/SPEC.md) is its contract.

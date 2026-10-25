@@ -18,15 +18,16 @@ read), and bh-02's configuration directories under one (`trusted`: the person's
 `$XDG_CONFIG_HOME/bh-02` and `~/.config/bh-02`, when bh-02 runs from the home directory), whose
 models file and startup file a later session reads on the host and trusts. What
 it may not read: brig's credential list under the home directory, `hide`
-under the project, and what the `host` value names as `secrets` (bh-02's own `local.env`,
-wherever bh-02 runs from, and the sessions' state, where Claude Code keeps its tokens). No
+under the project (nothing by default), and what the `host` value names as `secrets` (the
+sessions' state, where Claude Code keeps its tokens). No
 network: the program's own socket is the one way in or out. The worker's environment is scrubbed
 to a short allowlist. brig's host process, which starts the worker from outside the jail,
 keeps bh-02's own environment: brig's host runtime composes `{**os.environ, **jail.env}` by its
 spec, and `jail.env` can add keys but not remove them. So a variable of the launching shell (a
 `CLAUDE_*` of a Claude Code that launched bh-02, say) sits in that process, out of an input's
-reach (in the jail, `ps` fails with a permission error; measured). bh-02's own token is never there: it goes
-only to the Claude Code child.
+reach (in the jail, `ps` fails with a permission error; measured). A key the person exports
+for a model (`key = { env = ... }`) is there too, and in no worker's environment unless `env`
+lists it.
 
 One policy, two platforms; only the stack and the read model differ:
 
@@ -40,23 +41,21 @@ One policy, two platforms; only the stack and the read model differ:
   jail, the home directory included. brig's supervisor, the jail's PID 1, runs under a Python
   the jail holds, chosen at each compile (`supervisor_interpreter`): the system's
   `/usr/bin/python3` where there is one, else the one bh-02 runs on.
-  The secrets stay `read_denies`, now brig's carve-outs: one inside that tree (a `local.env` at
-  the project root) is masked if it exists, and one that does not exist yet is not, which
-  brig's `fs_read` grade says (`best_effort`, naming it); an absent one where bh-02 looks for
-  its credential (`host.credentials`) keeps its write deny, so an input can't plant one there.
-  bubblewrap holds each absent write-denied path (`.envrc`, `.vscode`, such a `local.env`, ...)
+  The secrets stay `read_denies`, now brig's carve-outs: one inside that tree (a `hide`n file
+  at the project root, a state directory under it) is masked if it exists, and one that does not
+  exist yet is not, which brig's `fs_read` grade says (`best_effort`, naming it).
+  bubblewrap holds each absent write-denied path (`.envrc`, `.vscode`, ...)
   by mounting over an empty directory on the host, which the jail makes (and marks as its own)
   before bubblewrap starts; the jail removes the ones it made once brig has verified the worker
   is gone, never before (a mount point removed while the
   jail lives is detached inside it). A mount can be undone from the host (a file renamed over
   a denied or masked one, as a host `git config` does to `.git/config`; a placeholder removed),
   and from then on an input could write or read that path. So the jail watches every path it
-  holds (`tripwired`, `tripwire.Tripwire`; never one an input may create, as the project's own
-  absent `local.env`) and ends itself at the first such change: the next
-  input's jail holds the path again, and the input says why (`ended`). Until it has ended (a few
-  milliseconds; measured in the README) a program already running in it can get one write or
-  read in, so while the jail holds a secret under a writable root `fs_read` stays best-effort
-  (`graded`) and `notice()` says which paths (`held`, `notice_for`).
+  holds (`tripwired`, `tripwire.Tripwire`; never one an input may create) and ends itself at the
+  first such change: the next input's jail holds the path again, and the input says why
+  (`ended`). Until it has ended (a few milliseconds; measured in the README) a program already
+  running in it can get one write or read in, so while the jail holds a secret under a writable
+  root `fs_read` stays best-effort (`graded`) and `notice()` says which paths (`held`, `notice_for`).
 
 On both, the jail is launched tethered to bh-02 (`_Jailed`): when bh-02 ends, however it ends,
 brig kills the jail's process group, so a program an input left running doesn't outlive it (on
@@ -122,7 +121,6 @@ __all__ = [
     "graded",
     "group_alive",
     "held",
-    "holding",
     "host_interpreters",
     "identity",
     "link_directories",
@@ -171,16 +169,13 @@ _STACKS: Mapping[str, Callable[[str], Stack]] = {"darwin": _seatbelt, "linux": s
 @runtime_checkable
 class Host(Protocol):
     """What the jail needs of the `host` value (CONTRACTS.md: host): the composition's files,
-    which an input may not write; where bh-02 looks for its credential, where an input may
-    create nothing; the secrets, which it may not read; bh-02's configuration directories
+    which an input may not write; the secrets, which it may not read; bh-02's configuration directories
     (`trusted`), whose files the host reads and trusts, which it may not write; the directories
     bh-02 runs its own code from (`code`), which every jail reads and no input writes; and the
     project's auto memory directory (`auto_memory`), which it may write ('' for none)."""
 
     @property
     def paths(self) -> tuple[str, ...]: ...
-    @property
-    def credentials(self) -> tuple[str, ...]: ...
     @property
     def secrets(self) -> tuple[str, ...]: ...
     @property
@@ -198,13 +193,13 @@ class BrigConfig:
     (`SELF_MODIFY_WORKSPACE_RELATIVE`: `.git/hooks`, `CLAUDE.md`, ...) an input may write after all;
     by default the project's guidance files, which editing is ordinary work. The rest stay denied:
     they can run code outside the jail later (hooks, shell rc files, editor and Claude settings).
-    `hide`: paths it may not read (relative to the root): a project's `local.env` may hold a
-    credential. `env`: the variables that survive the scrub."""
+    `hide`: paths it may not read (relative to the root; none by default). `env`: the variables that
+    survive the scrub."""
 
     write: Sequence[str] = (".",)
     deny: Sequence[str] = ()
     allow: Sequence[str] = ("CLAUDE.md", "AGENTS.md")
-    hide: Sequence[str] = ("local.env",)
+    hide: Sequence[str] = ()
     env: Sequence[str] = ("PATH", "HOME", "LANG", "LC_ALL", "TERM")
 
 
@@ -245,8 +240,8 @@ def spec_for(
     selfmod = [str(Path(r, name)) for r in roots for name in self_modify_denied(config.allow)]
     hidden = [*(str(Path(root, name).resolve()) for name in config.hide), *secrets]
     # A secret an input may not read, it may not overwrite or remove either: one under a writable
-    # root (the project's `local.env`) is denied writing too, or an input could replace the
-    # credential it can't see.
+    # root (a `hide`n file, a state directory) is denied writing too, or an input could replace
+    # what it can't see.
     kept = [s for s in hidden if any(s == r or s.startswith(r + "/") for r in writable)]
     # bh-02's configuration under a writable root (bh-02 run from the home directory): an input
     # there could replace a file a later session reads on the host and trusts, the person's
@@ -318,23 +313,20 @@ def link_directories(links: Sequence[str], writable: Sequence[str]) -> tuple[str
     return tuple(dict.fromkeys(h for h in holders if any(h.startswith(r + "/") for r in writable)))
 
 
-def allowlisted(spec: Spec, readable: Sequence[str], hold: Collection[str] = ()) -> Spec:
+def allowlisted(spec: Spec, readable: Sequence[str]) -> Spec:
     """`spec`, reading by allowlist: `readable` is the tree an input may read, and the policy's
     read denies become the carve-outs inside it. The environment and the channel are the
     policy's, unchanged, and so are the writes but one kind: a path denied both reading and
     writing (a secret under the project) keeps only its read deny. bwrap masks an existing one
     with a read-only `/dev/null`, which refuses writes and removal too (a write deny as well
-    would be a bind of the real file, under the mask). An absent one has nothing to mask, so a
-    input could create it: those in `hold` (absent places bh-02 looks for its credential, where a
-    planted `local.env` would be read at the next launch) keep their write deny, an empty
-    directory held read-only there for the session (`made_by_the_jail`). The rest (the project's
-    own absent `local.env`) are left alone: a directory there would be in the person's way, and
+    would be a bind of the real file, under the mask). An absent one has nothing to mask, so an
+    input could create it; it is left alone: a directory there would be in the person's way, and
     nothing of bh-02's reads one."""
     return replace(
         spec,
         fs=FsPolicy(
             write_allows=spec.fs.write_allows,
-            write_denies=tuple(d for d in spec.fs.write_denies if d not in spec.fs.read_denies or d in hold),
+            write_denies=tuple(d for d in spec.fs.write_denies if d not in spec.fs.read_denies),
             read_model=ReadModel.ALLOW_LIST,
             read_allows=tuple(readable),
             read_denies=spec.fs.read_denies,
@@ -355,7 +347,7 @@ def readable_roots(
     bh-02's own code (`code`: the directory of each package it runs, which the extensions'
     worker imports cordis from; with an editable install, the workspace's `src/cordis`, which
     the interpreter's trees don't hold). Not the host's whole `sys.path`: under pytest or
-    `python -m` it holds the workspace root, and with it the workspace's `local.env`, for
+    `python -m` it holds the workspace root, and with it the whole workspace, for
     nothing a worker needs."""
     named = [str(Path(arg).parent) for arg in argv if arg.startswith("/")]
     return tuple(dict.fromkeys([*system, *interpreter, *named, *code]))
@@ -372,13 +364,13 @@ def uncovered(denies: Sequence[str]) -> tuple[str, ...]:
 def held(spec: Spec, absent: Collection[str]) -> tuple[str, ...]:
     """The read denies a Linux jail (`spec`, `allowlisted`) holds at or under a root an input
     may write: one that is there (not in `absent`), which bubblewrap masks with a mount on the
-    path itself, and an absent one no input can create, at or under a write deny (the empty
-    directory where bh-02 looks for its credential, or a directory bound read-only), where only
+    path itself, and an absent one no input can create, at or under a write deny (a directory
+    bound read-only), where only
     the host could put a file, which the jail could then read. A mount is on the host's
     directory entry, so replacing that entry on the host (an editor saves by renaming a new file
     over it) or removing it detaches the mount inside the jail, and an input can then read and
-    rewrite what is there (measured). Not an absent one nothing holds (the project's own
-    `local.env`): an input may create it, and a file the host creates there is readable, which
+    rewrite what is there (measured). Not an absent one nothing holds (a `hide`n file the project
+    has none of): an input may create it, and a file the host creates there is readable, which
     brig's `fs_read` grade names. The rest are outside every writable root, where the allowlist
     alone keeps them out of the jail."""
     roots, denies = spec.fs.write_allows, spec.fs.write_denies
@@ -410,45 +402,24 @@ def notice_for(platform: str, holds: Sequence[str]) -> str:
         return ""
     return (
         f"The jail keeps inputs from reading {', '.join(holds)}. On Linux it does that with a mount "
-        "on each path that is there, and, where bh-02 looks for its credential and there is none, "
-        "with an empty directory, so nothing can be created there while the Python process runs: "
-        "`/release` stops it and frees the path until the next input, which is when to add your "
-        "credential. The host can undo a mount: when a file is created at one of these paths, or "
-        "replaced (an editor saves local.env by renaming a new file over it) or removed while the "
-        "Python process runs, bh-02 ends the jail at once (a running input with it) and the next input's "
+        "on each path that is there. The host can undo a mount: when a file at one of these paths "
+        "is replaced (an editor saves by renaming a new file over it) or removed while the Python "
+        "process runs, bh-02 ends the jail at once (a running input with it) and the next input's "
         "jail holds the path again. A program an input left running can still read or rewrite it "
         "in the milliseconds that takes, so edit them after `/release`."
     )
 
 
-def holding(credentials: Sequence[str], denies: Sequence[str]) -> tuple[str, ...]:
-    """The places bh-02 looks for its credential that a Linux jail holds with an empty
-    directory (`allowlisted`'s `hold`): those still among its write denies, which it mounts."""
-    return tuple(c for c in credentials if c in denies)
-
-
-def released_for(free: Sequence[str], still: Sequence[str], running: bool = False) -> str:
-    """What `/release` tells the person: where bh-02 looks for its credential and nothing holds
-    now, what another session's jail still holds, and (`running`) that a program this jail
-    started still runs (an owner that did not stop its own), whose jail holds the rest."""
-    said = []
-    if free:
-        said.append(
-            f"Nothing holds {', '.join(free)} until something starts in the runner again: create "
-            "your local.env there now, then send your message. The next jail masks it from inputs (a "
-            "model already running keeps the credential it started with: `/restart model`)."
-        )
-    if still:
-        said.append(
-            f"{', '.join(still)} stays held: another bh-02 session of yours is running a jail, and "
-            "none removes a placeholder while another runs. Quit that session, then /release again."
-        )
-    if running:
-        said.append(
-            "A program this runner started still runs (its row did not stop it on /release), and "
-            "its jail holds what it holds: /rows shows the rows; /restart one, then /release again."
-        )
-    return " ".join(said)
+def released_for(running: bool = False) -> str:
+    """What `/release` tells the person after it has stopped what it could: that a program this
+    jail started still runs (`running`: an owner that did not stop its own), whose jail holds
+    what it holds. Empty when nothing does."""
+    if not running:
+        return ""
+    return (
+        "A program this runner started still runs (its row did not stop it on /release), and "
+        "its jail holds what it holds: /rows shows the rows; /restart one, then /release again."
+    )
 
 
 def told_reads(trees: Sequence[str], own: Sequence[str]) -> tuple[str, ...]:
@@ -1040,9 +1011,6 @@ class BrigJail:
         # The probe's endpoint is in a subdirectory: bwrap refuses one directly in the jail directory.
         # What each start is (its own grades among it) is kept with that start (`_Facts`).
         self._report: Mapping[str, str] = {}
-        # where bh-02 looks for its credential that a jail of this one's has held: what `release`
-        # says about, whichever program's jail held it
-        self._holding: tuple[str, ...] = ()
         # every program this jail started that may still run, and the starts under way: what
         # `release` waits for (a start under way) and says still runs (an owner that kept its own)
         self._live: list[_Jailed] = []
@@ -1059,20 +1027,15 @@ class BrigJail:
     async def release(self) -> str:
         """For `/release`, once each owner has stopped its own program (`runner.Runner`). On
         Linux: wait for a start under way, sweep what jails that are gone left (each stop already
-        removed what its jail made once no jail runs), and say which places bh-02 looks for its
-        credential are free now, what another session's jail still holds, and whether a program
-        of this jail's still runs (`released_for`). Empty when there is nothing to say, and on
+        removed what its jail made once no jail runs), and say whether a program of this jail's
+        still runs (`released_for`). Empty when there is nothing to say, and on
         darwin, where seatbelt holds a path without anything on the host."""
         if self._platform != "linux":
             return ""
         await asyncio.gather(*self._starting)  # a start under way: its placeholders made first
         self._live = [started for started in self._live if not started.stopped]
         await asyncio.to_thread(self._swept, records_dir(os.environ, str(Path.home())))
-        return released_for(
-            [p for p in self._holding if not os.path.lexists(p)],
-            [p for p in self._holding if Path(p).is_dir()],
-            running=bool(self._live),
-        )
+        return released_for(running=bool(self._live))
 
     async def start(self, argv: Sequence[str], *, cwd: str, endpoint: str) -> _Jailed:
         """Start `argv` in `cwd`, in a jail of its own compiled from the policy, listening on
@@ -1113,9 +1076,6 @@ class BrigJail:
             jail, report = self.compile(jail_dir, endpoint, cwd, argv, author)
             absent = self._absent_secrets(jail.spec)
             facts = self._facts(jail.spec, report, absent, jail_dir, endpoint)
-            if self._platform == "linux":
-                held_now = holding(self._host.credentials, jail.spec.fs.write_denies)
-                self._holding = tuple(dict.fromkeys((*self._holding, *held_now)))
             made = made_by_the_jail(self._absent_denies(jail.spec)) if self._platform == "linux" else ()
             if made:
                 # Recorded before anything is made, each by the mark it will carry, then made and
@@ -1219,8 +1179,7 @@ class BrigJail:
                 argv=argv, interpreter=(base_prefix, prefix), system=SYSTEM_READABLE, code=self._host.code
             )
             links = [link for arg in argv if arg.startswith("/") for link in self._linked_dirs(arg)]
-            hold = [c for c in self._host.credentials if not Path(c).exists()]
-            spec = allowlisted(spec, [p for p in (*readable, *links) if Path(p).exists()], hold)
+            spec = allowlisted(spec, [p for p in (*readable, *links) if Path(p).exists()])
             denies = uncovered(mountable(spec.fs.write_denies, self._instead(spec)))
             spec = replace(spec, fs=replace(spec.fs, write_denies=denies))
             spec = replace(spec, env=replace(spec.env, set=(*spec.env.set, *author)))

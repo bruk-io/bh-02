@@ -94,6 +94,7 @@ When a gate fails, its message says which rule and why; fix the code rather than
 - **Tests import packages by name** and use fakes from a package's own `testing` module, never
   another package's tests. Give a test file a name no other member uses (`test_tui_render.py`, not
   `test_render.py`).
-- **The Claude credential stays in `local.env`**, under
-  [its rules](../bh-02/reference/plugins/models.md#the-credential). A test that needs it reads
-  `local.env` and skips when it is absent.
+- **The Claude credential goes only to the Claude Code CLI**, under
+  [its rules](../bh-02/reference/plugins/models.md#the-credential). It comes from a claude-code
+  endpoint's `key`, never from a file. A test that needs the real one reads
+  `CLAUDE_CODE_OAUTH_TOKEN` from the environment and skips when it is unset.

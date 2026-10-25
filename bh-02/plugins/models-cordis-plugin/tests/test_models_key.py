@@ -24,7 +24,7 @@ from models_cordis_plugin import (
 )
 from models_cordis_plugin.claude_code import TOKEN_VARIABLE
 from models_cordis_plugin.claude_code.testing import FakeClaudeCode, FakeStep
-from models_cordis_plugin.named import KeySpec
+from models_cordis_plugin.key import KeySpec
 from models_cordis_plugin.openai import OpenAIModel, Reply, headers_for
 from models_cordis_plugin.openai.testing import FakeGet, StubServer
 from models_cordis_plugin.shell_key import command_key

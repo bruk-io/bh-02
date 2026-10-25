@@ -23,7 +23,6 @@ import click
 
 from bh_02 import sessions, viewing, watching
 from bh_02.bootstrap import (
-    CREDENTIAL_FILE,
     CompositionError,
     LayerError,
     NotStarted,
@@ -31,7 +30,6 @@ from bh_02.bootstrap import (
     code_directories,
     code_packages,
     config_directories,
-    credential_files,
     layers,
     memory_directory,
     project_of,
@@ -41,7 +39,7 @@ from bh_02.bootstrap import (
 )
 from cordis.loader import read_layer
 
-__all__ = ["credential_search", "main"]
+__all__ = ["main"]
 
 _MODEL_HELP = (
     "The model to start on, by name, ENDPOINT/MODEL: one of your endpoints' in "
@@ -96,9 +94,9 @@ def main(
 ) -> None:
     """A coding agent in a terminal app. The model acts in Python, through the python tool, in a
     persistent Python process inside a jail. Its models are the endpoints in the models file: Claude
-    through Claude Code (on the Claude subscription, with the CLAUDE_CODE_OAUTH_TOKEN in local.env
-    that `claude setup-token` makes, or through a gateway), and any OpenAI-compatible model. Every
-    run is a session that `--resume` continues."""
+    through Claude Code (on the Claude subscription, with the token `claude setup-token` makes,
+    read from the environment by the endpoint's `key`, or through a gateway), and any
+    OpenAI-compatible model. Every run is a session that `--resume` continues."""
     if ctx.invoked_subcommand is not None:
         return
     with contextlib.ExitStack() as holding:  # the session is held until the run is over
@@ -308,19 +306,16 @@ def _launch(
     """Run to the end; return the exit code and whether the composition came up. A failure
     the person should see is printed (the terminal is theirs again by then) and becomes exit
     code 1. A bug propagates as itself."""
-    # where the credential may be: where the model rows look for it, beside the project; and the
-    # sessions' state, where each session's Claude Code child keeps its config and messaging peer
-    # token (this run's, and the default one when `XDG_STATE_HOME` moves this run's elsewhere):
-    # no jailed input may read any of them. Another state root, of a run with another
+    # the sessions' state, where each session's Claude Code child keeps its config and messaging
+    # peer token (this run's, and the default one when `XDG_STATE_HOME` moves this run's elsewhere):
+    # no jailed input may read it. Another state root, of a run with another
     # `XDG_STATE_HOME`, is not known here. And bh-02's configuration (this run's and the default
     # one), whose files the host reads and trusts: no jailed input may write there. And where
     # bh-02 runs its own code from, every package a layer may name as installed: every jail reads
     # it (the extensions process imports cordis), and no jailed input may write it. And the
     # project's auto memory directory, made here so the jail can let an input write it.
-    credentials = credential_search()
     states = [listing.root, str(sessions.default_state_root())] if listing.root else []
-    beside = [Path.cwd() / CREDENTIAL_FILE]
-    secrets = unreadable(credentials, beside, (str(Path(state).resolve()) for state in states))
+    secrets = unreadable(str(Path(state).resolve()) for state in states)
     trusted = config_directories(os.environ, Path.home())
     code = code_directories(code_packages(ep.module for ep in entry_points(group="cordis.plugins")))
     memory = memory_directory(project_of(Path.cwd().resolve()), os.environ, Path.home())
@@ -333,7 +328,6 @@ def _launch(
                 report=report,
                 row_log=row_log,
                 session=listing,
-                credentials=credentials,
                 secrets=secrets,
                 trusted=trusted,
                 code=code,
@@ -351,15 +345,6 @@ def _launch(
     except KeyboardInterrupt:
         click.echo(err=True)
     return 0, True
-
-
-def credential_search() -> tuple[str, ...]:
-    """Where the model rows look for bh-02's `local.env`, nearest first: above bh-02's own
-    install and above its environment, so the workspace's own is found from any working
-    directory. The one list: the model rows read the first that is a file (the `host`
-    value's `credentials`), and every one is a secret the jail keeps an input from reading,
-    writing or creating. Not the project's own `local.env`: a project's may hold anything."""
-    return credential_files([Path(__file__).resolve(), Path(sys.prefix).resolve()])
 
 
 def _writer(file: TextIO, prefix: str) -> Callable[[str], None]:

@@ -43,7 +43,7 @@ class _Mechanism:
 
     async def release(self) -> str:
         self.log.append("mechanism")
-        return "Nothing holds /w/local.env."
+        return "Nothing holds /w/private.txt."
 
 
 async def test_release_asks_each_owner_to_stop_its_own_then_the_mechanism_and_says_what_each_said() -> None:
@@ -63,7 +63,7 @@ async def test_release_asks_each_owner_to_stop_its_own_then_the_mechanism_and_sa
     remove()
     said = await runner.release()
     assert log == ["python", "extensions", "mechanism"]  # owners first: the mechanism frees what is left
-    assert said == "The Python process is stopped. Nothing holds /w/local.env."
+    assert said == "The Python process is stopped. Nothing holds /w/private.txt."
 
 
 async def test_a_start_ends_a_release_and_is_told_to_each_watcher() -> None:
@@ -111,8 +111,8 @@ async def test_the_release_row_offers_slash_release_over_the_runner() -> None:
     assert [e.name for e in effects] == ["acquire"]
     effects[0].args[0](*effects[0].args[1:])
     ((spec, run),) = registered
-    assert spec["name"] == "release" and "credential" in spec["help"]
-    assert await run("") == "Nothing holds /w/local.env."
+    assert spec["name"] == "release" and "path the jail holds" in spec["help"]
+    assert await run("") == "Nothing holds /w/private.txt."
     assert await Runner(Unjailed()).release() == ""
     assert resolve("runner:release").inject == {"runner", "commands"}
 

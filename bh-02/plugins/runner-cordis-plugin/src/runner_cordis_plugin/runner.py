@@ -7,8 +7,8 @@ brig jail (`jail.BrigJail`, `runner:confined`) or none (`unconfined.Unjailed`,
 - Each owner holds its own start. The row that starts a program is the one that stops it: on
   `/release` the runner asks each owner that registered (`on_release`) to stop its own process
   and say what it stopped, then has the mechanism let go of what it holds on the host (on Linux,
-  the placeholders where bh-02 looks for its credential). The runner never stops another row's
-  program.
+  the placeholders it holds in place of write-denied paths that do not exist yet). The runner never
+  stops another row's program.
 - A release ends with the next start, whoever starts: while `released()`, an owner that would
   start only to keep something warm (the extensions process) waits, and one the person asked for
   (an input, a change the model made) starts, ending it.

@@ -138,7 +138,7 @@ async def test_model_refuses_when_a_later_layer_sets_the_model_row_s_config(tmp_
     base, layer, patch, other = (tmp_path / n for n in ("base.toml", "session.toml", "p.toml", "q.toml"))
     base.write_text('[[plugin]]\nid = "model"\nuse = "models:model"\n')
     layer.write_text('[[plugin]]\nid = "model"\nconfig = { default = "haiku" }\n')
-    patch.write_text('[[plugin]]\nid = "model"\nconfig = { env_file = "/x/local.env" }\n')
+    patch.write_text('[[plugin]]\nid = "model"\nconfig = { cwd = "/x" }\n')
     other.write_text('[[plugin]]\nid = "model"\ndisabled = false\n')  # no config: shadows nothing
     files = [str(base), str(layer), str(other), str(patch)]
     assert shadowing(files, str(layer), "model") == str(patch)

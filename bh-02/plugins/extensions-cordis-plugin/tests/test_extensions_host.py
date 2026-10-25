@@ -351,15 +351,15 @@ async def test_an_extension_that_ends_the_worker_is_not_loaded_again_until_somet
         assert await h.commands.runs["todo"]("again") == "again"
 
 
-_SECRET = "SECRET=not-for-the-model\n"  # a file the jail hides, such as local.env
+_SECRET = "SECRET=not-for-the-model\n"  # a file the jail hides, such as private.txt
 
 
 def _apart(tmp_path: Path) -> tuple[Path, Path]:
-    """A project, and beside it, outside it, a file of secrets (`local.env`)."""
+    """A project, and beside it, outside it, a file of secrets (`private.txt`)."""
     project, outside = tmp_path / "project", tmp_path / "outside"
     project.mkdir()
     outside.mkdir()
-    secret = outside / "local.env"
+    secret = outside / "private.txt"
     secret.write_text(_SECRET)
     return project, secret
 

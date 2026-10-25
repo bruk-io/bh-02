@@ -462,7 +462,7 @@ def chosen(found: Sequence[Session | Broken], sid: str, action: str) -> Session 
 
 def resume_command(stack: str, session_id: str | None = None) -> str:
     """The command that continues a session (the newest when `session_id` is None), whatever
-    it runs on (`stack`): the model row reads any credential from `local.env` itself."""
+    it runs on (`stack`)."""
     return "uv run bh-02 --resume" if session_id is None else f"uv run bh-02 --resume {session_id}"
 
 

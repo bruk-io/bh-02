@@ -1,12 +1,11 @@
-"""Where bh-02's credential is looked for, and what no jailed input may read: one list, from the
-anchors bh-02 really runs with (its own install and its environment), never a stand-in."""
+"""What the launch hands the jail as the `host` value: the sessions' state it may not read, bh-02's
+configuration it may not write, and the directories bh-02 runs its own code from."""
 
 import importlib.metadata
 import json
 import os
 import sys
 from collections.abc import Callable
-from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -15,53 +14,15 @@ from click.testing import CliRunner
 import cordis
 import memory_cordis_plugin
 from bh_02 import main
-from bh_02.bootstrap import CREDENTIAL_FILE, code_directories, code_packages, config_directories, unreadable
-from bh_02.cli import credential_search
-from models_cordis_plugin.local_env import token_file
-
-_WORKSPACE = Path(__file__).resolve().parents[3]
+from bh_02.bootstrap import code_directories, code_packages, config_directories
 
 
-@dataclass(frozen=True)
-class _Host:
-    credentials: tuple[str, ...]
-
-
-def test_every_path_the_model_row_searches_is_a_secret(tmp_path: Path) -> None:
-    """The model rows search exactly the `host` value's `credentials`, and every one of them is
-    among the jail's `secrets` (cli: `unreadable`), so none is a place an input could plant a
-    `local.env` for the next launch to hand to Claude Code. Before, the model row anchored on its
-    own package and searched four directories of the plugins tree the jail never named."""
-    searched = credential_search()
-    secrets = unreadable(searched, [tmp_path / CREDENTIAL_FILE], [])
-    assert [path for path in searched if path not in secrets] == []
-    assert str(_WORKSPACE / CREDENTIAL_FILE) in searched  # the workspace root's, from any directory
-    plugins = str(_WORKSPACE / "bh-02" / "plugins")
-    assert not any(path.startswith(plugins) for path in searched)  # no plugin's own tree
-    assert str(tmp_path / CREDENTIAL_FILE) in secrets and str(tmp_path / CREDENTIAL_FILE) not in searched
-
-
-def test_the_model_row_reads_only_what_the_host_value_names(tmp_path: Path) -> None:
-    """What a model row finds is a function of the `credentials` it is given and nothing else:
-    a `local.env` anywhere else (its own package's tree, the project) is never read."""
-    elsewhere = tmp_path / "elsewhere" / CREDENTIAL_FILE
-    elsewhere.parent.mkdir()
-    elsewhere.write_text("NOT_A_REAL_CREDENTIAL=placeholder\n")  # a stand-in: never the real file
-    named = tmp_path / "named" / CREDENTIAL_FILE
-    host = _Host((str(named),))
-    assert token_file(None, host.credentials) is None
-    named.parent.mkdir()
-    named.write_text("NOT_A_REAL_CREDENTIAL=placeholder\n")
-    assert token_file(None, host.credentials) == named
-
-
-def test_the_bh_02_command_boots_with_every_searched_path_among_the_secrets(
+def test_the_bh_02_command_boots_keeping_inputs_from_reading_the_sessions_state(
     composition: Callable[..., Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The launch itself, not only how the lists are built: `bh-02` boots a composition whose
-    `host` value names what the model rows search (`credentials`, exactly `credential_search`)
-    and keeps every one of those paths among the jail's `secrets`. A launch that handed either
-    side another list would reopen the planted-credential hole (task-0023)."""
+    """The launch hands the jail what no input may read (`host.secrets`): the sessions' state
+    directories, this run's and the default one, where each session's Claude Code child keeps its
+    config and messaging peer token. Bh-02 reads no credential file, so there is no other secret."""
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     work = tmp_path / "work"
     work.mkdir()
@@ -75,9 +36,10 @@ def test_the_bh_02_command_boots_with_every_searched_path_among_the_secrets(
     result = CliRunner().invoke(main, ["--no-jail", "--patch", str(patch)])
     assert result.exit_code == 0, result.output
     booted = json.loads(seen.read_text())
-    assert booted["credentials"] == list(credential_search())  # what the model rows search
-    assert [path for path in booted["credentials"] if path not in booted["secrets"]] == []
-    assert str(work / CREDENTIAL_FILE) in booted["secrets"]  # and the project's own, beside it
+    assert "credentials" not in booted
+    state = Path(os.environ["XDG_STATE_HOME"]).resolve()
+    assert Path(booted["secrets"][0]).is_relative_to(state)  # this run's state
+    assert booted["secrets"] == list(dict.fromkeys(booted["secrets"]))  # each once
 
 
 def test_the_bh_02_command_boots_keeping_inputs_out_of_bh_02_s_config_directories(
@@ -117,7 +79,7 @@ def test_the_bh_02_command_boots_handing_the_jail_the_directories_bh_02_runs_cod
     installed, found by name. With this editable install those are the workspace's `src/<package>`
     directories, whose modules bh-02 imports (which no input may write when bh-02 works on its own
     checkout), and the extensions process imports cordis from one (which a Linux jail must let it
-    read). Never the workspace itself, whose `local.env` no input may read."""
+    read). Never the workspace itself, whose files no input may read."""
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     work = tmp_path / "work"
     work.mkdir()
@@ -140,7 +102,7 @@ def test_the_bh_02_command_boots_handing_the_jail_the_directories_bh_02_runs_cod
     assert str(shipped.parent) in code and str(Path(cordis.__file__).parent) in code
     assert all(Path(path).is_dir() for path in code)
     workspace = next((p for p in shipped.parents if (p / "uv.lock").is_file()), None)
-    assert workspace is None or str(workspace) not in code  # not where its local.env is
+    assert workspace is None or str(workspace) not in code  # not the workspace itself
 
 
 def test_a_package_s_code_is_where_it_is_installed_as_named_and_as_it_resolves(

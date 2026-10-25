@@ -49,11 +49,10 @@ def _said(chunks: Sequence[Mapping[str, Any]]) -> str:
     return "".join(c["text"] for c in chunks if c["type"] == "text")
 
 
-async def test_the_provider_starts_claude_code_with_the_layer_and_needs_no_local_env(tmp_path: Path) -> None:
+async def test_the_provider_starts_claude_code_with_the_layer_and_needs_no_token(tmp_path: Path) -> None:
     config = ClaudeCodeConfig(
         model="claude-opus-5-5",
         state=str(tmp_path / "state"),
-        env_file=str(tmp_path / "absent.env"),  # no credential file: a gateway needs none
         cwd=str(tmp_path),
         gateway=_GATEWAY,
     )

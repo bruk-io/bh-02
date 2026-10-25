@@ -38,22 +38,27 @@ a renamed plugin is reported as unresolved.
 ## The credential
 
 bh-02 reaches Claude through Claude Code, with your subscription's token or a company gateway. A
-subscription needs a Claude Code OAuth token in a file of its own:
+subscription needs a Claude Code OAuth token, which you keep in your environment:
 
 1. Run `claude setup-token`. It makes a long-lived token for your subscription.
-2. At the root of the checkout, create a file named `local.env` with one line:
-   `CLAUDE_CODE_OAUTH_TOKEN=` followed by the token.
-3. Make the file readable only by you: `chmod 600 local.env`.
+2. Export it as `CLAUDE_CODE_OAUTH_TOKEN` in the shell that starts bh-02 (from direnv, `op run` or
+   your shell profile; a password manager's `cmd` or `op` works too).
+3. In your models file, give the Claude endpoint `key = { env = "CLAUDE_CODE_OAUTH_TOKEN" }`
+   ([Your models](#your-models), [Models](using/models.md#the-subscription-token)).
 
-`local.env` is git-ignored. bh-02 looks for it above its own install, so it finds the checkout's
-file from any directory you work in.
+bh-02 reads no credential file. It hands the token only to the Claude Code CLI it starts, never to
+the model's code.
 
 !!! warning
-    Keep the token in `local.env` and nowhere else. Where it goes, and the rules for keeping it,
-    are in [the credential](reference/plugins/models.md#the-credential).
+    Keep the token out of your project and out of files you commit. Where it goes, and the rules
+    for keeping it, are in [the credential](reference/plugins/models.md#the-credential).
 
 Without a token bh-02 still starts, and each subscription message answers with an error that says
-where to put one. A gateway endpoint needs no token: see [Models](using/models.md#claude-through-a-gateway).
+what to write. A gateway endpoint needs no token: see [Models](using/models.md#claude-through-a-gateway).
+
+!!! note
+    A `local.env` from an earlier bh-02 is ignored. Export its `CLAUDE_CODE_OAUTH_TOKEN` and your
+    keys in the environment instead.
 
 ## Your models
 
@@ -66,6 +71,7 @@ default = "claude/sonnet"
 
 [claude]
 provider = "claude-code"
+key = { env = "CLAUDE_CODE_OAUTH_TOKEN" }
 models = { sonnet = { id = "sonnet" }, opus = { id = "opus" }, haiku = { id = "haiku" } }
 ```
 

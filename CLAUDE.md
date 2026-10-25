@@ -54,15 +54,17 @@ uv run bh-02 --trace FILE                                 # every row's lifecycl
 uv run pytest -m e2e                                      # the tests against real services (Claude Code on the subscription): only when asked, skipped without the token
 ```
 
-bh-02's Claude credential is `CLAUDE_CODE_OAUTH_TOKEN` (`claude setup-token` makes one) in
-`local.env` (git-ignored, at the repository root). The model row (`models:model`, its
-claude-code provider) reads that file itself and hands the token only to the Claude Code CLI it
-starts. Without it bh-02 still starts, and each message answers with an error saying where to
-put one. A claude-code endpoint with a `base_url` and a `key` of `cmd` or `op` (a company's gateway)
-needs no token: the CLI runs that command itself. An OpenAI-compatible endpoint in the models
-file has a `key = { env = "NAME" }` (a variable of bh-02's process environment, never `local.env`),
-`{ cmd = "..." }` or `{ op = "op://..." }` (with an optional `ttl_ms`), which the row reads or runs
-per request and sends only as that request's header.
+bh-02 reads no credential file. A model's key, and the Claude subscription token
+(`CLAUDE_CODE_OAUTH_TOKEN`; `claude setup-token` makes one), come from the endpoint's `key` in the
+models file: `{ env = "NAME" }` (a variable of the environment bh-02 was started with: direnv,
+`op run`, your profile), `{ cmd = "..." }` or `{ op = "op://..." }` (with an optional `ttl_ms`; not
+for the subscription token, which is read each time the CLI starts). A claude-code endpoint with no
+`base_url` takes `key = { env = "CLAUDE_CODE_OAUTH_TOKEN" }`: the model row (`models:model`, its
+claude-code provider) reads it and hands it only to the Claude Code CLI it starts. Without one
+bh-02 still starts, and each message answers with an error saying what to write. A claude-code
+endpoint with a `base_url` and a `key` of `cmd` or `op` (a company's gateway) needs no token: the CLI
+runs that command itself. An OpenAI-compatible endpoint's key is read or run per request and sent
+only as that request's header.
 
 Formatting and fixing happen by default. A `PostToolUse` hook in `.claude/settings.json` runs
 `ruff format` and `ruff check --fix` on every `.py` file Claude writes or edits, so don't
@@ -121,7 +123,7 @@ Operational facts:
 - **Prefer pure functions.** Everything gated is pure unless it is named in its gate's `[tool.pypeeker.no-impure-functions].exclude`, which is the budget. Adding a name is a design decision, not a formality. Before you add one, try the `decide` split - compute the decision in a pure function, apply it in a named imperative one - or move the work into an effect, which is what keeps most components pure. A method that mutates its own instance is fine by convention; the analysis still counts it. The analysis is a heuristic (it sees `print`, `open` and a stdlib denylist, not asyncio or importlib). Don't quote a count; `scripts/arch-check` is the source.
 - **Which shape, when.** Yield a value and let a driver perform it when the sequence of effects is itself what needs testing, printing, replaying or undoing: more than one driver (runtime, test, dry run), or uniform treatment the caller cannot know about (undo order, a plan). That is why components yield and why the loader has `plan`. Call a `Protocol` and fake it in tests when the seam is a stateful capability with one driver and non-revertible effects (a terminal, an SDK session); in a composition the fake is a replacement row. Split a pure decision out of a loop when the loop carries state across iterations or has three or more branches; a loop with fewer decisions than that is the shell, and the shell is allowed to be a loop.
 - **When a class earns its place.** A class is right when it is a value (a dataclass), when it holds state its own methods mutate (`Fiber`, `Runtime`, `Loader`), or when it is the shape a Protocol asks for. A method that mutates something other than `self` is a function that has been given the wrong first argument. A class whose methods only read through one stored reference is a namespace, which is what a module is for; the two deliberate exceptions are cordis's `Performer` (a component annotates it) and `Inspection` (a held view that keeps reading live state is the point of it).
-- **The Claude credential lives only in `local.env`** (git-ignored, mode 600) as `CLAUDE_CODE_OAUTH_TOKEN`. The claude-code provider reads that file itself and passes the token only to the Claude Code CLI it starts (never into bh-02's own environment, never to the Python process or a jail). Never print, log, echo or commit it, never copy it into another file, test fixture or command line, and never write `ANTHROPIC_API_KEY`. A test that needs it reads `local.env` the same way and skips when it is absent.
+- **The Claude credential goes only to the Claude Code CLI.** `CLAUDE_CODE_OAUTH_TOKEN` comes from a claude-code endpoint's `key` (an `env`, `cmd` or `op`) and the provider passes it only in the explicit environment of the Claude Code CLI it starts (never into bh-02's own `os.environ`, never to the Python process or a jail). The person's shell may export it; the runners drop `CLAUDE*` from what they start. Never print, log, echo or commit it, never copy it into a file, test fixture or command line, and never write `ANTHROPIC_API_KEY`. A test that needs the real one reads `CLAUDE_CODE_OAUTH_TOKEN` from the environment and skips when it is unset.
 
 <!-- BACKLOG.MD MCP GUIDELINES START -->
 

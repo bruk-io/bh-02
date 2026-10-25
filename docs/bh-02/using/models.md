@@ -11,12 +11,13 @@ default = "claude/sonnet"
 
 [claude]
 provider = "claude-code"
+key = { env = "CLAUDE_CODE_OAUTH_TOKEN" }
 models = { sonnet = { id = "sonnet" }, opus = { id = "opus" }, haiku = { id = "haiku" } }
 ```
 
 `claude/sonnet`, `claude/opus` and `claude/haiku` are Claude through Claude Code on your
-subscription, by Claude Code's own aliases; they need the credential in `local.env`
-([Get started](../get-started.md#the-credential)). Any other Claude model goes in the same way, by
+subscription, by Claude Code's own aliases; they need the subscription token, which `key` says where
+to read ([Get started](../get-started.md#the-credential)). Any other Claude model goes in the same way, by
 its id (`opus41 = { id = "claude-opus-4-1" }`).
 
 ## Choosing a model
@@ -124,7 +125,7 @@ the endpoint's `max_tokens` and its own `temperature`.
 |---|---|---|
 | `provider` | endpoint | `claude-code` (Claude through Claude Code) or `openai` (any OpenAI-compatible `/chat/completions` endpoint) |
 | `base_url` | endpoint | `openai`: the endpoint, ending before `/chat/completions`. `claude-code`, optional: a gateway ([below](#claude-through-a-gateway)) |
-| `key` | endpoint | optional: one table saying where the API key comes from, `{ env = "NAME" }`, `{ cmd = "..." }` or `{ op = "op://..." }`, and for `cmd` and `op` a `ttl_ms` ([below](#the-key)). `claude-code`: a gateway's, `cmd` or `op` only |
+| `key` | endpoint | optional: one table saying where the API key comes from, `{ env = "NAME" }`, `{ cmd = "..." }` or `{ op = "op://..." }`, and for `cmd` and `op` a `ttl_ms` ([below](#the-key)). `claude-code` without a `base_url`: the subscription token's source, any of the three; with one: a gateway's, `cmd` or `op` only |
 | `experimental_betas` | endpoint | `claude-code` through a gateway, optional: `false` when the gateway refuses Anthropic's beta headers |
 | `models` | endpoint | its models, one table each, named `ENDPOINT/MODEL` |
 | `discover`, `include` | endpoint | `openai` only, optional: `discover = true` also offers the models its server lists, `include` narrows them ([below](#listing-an-endpoints-models-discover)) |
@@ -171,7 +172,26 @@ as the command. bh-02 itself never runs it or holds the key, and needs no `CLAUD
 So a gateway's key can't be `{ env = ... }`: that would make bh-02 read the key to pass it on, and
 it is refused with a message saying so. Nothing else of your Claude Code settings is read.
 `base_url` and `key` come together: one without the other is refused. A `claude-code` endpoint
-without them still uses the subscription.
+without a `base_url` uses the subscription, and its `key` says where the token is
+([below](#the-subscription-token)).
+
+### The subscription token
+
+A `claude-code` endpoint without a `base_url` runs on your Claude subscription. `claude setup-token`
+makes the token; its `key` says where bh-02 gets it, the same three sources as any key:
+
+```toml
+key = { env = "CLAUDE_CODE_OAUTH_TOKEN" }
+key = { cmd = "my-token-helper get_claude_token" }
+key = { op = "op://personal/claude/token" }
+```
+
+bh-02 reads the variable, or runs the command through your shell as you, each time it starts the
+Claude Code CLI, and hands the token only to that CLI's own environment. It is never put in bh-02's
+own environment, so no program bh-02 starts afterwards (the Python process, `!COMMAND`) inherits it
+from bh-02, and the runners drop every `CLAUDE*` variable of a shell that exports it. There is no
+`ttl_ms` here: the token is read when the CLI starts, not per request. Without a `key`, bh-02 still
+starts and each message says what to write.
 
 ### Listing an endpoint's models: discover
 
@@ -235,7 +255,7 @@ key = { op = "op://work/openrouter/key" }
 
 `env` names a variable of the environment bh-02 was started with (a shell profile, direnv, `op run`),
 never the key itself. bh-02 reads it for each request and sends it only as the request's
-`Authorization` header. `local.env` is not read for a key. A variable that isn't set is said, with
+`Authorization` header. A variable that isn't set is said, with
 its name and that bh-02 looks in the environment it was started with; export it in the shell that
 starts bh-02 and start it again. The jail gives the model's code only the variables on its
 allow-list, so the key is not among them; under `--no-jail` nothing is scrubbed and the model's code
@@ -263,6 +283,9 @@ that names one is refused. A `claude-code` endpoint's `key` is its gateway's
 `key_command` and `key_ttl_ms` are no longer read; an endpoint with one is refused with what to write.
 Move each key's value from `local.env` into your environment and write `key = { env = "NAME" }`, and
 `key_command = "..."` becomes `key = { cmd = "..." }` (`key_ttl_ms = N` becomes `ttl_ms = N` in it).
+`local.env` itself is no longer read, for a key or for `CLAUDE_CODE_OAUTH_TOKEN`: a claude-code
+endpoint without a `base_url` now needs `key = { env = "CLAUDE_CODE_OAUTH_TOKEN" }` (or `cmd` or
+`op`), and the variable exported where you start bh-02. A leftover `local.env` is ignored.
 
 ### Keep the models file out of the project
 

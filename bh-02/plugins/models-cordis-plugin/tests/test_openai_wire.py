@@ -360,7 +360,6 @@ def test_a_refused_key_names_its_environment_variable() -> None:
     keyed = Where("router", "https://r/v1/chat/completions", "m", "OPENROUTER_API_KEY", "/c/models.toml")
     error = http_error(401, "no", keyed)
     assert "check the environment variable OPENROUTER_API_KEY" in error.message
-    assert "local.env" not in error.message
 
 
 def test_a_refused_command_key_names_its_command() -> None:

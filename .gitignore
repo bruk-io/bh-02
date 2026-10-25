@@ -7,8 +7,7 @@ __pycache__/
 .pypeeker/
 .DS_Store
 
-# Local secrets (the Claude Code OAuth token, CLAUDE_CODE_OAUTH_TOKEN): never committed
-local.env
+# Local secrets: never committed (bh-02 reads no env file, but one left by hand stays out of git)
 *.env
 .claude/worktrees/
 site/

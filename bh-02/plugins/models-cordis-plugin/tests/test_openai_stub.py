@@ -99,7 +99,7 @@ async def test_the_key_is_read_from_the_environment_and_sent_only_as_the_authori
         "model 'stub' reads its key from the environment variable STUB_KEY, which is not set in bh-02's "
         "environment"
     )
-    assert "local.env is not read" in missing.value.message and "sk-stand-in" not in missing.value.message
+    assert "sk-stand-in" not in missing.value.message
     assert (
         refused.value.kind == "authentication_failed"
         and "HTTP 401: Incorrect API key provided" in refused.value.message

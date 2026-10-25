@@ -24,12 +24,14 @@ _READY_TIMEOUT_S = 10.0
 _GONE = (ProcessLookupError, PermissionError)
 _STOP_GRACE_S = 2.0
 # Claude credentials are the host's, never an input's: bh-02's own (CLAUDE_CODE_OAUTH_TOKEN, which
-# bh-02 reads from local.env and never puts in its environment, but a person may export), any
-# ANTHROPIC_* of the person's shell, and whatever a Claude Code that launched bh-02 left in it
-# (CLAUDECODE, CLAUDE_PID, CLAUDE_CODE_* such as a messaging token). The worker needs none of
-# them. Unjailed confines nothing else, so this keeps a secret out of `os.environ` in an input,
-# not out of reach: the input can still read local.env itself, or the environment of any process
-# of the same user (`ps eww`), the Claude Code child's included.
+# the person exports for a claude-code endpoint's `key = { env = ... }`, and which bh-02 hands only
+# to the Claude Code child), any ANTHROPIC_* of the person's shell, and whatever a Claude Code that
+# launched bh-02 left in it (CLAUDECODE, CLAUDE_PID, CLAUDE_CODE_* such as a messaging token).
+# The worker needs none of them. Unjailed confines nothing else, so this keeps a secret out of
+# `os.environ` in an input, not out of reach: the input can still read the environment of any
+# process of the same user (`ps eww`), the Claude Code child's included. Every other variable
+# passes, a model's provider key (`OPENAI_API_KEY`, `OPENROUTER_API_KEY`) among them: under
+# `--no-jail` the model's code can read them.
 _HOST_ONLY = ("ANTHROPIC_", "CLAUDE")
 # tmux's: `TMUX` names the server's socket and `TMUX_PANE` the pane bh-02 runs in (decision-0002,
 # Watching). The confined runner's allowlist never passes them; this one passes everything else, so

@@ -57,15 +57,16 @@ async def approval(*, runner: Graded) -> Effects:
 async def release(*, runner: _Releasing, commands: _Registrar) -> Effects:
     """Fills a `release` row: `use = "runner:release"`. `/release` asks each row that started a
     program in the runner to stop its own (the Python process, the extensions process), then has
-    the runner let go of what it holds on the host (on Linux, where bh-02 looks for its
-    credential) until the next start: the way to add a credential mid-session."""
+    the runner let go of what it holds on the host (on Linux, the empty directories it keeps in place
+    of write-denied paths that do not exist yet, such as `.envrc`) until the next start: the way to
+    create one of those mid-session."""
 
     async def run(args: str) -> str:
         return await runner.release() or "Nothing runs in the runner, and it holds nothing."
 
     spec = {
         "name": "release",
-        "help": "stop what runs in the runner until the next input (to add your credential)",
+        "help": "stop what runs in the runner until the next input (to create a path the jail holds)",
         "usage": "",
     }
     yield acquire(commands.register, spec, run)

@@ -91,7 +91,7 @@ whatever the result printed. It reads them once, at the first input that opens a
   linking to the AGENTS.md beside it, read once). A file of yours whose way passes through the
   project (`~/.claude/CLAUDE.md` a link into a dotfiles repository bh-02 runs in;
   `host_paths.passes`, as the models file is walked) is not read,
-  and nothing named like a secret (`local.env`, `.env`) ever is.
+  and nothing named like a secret (`prod.env`, `.env`) ever is.
 - **`/memory` lists, it doesn't open.** bh-02's app owns the terminal, so `/memory` names each
   file, marked by how it loads (✓ at launch, … on demand, · not there, ✗ excluded or not read),
   and you open one in your own editor.

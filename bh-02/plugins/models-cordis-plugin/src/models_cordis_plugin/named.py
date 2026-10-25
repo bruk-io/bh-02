@@ -36,7 +36,8 @@ A model's table is its endpoint's settings with its own over them (`derived`). `
 the endpoint's `models` doesn't name, is that id on the endpoint: no server is asked for it. An
 openai endpoint with `discover = true` also offers the models its server lists (`discovery.py`),
 narrowed by `include`, by glob; `/model` asks the server only when it lists. A claude-code endpoint
-with no `base_url` runs on the subscription token in local.env (and takes no `key`). An endpoint whose
+with no `base_url` runs on the subscription token, which its `key` says where to get (`env`, `cmd` or
+`op`, read when the CLI starts; no `ttl_ms`), and hands it to the Claude Code CLI alone. An endpoint whose
 table has a problem names no model: `ENDPOINT/MODEL` is refused with that table's problem, as the
 table alone is.
 
@@ -63,7 +64,6 @@ reads the file, and `in_project`, which follows the file's links.
 
 import os
 import re
-import shlex
 import tomllib
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -72,14 +72,13 @@ from typing import Any, Final
 from urllib.parse import urlsplit
 
 from host_paths import config_home, passes, roots
-from models_cordis_plugin.claude_code.credential import TOKEN_VARIABLE
+from models_cordis_plugin.key import TOKEN_VARIABLE, KeySpec
 
 __all__ = [
     "CLAUDE_CODE",
     "DEFAULT_TTL_MS",
     "OPENAI",
     "Intended",
-    "KeySpec",
     "ModelConfig",
     "ModelsError",
     "Named",
@@ -172,7 +171,7 @@ class ModelConfig:
     `models`: the models file, when not the default one. `extra`: endpoints of the row's own, one
     table per name, as in the file. For the claude-code provider: `state`, the directory its
     Claude Code state lives in (the session's `claude/`, which the session layer sets);
-    `env_file`, where `local.env` is (found above the install when unset); `cwd`, the project Claude
+    `cwd`, the project Claude
     Code is told it works in (the working directory when unset), which, like the working directory,
     a models file must be outside of (`in_project`)."""
 
@@ -180,7 +179,6 @@ class ModelConfig:
     models: str | None = None
     extra: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
     state: str | None = None
-    env_file: str | None = None
     cwd: str | None = None
 
 
@@ -201,34 +199,6 @@ class Intended:
 
     name: object
     origin: str
-
-
-@dataclass(frozen=True, slots=True)
-class KeySpec:
-    """Where an endpoint's key comes from, as its `key` table says (`key_spec`): `source` is `env`
-    (`value` names a variable of bh-02's process environment), `cmd` (`value` is a shell command that
-    prints the key) or `op` (`value` is a 1Password reference, read by `op read`), and `ttl_ms` is how
-    long a printed key is used (None when unset; only `cmd` and `op` take one). The key itself is
-    never in it."""
-
-    source: str
-    value: str
-    ttl_ms: int | None = None
-
-    @property
-    def command(self) -> str | None:
-        """The shell command that prints the key: the `cmd` as written, `op read <reference>` for an
-        `op` (the reference quoted, as it reaches a shell); None for an `env`, which prints nothing."""
-        if self.source == "cmd":
-            return self.value
-        if self.source == "op":
-            return f"op read {shlex.quote(self.value)}"
-        return None
-
-    @property
-    def label(self) -> str:
-        """What names this source in a cache (`openai.ListingKey`): never the key."""
-        return f"{self.source}:{self.value}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -571,8 +541,8 @@ def _settings_problem(named: Named, where: str) -> str | None:
 def _key_problem(named: Named, where: str) -> str | None:
     """What is wrong with how a model or endpoint gets its key (`key`: `_read_key`), or None. A
     claude-code one with a `base_url` (a gateway) needs a `key` of `cmd` or `op`, which the Claude
-    Code CLI runs: bh-02 never holds that key, so an `env` is refused. One without has the
-    subscription token (local.env) and takes no `key`."""
+    Code CLI runs: bh-02 never holds that key, so an `env` is refused. One without runs on the
+    subscription token its `key` gives (any source; bh-02 reads it when the CLI starts, so no `ttl_ms`)."""
     table = named.table
     key = table.get(_KEY)
     spec = None
@@ -581,10 +551,10 @@ def _key_problem(named: Named, where: str) -> str | None:
         if isinstance(read, str):
             return f"{where}: {read}"
         spec = read
-    if (why := withheld(named)) is not None:
+    if named.provider != CLAUDE_CODE and (why := withheld(named)) is not None:
         return why
     if named.provider == CLAUDE_CODE:
-        if spec is not None and spec.source == "env":
+        if spec is not None and spec.source == "env" and "base_url" in table:
             return (
                 f"{where}: a gateway's key can't be an env: the Claude Code CLI gets it by running a "
                 "command, and bh-02 never holds it. Give the command that prints it, "
@@ -595,12 +565,12 @@ def _key_problem(named: Named, where: str) -> str | None:
                 f"{where}: a gateway needs both base_url (where Claude Code sends its requests) and "
                 "key (the command that prints its key, Claude Code's apiKeyHelper), like "
                 '`key = { cmd = "my-token-helper", ttl_ms = 300000 }`; give both, or neither, which '
-                "uses the subscription token in local.env"
+                "uses the subscription token"
             )
-        if "base_url" not in table and spec is not None:
+        if "base_url" not in table and spec is not None and spec.ttl_ms is not None:
             return (
-                f"{where}: key is for a gateway; add base_url (where Claude Code sends its requests), or "
-                "remove key, which uses the subscription token in local.env"
+                f"{where}: key.ttl_ms is for a gateway's key, which Claude Code runs again when it is up; "
+                "bh-02 reads the subscription token each time it starts the Claude Code CLI, so remove ttl_ms"
             )
         if _BETAS in table and "base_url" not in table:
             return f"{where}: experimental_betas is for a gateway; add base_url and key, or remove it"

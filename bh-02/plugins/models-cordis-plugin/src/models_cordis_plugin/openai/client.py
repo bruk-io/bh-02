@@ -24,7 +24,8 @@ from typing import Any, Final
 
 import httpx2
 
-from models_cordis_plugin.named import DEFAULT_TTL_MS, KeySpec, ModelsError, Named, key_spec, withheld
+from models_cordis_plugin.key import KeySpec
+from models_cordis_plugin.named import DEFAULT_TTL_MS, ModelsError, Named, key_spec, withheld
 from models_cordis_plugin.openai.wire import (
     Fold,
     Where,
@@ -99,7 +100,7 @@ def _unset_line(name: str, spec: KeySpec) -> str:
     """Said for an `env` key whose variable is not set (or empty) in bh-02's environment."""
     return (
         f"model {name!r} reads its key from the environment variable {spec.value}, which is not set in "
-        "bh-02's environment (the one it was started with; local.env is not read for a key). Export "
+        "bh-02's environment (the one it was started with). Export "
         f"{spec.value} in the shell that starts bh-02 (from direnv, `op run`, or your profile) and start it "
         "again"
     )

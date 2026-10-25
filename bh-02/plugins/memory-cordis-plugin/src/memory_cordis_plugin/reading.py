@@ -9,7 +9,7 @@ to the AGENTS.md beside it). A file outside the project (yours, the managed poli
 directory above the project) is read as it is named, unless its way passes through the project
 (`host_paths.passes`, the walk the models file and the python row's startup files are held to): a
 link of yours into the project, whose end the model could repoint, is not followed. None named
-like a secret (`local.env`, `.env`, `*.env`) is read, and none larger than Claude Code reads
+like a secret (`prod.env`, `.env`, `*.env`) is read, and none larger than Claude Code reads
 (4 MiB).
 """
 
@@ -24,11 +24,11 @@ from host_paths import MOST_LINKS, Link, Linked, NotOneFile, TooLarge, passes, r
 __all__ = ["LIMIT", "read", "secret", "under"]
 
 LIMIT = 4 * 1024 * 1024  # a memory file larger than this is skipped, as Claude Code skips one
-_SECRET = re.compile(r"^\.env(\..*)?$|\.env$")  # local.env, .env, .env.local, prod.env: never read
+_SECRET = re.compile(r"^\.env(\..*)?$|\.env$")  # .env, .env.local, prod.env: never read
 
 
 def secret(path: Path) -> bool:
-    """Whether a file is named like a secret (`local.env`, `.env`, `*.env`): never read."""
+    """Whether a file is named like a secret (`prod.env`, `.env`, `*.env`): never read."""
     return bool(_SECRET.search(path.name))
 
 

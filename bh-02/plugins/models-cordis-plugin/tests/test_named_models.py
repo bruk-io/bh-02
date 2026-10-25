@@ -149,8 +149,8 @@ _GATE: dict[str, Any] = {
         ({**_OPEN, "colour": "red"}, "colour is not a setting of an openai endpoint; it takes"),
         ({"provider": "claude-code", "base_url": "https://h/v1", "models": _X}, "a gateway needs both"),
         (
-            {"provider": "claude-code", "key": {"cmd": "c"}, "models": _X},
-            "key is for a gateway; add base_url",
+            {"provider": "claude-code", "key": {"cmd": "c", "ttl_ms": 5}, "models": _X},
+            "key.ttl_ms is for a gateway's key",
         ),
         (
             {**_GATE, "key": {"env": "GATEWAY_KEY"}},
@@ -185,6 +185,19 @@ def test_a_table_with_a_problem_says_what_to_fix(table: dict[str, Any], said: st
     message = raised.value.message  # an endpoint's own problem, or one of its model's
     assert raised.value.kind == "model_config"
     assert "endpoint 'm' (/c/models.toml)" in message or "model 'm/x' (/c/models.toml)" in message
+
+
+@pytest.mark.parametrize(
+    "key", [{"env": "CLAUDE_CODE_OAUTH_TOKEN"}, {"cmd": "print-a-token"}, {"op": "op://v/i/f"}]
+)
+def test_a_claude_code_endpoint_without_a_base_url_takes_a_key_of_any_source_for_its_token(
+    key: dict[str, Any],
+) -> None:
+    """The subscription token's source is the endpoint's `key`; reading the variable the CLI takes
+    it from is the point there, though an openai endpoint may not (`withheld`)."""
+    table = {"provider": "claude-code", "key": key, "models": _X}
+    (named,) = [m for m in combined({"m": table}, "/c/models.toml", {}) if m.name == "m"]
+    assert problem(named) is None
 
 
 @pytest.mark.parametrize(
@@ -403,21 +416,19 @@ def test_switching_to_a_model_whose_key_variable_is_unset_is_refused_saying_what
     values = Catalog(_Loader(_Entry("model", "models:model", {"models": str(models)})))
     why = str(values.check("keyed/x"))
     assert why.startswith("model 'keyed/x' reads its key from the environment variable KEYED_KEY, which")
-    assert "Export KEYED_KEY in the shell that starts bh-02" in why and "local.env is not read" in why
+    assert "Export KEYED_KEY in the shell that starts bh-02" in why
     monkeypatch.setenv("KEYED_KEY", "sk-stand-in")  # a stand-in: never a real key
     assert values.check("keyed/x") is None
 
 
-async def test_a_key_is_read_from_the_environment_on_every_request_and_never_from_local_env(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+async def test_a_key_is_read_from_the_environment_on_every_request(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    (tmp_path / "local.env").write_text("KEYED_KEY=sk-from-local-env\n")
-    monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("KEYED_KEY", raising=False)
     named = find("keyed/x", combined({"keyed": {**_OPEN, "key": {"env": "KEYED_KEY"}}}, "/c/models.toml", {}))
     assert named is not None
     with pytest.raises(ModelsError, match="not set in bh-02's environment"):
-        await headers_for(named)  # local.env has the line, and is not looked at
+        await headers_for(named)
     monkeypatch.setenv("KEYED_KEY", "sk-stand-in")
     assert (await headers_for(named))["Authorization"] == "Bearer sk-stand-in"
     monkeypatch.setenv("KEYED_KEY", "sk-rotated")

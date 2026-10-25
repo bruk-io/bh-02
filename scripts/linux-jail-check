@@ -33,7 +33,7 @@ fail at its first download), and a CA without a proxy is ignored.
 
 What reaches the container: the files git tracks or would track (`git ls-files --cached
 --others --exclude-standard`), streamed in as a tar. So nothing git ignores goes in: not
-`local.env` (the Claude credential), not `.venv` (the container makes its own), not a session's
+any `.env` file, not `.venv` (the container makes its own), not a session's
 state. The workspace is unpacked into `/work`, owned by an unprivileged user, and the host tree
 is never mounted, so nothing in the container can write it.
 
@@ -208,7 +208,7 @@ def run_options(proxy: Proxy | None) -> list[str]:
 
 def source_tar() -> bytes:
     """The workspace as git sees it, tarred: tracked files and untracked ones git would track,
-    never an ignored one (`local.env`, `.venv`)."""
+    never an ignored one (an `.env` file, `.venv`)."""
     listed = subprocess.run(
         ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
         cwd=ROOT,

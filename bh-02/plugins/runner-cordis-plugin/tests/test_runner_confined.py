@@ -39,7 +39,6 @@ from runner_cordis_plugin import (
     graded,
     group_alive,
     held,
-    holding,
     host_interpreters,
     identity,
     lifted,
@@ -71,7 +70,6 @@ from runner_cordis_plugin import (
 @dataclass(frozen=True)
 class Host:
     paths: tuple[str, ...] = ()
-    credentials: tuple[str, ...] = ()
     secrets: tuple[str, ...] = ()
     trusted: tuple[str, ...] = ()
     code: tuple[str, ...] = ()
@@ -115,10 +113,10 @@ def test_the_spec_denies_what_would_reach_outside_the_jail_later() -> None:
         endpoint="/tmp/k/k.sock",
         scratch="/tmp/j/tmp",
         home="/Users/me",
-        config=BrigConfig(),
+        config=BrigConfig(hide=("private.txt",)),
         layers=("/w/app/mine.toml", "/elsewhere/chat.toml"),
         host=("/w/app/src", "/usr/lib/python3.15", "/w/app/.venv", "/w/app"),
-        secrets=("/src/bh/local.env",),
+        secrets=("/src/bh/private.txt",),
     )
     assert spec.fs.write_allows == ("/tmp/j/tmp", "/tmp/k", "/w/app")
     denies = set(spec.fs.write_denies)
@@ -135,10 +133,10 @@ def test_the_spec_denies_what_would_reach_outside_the_jail_later() -> None:
     } <= denies  # brig's self-modify list
     assert not {"/w/app/CLAUDE.md", "/w/app/AGENTS.md"} & denies  # but the guidance files: `allow`'s default
     assert "/Users/me/.ssh" in spec.fs.read_denies
-    assert "/w/app/local.env" in spec.fs.read_denies  # a credential beside the project
-    assert "/src/bh/local.env" in spec.fs.read_denies  # bh-02's own, wherever the project is
-    assert "/w/app/local.env" in denies  # one it may not read it may not overwrite either
-    assert "/src/bh/local.env" not in denies  # outside every writable root: nothing to deny
+    assert "/w/app/private.txt" in spec.fs.read_denies  # a file `hide` names, beside the project
+    assert "/src/bh/private.txt" in spec.fs.read_denies  # a secret, wherever the project is
+    assert "/w/app/private.txt" in denies  # one it may not read it may not overwrite either
+    assert "/src/bh/private.txt" not in denies  # outside every writable root: nothing to deny
     assert dict(spec.env.set) == {"TMPDIR": "/tmp/j/tmp"} and "PATH" in spec.env.allow_names
     # The channel by name; its socket's directory is a write root (above), as brig granted it
     # per channel until its decision-186.
@@ -468,7 +466,7 @@ def test_a_linux_jail_reads_bh_02_s_own_code_and_writes_none_of_it(tmp_path: Pat
     editable install that is the workspace's `src/cordis`, outside the project and the
     interpreter: so the allowlist names bh-02's own code (`host.code`), read-only (outside
     every writable root nothing writes it; under one, it is denied above), and never the
-    workspace itself, whose `local.env` an input must not read."""
+    workspace itself, whose files an input must not read."""
     readable = readable_roots(
         argv=["/w/.venv/bin/python", "-I", f"{_CODE[1]}/worker.py", "/tmp/k/k.sock"],
         interpreter=("/opt/py", "/w/.venv"),
@@ -521,28 +519,26 @@ async def test_the_row_binds_a_runner_over_a_brig_jail_over_the_layers_it_was_gi
 
 def test_on_linux_the_policy_reads_by_allowlist_and_keeps_every_deny() -> None:
     """The same policy, one read model over: what is readable is named, and every read deny
-    (credentials, `hide`, `secrets`) is a carve-out inside it; writes and env are untouched,
-    but for a secret under the project, whose read mask refuses writes by itself. One the jail
-    must `hold` (absent, where bh-02 looks for its credential) keeps its write deny, the only
-    thing that stops an input creating it."""
+    (brig's credential list, `hide`, `secrets`) is a carve-out inside it; writes and env are
+    untouched, but for a secret under the project, whose read mask refuses writes by itself."""
     policy = spec_for(
         root="/w/app",
         endpoint="/tmp/k/k.sock",
         scratch="/tmp/j/tmp",
         home="/home/me",
-        config=BrigConfig(),
+        config=BrigConfig(hide=("private.txt",)),
         layers=("/w/app/mine.toml",),
         host=(),
-        secrets=("/src/bh/local.env",),
+        secrets=("/src/bh/private.txt",),
     )
-    holding = allowlisted(policy, ("/usr", "/etc", "/opt/py"), hold={"/w/app/local.env"})
-    assert holding.fs.write_denies == policy.fs.write_denies  # absent where bh-02 looks: held
     linux = allowlisted(policy, ("/usr", "/etc", "/opt/py"))
     assert linux.fs.read_allows == ("/etc", "/opt/py", "/usr")
     assert linux.fs.read_denies == policy.fs.read_denies
-    assert {"/w/app/local.env", "/src/bh/local.env", "/home/me/.ssh"} <= set(linux.fs.read_denies)
-    assert "/w/app/local.env" in policy.fs.write_denies and "/w/app/local.env" not in linux.fs.write_denies
-    kept = tuple(d for d in policy.fs.write_denies if d != "/w/app/local.env")
+    assert {"/w/app/private.txt", "/src/bh/private.txt", "/home/me/.ssh"} <= set(linux.fs.read_denies)
+    assert (
+        "/w/app/private.txt" in policy.fs.write_denies and "/w/app/private.txt" not in linux.fs.write_denies
+    )
+    kept = tuple(d for d in policy.fs.write_denies if d != "/w/app/private.txt")
     assert (linux.fs.write_allows, linux.fs.write_denies) == (policy.fs.write_allows, kept)
     assert (linux.env, linux.channels) == (policy.env, policy.channels)
     assert linux.fs.read_model.value == "allow_list" and policy.fs.read_model.value == "deny_list"
@@ -556,7 +552,7 @@ def test_a_linux_jail_reads_the_system_the_interpreter_and_what_the_command_name
     )
     assert readable[: len(SYSTEM_READABLE)] == SYSTEM_READABLE
     assert {"/opt/py", "/w/.venv", "/w/.venv/bin", "/w/src/python_cordis_plugin"} <= set(readable)
-    assert "/w" not in readable  # not the workspace root, whose local.env an input must not read
+    assert "/w" not in readable  # not the workspace root, whose files an input must not read
     assert len(readable) == len(set(readable))
 
 
@@ -568,8 +564,8 @@ def test_what_the_jail_made_on_the_host_is_removed_deepest_first() -> None:
 def test_a_deny_inside_another_is_left_to_the_outer_one() -> None:
     """An absent secret in a directory the host imports code from: that directory is bound
     read-only already, and a mount point for the secret can't be made on it."""
-    denies = uncovered(["/w/pkg/src", "/w/pkg/src/local.env", "/w/pkg/local.env", "/w/pkg/srcx"])
-    assert denies == ("/w/pkg/src", "/w/pkg/local.env", "/w/pkg/srcx")
+    denies = uncovered(["/w/pkg/src", "/w/pkg/src/private.txt", "/w/pkg/private.txt", "/w/pkg/srcx"])
+    assert denies == ("/w/pkg/src", "/w/pkg/private.txt", "/w/pkg/srcx")
 
 
 def test_a_linux_jail_holds_the_secrets_under_a_writable_root_and_says_so() -> None:
@@ -581,33 +577,25 @@ def test_a_linux_jail_holds_the_secrets_under_a_writable_root_and_says_so() -> N
         endpoint="/tmp/k/k.sock",
         scratch="/tmp/j/tmp",
         home="/home/me",
-        config=BrigConfig(),
+        config=BrigConfig(hide=("private.txt",)),
         layers=(),
         host=(),
-        secrets=("/w/app/pkg/local.env", "/src/bh/local.env"),
+        secrets=("/w/app/pkg/private.txt", "/src/bh/private.txt"),
     )
     holds = held(spec, ())  # both there, so both masked
-    assert holds == ("/w/app/local.env", "/w/app/pkg/local.env")  # not ~/.ssh, not /src/bh
+    assert holds == ("/w/app/pkg/private.txt", "/w/app/private.txt")  # not ~/.ssh, not /src/bh
     notice = notice_for("linux", holds)
-    assert "/w/app/local.env, /w/app/pkg/local.env" in notice and "renaming a new file over it" in notice
-    assert "bh-02 ends the jail at once" in notice and "`/release`" in notice
+    assert "/w/app/pkg/private.txt, /w/app/private.txt" in notice and "renaming a new file over it" in notice
+    assert "bh-02 ends the jail at once" in notice and "credential" not in notice
     assert notice_for("darwin", holds) == "" and notice_for("linux", ()) == ""
     report = {"fs_read": "enforced", "fs_write": "enforced"}
     assert graded(report, holds) == {"fs_read": "best_effort", "fs_write": "enforced"}
     assert graded(report, ()) == report
 
 
-def test_release_says_where_the_credential_can_go_now_and_what_another_session_still_holds() -> None:
-    assert holding(("/w/a/local.env", "/w/local.env", "/x/local.env"), ("/w/.envrc", "/w/local.env")) == (
-        "/w/local.env",
-    )  # only what the jail mounts over
-    free = released_for(["/w/local.env"], [])
-    assert free.startswith("Nothing holds /w/local.env until something starts in the runner again")
-    assert "`/restart model`" in free and "stays held" not in free
-    still = released_for([], ["/w/local.env"])
-    assert still.startswith("/w/local.env stays held") and "/release again" in still
-    assert released_for([], []) == ""
-    running = released_for([], [], running=True)  # an owner did not stop its own program
+def test_release_says_only_that_a_program_still_runs() -> None:
+    assert released_for() == "" and released_for(running=False) == ""
+    running = released_for(running=True)  # an owner did not stop its own program
     assert running.startswith("A program this runner started still runs") and "/restart" in running
 
 
@@ -716,23 +704,19 @@ async def test_a_linux_jail_ends_when_the_host_replaces_or_removes_a_secret_it_h
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The jail holds a secret under the project with a mount on its path (a `/dev/null` over the
-    file, an empty directory where there is none). Replacing the file on the host the way an
-    editor saves (a new file renamed over it), or removing the empty directory, detaches that
-    mount inside the jail (measured before the tripwire: the workload then read the new file and
-    created the absent one), so the jail ends itself at once and says why. A new jail holds both
-    again. `fs_read` stays best-effort: a file created on the host at an absent secret that is
-    not held is still readable."""
+    file), and a write-denied path that is not there (`.envrc`) with an empty directory. Replacing
+    the file on the host the way an editor saves (a new file renamed over it), or removing the
+    empty directory, detaches that mount inside the jail (measured before the tripwire: the
+    workload then read the new file and created the absent one), so the jail ends itself at once
+    and says why. A new jail holds both again. `fs_read` stays best-effort: a file created on the
+    host at an absent secret that is not held is still readable."""
     _needs_bwrap()
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     project = tmp_path / "project"
-    (project / "pkg").mkdir(parents=True)
-    secret, absent, seen = project / "local.env", project / "pkg" / "local.env", project / "seen"
+    project.mkdir()
+    secret, absent, seen = project / "private.txt", project / ".envrc", project / "seen"
     secret.write_text("OLD=1\n")  # a stand-in: never the real file
-    one = BrigJail(
-        BrigConfig(),
-        Host(credentials=(str(absent),), secrets=(str(absent),)),
-        lock=str(tmp_path / "jails.lock"),
-    )
+    one = BrigJail(BrigConfig(hide=("private.txt",)), Host(), lock=str(tmp_path / "jails.lock"))
 
     async def jailed() -> Any:
         sock_dir = Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"))
@@ -750,7 +734,7 @@ async def test_a_linux_jail_ends_when_the_host_replaces_or_removes_a_secret_it_h
     started = await jailed()
     try:
         assert started.report()["fs_read"] == "best_effort"
-        assert f"{secret}, {absent}" in started.notice()
+        assert str(secret) in started.notice()
         await asyncio.sleep(0.5)
         assert not seen.exists() and absent.is_dir() and started.ended() == ""  # held
         group = _jail_group(tmp_path)
@@ -799,14 +783,10 @@ async def test_the_tripwire_ends_the_whole_jail_a_program_in_a_session_of_its_ow
     _needs_bwrap()
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     project = tmp_path / "project"
-    (project / "pkg").mkdir(parents=True)
-    absent = project / "pkg" / "local.env"
+    project.mkdir()
+    absent = project / ".envrc"
     marker = f"{uuid.uuid4().int % 10**9 + 10**9}.{uuid.uuid4().int % 10**6:06d}"
-    one = BrigJail(
-        BrigConfig(),
-        Host(credentials=(str(absent),), secrets=(str(absent),)),
-        lock=str(tmp_path / "jails.lock"),
-    )
+    one = BrigJail(BrigConfig(), Host(), lock=str(tmp_path / "jails.lock"))
     sock_dir = Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"))
     endpoint = str(sock_dir / "k.sock")
     argv = [sys.executable, "-I", "-c", _LISTEN_WITH_A_SESSION_OF_ITS_OWN, endpoint, marker]
@@ -865,13 +845,9 @@ async def test_a_jail_whose_hold_the_host_lifted_ends_at_once_whatever_its_progr
     _needs_bwrap()
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     project = tmp_path / "project"
-    (project / "pkg").mkdir(parents=True)
-    absent, stamp = project / "pkg" / "local.env", project / "stamp"
-    one = BrigJail(
-        BrigConfig(),
-        Host(credentials=(str(absent),), secrets=(str(absent),)),
-        lock=str(tmp_path / "jails.lock"),
-    )
+    project.mkdir()
+    absent, stamp = project / ".envrc", project / "stamp"
+    one = BrigJail(BrigConfig(), Host(), lock=str(tmp_path / "jails.lock"))
     endpoint = _endpoint()
     argv = [sys.executable, "-I", "-c", _HOSTILE_IGNORING_SIGTERM, endpoint, str(absent), str(stamp)]
     started = await one.start(argv, cwd=str(project), endpoint=endpoint)
@@ -1173,11 +1149,12 @@ async def test_each_start_keeps_what_it_is_whatever_the_jail_starts_after_it(tmp
     extensions' worker's trees. The jail's own grades are what was known before either."""
     project = tmp_path / "project"
     project.mkdir()
-    credential = project / "local.env"  # where bh-02 looks for its credential, absent: held
+    secret = project / "private.txt"  # a secret under the project: masked, so held
+    secret.write_text("OLD=1\n")  # a stand-in: never a real file
     for name in ("python", "extensions"):
         (tmp_path / name).mkdir()
         (tmp_path / name / "worker.py").write_text(_LISTEN)
-    one = BrigJail(BrigConfig(), Host(credentials=(str(credential),), secrets=(str(credential),)))
+    one = BrigJail(BrigConfig(hide=("private.txt",)), Host())
     before = dict(one.report())
     started = []
     try:
@@ -1192,9 +1169,7 @@ async def test_each_start_keeps_what_it_is_whatever_the_jail_starts_after_it(tmp
         )  # the second start's, not the first's
         assert str(tmp_path / "extensions") in extensions.reads()
         assert python_process.writes() == extensions.writes() == (str(project.resolve()),)
-        assert (
-            str(credential) in python_process.notice() and python_process.report()["fs_read"] == "best_effort"
-        )
+        assert str(secret) in python_process.notice() and python_process.report()["fs_read"] == "best_effort"
         assert one.report() == before
     finally:
         for each in started:
@@ -1214,20 +1189,14 @@ def _stops(started: Any) -> Any:
 @pytest.mark.usefixtures("_plain_launch")
 async def test_release_frees_what_the_programs_held_once_each_owner_stopped_its_own(tmp_path: Path) -> None:
     """The runner starts the Python process and the extensions' worker, and both jails hold the
-    absent `local.env` where bh-02 looks for its credential (and take the shared jail lock). On
+    absent `.envrc` (an empty directory in its place, and they take the shared jail lock). On
     `/release` each owner stops its own program (`on_release`), then the jail sweeps: the
-    placeholder is removed, the path is free, and it says so. The runner stays released, so the
+    placeholder is removed and the path is free. The runner stays released, so the
     extensions' worker waits, until the next start (the next input's Python process)."""
     project = tmp_path / "project"
     project.mkdir()
-    credential = project / "local.env"
-    runner = Runner(
-        BrigJail(
-            BrigConfig(),
-            Host(credentials=(str(credential),), secrets=(str(credential),)),
-            lock=str(tmp_path / "jails.lock"),
-        )
-    )
+    placeholder = project / ".envrc"
+    runner = Runner(BrigJail(BrigConfig(), Host(), lock=str(tmp_path / "jails.lock")))
     started = []
     for _ in ("python", "extensions"):
         endpoint = _endpoint()
@@ -1237,11 +1206,10 @@ async def test_release_frees_what_the_programs_held_once_each_owner_stopped_its_
     try:
         records = tmp_path / "state" / "bh-02" / "jails"
         groups = [recorded_group(record.read_text()) for record in sorted(records.iterdir())]
-        assert credential.is_dir() and len(groups) == 2 and None not in groups
+        assert placeholder.is_dir() and len(groups) == 2 and None not in groups
         said = await runner.release()
-        assert said.startswith(f"Nothing holds {credential}"), said
-        assert "stays held" not in said and "still runs" not in said
-        assert not credential.exists() and list(records.iterdir()) == []
+        assert said == "", said  # nothing still runs
+        assert not placeholder.exists() and list(records.iterdir()) == []
         for group in groups:
             assert group is not None and await _gone(group)
         assert runner.released()
@@ -1250,7 +1218,7 @@ async def test_release_frees_what_the_programs_held_once_each_owner_stopped_its_
             [sys.executable, "-I", "-c", _LISTEN, endpoint], cwd=str(project), endpoint=endpoint
         )
         try:
-            assert not runner.released() and credential.is_dir()  # the next input's jail holds it again
+            assert not runner.released() and placeholder.is_dir()  # the next input's jail holds it again
         finally:
             await again.stop()
     finally:
@@ -1266,14 +1234,8 @@ async def test_release_never_stops_a_program_its_owner_did_not_and_says_it_still
     jail keeps the path held, and `/release` says so, naming the way out."""
     project = tmp_path / "project"
     project.mkdir()
-    credential = project / "local.env"
-    runner = Runner(
-        BrigJail(
-            BrigConfig(),
-            Host(credentials=(str(credential),), secrets=(str(credential),)),
-            lock=str(tmp_path / "jails.lock"),
-        )
-    )
+    placeholder = project / ".envrc"
+    runner = Runner(BrigJail(BrigConfig(), Host(), lock=str(tmp_path / "jails.lock")))
     endpoint = _endpoint()
     kept = await runner.start(
         [sys.executable, "-I", "-c", _LISTEN, endpoint], cwd=str(project), endpoint=endpoint
@@ -1281,7 +1243,7 @@ async def test_release_never_stops_a_program_its_owner_did_not_and_says_it_still
     try:
         said = await runner.release()
         assert "still runs" in said and "/restart" in said, said
-        assert credential.is_dir() and kept.ended() == ""
+        assert placeholder.is_dir() and kept.ended() == ""
     finally:
         await kept.stop()
 
@@ -1301,15 +1263,12 @@ async def test_release_keeps_what_another_session_holds_on_the_shared_lock_until
 ) -> None:
     """Another bh-02 session of the person's runs a jail: it holds the jail lock shared, from a
     process of its own. A program stopped here can't remove the placeholder while that hold
-    stands, and `/release` says the path stays held by another session. Once that session is
-    gone, the next `/release` frees it."""
+    stands. Once that session is gone, the next `/release` frees it."""
     project = tmp_path / "project"
     project.mkdir()
-    credential = project / "local.env"
+    placeholder = project / ".envrc"
     lock = str(tmp_path / "jails.lock")
-    runner = Runner(
-        BrigJail(BrigConfig(), Host(credentials=(str(credential),), secrets=(str(credential),)), lock=lock)
-    )
+    runner = Runner(BrigJail(BrigConfig(), Host(), lock=lock))
     endpoint = _endpoint()
     started = await runner.start(
         [sys.executable, "-I", "-c", _LISTEN, endpoint], cwd=str(project), endpoint=endpoint
@@ -1320,13 +1279,12 @@ async def test_release_keeps_what_another_session_holds_on_the_shared_lock_until
     try:
         assert other.stdout is not None and other.stdout.readline() == "held\n"
         await started.stop()
-        said = await runner.release()
-        assert credential.is_dir(), said
-        assert f"{credential} stays held" in said and "another bh-02 session" in said, said
+        await runner.release()
+        assert placeholder.is_dir()  # held while the other session's jail runs
         other.kill()
         other.wait()
-        said = await runner.release()
-        assert not credential.exists() and said.startswith(f"Nothing holds {credential}"), said
+        await runner.release()
+        assert not placeholder.exists()
     finally:
         other.kill()
         other.wait()
@@ -1367,19 +1325,21 @@ async def test_release_waits_for_a_start_under_way_and_says_it_still_runs(
 
 
 @pytest.mark.usefixtures("_plain_launch")
-async def test_an_input_creating_the_project_s_own_absent_local_env_leaves_the_jail_running(
+async def test_an_input_creating_a_hidden_file_the_project_lacks_leaves_the_jail_running(
     tmp_path: Path,
 ) -> None:
-    """The project's `local.env` is absent and not where bh-02 looks for its credential: nothing
-    holds it, and an input may create it. That must not trip the jail's own tripwire, which would
+    """The project's `private.txt`, a file `hide` names, is absent: nothing holds it, and an input
+    may create it. That must not trip the jail's own tripwire, which would
     end the jail mid-input and blame the host. The host removing a placeholder the jail does hold
     still ends it."""
     project = tmp_path / "project"
     project.mkdir()
-    created, done = project / "local.env", project / "done"
+    created, done = project / "private.txt", project / "done"
     endpoint = _endpoint()
     argv = [sys.executable, "-I", "-c", _LISTEN_THEN_CREATE, endpoint, str(created), str(done)]
-    started = await BrigJail(BrigConfig(), Host()).start(argv, cwd=str(project), endpoint=endpoint)
+    started = await BrigJail(BrigConfig(hide=("private.txt",)), Host()).start(
+        argv, cwd=str(project), endpoint=endpoint
+    )
     try:
         group = _recorded_group(tmp_path)
         for _ in range(250):
@@ -1405,7 +1365,7 @@ from pathlib import Path
 from runner_cordis_plugin import BrigConfig, BrigJail
 
 class Host:
-    paths, credentials, secrets, trusted, code, auto_memory = (), (), (), (), (), ""
+    paths, secrets, trusted, code, auto_memory = (), (), (), (), ""
 
 async def main():
     sock = str(Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"), "k.sock"))
@@ -1432,7 +1392,7 @@ from runner_cordis_plugin import Approval, BrigConfig, BrigJail, Runner
 from python_cordis_plugin import PythonProcess, PythonProcessConfig
 
 class Host:
-    paths, credentials, secrets, trusted, code, auto_memory = (), (), (), (), (), ""
+    paths, secrets, trusted, code, auto_memory = (), (), (), (), ""
 
 LOOP = (
     "import os, sys, time\\n"
@@ -1673,7 +1633,7 @@ from brig.run import Jail
 from runner_cordis_plugin import BrigConfig, BrigJail
 
 class Host:
-    paths, credentials, secrets, trusted, code, auto_memory = (), (), (), (), (), ""
+    paths, secrets, trusted, code, auto_memory = (), (), (), (), ""
 
 def crash(*args, **kwargs):
     os._exit(9)
@@ -1984,7 +1944,7 @@ from brig.run import ExecWrapNotAPrefix, Jail
 from runner_cordis_plugin import BrigConfig, BrigJail
 
 class Host:
-    paths, credentials, secrets, trusted, code, auto_memory = (), (), (), (), (), ""
+    paths, secrets, trusted, code, auto_memory = (), (), (), (), ""
 
 project, token, how, lock = sys.argv[1:5]
 helper = Helper(
@@ -2522,14 +2482,13 @@ def test_the_linux_jail_compiles_the_policy_with_bubblewrap_and_masks_the_projec
 ) -> None:
     """The compile half of the Linux jail, which runs anywhere (the enforcement half is
     `scripts/linux-jail-check`'s): the grades an input is confined by, and the project's own
-    `local.env` masked on the command line, because it exists; absent, named instead, and held
-    by a read-only empty directory only where bh-02 looks for its credential. Either way
-    `fs_read` is best-effort: the mount is on the host's directory entry, which the host can
-    replace (an editor's save)."""
+    `private.txt` (a file `hide` names) masked on the command line, because it exists; absent,
+    named instead, and nothing mounted there. Either way `fs_read` is best-effort: the mount is on
+    the host's directory entry, which the host can replace (an editor's save)."""
     project = tmp_path / "project"
     project.mkdir()
-    secret = project / "local.env"
-    jail = BrigJail(BrigConfig(), Host(), platform="linux")
+    secret = project / "private.txt"
+    jail = BrigJail(BrigConfig(hide=("private.txt",)), Host(), platform="linux")
     report = jail.report()
     assert report["fs_write"] == report["network"] == report["env"] == "enforced"
 
@@ -2537,11 +2496,6 @@ def test_the_linux_jail_compiles_the_policy_with_bubblewrap_and_masks_the_projec
     detail = next(g.detail for axis, g in compiled.report.axes.items() if axis.value == "fs_read")
     assert graded["fs_read"] == "best_effort" and str(secret.resolve()) in detail
     assert str(secret.resolve()) not in compiled.wrap(("w",))  # the project's own: nothing made
-    looked = BrigJail(BrigConfig(), Host(credentials=(str(secret.resolve()),)), platform="linux")
-    compiled, graded = looked.compile(str(tmp_path / "j"), str(tmp_path / "k" / "k.sock"), str(project), ())
-    argv = compiled.wrap(("w",))
-    at = argv.index(str(secret.resolve()))
-    assert argv[at - 1 : at + 3] == ("--tmpfs", str(secret.resolve()), "--remount-ro", str(secret.resolve()))
 
     secret.write_text("NOT_A_REAL_CREDENTIAL=placeholder\n")  # a stand-in: never the real file
     compiled, graded = jail.compile(str(tmp_path / "j"), str(tmp_path / "k" / "k.sock"), str(project), ())
@@ -2554,8 +2508,8 @@ def test_the_linux_jail_compiles_the_policy_with_bubblewrap_and_masks_the_projec
 
 
 def test_the_tripwire_watches_each_held_path_s_directory_by_name() -> None:
-    held = ("/w/.git/config", "/w/.git/hooks", "/w/mine.toml", "/w/local.env", "/w/mine.toml")
-    assert wires(held) == {"/w/.git": ("config", "hooks"), "/w": ("mine.toml", "local.env")}
+    held = ("/w/.git/config", "/w/.git/hooks", "/w/mine.toml", "/w/private.txt", "/w/mine.toml")
+    assert wires(held) == {"/w/.git": ("config", "hooks"), "/w": ("mine.toml", "private.txt")}
 
 
 def test_what_lifts_a_hold_is_the_host_replacing_moving_or_removing_a_held_name() -> None:
@@ -2581,30 +2535,29 @@ def test_inotify_records_are_read_as_descriptor_mask_and_name() -> None:
 
 
 def test_a_linux_jail_watches_an_absent_secret_only_where_no_input_may_create_it() -> None:
-    """The project's own `local.env`, absent and not where bh-02 looks for its credential: the
-    allowlist drops its write deny and nothing is mounted there, so an input may create it, and
-    that must not trip the jail's own tripwire. An absent one an input can't create (held by an
-    empty directory where bh-02 looks for its credential, or inside a directory bound read-only)
-    is still watched: only the host could create it, and the jail could then read it. One that
-    is there is masked, and watched."""
+    """The project's own `private.txt` (a file `hide` names), absent: the allowlist drops its write
+    deny and nothing is mounted there, so an input may create it, and that must not trip the jail's
+    own tripwire. An absent one an input can't create (inside a directory bound read-only) is still
+    watched: only the host could create it, and the jail could then read it. One that is there is
+    masked, and watched."""
     policy = spec_for(
         root="/w/app",
         endpoint="/tmp/k/k.sock",
         scratch="/tmp/j/tmp",
         home="/home/me",
-        config=BrigConfig(),
+        config=BrigConfig(hide=("private.txt",)),
         layers=(),
         host=("/w/app/src",),  # a directory the host imports code from: bound read-only
-        secrets=("/w/app/creds/local.env", "/w/app/src/local.env"),
+        secrets=("/w/app/src/private.txt",),
     )
-    linux = allowlisted(policy, ("/usr",), hold={"/w/app/creds/local.env"})
-    absent = {"/w/app/local.env", "/w/app/creds/local.env", "/w/app/src/local.env"}
-    assert "/w/app/local.env" not in linux.fs.write_denies  # an input may create it
+    linux = allowlisted(policy, ("/usr",))
+    absent = {"/w/app/private.txt", "/w/app/src/private.txt"}
+    assert "/w/app/private.txt" not in linux.fs.write_denies  # an input may create it
     watched = tripwired(linux, absent)
-    assert "/w/app/local.env" not in watched and "/w/app/local.env" not in held(linux, absent)
-    assert {"/w/app/creds/local.env", "/w/app/src/local.env"} <= set(watched)
-    assert "/w/app/local.env" in tripwired(linux, ()) and "/w/app/local.env" in held(linux, ())  # masked
-    assert "/w/app/local.env" not in notice_for("linux", held(linux, absent))
+    assert "/w/app/private.txt" not in watched and "/w/app/private.txt" not in held(linux, absent)
+    assert "/w/app/src/private.txt" in watched
+    assert "/w/app/private.txt" in tripwired(linux, ()) and "/w/app/private.txt" in held(linux, ())  # masked
+    assert "/w/app/private.txt" not in notice_for("linux", held(linux, absent))
 
 
 def test_a_linux_jail_trips_on_every_write_deny_under_a_writable_root_and_every_held_secret() -> None:
@@ -2613,12 +2566,12 @@ def test_a_linux_jail_trips_on_every_write_deny_under_a_writable_root_and_every_
         endpoint="/tmp/k/k.sock",
         scratch="/tmp/j/tmp",
         home="/home/me",
-        config=BrigConfig(),
+        config=BrigConfig(hide=("private.txt",)),
         layers=("/w/app/mine.toml", "/elsewhere/chat.toml"),
         host=(),
     )
     paths = tripwired(policy, ())
-    assert {"/w/app/mine.toml", "/w/app/.git/config", "/w/app/local.env"} <= set(paths)
+    assert {"/w/app/mine.toml", "/w/app/.git/config", "/w/app/private.txt"} <= set(paths)
     assert "/elsewhere/chat.toml" not in paths  # outside every writable root: nothing is mounted
 
 

@@ -4,7 +4,7 @@ bh-02's model: named models over their providers, switched by name. Three rows:
 
 | Row | Binds / registers | Consumes |
 |---|---|---|
-| `models:model` | `model`: one model step per `complete(messages, tools)` (CONTRACTS.md: model), the model `default` names on its provider | `host` (`credentials`: where `local.env` is looked for, for the Claude Code token) |
+| `models:model` | `model`: one model step per `complete(messages, tools)` (CONTRACTS.md: model), the model `default` names on its provider | |
 | `models:catalog` | `models`: the models there are (an endpoint's, as `/model` last heard them), the one the model row names now, why a name can't be switched to, and why the models file is not read (CONTRACTS.md: models) | `loader` |
 | `models:switch` | registers `/model [NAME]`: lists the models, switches by name in the session's layer, the reload queued in `jobs`; config: `layer` (the session's), `model_row` (`model`) | `commands` (`register`), `loader`, `models`, `jobs` (`put`) |
 
@@ -14,9 +14,8 @@ The model row's config (`ModelConfig`):
 - `models`: the models file, when not the default one.
 - `extra`: endpoints of the row's own, one table per name as in the file (a layer writes them),
   without `discover` or `key`, which only the models file may name.
-- `state`, `env_file`, `cwd`: the claude-code provider's (below). `env_file` is where
-  the claude-code provider reads the token (a `key` never reads `local.env`). Unset, `local.env` is looked for where the `host`
-  value's `credentials` say (below). A models file must be outside `cwd` as well as the
+- `state`, `cwd`: the claude-code provider's (below). The subscription token is the endpoint's
+  `key` (below), not a setting of the row. A models file must be outside `cwd` as well as the
   working directory (below).
 
 ## Named models
@@ -225,8 +224,7 @@ a URL no request can go to (`model_config`); nothing the HTTP client raises esca
   for its end (`sk-proj-****abcd`), as `<key>`: an error is kept in the session's events.
 
 A model's `key` (`named.KeySpec`, one table with exactly one source and an optional `ttl_ms`) says
-where its key comes from. `env` names a variable of bh-02's process environment (`os.environ`; never
-`local.env`), read when each request is made and put only in that request's `Authorization` header:
+where its key comes from. `env` names a variable of bh-02's process environment (`os.environ`), read when each request is made and put only in that request's `Authorization` header:
 never in an environment bh-02 hands on, never in anything whose repr shows it. A variable that is not
 set says its name and that it is looked for in the environment bh-02 started with, at `/model NAME`
 (which looks for it, never reads it out, and does not switch) and again at a request; no key sends none.
@@ -359,7 +357,8 @@ subscription's sanctioned route. bh-02 never imitates Claude Code's requests by 
 (`pi-claude-agent-sdk`, `pi-claude-bridge`): Claude Code carries the model's steps, and bh-02
 runs the loop. It is `claude_code/` (`ClaudeCodeModel`, `ClaudeCodeConfig`): `model` is
 the named model's id, `state` the session's own directory (which the session layer sets on the
-model row), `env_file` where the credential is, `cwd` the project directory.
+model row), `token` the endpoint's `key` (where the subscription token is read from), `cwd` the
+project directory.
 
 Why this shape, and not the two bh-02 ran before: Claude Code's own loop (the first of them) would
 own the conversation, the approvals and the tool, and the plain Messages API with the
@@ -503,34 +502,36 @@ Without `state`, a temporary directory is used and removed.
 
 These are the credential's rules; every other page that mentions them points here.
 
-The credential is `CLAUDE_CODE_OAUTH_TOKEN` (`claude setup-token` makes one), one line of the
-git-ignored `local.env` at the repository root (mode 600), so `uv run bh-02` needs no
-`--env-file`.
-- **Who reads it: the model rows, from the file.** Where it is looked for is not this plugin's
-  to decide: both rows depend on `host`, and its `credentials` (above bh-02's install and its
-  environment, nearest first: `bh_02.cli.credential_search`, the one definition of that search)
-  are the places searched; `token_file` takes the first that is a regular file (the row's
-  `env_file` instead, when set), so the empty directory a Linux jail holds an absent one with
-  never hides the real file, at the first read or at any later one (each Claude Code start, each
-  openai request). `parse_env` (pure) reads it with one read.
+The credential is `CLAUDE_CODE_OAUTH_TOKEN` (`claude setup-token` makes one). bh-02 reads no
+credential file: a claude-code endpoint without a `base_url` says where the token comes from in its
+`key`, like any model's key (`{ env = "CLAUDE_CODE_OAUTH_TOKEN" }`, or `cmd`, or `op`; no `ttl_ms`).
+- **Who reads it: the claude-code provider, when it starts the CLI.** `ClaudeCodeModel._child_env`
+  reads the variable from bh-02's environment, or runs the command through the person's shell
+  (`shell_key.command_key`, the same as an openai key's), at each Claude Code start (after
+  `/model`, `/clear`, a failed step), so a token set after a failed step is found at the next
+  one. Through a gateway the CLI runs the command itself and bh-02 reads nothing. An old
+  `local.env` is not read.
 - **Where it goes: only to the Claude Code CLI.** The token goes only into the SDK options' `env`
-  for the Claude Code child: never into bh-02's `os.environ`, so no program the runner starts
-  can inherit it; never on a command line; never in a repr (the child's env is a `ChildEnv`,
-  whose repr names its keys only, since Textual prints a crash with every frame's locals). The
-  child starts detached, with every other `ANTHROPIC_*` and `CLAUDE_*` removed (below).
+  for the Claude Code child (`credential.child_env`): bh-02 never writes it into its own
+  `os.environ`, so no program the runner starts gets it from bh-02; never on a command line; never in
+  a repr (the child's env is a `ChildEnv`, whose repr names its keys only, since Textual prints a
+  crash with every frame's locals). The child starts detached, with every other `ANTHROPIC_*` and
+  `CLAUDE_*` removed (below). `test_the_token_reaches_the_cli_s_environment_alone` shows it in the
+  CLI's environment and not in bh-02's.
 - **Never `ANTHROPIC_API_KEY`.** bh-02 never sets or reads `ANTHROPIC_API_KEY` or
-  `ANTHROPIC_AUTH_TOKEN`, and the token is never printed, logged or committed. No model's `key`
-  may read it (above).
-- **The model's code never gets it.** The same list is among the jail's `secrets`, so no place
-  searched is one a jailed input can read, write or create; `runner:unconfined` (`--no-jail`)
-  starts every program without `CLAUDE*` or `ANTHROPIC_*`, and `!COMMAND` runs without them too
-  (the commands plugin's README). An input approved under `--no-jail` runs with the person's
-  permissions, so it could still open `local.env` itself: the
-  [runner plugin's README](../runner-cordis-plugin/README.md) has the jail's policy, and how
-  `/release` lets the person add a credential mid-session.
-- **Without it** the row still binds, and each step answers `authentication_failed`, naming the
-  file it read (the row's `env_file` when set), whether that file is missing or lacks the
-  variable, and to make a token with `claude setup-token`.
+  `ANTHROPIC_AUTH_TOKEN`, and the token is never printed, logged or committed. No openai
+  model's `key` may read it (above).
+- **The model's code never gets it from bh-02.** The person may export it (that is where an `env`
+  key reads it), and bh-02's own process then holds it. The jail's environment is an allow-list that
+  leaves it out; `runner:unconfined` (`--no-jail`) starts every program without `CLAUDE*` or
+  `ANTHROPIC_*` (`tests/test_runner_tmux.py`), and `!COMMAND` runs without them too (the commands
+  plugin's README). An input approved under `--no-jail` runs with the person's permissions, so it
+  could still read the environment of a process the person owns: the
+  [runner plugin's README](../runner-cordis-plugin/README.md) has the jail's policy.
+- **Without it** the row still binds, and each step answers `authentication_failed`, saying the
+  endpoint has no `key`, or that its variable is not set in bh-02's environment, or that its
+  command printed nothing, and to make a token with `claude setup-token` and write
+  `key = { env = "CLAUDE_CODE_OAUTH_TOKEN" }`.
 
 ### Through a gateway
 
@@ -547,8 +548,7 @@ CLI: the flag layer is applied though no setting source is, the CLI runs the hel
 the command (`failure_of`); the CLI retries it for about three minutes first (measured).
 - **No token.** The child's environment is `credential.gateway_env`: the fixed settings,
   `CLAUDE_CONFIG_DIR`, and `CLAUDE_CODE_OAUTH_TOKEN` set empty, so a token in bh-02's own
-  environment never reaches it (the SDK merges that environment under the options' `env`). `local.env`
-  is not read.
+  environment never reaches it (the SDK merges that environment under the options' `env`).
 - **bh-02 never holds the key.** The CLI runs the command; bh-02 only names it. The base URL goes in
   the settings layer, not the environment, so the detached launcher's scrub of `ANTHROPIC_*` (below)
   stays as it is.
@@ -593,7 +593,7 @@ Bump the pin deliberately, and run the e2e tests.
   (against `StubServer`), discovery asking with it, a gateway handing its command to the CLI, and
   `extra` refusing a `key`.
 - `test_models_gateway.py`: the gateway's settings layer and token-less environment, the provider
-  starting `FakeClaudeCode` with both and no `local.env`, and what a refused key says.
+  starting `FakeClaudeCode` with both and no token, and what a refused key says.
 - `test_models_wiring.py` drives the rows by hand: the named model's provider, entered; a
   model that can't be used, binding anyway; a factory provider; the catalog.
 - `test_openai_stub.py` runs the openai provider against `openai.testing.StubServer`, a

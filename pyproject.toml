@@ -268,7 +268,7 @@ exclude = [
     "subagents_cordis_plugin.kinds:type_files", "subagents_cordis_plugin.kinds:type_names",
     "agent_cordis_plugin.transcript:MemoryTranscript.append",
     # Claude Code: one process per conversation and what it holds, saved in the session's
-    # state dir; the one read of local.env; a rebuilt session file; the CLI's stderr to a log;
+    # state dir; a rebuilt session file; the CLI's stderr to a log;
     # the console script that becomes the CLI
     "models_cordis_plugin.claude_code.provider:ClaudeCodeModel._dir",       # makes the state dir (a temporary one without a session)
     "models_cordis_plugin.claude_code.provider:ClaudeCodeModel._load",      # reads the saved state.json once
@@ -281,7 +281,6 @@ exclude = [
     "models_cordis_plugin.claude_code.provider:ClaudeCodeModel.close",      # ends the process, removes a temporary dir
     "models_cordis_plugin.claude_code.provider:ClaudeCodeModel.__aexit__",  # close()
     "models_cordis_plugin.claude_code.provider:_appender.append",
-    "models_cordis_plugin.claude_code.credential:child_env",
     "models_cordis_plugin.claude_code.records:write_session",
     "models_cordis_plugin.claude_code.detach:main",
     # the models file and the environment that says where it is, read when a model is chosen

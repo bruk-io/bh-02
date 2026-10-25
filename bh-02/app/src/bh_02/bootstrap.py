@@ -21,7 +21,6 @@ from cordis.loader import read_layer, resolve
 from host_paths import Appender, config_home, state_home
 
 __all__ = [
-    "CREDENTIAL_FILE",
     "CompositionError",
     "LayerError",
     "NotStarted",
@@ -29,7 +28,6 @@ __all__ = [
     "code_directories",
     "code_packages",
     "config_directories",
-    "credential_files",
     "memory_directory",
     "project_of",
     "unreadable",
@@ -73,9 +71,7 @@ async def shell(*, done: _ChatDone) -> Effects:
 class _Host:
     """What the host is, as the rows that keep the model's code from it read it (CONTRACTS.md:
     host): every layer the loader is watching
-    (`paths`), where the model rows look for the credential file, nearest first
-    (`credentials`), what no input may read (`secrets`): every one of `credentials`, the
-    `local.env` beside and above the project, and the sessions' state (Claude Code's own config
+    (`paths`), what no input may read (`secrets`): the sessions' state (Claude Code's own config
     and tokens), bh-02's configuration directories (`trusted`), whose files the host reads and
     trusts, the directories bh-02 runs its own code from (`code`), and the project's auto memory
     directory (`auto_memory`), which the model writes and the memory rows read. The jail keeps an
@@ -85,36 +81,18 @@ class _Host:
     code."""
 
     paths: tuple[str, ...] = ()
-    credentials: tuple[str, ...] = ()
     secrets: tuple[str, ...] = ()
     trusted: tuple[str, ...] = ()
     code: tuple[str, ...] = ()
     auto_memory: str = ""
 
 
-# The file bh-02's credentials live in (CLAUDE_CODE_OAUTH_TOKEN, and any key a model names),
-# read by the model row.
-CREDENTIAL_FILE = "local.env"
-
-
-def credential_files(anchors: Iterable[Path]) -> tuple[str, ...]:
-    """`local.env` in every directory above each anchor, nearest first, resolved anchors in.
-    Above bh-02's installed package and its environment, that is where the model rows look for
-    the credential (the `host` value's `credentials`), so from any working directory the
-    workspace's own `local.env` is among them."""
-    found = (str(parent / CREDENTIAL_FILE) for anchor in anchors for parent in anchor.parents)
-    return tuple(dict.fromkeys(found))
-
-
-def unreadable(credentials: Iterable[str], anchors: Iterable[Path], states: Iterable[str]) -> tuple[str, ...]:
-    """What no jailed input may read (the `host` value's `secrets`): every place the model rows
-    look for the credential (`credentials`, all of them, so none can be planted), the
-    `local.env` above each of `anchors` (the project's, beside it), and `states`, the sessions'
+def unreadable(states: Iterable[str]) -> tuple[str, ...]:
+    """What no jailed input may read (the `host` value's `secrets`): `states`, the sessions'
     state directories (this run's and the default one), where each session's Claude Code child
     keeps its config and messaging peer token. An empty state (a composition booted without
     sessions) adds nothing."""
-    found = (*credentials, *credential_files(anchors), *(state for state in states if state))
-    return tuple(dict.fromkeys(found))
+    return tuple(dict.fromkeys(state for state in states if state))
 
 
 def config_directories(environ: Mapping[str, str], home: Path) -> tuple[str, ...]:
@@ -209,8 +187,8 @@ def code_directories(packages: Iterable[str]) -> tuple[str, ...]:
 
 @component(provides=("host",))
 async def host(*, config: _Host) -> Effects:
-    """Binds what the host is (the layer files `run()` was given, where the credential is and
-    what else no input may read or write, bh-02's own code, the auto memory directory), mounted
+    """Binds what the host is (the layer files `run()` was given, what no input may read
+    or write (the sessions' state), bh-02's own code, the auto memory directory), mounted
     by `run()` as a row of its own, so a jail can keep an input from rewriting the program it
     runs in."""
     yield bind("host", config)
@@ -426,7 +404,6 @@ async def run(
     report: Callable[[str], None] | None = None,
     row_log: Path | None = None,
     session: Listing | None = None,
-    credentials: Iterable[str] = (),
     secrets: Iterable[str] = (),
     trusted: Iterable[str] = (),
     code: Iterable[str] = (),
@@ -442,10 +419,8 @@ async def run(
     binds, or its component fails) is known only by starting rows, and is diagnosed afterwards.
 
     Adds three rows of its own after `overrides`, pinned on: `host`, which binds the layer
-    files' paths, `credentials`, where the model rows look for the credential file (none: a
-    composition booted without them finds no credential unless its model row names an
-    `env_file`), `secrets`, where the credential file may be and the sessions' state
-    (CONTRACTS.md: host; the jail denies an input both), `trusted`, bh-02's configuration
+    files' paths, `secrets`, the sessions' state
+    (CONTRACTS.md: host; the jail denies an input reading it), `trusted`, bh-02's configuration
     directories (`config_directories`; the jail denies an input writing there), `code`, the
     directories bh-02 runs its own code from (`code_directories`; every jail reads them, and
     denies an input writing them), and `auto_memory`, the project's auto memory directory
@@ -479,7 +454,6 @@ async def run(
     read = read_layers(paths)
     watched = {
         "paths": [str(Path(path).resolve()) for path in paths],
-        "credentials": list(credentials),
         "secrets": list(secrets),
         "trusted": list(trusted),
         "code": list(code),

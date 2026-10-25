@@ -90,7 +90,7 @@ bh-02 refused). The status bar's `extensions` field shows the same to the person
 
 Not in bh-02's process. `host.py` starts the extensions process (`worker.py`) through the
 runner, which jails it as it does the Python process, where inputs run: with `runner:confined` an extension can write only
-inside the project, can't reach the network, and can't read `local.env` or the sessions' state.
+inside the project, can't reach the network, and can't read a file `hide` names or the sessions' state.
 Each load is put to the `approval` rule (`runner:approval`), the rule the loop asks about
 inputs too, so an extension loads without asking exactly when an input runs without asking; the
 model's plugins are as contained as its inputs. With `--no-jail` (`runner:unconfined`) an
@@ -114,7 +114,7 @@ about first.
 The model writes the extensions directory from the jail, and `host.py` reads it on the host,
 with the person's permissions, so it follows no link there (the python row's rule for its startup
 files: never read a file the model could write, or reach through a link it could make, and hand
-its text to the model). A link to `local.env`, or a hard link to it, would otherwise send the
+its text to the model). A link to a file the jail hides, or a hard link to it, would otherwise send the
 secret to the extensions process as an extension's source, where an extension already loaded could keep
 it, and a SyntaxError on its first line would put that line in status.json and the prompt.
 - The directory is opened from the project's root a name at a time (`.bh-02`, then `plugins`)
@@ -164,7 +164,7 @@ loads isn't loaded again every `watch`.
 `/release` stops the extensions process too, and the row does it itself: it registers the
 process's stop with the runner (`Extensions.stopped`, `runner.on_release`), which asks each owner to stop its
 own program and stops none itself, since the extensions process's jail holds the same
-placeholders as the Python process's (where bh-02 looks for its credential, the person's to fill now). The stop
+placeholders as the Python process's (the paths the person may now create). The stop
 takes back what the extensions added and answers `The extensions process is stopped, and what
 the extensions added with it: ...`. That is not an ending: while the runner is `released()` and
 nothing in the directory changed, no extensions process starts (each extension's status says

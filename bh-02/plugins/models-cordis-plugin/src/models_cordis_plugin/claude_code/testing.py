@@ -23,7 +23,7 @@ import contextlib
 import json
 from collections.abc import AsyncIterable, AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, cast
+from typing import Any, Final, cast
 
 from claude_agent_sdk import (
     AssistantMessage,
@@ -44,7 +44,14 @@ from claude_agent_sdk.types import AssistantMessageError, ContentBlock
 from mcp import Client
 from mcp.types import RequestParamsMeta
 
-__all__ = ["FakeClaudeCode", "FakeStep", "events_for"]
+from models_cordis_plugin.key import KeySpec
+
+__all__ = ["FAKE_TOKEN", "FAKE_TOKEN_KEY", "FakeClaudeCode", "FakeStep", "events_for"]
+
+# A stand-in for the subscription token, and the `key` that gives it (a command, so no test needs
+# the environment): no real credential is ever read in a test.
+FAKE_TOKEN: Final = "sentinel-not-a-real-token"
+FAKE_TOKEN_KEY: Final = KeySpec("cmd", f"printf %s {FAKE_TOKEN}")
 
 type Json = Mapping[str, Any]
 

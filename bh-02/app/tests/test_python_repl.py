@@ -28,7 +28,6 @@ from bh_02.bootstrap import (
     code_directories,
     code_packages,
     config_directories,
-    credential_files,
     layers,
     run,
     unreadable,
@@ -36,7 +35,6 @@ from bh_02.bootstrap import (
 from cordis import Row
 from cordis.loader import boot
 from extensions_cordis_plugin import Extensions, ExtensionsConfig
-from models_cordis_plugin.local_env import token_file
 from python_cordis_plugin import PythonProcess, PythonProcessConfig, worker_argv
 from runner_cordis_plugin import (
     Approval,
@@ -313,16 +311,16 @@ async def test_the_jail_row_s_allow_lets_an_input_write_one_more_self_modificati
 
 
 @pytest.mark.usefixtures("_needs_a_jail")
-async def test_a_jailed_input_cannot_read_the_credential_file_bh_02_names_from_another_directory(
+async def test_a_jailed_input_cannot_read_a_secret_bh_02_names_from_another_directory(
     composition: Callable[..., Path],
     tmp_path: Path,
 ) -> None:
-    """bh-02 runs in a project far from the workspace whose `local.env` holds its credential: a
-    input can't open that file, nor have a program it starts read it."""
+    """bh-02 runs in a project far from a file the host names as a secret: an input can't open
+    that file, nor have a program it starts read it."""
     project, workspace = tmp_path / "project", tmp_path / "workspace"
     project.mkdir()
     workspace.mkdir()
-    secret = workspace / "local.env"
+    secret = workspace / "private.txt"
     secret.write_text("NOT_A_REAL_CREDENTIAL=placeholder\n")  # a stand-in: never the real file
     readable = workspace / "notes.txt"
     readable.write_text("fine")
@@ -400,18 +398,18 @@ async def test_on_linux_a_host_with_no_interpreter_the_jail_mounts_does_not_star
 
 
 @pytest.mark.usefixtures("_needs_a_jail")
-async def test_a_jailed_input_cannot_read_the_project_s_own_local_env_but_reads_beside_it(
+async def test_a_jailed_input_cannot_read_a_file_the_project_hides_but_reads_beside_it(
     composition: Callable[..., Path],
     tmp_path: Path,
 ) -> None:
-    """The credential inside the project, where an input may write: the one case an allowlist
-    alone can't hide, so on Linux it is a mask over the file. Nor can an input overwrite, append
+    """A file the runner's `hide` names inside the project, where an input may write: the one case
+    an allowlist alone can't hide, so on Linux it is a mask over the file. Nor can an input overwrite, append
     to, remove or rename over it. A sibling reads in the same run,
     in-process and from a program the input starts; the host's file is untouched; and nothing
     the jail made in the project outlives it."""
     project = tmp_path / "project"
     project.mkdir()
-    secret = project / "local.env"
+    secret = project / "private.txt"
     secret.write_text("NOT_A_REAL_CREDENTIAL=placeholder\n")  # a stand-in: never the real file
     (project / "notes.txt").write_text("fine")
 
@@ -420,17 +418,17 @@ async def test_a_jailed_input_cannot_read_the_project_s_own_local_env_but_reads_
 
     patch = _inputs(
         composition,
-        attempt("open('local.env').read()"),
+        attempt("open('private.txt').read()"),
         attempt("open('notes.txt').read()"),
         "import subprocess\n"
-        "r = subprocess.run(['/bin/cat', 'local.env'], capture_output=True, text=True)\n"
+        "r = subprocess.run(['/bin/cat', 'private.txt'], capture_output=True, text=True)\n"
         "print('READ' if r.returncode == 0 else 'DENIED')",
         # nor may it replace what it can't read: overwrite, append, remove, rename over
-        attempt("open('local.env', 'w').write('X=1')"),
-        attempt("open('local.env', 'a').write('X=1')"),
-        attempt("__import__('os').remove('local.env')"),
-        attempt("open('new.env', 'w').write('X=1'); __import__('os').replace('new.env', 'local.env')"),
-        extra=_jailed_in(project),
+        attempt("open('private.txt', 'w').write('X=1')"),
+        attempt("open('private.txt', 'a').write('X=1')"),
+        attempt("__import__('os').remove('private.txt')"),
+        attempt("open('new.txt', 'w').write('X=1'); __import__('os').replace('new.txt', 'private.txt')"),
+        extra=_jailed_in(project) + 'config = { hide = ["private.txt"] }\n',
     )
     _answers()
     await run([*layers(), patch], [Row("chat", config={"prompt": "go"})])
@@ -438,59 +436,14 @@ async def test_a_jailed_input_cannot_read_the_project_s_own_local_env_but_reads_
     assert "[0] DENIED" in out and "[1] READ" in out and "[2] DENIED" in out, out
     assert all(f"[{n}] DENIED" in out for n in (3, 4, 5, 6)), out
     assert "placeholder" not in out, out
-    (project / "new.env").unlink(missing_ok=True)  # the rename's source, left when it is refused
+    (project / "new.txt").unlink(missing_ok=True)  # the rename's source, left when it is refused
     assert secret.read_text() == "NOT_A_REAL_CREDENTIAL=placeholder\n"
-    assert sorted(p.name for p in project.iterdir()) == ["local.env", "notes.txt"]  # nothing left behind
-
-
-@pytest.mark.usefixtures("_needs_a_jail")
-async def test_a_jailed_input_cannot_plant_a_credential_where_the_model_row_looks(
-    composition: Callable[..., Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """bh-02 run inside its own workspace: every place the model row looks for `local.env`
-    (`credentials`, nearest first) is under the project, where an input may write. An input can't
-    create one where there is none (the next launch would hand its token to Claude Code), in
-    a directory of its own or one the host imports code from, by writing, by renaming a file of
-    its own there, or as a link; nor replace the one that is there. Nothing the jail made on the
-    host outlives it, and the model row still finds the real file."""
-    project = tmp_path / "project"
-    imported = project / "pkg" / "src"  # a directory the host imports code from (editable install)
-    imported.mkdir(parents=True)
-    monkeypatch.syspath_prepend(str(imported))
-    real = project / "local.env"
-    real.write_text("NOT_A_REAL_CREDENTIAL=placeholder\n")  # a stand-in: never the real file
-    credentials = [str(imported / "local.env"), str(project / "pkg" / "local.env"), str(real)]
-
-    def attempt(what: str) -> str:
-        return f"import os\ntry:\n    {what}; print('WROTE')\nexcept OSError:\n    print('DENIED')"
-
-    absent = credentials[:2]
-    inputs = [
-        *(attempt(f"open({p!r}, 'w').write('X=1')") for p in absent),
-        *(attempt(f"open('mine.env', 'w').write('X=1'); os.replace('mine.env', {p!r})") for p in absent),
-        *(attempt(f"os.symlink('/tmp/elsewhere.env', {p!r})") for p in absent),
-        attempt(f"open({str(real)!r}, 'w').write('X=1')"),
-        attempt(f"open('mine.env', 'w').write('X=1'); os.replace('mine.env', {str(real)!r})"),
-    ]
-    before = sorted(str(p) for p in project.rglob("*"))
-    patch = _inputs(composition, *inputs, extra=_jailed_in(project))
-    _answers()
-    secrets = unreadable(credentials, [], [])
-    await run(
-        [*layers(), patch], [Row("chat", config={"prompt": "go"})], credentials=credentials, secrets=secrets
-    )
-    out = _shown()
-    assert all(f"[{n}] DENIED" in out for n in range(len(inputs))), out
-    (project / "mine.env").unlink(missing_ok=True)  # the renames' source, left when each is refused
-    assert sorted(str(p) for p in project.rglob("*")) == before  # no file planted, no placeholder left
-    assert real.read_text() == "NOT_A_REAL_CREDENTIAL=placeholder\n"
-    assert token_file(None, credentials) == real
+    assert sorted(p.name for p in project.iterdir()) == ["notes.txt", "private.txt"]  # nothing left behind
 
 
 @dataclass(frozen=True)
 class _Host:
     paths: tuple[str, ...] = ()
-    credentials: tuple[str, ...] = ()
     secrets: tuple[str, ...] = ()
     trusted: tuple[str, ...] = ()
     code: tuple[str, ...] = ()
@@ -504,60 +457,50 @@ def _python(jail: BrigJail | Runner, config: PythonProcessConfig) -> PythonProce
     return PythonProcess(runner, config, rule=Approval(runner))
 
 
-async def test_on_linux_release_frees_where_the_model_row_looks_until_the_next_input(
+async def test_on_linux_release_frees_the_jail_s_placeholder_until_the_next_input(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """`/release` (the runner's `release()`, the python row's `stopped` registered with it): the
-    jail holding an absent `local.env` where the model row looks ends, and with it the hold, so
-    the person can create the file. An input run before they do holds it again (that is all
-    `/restart python` would have given them); after they do, the next input's jail masks it: it
-    can neither read nor rewrite it."""
+    jail holding an absent `.envrc` with an empty directory ends, and with it the hold, so the
+    person can create the file. An input run before they do holds it again (that is all
+    `/restart python` would have given them); after they do, the next input's jail binds it
+    read-only: it can't rewrite it."""
     if sys.platform != "linux" or not Path(_BWRAP).exists():
         pytest.skip("the hold is bubblewrap's: Linux with /usr/bin/bwrap only")
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     project = tmp_path / "project"
     project.mkdir()
-    credential = project / "local.env"
-    jail = BrigJail(
-        BrigConfig(),
-        _Host(credentials=(str(credential),), secrets=(str(credential),)),
-        lock=str(tmp_path / "jails.lock"),
-    )
+    placeholder = project / ".envrc"
+    jail = BrigJail(BrigConfig(), _Host(), lock=str(tmp_path / "jails.lock"))
     reach = (
-        "import os\n"
-        f"for how in ('r', 'w'):\n"
-        "    try:\n"
-        f"        open({str(credential)!r}, how)\n"
-        "        print(how, 'OPENED')\n"
-        "    except OSError as error:\n"
-        "        print(how, type(error).__name__)\n"
+        "try:\n"
+        f"    open({str(placeholder)!r}, 'w')\n"
+        "    print('w OPENED')\n"
+        "except OSError as error:\n"
+        "    print('w', type(error).__name__)\n"
     )
     runner = Runner(jail)
     async with _python(runner, PythonProcessConfig(root=str(project))) as process:
         runner.on_release(process.stopped)
-        assert credential.is_dir()  # held: the person can't create it
+        assert placeholder.is_dir()  # held: the person can't create it
         (record,) = (tmp_path / "state" / "bh-02" / "jails").iterdir()
         group = recorded_group(record.read_text())
         assert group is not None
         said = await runner.release()
-        assert said.startswith("The Python process is stopped") and f"Nothing holds {credential}" in said, (
-            said
-        )
-        assert not credential.exists() and runner.released()
+        assert said.startswith("The Python process is stopped"), said
+        assert not placeholder.exists() and runner.released()
         assert not group_alive(group)  # the jail is gone, not only its worker
         await process.run("1")
-        assert credential.is_dir() and not runner.released()  # an input came first: held again
+        assert placeholder.is_dir() and not runner.released()  # an input came first: held again
         await runner.release()
         await process.__aexit__(None, None, None)  # `/restart python`: stops the jail ...
         await process.__aenter__()  # ... and starts one at once, which holds the path again
-        assert credential.is_dir()
+        assert placeholder.is_dir()
         await runner.release()
-        credential.write_text("CLAUDE_CODE_OAUTH_TOKEN=stand-in-not-a-token\n")  # never a real one
+        placeholder.write_text("export STAND_IN=1\n")
         out = await process.run(reach)
-        assert "r PermissionError" in out and "w PermissionError" in out, out
-        assert str(credential) in process.notice()
-    assert credential.read_text() == "CLAUDE_CODE_OAUTH_TOKEN=stand-in-not-a-token\n"
-    assert token_file(None, [str(credential)]) == credential
+        assert "w OPENED" not in out, out
+    assert placeholder.read_text() == "export STAND_IN=1\n"
 
 
 # Imported, a plant records its name, then loads the real module from the path without the
@@ -660,15 +603,15 @@ async def test_on_linux_the_python_process_tells_the_model_its_own_worker_s_tree
         shutil.rmtree(sockets, ignore_errors=True)
 
 
-async def test_on_linux_release_frees_the_credential_path_while_the_extensions_worker_runs(
+async def test_on_linux_release_frees_the_placeholder_while_the_extensions_worker_runs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The model has written an extension, so the runner runs a second program, the extensions'
-    worker, whose jail also holds the absent `local.env` where bh-02 looks for its credential
-    (and takes the shared jail lock). On `/release` each owner stops its own program (the
-    extensions row registers its worker's stop as the python row does), so the path is free and
-    nothing claims another session holds it; the runner stays released until the next input
-    starts something. (A stand-in program here, stopped by the test as its owner; the real
+    worker, whose jail also holds the absent `.envrc` with an empty directory (and takes the shared
+    jail lock). On `/release` each owner stops its own program (the
+    extensions row registers its worker's stop as the python row does), so the path is free; the
+    runner stays released until the next input starts something. (A stand-in program here,
+    stopped by the test as its owner; the real
     extensions process under a Linux jail is
     `test_on_linux_the_extensions_worker_imports_cordis_from_an_editable_install`'s.)"""
     if sys.platform != "linux" or not Path(_BWRAP).exists():
@@ -678,12 +621,8 @@ async def test_on_linux_release_frees_the_credential_path_while_the_extensions_w
     project.mkdir()
     elsewhere.mkdir()
     (elsewhere / "worker.py").write_text(_LISTENS)
-    credential = project / "local.env"
-    jail = BrigJail(
-        BrigConfig(),
-        _Host(credentials=(str(credential),), secrets=(str(credential),)),
-        lock=str(tmp_path / "jails.lock"),
-    )
+    placeholder = project / ".envrc"
+    jail = BrigJail(BrigConfig(), _Host(), lock=str(tmp_path / "jails.lock"))
     sockets = Path(tempfile.mkdtemp(prefix="bh-x-", dir="/tmp"))  # a socket path must be short
     endpoint = str(sockets / "x.sock")
     try:
@@ -701,16 +640,16 @@ async def test_on_linux_release_frees_the_credential_path_while_the_extensions_w
             try:
                 records = sorted((tmp_path / "state" / "bh-02" / "jails").iterdir())
                 groups = [recorded_group(record.read_text()) for record in records]
-                assert len(groups) == 2 and credential.is_dir()
+                assert len(groups) == 2 and placeholder.is_dir()
                 said = await runner.release()
-                assert f"Nothing holds {credential}" in said and "stays held" not in said, said
-                assert not credential.exists()
+                assert "stays held" not in said and "still runs" not in said, said
+                assert not placeholder.exists()
                 for group in groups:
                     assert group is not None
                     assert not group_alive(group)  # both jails are gone, the extensions process's too
                 assert runner.released()
                 await process.run("1")  # the next input
-                assert not runner.released() and credential.is_dir()
+                assert not runner.released() and placeholder.is_dir()
             finally:
                 await extensions.stop()
     finally:
@@ -1353,25 +1292,13 @@ async def test_the_model_is_told_what_a_linux_jail_reads_and_that_the_home_direc
         assert "reads only" not in told and "home directory" not in told
 
 
-def test_the_credential_may_be_above_bh_02_s_install_its_environment_or_the_project() -> None:
-    found = credential_files(
-        [Path("/w/proj/local.env"), Path("/src/bh/app/bh_02/cli.py"), Path("/src/bh/.venv")]
+def test_no_jailed_input_may_read_the_sessions_state() -> None:
+    states = ["/xdg/bh-02/sessions", "/home/me/.local/state/bh-02/sessions"]
+    assert unreadable(states) == tuple(states)
+    assert unreadable(["/home/me/.local/state/bh-02/sessions"] * 2) == (
+        "/home/me/.local/state/bh-02/sessions",
     )
-    assert found[0] == "/w/proj/local.env"  # beside the project
-    assert "/src/bh/local.env" in found  # the workspace root, whatever the project
-    assert len(found) == len(set(found))  # each once
-
-
-def test_no_jailed_input_may_read_the_sessions_state_nor_the_credential() -> None:
-    searched = credential_files([Path("/src/bh/.venv")])
-    beside = [Path("/w/proj/local.env")]
-    found = unreadable(searched, beside, ["/xdg/bh-02/sessions", "/home/me/.local/state/bh-02/sessions"])
-    assert found[-2:] == ("/xdg/bh-02/sessions", "/home/me/.local/state/bh-02/sessions")
-    assert "/src/bh/local.env" in found and "/w/proj/local.env" in found  # searched, and beside
-    same = unreadable(searched, beside, ["/home/me/.local/state/bh-02/sessions"] * 2)
-    assert same.count("/home/me/.local/state/bh-02/sessions") == 1  # no XDG_STATE_HOME: once
-    both = (*searched, *credential_files(beside))
-    assert unreadable(searched, beside, [""]) == tuple(dict.fromkeys(both))  # booted without sessions
+    assert unreadable([""]) == ()  # booted without sessions: nothing
 
 
 @pytest.mark.usefixtures("_needs_a_jail")
@@ -1404,7 +1331,7 @@ async def test_a_jailed_input_cannot_read_under_the_sessions_state_directory(
         extra=_jailed_in(project),
     )
     _answers()
-    secrets = unreadable([], [], [str(state.resolve())])
+    secrets = unreadable([str(state.resolve())])
     await run([*layers(), patch], [Row("chat", config={"prompt": "go"})], secrets=secrets)
     out = _shown()
     assert "[0] DENIED" in out and "[1] DENIED" in out and "[3] DENIED" in out, out
@@ -1444,7 +1371,7 @@ async def test_a_jailed_input_can_neither_read_nor_forge_a_sub_agent_s_event_log
         extra=_jailed_in(project),
     )
     _answers()
-    secrets = unreadable([], [], [str(state.resolve())])
+    secrets = unreadable([str(state.resolve())])
     await run([*layers(), patch], [Row("chat", config={"prompt": "go"})], secrets=secrets)
     out = _shown()
     assert all(f"[{n}] DENIED" in out for n in range(4)), out

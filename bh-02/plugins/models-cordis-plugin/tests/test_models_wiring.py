@@ -13,13 +13,6 @@ from models_cordis_plugin.claude_code import ClaudeCodeError, ClaudeCodeModel
 from models_cordis_plugin.openai import OpenAIModel
 
 
-@dataclass(frozen=True)
-class _Host:
-    """The `host` value, as far as the model rows read it: where `local.env` is looked for."""
-
-    credentials: tuple[str, ...] = ()
-
-
 @pytest.fixture(autouse=True)
 def _own_models_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
@@ -27,12 +20,10 @@ def _own_models_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 async def _bound(config: ModelConfig) -> Any:
     """What the row binds under `model`, entered as the runtime would enter it."""
-    first = await drive(model(config=config, host=_Host()))
+    first = await drive(model(config=config))
     manager = first[0].args[0]  # the provider's value, to be entered
     entered = await manager.__aenter__()
-    effects = await drive(
-        model(config=config, host=_Host()), [entered]
-    )  # the runtime sends back what it entered
+    effects = await drive(model(config=config), [entered])  # the runtime sends back what it entered
     assert [e.name for e in effects] == ["enter", "bind"] and effects[1].args[0] == "model"
     assert effects[1].args[1] is entered
     return entered, manager
@@ -44,15 +35,10 @@ _SUB = {"sub": {"provider": "claude-code", "models": {"sonnet": {"id": "sonnet"}
 async def test_a_claude_code_model_binds_and_the_credential_is_read_at_the_first_step(
     tmp_path: Path,
 ) -> None:
-    config = ModelConfig(
-        default="sub/sonnet",
-        extra=_SUB,
-        state=str(tmp_path / "state"),
-        env_file=str(tmp_path / "missing.env"),
-    )
+    config = ModelConfig(default="sub/sonnet", extra=_SUB, state=str(tmp_path / "state"))
     bound, manager = await _bound(config)
     assert isinstance(bound, ClaudeCodeModel)  # an async context manager: left with the row
-    with pytest.raises(ClaudeCodeError, match="missing.env"):
+    with pytest.raises(ClaudeCodeError, match="the endpoint has no `key`"):
         async for _ in bound.complete([{"role": "user", "content": "hi"}], []):
             pass
     await manager.__aexit__(None, None, None)

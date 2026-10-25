@@ -1,10 +1,10 @@
 """The credential, and the environment the Claude Code CLI is started with.
 
-On the subscription, the token is a Claude Code OAuth token (`claude setup-token` makes one), kept
-as `CLAUDE_CODE_OAUTH_TOKEN` in the git-ignored `local.env` at the repository root. bh-02 reads
-that file itself (`parse_env`, pure, over one read) and hands the value to the CLI child alone,
-through the SDK options' `env`: never into bh-02's own `os.environ`, so no other child (the
-Python process, the jail) can inherit it.
+On the subscription, the token is a Claude Code OAuth token (`claude setup-token` makes one), which
+the endpoint's `key` says where to get (`env`, `cmd` or `op`: the provider resolves it when it
+starts the CLI). bh-02 hands the value to the CLI child alone, through the SDK options' `env`
+(`child_env`): it never writes it into its own `os.environ`, so no other child (the Python
+process, the jail) gets it from bh-02.
 
 Through a gateway (a claude-code endpoint with `base_url` and a `key` of `cmd` or `op`), bh-02 holds
 no credential at all: the CLI is given a settings layer of its own (`gateway_settings`, the SDK's
@@ -16,20 +16,18 @@ that CLI. The layer is all the CLI reads of settings: the person's own still are
 
 The token is never held in a named local of a long-lived frame nor in anything whose repr
 shows it: Textual prints a crash with every frame's locals, and `ChildEnv`'s repr names its keys
-only. An error about the credential names the variable and the file, never a value.
+only. An error about the credential names the variable or the command, never a value.
 """
 
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Final
 
-from models_cordis_plugin.local_env import parse_env
+from models_cordis_plugin.key import TOKEN_VARIABLE
 
 __all__ = ["TOKEN_VARIABLE", "ChildEnv", "Gateway", "child_env", "gateway_env", "gateway_settings"]
 
-TOKEN_VARIABLE: Final = "CLAUDE_CODE_OAUTH_TOKEN"
 
 # What the CLI is told besides the token (the spike's measurements; README.md):
 _FIXED: Final[Mapping[str, str]] = {
@@ -85,12 +83,10 @@ class ChildEnv(dict[str, str]):
     __str__ = __repr__
 
 
-def child_env(path: Path | None, config_dir: str) -> ChildEnv | None:
-    """The CLI child's environment: the token from `path`, Claude Code's own state in
-    `config_dir` (`CLAUDE_CONFIG_DIR`), and the fixed settings; None when there is no token."""
-    if path is None or not path.is_file():
-        return None
+def child_env(token: str, config_dir: str) -> ChildEnv:
+    """The CLI child's environment: `token`, Claude Code's own state in `config_dir`
+    (`CLAUDE_CONFIG_DIR`), and the fixed settings."""
     env = ChildEnv(_FIXED)
     env["CLAUDE_CONFIG_DIR"] = config_dir
-    env[TOKEN_VARIABLE] = parse_env(path.read_text(encoding="utf-8")).get(TOKEN_VARIABLE, "")
-    return env if env[TOKEN_VARIABLE] else None
+    env[TOKEN_VARIABLE] = token
+    return env

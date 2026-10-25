@@ -136,18 +136,16 @@ def resolved(config: ModelConfig) -> Named:
     return outcome
 
 
-def _provided(named: Named, config: ModelConfig, searched: Sequence[str]) -> Any:
-    """The provider's value for `named`: not entered yet. `searched`: where the claude-code
-    provider looks for `local.env` when the config names no `env_file` (the `host` value's `credentials`)."""
+def _provided(named: Named, config: ModelConfig) -> Any:
+    """The provider's value for `named`: not entered yet."""
     if named.provider == CLAUDE_CODE:
         return ClaudeCodeModel(
             ClaudeCodeConfig(
                 model=named.id,
                 name=named.name,
                 state=config.state,
-                env_file=config.env_file,
                 cwd=config.cwd,
-                searched=tuple(searched),
+                token=None if "base_url" in named.table else key_spec(named.table.get("key")),
                 gateway=_gateway(named.table),
             )
         )
@@ -185,12 +183,11 @@ def _gateway(table: Mapping[str, Any]) -> Gateway | None:
 
 
 @contextlib.asynccontextmanager
-async def opened(config: ModelConfig, searched: Sequence[str] = ()) -> AsyncIterator[Any]:
+async def opened(config: ModelConfig) -> AsyncIterator[Any]:
     """The `model` value, for as long as the row is up: the named model's provider, entered
-    when it is a context manager (Claude Code's process, an HTTP client), else `Unusable`.
-    `searched`: where the provider looks for `local.env` (the `host` value's `credentials`)."""
+    when it is a context manager (Claude Code's process, an HTTP client), else `Unusable`."""
     try:
-        value = _provided(resolved(config), config, searched)
+        value = _provided(resolved(config), config)
     except ModelsError as error:
         value = Unusable(error)
     if isinstance(value, AbstractAsyncContextManager):

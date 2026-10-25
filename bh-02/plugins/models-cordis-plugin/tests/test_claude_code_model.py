@@ -24,7 +24,8 @@ from models_cordis_plugin.claude_code import (
     failure_of,
     project_dir,
 )
-from models_cordis_plugin.claude_code.testing import FakeClaudeCode, FakeStep
+from models_cordis_plugin.claude_code.testing import FAKE_TOKEN, FAKE_TOKEN_KEY, FakeClaudeCode, FakeStep
+from models_cordis_plugin.key import KeySpec
 
 _SPEC = {
     "name": "python",
@@ -47,11 +48,9 @@ class _Harness:
     """A model whose sessions are fakes, each over the next scripted steps."""
 
     def __init__(self, tmp_path: Path, *scripts: list[FakeStep], hold: asyncio.Event | None = None) -> None:
-        env_file = tmp_path / "local.env"
-        env_file.write_text(f"{TOKEN_VARIABLE}=sentinel-not-a-real-token\n")
         self.state = tmp_path / "state"
         self.cwd = str(tmp_path / "work")
-        self.config = ClaudeCodeConfig(state=str(self.state), env_file=str(env_file), cwd=self.cwd)
+        self.config = ClaudeCodeConfig(state=str(self.state), token=FAKE_TOKEN_KEY, cwd=self.cwd)
         self.scripts = list(scripts)
         self.fakes: list[FakeClaudeCode] = []
         self.hold = hold
@@ -342,7 +341,7 @@ async def test_a_conversation_that_cannot_be_written_for_claude_code_says_so_and
 ) -> None:
     h = _Harness(tmp_path, [FakeStep([_text("hello")])])
     deep = tmp_path.joinpath(*["a-rather-long-directory-name"] * 8)
-    h.config = ClaudeCodeConfig(state=h.config.state, env_file=h.config.env_file, cwd=str(deep))
+    h.config = ClaudeCodeConfig(state=h.config.state, token=h.config.token, cwd=str(deep))
     h.model = ClaudeCodeModel(h.config, h.open)
     messages = [
         {"role": "user", "content": "a"},
@@ -670,35 +669,65 @@ async def test_a_finished_step_whose_call_did_not_decode_shows_it_with_its_error
     assert fake.interrupts == 1 and h.saved()["held"]["ended"] == "cut"
 
 
-async def _refused(tmp_path: Path, env_file: Path) -> ClaudeCodeError:
-    config = ClaudeCodeConfig(state=str(tmp_path / "s"), env_file=str(env_file))
+async def _refused(tmp_path: Path, token: KeySpec | None) -> ClaudeCodeError:
+    config = ClaudeCodeConfig(state=str(tmp_path / "s"), token=token)
     model = ClaudeCodeModel(config, lambda options: pytest.fail("nothing starts without a token"))
     with pytest.raises(ClaudeCodeError) as raised:
         async for _ in model.complete([{"role": "user", "content": "hi"}], []):
             pass
-    assert raised.value.kind == "authentication_failed" and "claude setup-token" in raised.value.message
+    assert raised.value.kind == "authentication_failed"
     return raised.value
 
 
-async def test_without_a_credential_the_step_names_the_file_it_read_and_what_is_wrong(
-    tmp_path: Path,
+async def test_without_a_credential_the_step_says_where_it_looked_and_what_to_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    missing = await _refused(tmp_path, tmp_path / "elsewhere.env")
-    assert str(tmp_path / "elsewhere.env") in missing.message and "does not exist" in missing.message
-    other = tmp_path / "other.env"
-    other.write_text("SOMETHING_ELSE=1\n")
-    lacking = await _refused(tmp_path, other)
-    assert f"{TOKEN_VARIABLE} is not in {other}" in lacking.message
-    assert "local.env" not in lacking.message  # the row reads other.env, so that is the file named
+    monkeypatch.delenv("BH_TEST_TOKEN", raising=False)
+    none = await _refused(tmp_path, None)
+    assert "the endpoint has no `key`" in none.message and "claude setup-token" in none.message
+    assert 'key = { env = "CLAUDE_CODE_OAUTH_TOKEN" }' in none.message
+    unset = await _refused(tmp_path, KeySpec("env", "BH_TEST_TOKEN"))
+    assert "BH_TEST_TOKEN is not set in bh-02's environment" in unset.message
+    assert "local.env" not in none.message + unset.message
+    silent = await _refused(tmp_path, KeySpec("cmd", "true"))
+    assert "printed nothing" in silent.message and "`true`" in silent.message
 
 
-async def test_a_credential_added_mid_session_is_read_at_the_next_step(tmp_path: Path) -> None:
-    """With no credential each step fails before anything starts, so the next one looks again:
-    once the person has put the file where the row looks (on Linux, after `/release` freed the
-    jail's placeholder there), the next message starts Claude Code with it. No restart."""
-    held = tmp_path / "local.env"
-    held.mkdir()  # the jail's placeholder: not a file, so not a credential
-    config = ClaudeCodeConfig(state=str(tmp_path / "state"), searched=(str(held),), cwd=str(tmp_path))
+async def test_the_token_reaches_the_cli_s_environment_alone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The `key` names where the token is (a variable of bh-02's environment, here under another
+    name); it goes into the Claude Code child's explicit environment as CLAUDE_CODE_OAUTH_TOKEN and
+    nowhere else: bh-02's own `os.environ` gains no variable by it, so nothing it starts
+    afterwards (the Python worker) can inherit it from bh-02."""
+    monkeypatch.setenv("BH_TEST_TOKEN", FAKE_TOKEN)
+    monkeypatch.delenv(TOKEN_VARIABLE, raising=False)
+    opened: list[FakeClaudeCode] = []
+
+    def open_(options: Any) -> FakeClaudeCode:
+        opened.append(FakeClaudeCode(options, [FakeStep([_text("Hello")])]))
+        return opened[-1]
+
+    config = ClaudeCodeConfig(
+        state=str(tmp_path / "state"), token=KeySpec("env", "BH_TEST_TOKEN"), cwd=str(tmp_path)
+    )
+    model = ClaudeCodeModel(config, open_)
+    said = [dict(c) async for c in model.complete([_SYSTEM, {"role": "user", "content": "hi"}], [_SPEC])]
+    assert _said(said) == "Hello"
+    (fake,) = opened
+    assert fake.options.env[TOKEN_VARIABLE] == FAKE_TOKEN
+    assert TOKEN_VARIABLE not in os.environ  # not in bh-02's own environment
+    await model.close()
+
+
+async def test_a_credential_set_after_a_failed_step_is_read_at_the_next_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With no credential each step fails before anything starts, so the next one looks again."""
+    monkeypatch.delenv("BH_TEST_TOKEN", raising=False)
+    config = ClaudeCodeConfig(
+        state=str(tmp_path / "state"), token=KeySpec("env", "BH_TEST_TOKEN"), cwd=str(tmp_path)
+    )
     opened: list[FakeClaudeCode] = []
 
     def open_(options: Any) -> FakeClaudeCode:
@@ -710,17 +739,17 @@ async def test_a_credential_added_mid_session_is_read_at_the_next_step(tmp_path:
         async for _ in model.complete([_SYSTEM, {"role": "user", "content": "hi"}], [_SPEC]):
             pass
     assert raised.value.kind == "authentication_failed" and not opened
-    held.rmdir()
-    held.write_text(f"{TOKEN_VARIABLE}=sentinel-not-a-real-token\n")
+    monkeypatch.setenv("BH_TEST_TOKEN", FAKE_TOKEN)
     said = [dict(c) async for c in model.complete([_SYSTEM, {"role": "user", "content": "hi"}], [_SPEC])]
     assert _said(said) == "Hello"
     (fake,) = opened
-    assert fake.options.env[TOKEN_VARIABLE] == "sentinel-not-a-real-token"
+    assert fake.options.env[TOKEN_VARIABLE] == FAKE_TOKEN
+    await model.close()
 
 
 def test_a_refused_credential_says_what_to_do_in_bh_02_s_words_only() -> None:
     error = failure_of("authentication_failed", "Not logged in · Please run /login")
     assert error.kind == "authentication_failed" and "claude setup-token" in error.message
-    assert "/login" not in error.message and "local.env" in error.message
+    assert "/login" not in error.message and "local.env" not in error.message
     limited = failure_of("rate_limit", "API Error: 429")
     assert limited.message.endswith("(API Error: 429)")  # a detail that helps is kept
