@@ -1,0 +1,27 @@
+---
+id: DRAFT-0012
+title: Know which processes bh-02 spawns inherit its whole environment
+status: Draft
+assignee: []
+created_date: '2026-10-25 17:57'
+labels:
+  - size-2
+dependencies: []
+parent_task_id: TASK-0169
+type: spike
+---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+Provider keys are moving from `local.env` (never in bh-02's environment) to the person's process environment (TASK-0169). That is safe only if every process bh-02 starts either gets an explicit, allow-listed environment or is out of the model's reach. We know the jailed Python worker is scrubbed to the runner's `env` allow-list, the Claude Code CLI child is started with an explicit environment, brig's host process keeps bh-02's whole environment but sits outside the jail, and the unconfined runner (`--no-jail`) passes the host's environment minus the Claude variables. We have not checked the extensions process, the startup check (copies `os.environ` minus `MYPY*`), or the shells that run a key's `cmd`. This spike produces the list, so the allow-list work and the docs state the exposure truthfully.
+
+What it delivers is the answer written down, not code changes.
+<!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [ ] #1 A written list names every place bh-02 starts a process (worker, extensions process, startup check, key command shell, Claude Code CLI, brig host) and, for each, whether it gets an explicit environment, bh-02's whole one, or a scrubbed one, with the file and line that decides it.
+- [ ] #2 Each process that inherits bh-02's whole environment is marked as inside the model's reach or outside it, with the evidence (a measurement or the code path), not an assumption.
+- [ ] #3 The list is attached to TASK-0169 as a comment or note, and any process found inside the model's reach that was not expected becomes a new task.
+<!-- AC:END -->
