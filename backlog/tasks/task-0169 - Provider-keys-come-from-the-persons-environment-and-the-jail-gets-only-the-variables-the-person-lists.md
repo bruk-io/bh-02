@@ -1,9 +1,9 @@
 ---
-id: DRAFT-0010
+id: TASK-0169
 title: >-
   Provider keys come from the person's environment, and the jail gets only the
   variables the person lists
-status: Draft
+status: To Do
 assignee: []
 created_date: '2026-10-25 17:39'
 updated_date: '2026-10-25 17:56'
