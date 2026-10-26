@@ -1,9 +1,9 @@
 ---
-id: DRAFT-0011
+id: TASK-0171
 title: >-
   A claude-code endpoint can run on an Anthropic API key, not only a
   subscription token
-status: Draft
+status: To Do
 assignee: []
 created_date: '2026-10-25 17:52'
 updated_date: '2026-10-26 00:56'
