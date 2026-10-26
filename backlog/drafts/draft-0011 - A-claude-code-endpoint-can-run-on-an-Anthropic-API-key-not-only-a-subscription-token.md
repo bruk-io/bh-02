@@ -6,7 +6,7 @@ title: >-
 status: Draft
 assignee: []
 created_date: '2026-10-25 17:52'
-updated_date: '2026-10-25 21:44'
+updated_date: '2026-10-26 00:56'
 labels: []
 dependencies:
   - TASK-0169
@@ -19,7 +19,7 @@ type: intent
 <!-- SECTION:DESCRIPTION:BEGIN -->
 ## Problem
 
-A `claude-code` endpoint without a `base_url` runs on a subscription token (`CLAUDE_CODE_OAUTH_TOKEN`). The person has extra Anthropic API tokens that can only be used through Claude Code (the Agent SDK's CLI child), not by calling the Messages API directly, and bh-02 has no way to give the CLI one. The earlier idea of a separate `anthropic-api` provider that calls the API itself is dropped: those tokens could not be used that way.
+A `claude-code` endpoint without a `base_url` runs on a subscription token (`CLAUDE_CODE_OAUTH_TOKEN`). The person has extra Anthropic API tokens that can only be used through Claude Code (the Agent SDK's CLI child), not by calling the Messages API directly, and bh-02 has no way to give the CLI one. The person wants to drive the `claude-code` provider explicitly through either an API key or the Claude Code subscription, per endpoint. The earlier idea of a separate `anthropic-api` provider that calls the API itself is dropped: those tokens could not be used that way.
 
 ## Affected users and systems
 
@@ -31,18 +31,19 @@ A `claude-code` endpoint without a `base_url` runs on a subscription token (`CLA
 
 - The SDK has no api-key option. `ClaudeAgentOptions.env` is passed to the CLI child and wins over the inherited environment, and the SDK itself treats `ANTHROPIC_API_KEY` there as env-based auth. So the route is the key in the child's `env`.
 - The SDK always merges bh-02's whole environment into the child's, so an `ANTHROPIC_API_KEY` exported in the person's shell would reach the CLI as well (`detach.py` exists for that reason).
-- Not verified: how the CLI chooses when both a subscription token and an API key are set.
+- Not verified: how the CLI behaves when one of the two credential variables is set empty and the other is set.
 
 ## Decisions already made (with the person, 2026-10-25)
 
+- The choice is explicit and per endpoint: a `claude-code` endpoint says which way it authenticates, `subscription` (its `key` is a Claude Code subscription token, as today) or `api-key` (its `key` is an Anthropic API key). It is never guessed from the key's shape. The field's name and spelling are a design detail for the task that builds it.
 - The credential goes through the endpoint's `key` object (`env`, `cmd` or `op`), written in `models.toml`, never in the runner's `env` allow-list.
-- The key reaches only the CLI child's explicit environment: never bh-02's `os.environ`, the Python worker, a jail, a log or a transcript.
+- The key reaches only the CLI child's explicit environment: never bh-02's `os.environ`, the Python worker, a jail, a log or a transcript. The child's environment sets the variable for the chosen way and sets the other empty (as `gateway_env` already does for the token), so only the chosen credential can be used.
 
 ## Open questions
 
-- [ ] What tells a `claude-code` endpoint its `key` is an API key and not a subscription token (a field on the endpoint, or the key's own shape)? Carried forward: a design choice for the person once the CLI's behaviour is known.
-- [ ] How does the CLI choose when `ANTHROPIC_API_KEY` and a token are both set, and what must `ChildEnv` blank so only the chosen one is used (as `gateway_env` blanks the token)? Carried forward: a spike answers it against the real CLI.
-- [ ] The project rule against `ANTHROPIC_API_KEY`: reword it to "never in bh-02's own environment or any program the runner starts; only in the CLI child's explicit environment"?
+- [ ] Does "the Claude Code subscription" also mean the CLI's own login (no token in `models.toml`), or only a token as today? Carried forward: today bh-02 gives the CLI a config directory of its own, so a login would need a decision about that directory; the token form works without it.
+- [ ] What does the real CLI do when the unchosen variable is set empty? Carried forward: a spike against the real CLI answers it before the task is accepted.
+- [ ] The project rule against `ANTHROPIC_API_KEY`: reword it to "never in bh-02's own environment or any program the runner starts; only in the CLI child's explicit environment"? Carried forward: a one-line decision for the person when the task is accepted.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
