@@ -16,6 +16,7 @@ from typing import Any
 import pytest
 
 from models_cordis_plugin.claude_code import (
+    API_KEY_VARIABLE,
     CONTINUE,
     TOKEN_VARIABLE,
     ClaudeCodeConfig,
@@ -103,7 +104,10 @@ async def test_an_answer_is_one_query_and_claude_code_is_started_locked_down(tmp
     assert str(options.cli_path).endswith("claude-code-detached")
     assert options.env[TOKEN_VARIABLE] == "sentinel-not-a-real-token"
     assert options.env["CLAUDE_CONFIG_DIR"] == str(h.state / "config")
-    assert not any(key.startswith("ANTHROPIC_") for key in options.env)
+    assert {key for key in options.env if key.startswith("ANTHROPIC_")} == {"ANTHROPIC_API_KEY"}
+    assert (
+        options.env["ANTHROPIC_API_KEY"] == ""
+    )  # empty on the subscription: a shell's own never reaches the CLI
     assert h.saved()["held"]["ended"] == "clean" and h.saved()["session"] == "fake-session"
     await h.model.close()
     assert fake.disconnected
@@ -718,6 +722,54 @@ async def test_the_token_reaches_the_cli_s_environment_alone(
     assert fake.options.env[TOKEN_VARIABLE] == FAKE_TOKEN
     assert TOKEN_VARIABLE not in os.environ  # not in bh-02's own environment
     await model.close()
+
+
+async def test_an_api_key_reaches_the_cli_as_anthropic_api_key_alone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With `auth = "api-key"` the endpoint's `key` is an Anthropic API key: the CLI child gets it as
+    ANTHROPIC_API_KEY with the subscription token's variable empty, and bh-02's own `os.environ`
+    gains nothing by it."""
+    monkeypatch.setenv("BH_TEST_API_KEY", FAKE_TOKEN)
+    monkeypatch.delenv(API_KEY_VARIABLE, raising=False)
+    monkeypatch.setenv(TOKEN_VARIABLE, "a-token-exported-in-the-shell")
+    opened: list[FakeClaudeCode] = []
+
+    def open_(options: Any) -> FakeClaudeCode:
+        opened.append(FakeClaudeCode(options, [FakeStep([_text("Hello")])]))
+        return opened[-1]
+
+    config = ClaudeCodeConfig(
+        state=str(tmp_path / "state"),
+        token=KeySpec("env", "BH_TEST_API_KEY"),
+        cwd=str(tmp_path),
+        api_key=True,
+    )
+    model = ClaudeCodeModel(config, open_)
+    said = [dict(c) async for c in model.complete([_SYSTEM, {"role": "user", "content": "hi"}], [_SPEC])]
+    assert _said(said) == "Hello"
+    (fake,) = opened
+    assert fake.options.env[API_KEY_VARIABLE] == FAKE_TOKEN
+    assert fake.options.env[TOKEN_VARIABLE] == ""  # overrides the one the shell exported
+    assert API_KEY_VARIABLE not in os.environ
+    await model.close()
+
+
+async def test_a_missing_api_key_says_where_it_looked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("BH_TEST_API_KEY", raising=False)
+    config = ClaudeCodeConfig(
+        state=str(tmp_path / "state"),
+        token=KeySpec("env", "BH_TEST_API_KEY"),
+        cwd=str(tmp_path),
+        api_key=True,
+    )
+    model = ClaudeCodeModel(config, lambda options: FakeClaudeCode(options, []))
+    with pytest.raises(ClaudeCodeError) as raised:
+        async for _ in model.complete([_SYSTEM, {"role": "user", "content": "hi"}], [_SPEC]):
+            pass
+    assert raised.value.kind == "authentication_failed" and "BH_TEST_API_KEY" in raised.value.message
 
 
 async def test_a_credential_set_after_a_failed_step_is_read_at_the_next_one(

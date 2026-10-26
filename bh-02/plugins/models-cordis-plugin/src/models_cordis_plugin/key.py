@@ -6,9 +6,12 @@ import shlex
 from dataclasses import dataclass
 from typing import Final
 
-__all__ = ["TOKEN_VARIABLE", "KeySpec"]
+__all__ = ["API_KEY_VARIABLE", "TOKEN_VARIABLE", "KeySpec"]
 
 TOKEN_VARIABLE: Final = "CLAUDE_CODE_OAUTH_TOKEN"
+# What the CLI reads an Anthropic API key from. bh-02 sets it in the CLI child's environment alone,
+# and always (empty on the subscription), so one exported in a shell never reaches the CLI.
+API_KEY_VARIABLE: Final = "ANTHROPIC_API_KEY"
 
 
 @dataclass(frozen=True, slots=True)

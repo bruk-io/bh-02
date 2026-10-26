@@ -126,6 +126,7 @@ the endpoint's `max_tokens` and its own `temperature`.
 | `provider` | endpoint | `claude-code` (Claude through Claude Code) or `openai` (any OpenAI-compatible `/chat/completions` endpoint) |
 | `base_url` | endpoint | `openai`: the endpoint, ending before `/chat/completions`. `claude-code`, optional: a gateway ([below](#claude-through-a-gateway)) |
 | `key` | endpoint | optional: one table saying where the API key comes from, `{ env = "NAME" }`, `{ cmd = "..." }` or `{ op = "op://..." }`, and for `cmd` and `op` a `ttl_ms` ([below](#the-key)). `claude-code` without a `base_url`: the subscription token's source, any of the three; with one: a gateway's, `cmd` or `op` only |
+| `auth` | endpoint | `claude-code` without a `base_url`, optional: `subscription` (the default: `key` is a Claude Code subscription token) or `api-key` (`key` is an Anthropic API key; [below](#an-anthropic-api-key)) |
 | `experimental_betas` | endpoint | `claude-code` through a gateway, optional: `false` when the gateway refuses Anthropic's beta headers |
 | `models` | endpoint | its models, one table each, named `ENDPOINT/MODEL` |
 | `discover`, `include` | endpoint | `openai` only, optional: `discover = true` also offers the models its server lists, `include` narrows them ([below](#listing-an-endpoints-models-discover)) |
@@ -192,6 +193,28 @@ own environment, so no program bh-02 starts afterwards (the Python process, `!CO
 from bh-02, and the runners drop every `CLAUDE*` variable of a shell that exports it. There is no
 `ttl_ms` here: the token is read when the CLI starts, not per request. Without a `key`, bh-02 still
 starts and each message says what to write.
+
+### An Anthropic API key
+
+A `claude-code` endpoint can run on an Anthropic API key (your plan's API credit, say) instead of the
+subscription. Say so with `auth`, and give the key through `key` like any other:
+
+```toml
+[api]
+provider = "claude-code"
+auth = "api-key"
+key = { env = "ANTHROPIC_API_KEY" }    # or { cmd = "..." } or { op = "op://personal/anthropic/key" }
+
+[api.models.sonnet]
+id = "claude-sonnet-5-5"
+```
+
+`auth` is never guessed from the key: an endpoint is on the subscription unless it says `api-key`,
+and you can have one of each side by side (`/model api/sonnet`, `/model claude/opus`). bh-02 reads
+the key each time it starts the Claude Code CLI and gives it to that CLI alone, as
+`ANTHROPIC_API_KEY`, with the subscription token's variable set empty; on the subscription it is the
+other way round, so a key or token your shell exports never reaches the CLI by accident. There is no
+`ttl_ms` here, and `auth` is refused on a gateway endpoint, whose key is a command Claude Code runs.
 
 ### Listing an endpoint's models: discover
 

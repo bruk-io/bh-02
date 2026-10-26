@@ -4,7 +4,14 @@ The token here is a stand-in: no real credential is ever read."""
 
 import traceback
 
-from models_cordis_plugin.claude_code import TOKEN_VARIABLE, ChildEnv, child_env, scrubbed
+from models_cordis_plugin.claude_code import (
+    API_KEY_VARIABLE,
+    TOKEN_VARIABLE,
+    ChildEnv,
+    child_env,
+    gateway_env,
+    scrubbed,
+)
 
 _FAKE = "sentinel-not-a-real-token"
 
@@ -16,7 +23,8 @@ def test_child_env_carries_the_token_config_dir_and_fixed_settings() -> None:
     assert env["ENABLE_CLAUDEAI_MCP_SERVERS"] == "0" and env["DISABLE_AUTO_COMPACT"] == "1"
     # a failed stream is an error the step reads, never Claude Code's unseen non-streaming retry
     assert env["CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK"] == "1"
-    assert not any(key.startswith("ANTHROPIC_") for key in env)
+    assert env[API_KEY_VARIABLE] == ""  # the one not chosen is empty, never absent
+    assert {key for key in env if key.startswith("ANTHROPIC_")} == {API_KEY_VARIABLE}
 
 
 def test_the_child_env_never_shows_a_value_in_its_repr_or_a_traceback() -> None:
@@ -56,3 +64,25 @@ def test_the_detached_launcher_drops_every_variable_that_would_change_the_steps(
         "CLAUDE_CODE_SKIP_BEDROCK_AUTH": "1",
     }
     assert scrubbed(kept | dropped) == kept
+
+
+def test_an_api_key_goes_in_its_own_variable_and_the_token_s_is_empty() -> None:
+    env = child_env(_FAKE, "/state/config", api_key=True)
+    assert env[API_KEY_VARIABLE] == _FAKE and env[TOKEN_VARIABLE] == ""
+    assert _FAKE not in repr(env)
+
+
+def test_a_gateway_s_environment_has_neither_credential() -> None:
+    env = gateway_env("/state/config")
+    assert env[API_KEY_VARIABLE] == "" and env[TOKEN_VARIABLE] == ""
+
+
+def test_what_a_shell_exported_never_reaches_the_cli_whichever_way_it_authenticates() -> None:
+    """The SDK merges bh-02's environment under the child's, and the detached launcher keeps both
+    credential variables: so each start sets both, and a shell's own value of either is overridden."""
+    shell = {API_KEY_VARIABLE: "from-the-shell", TOKEN_VARIABLE: "also-from-the-shell", "PATH": "/bin"}
+    for env in (child_env(_FAKE, "/c"), child_env(_FAKE, "/c", api_key=True), gateway_env("/c")):
+        reaching = scrubbed({**shell, **env})
+        assert "from-the-shell" not in reaching.values() and "also-from-the-shell" not in reaching.values()
+        assert reaching["PATH"] == "/bin"
+    assert scrubbed({**shell, **child_env(_FAKE, "/c", api_key=True)})[API_KEY_VARIABLE] == _FAKE

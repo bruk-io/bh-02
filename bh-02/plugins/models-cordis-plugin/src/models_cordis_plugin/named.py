@@ -115,6 +115,8 @@ _DISCOVER: Final = "discover"
 _INCLUDE: Final = "include"
 _KEY: Final = "key"
 _BETAS: Final = "experimental_betas"
+_AUTH: Final = "auth"  # a claude-code endpoint's way in: subscription (default) or api-key
+_AUTHS: Final = ("subscription", "api-key")
 # What only an endpoint says: which models it has. A model made of it (`derived`) drops them.
 _LISTING: Final = frozenset({_MODELS, _DISCOVER, _INCLUDE})
 # The keys a model's own table may have, per provider (a factory's tables are its own).
@@ -125,7 +127,7 @@ _MODEL_KEYS: Final[Mapping[str, frozenset[str]]] = {
 # The keys an endpoint's table may have, per provider: how to reach it, its models, and the
 # settings its models share (each model's own table may set them again).
 _ENDPOINT_KEYS: Final[Mapping[str, frozenset[str]]] = {
-    CLAUDE_CODE: frozenset({"provider", "base_url", _KEY, _BETAS, _MODELS}),
+    CLAUDE_CODE: frozenset({"provider", "base_url", _KEY, _BETAS, _AUTH, _MODELS}),
     OPENAI: frozenset({"provider", "base_url", _KEY, "max_tokens", "temperature", *_LISTING}),
 }
 # A key's `env` is the name of a variable, never the key itself: a value that isn't such a name is
@@ -574,6 +576,28 @@ def _key_problem(named: Named, where: str) -> str | None:
             )
         if _BETAS in table and "base_url" not in table:
             return f"{where}: experimental_betas is for a gateway; add base_url and key, or remove it"
+        if _AUTH in table:
+            auth = table[_AUTH]
+            if auth not in _AUTHS:
+                return (
+                    f'{where}: auth must be "subscription" (the key is a Claude Code subscription '
+                    'token, the default) or "api-key" (the key is an Anthropic API key)'
+                )
+            if "base_url" in table:
+                return (
+                    f"{where}: auth is for an endpoint that reaches Anthropic itself; a gateway's key is "
+                    "the command that prints it, so remove auth"
+                )
+            if auth == "api-key" and spec is None:
+                return (
+                    f'{where}: auth = "api-key" needs a key to read it from, like '
+                    '`key = { env = "ANTHROPIC_API_KEY" }` or `key = { op = "op://vault/item/field" }`'
+                )
+            if auth == "api-key" and spec is not None and spec.ttl_ms is not None:
+                return (
+                    f"{where}: key.ttl_ms is for a gateway's key; bh-02 reads the API key each time it "
+                    "starts the Claude Code CLI, so remove ttl_ms"
+                )
     return None
 
 

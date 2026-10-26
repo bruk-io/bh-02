@@ -2,6 +2,7 @@
 `claude-code` provider of the `model` row."""
 
 from models_cordis_plugin.claude_code.credential import (
+    API_KEY_VARIABLE,
     TOKEN_VARIABLE,
     ChildEnv,
     Gateway,
@@ -34,6 +35,7 @@ from models_cordis_plugin.claude_code.stream import Step, cost_of, plain_name, v
 __all__ = [
     "CALL_ID",
     "CONTINUE",
+    "API_KEY_VARIABLE",
     "TOKEN_VARIABLE",
     "ChildEnv",
     "ClaudeCodeModel",

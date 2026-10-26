@@ -147,6 +147,7 @@ def _provided(named: Named, config: ModelConfig) -> Any:
                 cwd=config.cwd,
                 token=None if "base_url" in named.table else key_spec(named.table.get("key")),
                 gateway=_gateway(named.table),
+                api_key=named.table.get("auth") == "api-key",
             )
         )
     if named.provider == OPENAI:

@@ -80,6 +80,7 @@ from claude_agent_sdk import (
 )
 
 from models_cordis_plugin.claude_code.credential import (
+    API_KEY_VARIABLE,
     TOKEN_VARIABLE,
     ChildEnv,
     Gateway,
@@ -180,8 +181,10 @@ class ClaudeCodeConfig:
     environment alone (None: no key, and each step says to write one). `cwd`: the project Claude Code
     is told it works in (bh-02's working directory when unset). `gateway`: where Claude Code sends
     its requests and how it gets their key, instead of the subscription token (None: the
-    subscription). `name`: the named model (`ENDPOINT/MODEL`) the id belongs to, which the model's
-    `settings` name (empty when built with none: they then name the id)."""
+    subscription). `api_key`: the `token` is an Anthropic API key, not a subscription token (the
+    endpoint's `auth`); the CLI is given it as `ANTHROPIC_API_KEY`. `name`: the named model
+    (`ENDPOINT/MODEL`) the id belongs to, which the model's `settings` name (empty when built with
+    none: they then name the id)."""
 
     model: str = "sonnet"
     state: str | None = None
@@ -189,6 +192,7 @@ class ClaudeCodeConfig:
     cwd: str | None = None
     gateway: Gateway | None = None
     name: str = ""
+    api_key: bool = False
 
 
 class Session(Protocol):
@@ -414,8 +418,9 @@ class ClaudeCodeModel:
     # -- the process ---------------------------------------------------------------------
 
     async def _child_env(self, config_dir: str) -> ChildEnv:
-        """The CLI's environment on the subscription: the token the endpoint's `key` gives, read
-        now, goes into it and nowhere else, so no frame of bh-02's holds it as a local."""
+        """The CLI's environment without a gateway: the subscription token, or with `api_key` the
+        Anthropic API key, that the endpoint's `key` gives, read now, goes into it and nowhere else,
+        so no frame of bh-02's holds it as a local."""
         spec = self._config.token
         if spec is None:
             raise ClaudeCodeError("authentication_failed", _no_token(spec))
@@ -426,10 +431,11 @@ class ClaudeCodeModel:
                 if command is None
                 else await command_key(self._config.name, command),
                 config_dir,
+                api_key=self._config.api_key,
             )
         except ModelsError as error:
             raise ClaudeCodeError(error.kind, error.message) from None
-        if not env[TOKEN_VARIABLE]:
+        if not env[API_KEY_VARIABLE if self._config.api_key else TOKEN_VARIABLE]:
             raise ClaudeCodeError("authentication_failed", _no_token(spec))
         return env
 

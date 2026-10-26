@@ -518,9 +518,12 @@ credential file: a claude-code endpoint without a `base_url` says where the toke
   crash with every frame's locals). The child starts detached, with every other `ANTHROPIC_*` and
   `CLAUDE_*` removed (below). `test_the_token_reaches_the_cli_s_environment_alone` shows it in the
   CLI's environment and not in bh-02's.
-- **Never `ANTHROPIC_API_KEY`.** bh-02 never sets or reads `ANTHROPIC_API_KEY` or
-  `ANTHROPIC_AUTH_TOKEN`, and the token is never printed, logged or committed. No openai
-  model's `key` may read it (above).
+- **`ANTHROPIC_API_KEY` is the CLI child's alone.** An endpoint with `auth = "api-key"` gives the
+  Claude Code CLI its API key as `ANTHROPIC_API_KEY` in that child's explicit environment, and every
+  start sets both credential variables, the one not chosen empty (`credential.child_env`), so one a
+  shell exported never reaches the CLI (the detached launcher keeps both). bh-02 never puts either in
+  its own `os.environ`, never sets `ANTHROPIC_AUTH_TOKEN`, and never prints, logs or commits a
+  credential. No openai model's `key` may read the Claude Code token (above).
 - **The model's code never gets it from bh-02.** The person may export it (that is where an `env`
   key reads it), and bh-02's own process then holds it. The jail's environment is an allow-list that
   leaves it out; `runner:unconfined` (`--no-jail`) starts every program without `CLAUDE*` or

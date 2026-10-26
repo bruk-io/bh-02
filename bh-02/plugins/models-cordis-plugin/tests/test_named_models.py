@@ -160,6 +160,19 @@ _GATE: dict[str, Any] = {
         ({"provider": "claude-code", "base_url": "https://h/v1", "models": _X}, "a gateway needs both"),
         ({"provider": "claude-code", "experimental_betas": False, "models": _X}, "experimental_betas is for"),
         ({**_GATE, "experimental_betas": "no"}, "experimental_betas must be true or false"),
+        (
+            {"provider": "claude-code", "key": {"env": "K"}, "auth": "oauth", "models": _X},
+            'auth must be "subscription"',
+        ),
+        ({**_GATE, "auth": "api-key"}, "auth is for an endpoint that reaches Anthropic itself"),
+        (
+            {"provider": "claude-code", "auth": "api-key", "models": _X},
+            'auth = "api-key" needs a key to read it from',
+        ),
+        (
+            {"provider": "claude-code", "auth": "api-key", "key": {"cmd": "c", "ttl_ms": 5}, "models": _X},
+            "key.ttl_ms is for a gateway's key",
+        ),
         ({**_GATE, "discover": True}, "discover is not a setting of a claude-code endpoint"),
         ({**_GATE, "models": {"x": {"id": "x", "max_tokens": 5}}}, "max_tokens is not a setting"),
         (
@@ -433,3 +446,12 @@ async def test_a_key_is_read_from_the_environment_on_every_request(
     assert (await headers_for(named))["Authorization"] == "Bearer sk-stand-in"
     monkeypatch.setenv("KEYED_KEY", "sk-rotated")
     assert (await headers_for(named))["Authorization"] == "Bearer sk-rotated"  # each request
+
+
+@pytest.mark.parametrize("auth", ["subscription", "api-key"])
+def test_a_claude_code_endpoint_says_explicitly_whether_its_key_is_a_subscription_token_or_an_api_key(
+    auth: str,
+) -> None:
+    table = {"provider": "claude-code", "auth": auth, "key": {"env": "ANTHROPIC_API_KEY"}, "models": _X}
+    (named,) = [m for m in combined({"m": table}, "/c/models.toml", {}) if m.name == "m"]
+    assert problem(named) is None and named.table["auth"] == auth

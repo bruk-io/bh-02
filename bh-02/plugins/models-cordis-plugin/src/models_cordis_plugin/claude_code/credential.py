@@ -24,9 +24,17 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Final
 
-from models_cordis_plugin.key import TOKEN_VARIABLE
+from models_cordis_plugin.key import API_KEY_VARIABLE, TOKEN_VARIABLE
 
-__all__ = ["TOKEN_VARIABLE", "ChildEnv", "Gateway", "child_env", "gateway_env", "gateway_settings"]
+__all__ = [
+    "API_KEY_VARIABLE",
+    "TOKEN_VARIABLE",
+    "ChildEnv",
+    "Gateway",
+    "child_env",
+    "gateway_env",
+    "gateway_settings",
+]
 
 
 # What the CLI is told besides the token (the spike's measurements; README.md):
@@ -67,10 +75,11 @@ def gateway_settings(gateway: Gateway) -> str:
 
 def gateway_env(config_dir: str) -> ChildEnv:
     """The CLI child's environment through a gateway: Claude Code's own state in `config_dir`, the
-    fixed settings, and the token's variable empty (the gateway's key comes from its helper)."""
+    fixed settings, and both credential variables empty (the gateway's key comes from its helper)."""
     env = ChildEnv(_FIXED)
     env["CLAUDE_CONFIG_DIR"] = config_dir
     env[TOKEN_VARIABLE] = ""
+    env[API_KEY_VARIABLE] = ""
     return env
 
 
@@ -83,10 +92,14 @@ class ChildEnv(dict[str, str]):
     __str__ = __repr__
 
 
-def child_env(token: str, config_dir: str) -> ChildEnv:
-    """The CLI child's environment: `token`, Claude Code's own state in `config_dir`
-    (`CLAUDE_CONFIG_DIR`), and the fixed settings."""
+def child_env(secret: str, config_dir: str, *, api_key: bool = False) -> ChildEnv:
+    """The CLI child's environment: `secret`, Claude Code's own state in `config_dir`
+    (`CLAUDE_CONFIG_DIR`), and the fixed settings. `secret` is the subscription token, or with
+    `api_key` an Anthropic API key. Both credential variables are always set and the one not chosen
+    is empty, so only the chosen credential can be used: the SDK merges bh-02's own environment
+    under this one, and an empty value here is what overrides a variable a shell exported."""
     env = ChildEnv(_FIXED)
     env["CLAUDE_CONFIG_DIR"] = config_dir
-    env[TOKEN_VARIABLE] = token
+    env[TOKEN_VARIABLE] = "" if api_key else secret
+    env[API_KEY_VARIABLE] = secret if api_key else ""
     return env

@@ -39,10 +39,19 @@ def test_the_settings_layer_names_the_gateway_its_helper_and_what_the_table_says
 def test_the_environment_through_a_gateway_holds_no_token_even_one_bh_02_was_started_with() -> None:
     env = gateway_env("/state/config")
     assert env[TOKEN_VARIABLE] == "" and env["CLAUDE_CONFIG_DIR"] == "/state/config"
-    assert env["DISABLE_AUTO_COMPACT"] == "1" and not any(key.startswith("ANTHROPIC_") for key in env)
+    assert env["DISABLE_AUTO_COMPACT"] == "1" and env["ANTHROPIC_API_KEY"] == ""
+    assert {key for key in env if key.startswith("ANTHROPIC_")} == {"ANTHROPIC_API_KEY"}
     # the SDK merges bh-02's environment under the options' env, then the launcher scrubs it
-    child = scrubbed({TOKEN_VARIABLE: "sentinel-not-a-real-token", "ANTHROPIC_BASE_URL": "x", **env})
-    assert child[TOKEN_VARIABLE] == "" and "ANTHROPIC_BASE_URL" not in child
+    child = scrubbed(
+        {
+            TOKEN_VARIABLE: "sentinel-not-a-real-token",
+            "ANTHROPIC_API_KEY": "a-key",
+            "ANTHROPIC_BASE_URL": "x",
+            **env,
+        }
+    )
+    assert child[TOKEN_VARIABLE] == "" and child["ANTHROPIC_API_KEY"] == ""
+    assert "ANTHROPIC_BASE_URL" not in child
 
 
 def _said(chunks: Sequence[Mapping[str, Any]]) -> str:
