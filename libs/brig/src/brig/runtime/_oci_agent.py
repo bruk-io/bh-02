@@ -199,7 +199,9 @@ def accept_hello(
             raise AgentStartFailed(f"the supervisor did not connect within {HELLO_TIMEOUT_S:.0f}s")
     connection.settimeout(None)
     if sys.platform != "linux":
-        raise AgentStartFailed("the supervisor's identity is read with SO_PEERCRED, which needs Linux")
+        raise AgentStartFailed(
+            "the supervisor's identity is read with SO_PEERCRED, which needs Linux"
+        )
     peer_pid, _, _ = struct.unpack(
         "3i", connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12)
     )
