@@ -591,7 +591,8 @@ def _key_problem(named: Named, where: str) -> str | None:
             if auth == "api-key" and spec is None:
                 return (
                     f'{where}: auth = "api-key" needs a key to read it from, like '
-                    '`key = { env = "ANTHROPIC_API_KEY" }` or `key = { op = "op://vault/item/field" }`'
+                    '`key = { env = "BH02_ANTHROPIC_API_KEY" }` (a name of your own: other tools load '
+                    'ANTHROPIC_API_KEY on their own) or `key = { op = "op://vault/item/field" }`'
                 )
             if auth == "api-key" and spec is not None and spec.ttl_ms is not None:
                 return (

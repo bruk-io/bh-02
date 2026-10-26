@@ -203,11 +203,17 @@ subscription. Say so with `auth`, and give the key through `key` like any other:
 [api]
 provider = "claude-code"
 auth = "api-key"
-key = { env = "ANTHROPIC_API_KEY" }    # or { cmd = "..." } or { op = "op://personal/anthropic/key" }
+key = { env = "BH02_ANTHROPIC_API_KEY" }    # or { cmd = "..." } or { op = "op://personal/anthropic/key" }
 
 [api.models.sonnet]
 id = "claude-sonnet-5-5"
 ```
+
+Name your variable something of your own, like `BH02_ANTHROPIC_API_KEY`, and not `ANTHROPIC_API_KEY`:
+the Claude Code CLI, the Agent SDK and many other tools load `ANTHROPIC_API_KEY` from the environment on
+their own and would bill the API without being asked. bh-02 calls the key `ANTHROPIC_API_KEY` only in
+the CLI's own environment, and sets that variable empty on a subscription endpoint, so one your shell
+exports is overridden there too.
 
 `auth` is never guessed from the key: an endpoint is on the subscription unless it says `api-key`,
 and you can have one of each side by side (`/model api/sonnet`, `/model claude/opus`). bh-02 reads
