@@ -30,6 +30,7 @@ from models_cordis_plugin.named import (
     environ,
     in_project,
     intended,
+    key_spec,
     models_file,
     parsed,
     read_models,
@@ -135,23 +136,22 @@ def resolved(config: ModelConfig) -> Named:
     return outcome
 
 
-def _provided(named: Named, config: ModelConfig, searched: Sequence[str]) -> Any:
-    """The provider's value for `named`: not entered yet. `searched`: where `local.env` is
-    looked for when the config names no `env_file` (the `host` value's `credentials`)."""
+def _provided(named: Named, config: ModelConfig) -> Any:
+    """The provider's value for `named`: not entered yet."""
     if named.provider == CLAUDE_CODE:
         return ClaudeCodeModel(
             ClaudeCodeConfig(
                 model=named.id,
                 name=named.name,
                 state=config.state,
-                env_file=config.env_file,
                 cwd=config.cwd,
-                searched=tuple(searched),
+                token=None if "base_url" in named.table else key_spec(named.table.get("key")),
                 gateway=_gateway(named.table),
+                api_key=named.table.get("auth") == "api-key",
             )
         )
     if named.provider == OPENAI:
-        return OpenAIModel(named, config.env_file, searched=searched)
+        return OpenAIModel(named)
     module, _, attribute = named.provider.partition(":")
     try:
         factory = cast(
@@ -175,23 +175,20 @@ def _provided(named: Named, config: ModelConfig, searched: Sequence[str]) -> Any
 
 
 def _gateway(table: Mapping[str, Any]) -> Gateway | None:
-    """The gateway a claude-code model's table names (`base_url` and `key_command`, which `problem`
-    has checked come together), or None: the subscription."""
-    url, command, ttl = table.get("base_url"), table.get("key_command"), table.get("key_ttl_ms")
-    if not isinstance(url, str) or not isinstance(command, str):
+    """The gateway a claude-code model's table names (`base_url` and a `key` of `cmd` or `op`, which
+    `problem` has checked come together), or None: the subscription."""
+    url, spec = table.get("base_url"), key_spec(table.get("key"))
+    if not isinstance(url, str) or spec is None or (command := spec.command) is None:
         return None
-    return Gateway(
-        url, command, ttl if isinstance(ttl, int) else None, table.get("experimental_betas") is not False
-    )
+    return Gateway(url, command, spec.ttl_ms, table.get("experimental_betas") is not False)
 
 
 @contextlib.asynccontextmanager
-async def opened(config: ModelConfig, searched: Sequence[str] = ()) -> AsyncIterator[Any]:
+async def opened(config: ModelConfig) -> AsyncIterator[Any]:
     """The `model` value, for as long as the row is up: the named model's provider, entered
-    when it is a context manager (Claude Code's process, an HTTP client), else `Unusable`.
-    `searched`: where the provider looks for `local.env` (the `host` value's `credentials`)."""
+    when it is a context manager (Claude Code's process, an HTTP client), else `Unusable`."""
     try:
-        value = _provided(resolved(config), config, searched)
+        value = _provided(resolved(config), config)
     except ModelsError as error:
         value = Unusable(error)
     if isinstance(value, AbstractAsyncContextManager):

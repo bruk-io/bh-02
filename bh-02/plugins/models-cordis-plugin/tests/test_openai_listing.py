@@ -93,7 +93,7 @@ def test_a_list_longer_than_kept_is_cut_and_the_cut_counted() -> None:
         (Down("no answer within 6 s"), "no answer within 6 s"),
         (
             Reply(401, b'{"error": "key sk-secret rejected"}'),
-            "HTTP 401: it wants a key, or refused the one named",
+            "HTTP 401: it wants a key, or refused the one its `key` gives",
         ),
         (Reply(403, b""), "HTTP 403"),
         (Reply(404, b"<html>"), "HTTP 404: it has no /models"),

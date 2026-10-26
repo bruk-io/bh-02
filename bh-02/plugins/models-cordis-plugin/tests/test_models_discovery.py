@@ -155,7 +155,7 @@ _BROKEN = _FILE + 'colour = "red"\n'  # an endpoint with a setting it does not t
 def _why(tmp_path: Path) -> str:
     return (
         f"endpoint 'local' ({tmp_path / 'models.toml'}): colour is not a setting of an openai endpoint; "
-        "it takes base_url, discover, include, key, key_command, key_ttl_ms, max_tokens, models, provider, "
+        "it takes base_url, discover, include, key, max_tokens, models, provider, "
         "temperature"
     )
 
@@ -300,12 +300,13 @@ async def test_a_name_above_u_ffff_is_written_to_the_session_s_layer_and_read_ba
     assert get.calls == []  # a name is resolved without asking the server
 
 
-async def test_the_key_goes_in_the_request_s_header_and_nowhere_else(tmp_path: Path) -> None:
-    env = tmp_path / "local.env"
-    env.write_text(f"LOCAL_KEY={_KEY}\n")
-    text = _FILE + 'key = "LOCAL_KEY"\n'
+async def test_the_key_goes_in_the_request_s_header_and_nowhere_else(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("LOCAL_KEY", _KEY)
+    text = _FILE + 'key = { env = "LOCAL_KEY" }\n'
     get = FakeGet({_LOCAL: Down(f"the proxy said {_KEY} is wrong, sk-live-****cdef too")})
-    catalog = _catalog(tmp_path, get, text, env_file=str(env))
+    catalog = _catalog(tmp_path, get, text)
     switch = _switch(tmp_path, catalog)
     said = str(await switch.run(""))
     ((url, headers),) = get.calls
@@ -319,17 +320,18 @@ async def test_the_key_goes_in_the_request_s_header_and_nowhere_else(tmp_path: P
     assert _KEY not in repr(catalog.listed())  # and what was listed holds ids alone
 
 
-async def test_a_key_whose_line_is_missing_asks_nothing_and_says_so(tmp_path: Path) -> None:
-    env = tmp_path / "local.env"
-    env.write_text("OTHER=1\n")
+async def test_a_key_whose_variable_is_unset_asks_nothing_and_says_so(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("LOCAL_KEY", raising=False)
     get = FakeGet({_LOCAL: _ids("m")})
-    catalog = _catalog(tmp_path, get, _FILE + 'key = "LOCAL_KEY"\n', env_file=str(env))
+    catalog = _catalog(tmp_path, get, _FILE + 'key = { env = "LOCAL_KEY" }\n')
     said = str(await _switch(tmp_path, catalog).run(""))
     assert get.calls == []
     assert (
-        "local: no list from http://localhost:1234/v1/models (model 'local' names the key LOCAL_KEY" in said
+        "local: no list from http://localhost:1234/v1/models (model 'local' reads its key from the "
+        "environment variable LOCAL_KEY, which is not set in bh-02's environment" in said
     )
-    assert "then /model local again" in said
 
 
 async def test_endpoints_come_only_from_the_trusted_models_file(

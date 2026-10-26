@@ -8,7 +8,10 @@ import contextlib
 import os
 import signal
 import time
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -22,7 +25,23 @@ from commands_cordis_plugin import (
     run_line,
     shell_command,
 )
-from cordis import Runtime, State
+from cordis import Effects, Runtime, State, bind, component
+
+
+@dataclass(frozen=True, slots=True)
+class _Host:
+    """The `host` value, with what the shell-command row reads of it: the variables a key reads."""
+
+    key_envs: Mapping[str, Sequence[str]] = field(default_factory=dict)
+
+
+def _host(key_envs: Mapping[str, Sequence[str]]) -> Callable[..., Any]:
+    @component(provides=("host",))
+    async def host() -> Effects:
+        yield bind("host", _Host(key_envs))
+
+    return host
+
 
 _TOLD = "(Before this message the person ran a shell command themselves, in bh-02, not in your REPL:)"
 _NEXT = "the model reads this with your next message"
@@ -190,6 +209,25 @@ def test_the_host_s_own_variables_stay_out_of_the_command_s_environment() -> Non
     assert environment(given) == {"PATH": "/bin", "HOME": "/home/me"}
 
 
+def test_a_variable_a_models_file_key_reads_stays_out_of_the_command_s_environment() -> None:
+    """A key the person declared in the models file is a secret, and what the command prints goes
+    to the model: it is withheld, and the rest of the environment is not touched."""
+    given = {"PATH": "/bin", "OPENROUTER_API_KEY": "not-a-real-key", "HOME": "/home/me"}
+    assert environment(given, {"OPENROUTER_API_KEY"}) == {"PATH": "/bin", "HOME": "/home/me"}
+    assert environment(given) == given
+
+
+async def test_the_command_does_not_see_a_variable_a_key_reads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("BH02_TEST_KEY", "a-secret")
+    monkeypatch.setenv("BH02_TEST_MARK", "kept")
+    ran = await run_command(
+        "echo ${BH02_TEST_KEY:-withheld} ${BH02_TEST_MARK:-gone}", _config(tmp_path), {"BH02_TEST_KEY"}
+    )
+    assert ran.output == "withheld kept\n"
+
+
 async def test_the_command_runs_in_bh_02_s_environment_less_the_host_s_own(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -235,6 +273,7 @@ async def test_the_row_claims_its_prefix_in_the_broker_once_and_takes_it_when_it
 ) -> None:
     rt = Runtime()
     rt.mount(registry, id="commands")
+    rt.mount(_host({}), id="host")
     row = rt.mount(shell_command, id="shell-command", config={"cwd": str(tmp_path), "shell": "/bin/sh"})
     await rt.settle()
     commands = rt.root.get("commands")
@@ -253,4 +292,19 @@ async def test_the_row_claims_its_prefix_in_the_broker_once_and_takes_it_when_it
     await row.retire()
     await rt.settle()
     assert not commands.claims("!echo hi")  # the row took its prefix with it
+    await rt.shutdown()
+
+
+async def test_the_row_withholds_the_variables_the_host_says_a_key_reads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("BH02_TEST_KEY", "a-secret")
+    rt = Runtime()
+    rt.mount(registry, id="commands")
+    rt.mount(_host({"BH02_TEST_KEY": ("work",)}), id="host")
+    rt.mount(shell_command, id="shell-command", config={"cwd": str(tmp_path), "shell": "/bin/sh"})
+    await rt.settle()
+    commands = rt.root.get("commands")
+    [note] = await commands.run("!echo ${BH02_TEST_KEY:-withheld}")
+    assert note["text"].startswith("withheld\n")
     await rt.shutdown()

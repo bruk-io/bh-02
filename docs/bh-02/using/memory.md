@@ -26,7 +26,7 @@ The model can write files in the project, so bh-02 reads memory with that in min
 - A file in the project doesn't import anything from outside it. The prompt says which import was
   passed over and why. Your own files, outside the project, may import from anywhere.
 - No link the model could have made is followed, and nothing named like a secret
-  (`local.env`, `.env`) is read.
+  (`prod.env`, `.env`) is read.
 
 ## Settings
 

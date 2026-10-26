@@ -132,8 +132,8 @@ def test_a_project_file_imports_nothing_outside_the_project(tmp_path: Path) -> N
     text = found.text()
     assert "FAKE" not in text
     assert "(bh-02 did not import ~/.ssh/id_test: CLAUDE.md is in the project" in text
-    _write(root / "local.env", "FAKE-ENV")
-    _write(root / "CLAUDE.md", "@local.env")
+    _write(root / "prod.env", "FAKE-ENV")
+    _write(root / "CLAUDE.md", "@prod.env")
     assert "FAKE" not in found.text()
 
 

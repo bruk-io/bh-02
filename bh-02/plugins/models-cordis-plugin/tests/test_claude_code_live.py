@@ -1,12 +1,13 @@
 """Against the real Claude Code CLI on the subscription, Sonnet: one answer, then a tool round
 trip whose result the model recalls, first from Claude Code's own session and then from one
 rebuilt from the transcript alone. It spends subscription usage, so it runs only when asked
-for (`-m e2e`), and is skipped without `CLAUDE_CODE_OAUTH_TOKEN` in `local.env` (read the way
-the provider reads it; the token is never printed):
+for (`-m e2e`), and is skipped without `CLAUDE_CODE_OAUTH_TOKEN` in the environment (the provider
+reads it through the endpoint's `key`; the token is never printed):
 
     uv run pytest bh-02/plugins/models-cordis-plugin -m e2e -q
 """
 
+import os
 import secrets
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -14,14 +15,14 @@ from typing import Any
 
 import pytest
 
-from models_cordis_plugin.claude_code import ClaudeCodeConfig, ClaudeCodeModel, child_env
-from models_cordis_plugin.local_env import token_file
+from models_cordis_plugin.claude_code import TOKEN_VARIABLE, ClaudeCodeConfig, ClaudeCodeModel
+from models_cordis_plugin.key import KeySpec
 
 pytestmark = pytest.mark.e2e
 
-# The workspace root's `local.env`, where bh-02's own run finds it (bh_02.cli.credential_search
-# names it among the rest): only looked for and handed to the provider, never read here.
-_SEARCHED = (str(Path(__file__).resolve().parents[4] / "local.env"),)
+# Where the provider reads the subscription token: the variable the person exports, as an
+# endpoint's `key = { env = ... }` says; only named here, never read.
+_TOKEN = KeySpec("env", TOKEN_VARIABLE)
 
 _SYSTEM = {
     "role": "system",
@@ -38,14 +39,14 @@ _SECRET = {
 def _asked_for(request: pytest.FixtureRequest) -> None:
     if "e2e" not in str(request.config.getoption("markexpr") or ""):
         pytest.skip("runs against the real service only when asked for: -m e2e")
-    if child_env(token_file(None, _SEARCHED), "") is None:
-        pytest.skip("needs CLAUDE_CODE_OAUTH_TOKEN in local.env")
+    if not os.environ.get(TOKEN_VARIABLE):
+        pytest.skip("needs CLAUDE_CODE_OAUTH_TOKEN in the environment")
 
 
 def _config(tmp_path: Path) -> ClaudeCodeConfig:
     work = tmp_path / "work"
     work.mkdir(exist_ok=True)
-    return ClaudeCodeConfig(model="sonnet", state=str(tmp_path / "claude"), cwd=str(work), searched=_SEARCHED)
+    return ClaudeCodeConfig(model="sonnet", state=str(tmp_path / "claude"), cwd=str(work), token=_TOKEN)
 
 
 async def _step(
@@ -95,7 +96,7 @@ async def test_a_tool_round_trip_is_recalled_from_claude_code_s_session_and_from
         assert value in _said(third)
     # a conversation this Claude Code never saw (its state gone): written from the transcript, resumed
     fresh = ClaudeCodeConfig(
-        model="sonnet", state=str(tmp_path / "other"), cwd=str(tmp_path / "work"), searched=_SEARCHED
+        model="sonnet", state=str(tmp_path / "other"), cwd=str(tmp_path / "work"), token=_TOKEN
     )
     recall = [*rest, _entry(third), {"role": "user", "content": "Once more: the secret value, verbatim."}]
     async with ClaudeCodeModel(fresh) as rebuilt:

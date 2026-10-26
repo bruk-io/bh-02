@@ -116,9 +116,9 @@ What the rows depend on, which is what decides what reloads when:
 commands:registry       binds Commands                     depends on nothing
 commands:jobs           binds Jobs                         depends on Output
 commands:operator       registers /rows ... /restart       depends on Commands, Loader, Jobs
-commands:shell_command  claims ! (a shell command)         depends on Commands
-models:model            binds Model                        depends on Host (where the credential is looked for; its config, the models file as it starts, the credential at the first step)
-models:catalog          binds Models                       depends on Loader, Host
+commands:shell_command  claims ! (a shell command)         depends on Commands, Host
+models:model            binds Model                        depends on nothing (its config, the models file as it starts, the key at the first step)
+models:catalog          binds Models                       depends on Loader
 models:switch           registers /model                   depends on Commands, Loader, Models, Jobs
 agent:transcript        binds Transcript                   depends on nothing
 agent:system            binds System                       depends on nothing (its config)

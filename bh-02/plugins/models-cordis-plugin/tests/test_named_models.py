@@ -20,7 +20,7 @@ from models_cordis_plugin import (
     problem,
     resolved,
 )
-from models_cordis_plugin.openai import authorization
+from models_cordis_plugin.openai import headers_for
 
 _FILE = """\
 [local]
@@ -33,14 +33,14 @@ id = "llama3.2"
 [router]
 provider = "openai"
 base_url = "https://openrouter.ai/api/v1"
-key = "OPENROUTER_API_KEY"
+key = { env = "OPENROUTER_API_KEY" }
 max_tokens = 4096
 models = { sonnet = { id = "anthropic/claude-sonnet-4", temperature = 0.2 } }
 
 [work]
 provider = "claude-code"
 base_url = "https://gateway.example/anthropic"
-key_command = "print-a-token"
+key = { cmd = "print-a-token", ttl_ms = 60000 }
 experimental_betas = false
 
 [work.models.opus]
@@ -83,14 +83,17 @@ def test_the_file_adds_endpoints_whose_models_are_named_under_them_and_extra_win
     router = find("router/sonnet", models)  # the endpoint's settings, the model's own over them
     assert router is not None and router.id == "anthropic/claude-sonnet-4"
     assert {k: router.table[k] for k in ("key", "max_tokens", "temperature")} == {
-        "key": "OPENROUTER_API_KEY",
+        "key": {"env": "OPENROUTER_API_KEY"},
         "max_tokens": 4096,
         "temperature": 0.2,
     }
     assert "models" not in router.table
     opus = find("work/opus", models)
     assert opus is not None and (opus.provider, opus.id) == ("claude-code", "claude-opus-5-5[1m]")
-    assert opus.table["key_command"] == "print-a-token" and opus.table["experimental_betas"] is False
+    assert (
+        opus.table["key"] == {"cmd": "print-a-token", "ttl_ms": 60000}
+        and opus.table["experimental_betas"] is False
+    )
     raw = find("router/meta/llama-4", models)  # an id the endpoint's models doesn't name: on the endpoint
     assert raw is not None and (raw.name, raw.id) == ("router/meta/llama-4", "meta/llama-4")
 
@@ -100,7 +103,7 @@ _OPEN: dict[str, Any] = {"provider": "openai", "base_url": "https://h/v1", "mode
 _GATE: dict[str, Any] = {
     "provider": "claude-code",
     "base_url": "https://h/anthropic",
-    "key_command": "print-a-token",
+    "key": {"cmd": "print-a-token"},
     "models": _X,
 }
 
@@ -117,15 +120,26 @@ _GATE: dict[str, Any] = {
         ({"provider": "openai", "models": _X}, "names no base_url; give it the endpoint's base"),
         ({**_OPEN, "base_url": "ftp://h"}, "is not an http(s) URL"),
         ({**_OPEN, "base-url": "y"}, "base-url is not a setting of an openai endpoint"),
-        ({**_OPEN, "key": ""}, "key must name a line of local.env"),
-        ({**_OPEN, "key": "K", "key_command": "c"}, "give key (a line of local.env) or key_command"),
-        ({**_OPEN, "key_command": " "}, "key_command must be a command that prints a key"),
-        ({**_OPEN, "key_ttl_ms": 5}, "key_ttl_ms says how long a key_command's key is used"),
-        ({**_OPEN, "key_command": "c", "key_ttl_ms": True}, "key_ttl_ms must be a whole number"),
+        ({**_OPEN, "key": ""}, "key must be a table saying where the key comes from"),
+        ({**_OPEN, "key": "OPENAI_API_KEY"}, 'write `key = { env = "OPENROUTER_API_KEY" }`'),
+        ({**_OPEN, "key": {}}, "key names no source; give exactly one of env, cmd or op"),
+        ({**_OPEN, "key": {"ttl_ms": 5}}, "key names no source"),
+        ({**_OPEN, "key": {"env": "K", "cmd": "c"}}, "key gives env and cmd; give exactly one"),
+        ({**_OPEN, "key": {"cmd": "c", "op": "op://v/i/f"}}, "key gives cmd and op; give exactly one"),
+        ({**_OPEN, "key": {"env": "lower_case"}}, "key.env must be the name of an environment variable"),
+        ({**_OPEN, "key": {"env": 5}}, "key.env must be the name of an environment variable"),
+        ({**_OPEN, "key": {"cmd": " "}}, "key.cmd must be a command that prints a key"),
+        ({**_OPEN, "key": {"op": "vault/item"}}, "key.op must be a 1Password reference starting op://"),
+        ({**_OPEN, "key": {"env": "K", "ttl_ms": 5}}, "key.ttl_ms says how long a printed key is used"),
+        ({**_OPEN, "key": {"cmd": "c", "ttl_ms": True}}, "key.ttl_ms must be a whole number"),
+        ({**_OPEN, "key": {"cmd": "c", "ttl_ms": 0}}, "key.ttl_ms must be a whole number"),
+        ({**_OPEN, "key": {"cmd": "c", "tll_ms": 5}}, "key has tll_ms, which a key does not take"),
+        ({**_OPEN, "key_command": "c"}, "key_command is not a setting of an openai endpoint"),
+        ({**_OPEN, "key_ttl_ms": 5}, "key_ttl_ms is not a setting of an openai endpoint"),
         ({**_OPEN, "max_tokens": 0}, "max_tokens must be"),
         ({**_OPEN, "models": {"x": {"id": "x", "temperature": "hot"}}}, "temperature must be"),
         (
-            {**_OPEN, "models": {"x": {"id": "x", "key": "K"}}},
+            {**_OPEN, "models": {"x": {"id": "x", "key": {"env": "K"}}}},
             "key is not a setting of an openai model (m/x)",
         ),
         ({**_OPEN, "models": {"x": {}}}, "model 'x' names no id"),
@@ -134,10 +148,31 @@ _GATE: dict[str, Any] = {
         ({**_OPEN, "models": ["x"]}, "models must be a table of models"),
         ({**_OPEN, "colour": "red"}, "colour is not a setting of an openai endpoint; it takes"),
         ({"provider": "claude-code", "base_url": "https://h/v1", "models": _X}, "a gateway needs both"),
-        ({"provider": "claude-code", "key_command": "c", "models": _X}, "a gateway needs both"),
+        (
+            {"provider": "claude-code", "key": {"cmd": "c", "ttl_ms": 5}, "models": _X},
+            "key.ttl_ms is for a gateway's key",
+        ),
+        (
+            {**_GATE, "key": {"env": "GATEWAY_KEY"}},
+            "a gateway's key can't be an env: the Claude Code CLI gets it by running a command, and bh-02 "
+            "never holds it",
+        ),
+        ({"provider": "claude-code", "base_url": "https://h/v1", "models": _X}, "a gateway needs both"),
         ({"provider": "claude-code", "experimental_betas": False, "models": _X}, "experimental_betas is for"),
         ({**_GATE, "experimental_betas": "no"}, "experimental_betas must be true or false"),
-        ({**_GATE, "key": "K"}, "key is not a setting of a claude-code endpoint"),
+        (
+            {"provider": "claude-code", "key": {"env": "K"}, "auth": "oauth", "models": _X},
+            'auth must be "subscription"',
+        ),
+        ({**_GATE, "auth": "api-key"}, "auth is for an endpoint that reaches Anthropic itself"),
+        (
+            {"provider": "claude-code", "auth": "api-key", "models": _X},
+            'auth = "api-key" needs a key to read it from',
+        ),
+        (
+            {"provider": "claude-code", "auth": "api-key", "key": {"cmd": "c", "ttl_ms": 5}, "models": _X},
+            "key.ttl_ms is for a gateway's key",
+        ),
         ({**_GATE, "discover": True}, "discover is not a setting of a claude-code endpoint"),
         ({**_GATE, "models": {"x": {"id": "x", "max_tokens": 5}}}, "max_tokens is not a setting"),
         (
@@ -163,6 +198,19 @@ def test_a_table_with_a_problem_says_what_to_fix(table: dict[str, Any], said: st
     message = raised.value.message  # an endpoint's own problem, or one of its model's
     assert raised.value.kind == "model_config"
     assert "endpoint 'm' (/c/models.toml)" in message or "model 'm/x' (/c/models.toml)" in message
+
+
+@pytest.mark.parametrize(
+    "key", [{"env": "CLAUDE_CODE_OAUTH_TOKEN"}, {"cmd": "print-a-token"}, {"op": "op://v/i/f"}]
+)
+def test_a_claude_code_endpoint_without_a_base_url_takes_a_key_of_any_source_for_its_token(
+    key: dict[str, Any],
+) -> None:
+    """The subscription token's source is the endpoint's `key`; reading the variable the CLI takes
+    it from is the point there, though an openai endpoint may not (`withheld`)."""
+    table = {"provider": "claude-code", "key": key, "models": _X}
+    (named,) = [m for m in combined({"m": table}, "/c/models.toml", {}) if m.name == "m"]
+    assert problem(named) is None
 
 
 @pytest.mark.parametrize(
@@ -240,11 +288,12 @@ class _Loader:
         return self.now
 
 
-def test_the_models_value_reads_the_model_row_and_the_file_fresh(tmp_path: Path) -> None:
+def test_the_models_value_reads_the_model_row_and_the_file_fresh(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-stand-in")  # router's key variable (/model looks for it)
     models = tmp_path / "models.toml"
-    env = tmp_path / "local.env"  # router's key line is there (/model looks for it)
-    env.write_text("OPENROUTER_API_KEY=sk-stand-in\n")
-    loader = _Loader(_Entry("model", "models:model", {"models": str(models), "env_file": str(env)}))
+    loader = _Loader(_Entry("model", "models:model", {"models": str(models)}))
     values = Catalog(loader)
     nothing = values.current()  # no file, no default: no model, said
     assert (nothing["name"], nothing["provider"]) == ("none", "")
@@ -286,40 +335,42 @@ def test_the_models_value_over_another_component_says_it_has_no_models() -> None
 
 
 @pytest.mark.parametrize("secret", ["sk-proj-SECRETVALUE", "gsk_secretvalue123", "not a name"])
-def test_a_key_that_holds_a_value_not_a_line_name_is_refused_without_quoting_it(secret: str) -> None:
-    """A key pasted where its local.env line's name goes is never said back: errors are shown in
-    the conversation and kept in the session's events."""
-    table = {**_OPEN, "key": secret}
-    (host,) = [m for m in combined({"m": table}, "/c/models.toml", {}) if m.name == "m"]
-    with pytest.raises(ModelsError) as raised:
-        chosen("m/x", [host], "/c/models.toml")
-    assert "not hold the key itself" in raised.value.message and secret not in raised.value.message
-    named = find("m/x", [host])
-    assert named is host  # a table with a problem means no model: the endpoint's own table comes back
-    with pytest.raises(ModelsError) as sent:
-        authorization(named, None)
-    assert sent.value.kind == "model_config" and secret not in sent.value.message
+async def test_a_key_that_holds_a_value_not_a_name_is_refused_without_quoting_it(secret: str) -> None:
+    """A key pasted where its source goes (as text, or as an env's name) is never said back: errors are
+    shown in the conversation and kept in the session's events."""
+    for key in (secret, {"env": secret}):
+        table = {**_OPEN, "key": key}
+        (host,) = [m for m in combined({"m": table}, "/c/models.toml", {}) if m.name == "m"]
+        with pytest.raises(ModelsError) as raised:
+            chosen("m/x", [host], "/c/models.toml")
+        assert secret not in raised.value.message
+        named = find("m/x", [host])
+        assert named is host  # a table with a problem means no model: the endpoint's own table comes back
+        with pytest.raises(ModelsError) as sent:
+            await headers_for(named)
+        assert sent.value.kind == "model_config" and secret not in sent.value.message
+    assert "not hold the key itself" in raised.value.message
 
 
 @pytest.mark.parametrize(
     "secret", ["sk-caf" + chr(0xE9), "sk-" + chr(0x1F999), "sk-tab\there", "sk-bell\x07"]
 )
-def test_a_key_line_a_header_can_not_carry_is_a_models_error_that_never_quotes_it(
-    tmp_path: Path, secret: str
+async def test_a_key_a_header_can_not_carry_is_a_models_error_that_never_quotes_it(
+    monkeypatch: pytest.MonkeyPatch, secret: str
 ) -> None:
-    """TASK-0095: not printable ASCII is no header's: said as a `ModelsError` naming the line, not the
+    """TASK-0095: not printable ASCII is no header's: said as a `ModelsError` naming the variable, not the
     `UnicodeEncodeError` httpx2 raises (which `/model`'s discovery used to let out of `refresh`)."""
-    env = tmp_path / "local.env"
-    env.write_text(f"KEYED_KEY={secret}\n", encoding="utf-8")
-    table = {**_OPEN, "key": "KEYED_KEY"}
+    monkeypatch.setenv("KEYED_KEY", secret)
+    table = {**_OPEN, "key": {"env": "KEYED_KEY"}}
     named = find("keyed/x", combined({"keyed": table}, "/c/models.toml", {}))
     assert named is not None
     with pytest.raises(ModelsError) as raised:
-        authorization(named, str(env))
+        await headers_for(named)
     assert raised.value.kind == "authentication_failed"
     assert raised.value.message == (
-        f"model 'keyed/x' names the key KEYED_KEY, whose line in {env} holds a character a request header "
-        "can't carry (a key is printable ASCII). Fix that line, then try again."
+        "model 'keyed/x''s key from the environment variable KEYED_KEY holds a character a request header "
+        "can't carry (a key is one line of printable ASCII). Check what the variable holds, fix it, "
+        "then try again."
     )
     assert secret not in raised.value.message
 
@@ -363,38 +414,44 @@ def test_a_row_config_of_the_wrong_shape_is_a_models_error_saying_what_to_fix(
     assert values.current()["provider"] == ""  # the status bar never raises
 
 
-_KEYED = '[keyed]\nprovider = "openai"\nbase_url = "https://h/v1"\nkey = "KEYED_KEY"\nmodels.x.id = "x"\n'
+_KEYED = (
+    '[keyed]\nprovider = "openai"\nbase_url = "https://h/v1"\nkey = { env = "KEYED_KEY" }\n'
+    'models.x.id = "x"\n'
+)
 
 
-def test_switching_to_a_model_whose_key_line_is_missing_is_refused_saying_where_to_add_it(
-    tmp_path: Path,
+def test_switching_to_a_model_whose_key_variable_is_unset_is_refused_saying_what_to_export(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    env = tmp_path / "scratch.env"
-    env.write_text("OTHER=1\n")
+    monkeypatch.delenv("KEYED_KEY", raising=False)
     models = tmp_path / "models.toml"
     models.write_text(_KEYED)
-    values = Catalog(_Loader(_Entry("model", "models:model", {"models": str(models), "env_file": str(env)})))
+    values = Catalog(_Loader(_Entry("model", "models:model", {"models": str(models)})))
     why = str(values.check("keyed/x"))
-    assert why.startswith(f"model 'keyed/x' names the key KEYED_KEY, which is not a line of {env}.")
-    assert "(keep that file out of git), then /model keyed/x again." in why
-    env.write_text("KEYED_KEY=sk-stand-in\n")
+    assert why.startswith("model 'keyed/x' reads its key from the environment variable KEYED_KEY, which")
+    assert "Export KEYED_KEY in the shell that starts bh-02" in why
+    monkeypatch.setenv("KEYED_KEY", "sk-stand-in")  # a stand-in: never a real key
     assert values.check("keyed/x") is None
 
 
-def test_a_key_is_read_from_the_nearest_searched_file_past_a_jail_s_placeholder(tmp_path: Path) -> None:
-    """The openai provider reads its key per request, from the first searched `local.env` that
-    is a file: a Linux jail's placeholder directory nearer up never hides it, and `/model`'s
-    check looks in the same place."""
-    near, root = tmp_path / "a", tmp_path
-    searched = [str(near / "local.env"), str(root / "local.env")]
-    (near / "local.env").mkdir(parents=True)
-    (root / "local.env").write_text("KEYED_KEY=sk-stand-in\n")  # a stand-in: never a real key
-    named = find("keyed/x", combined({"keyed": {**_OPEN, "key": "KEYED_KEY"}}, "/c/models.toml", {}))
+async def test_a_key_is_read_from_the_environment_on_every_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("KEYED_KEY", raising=False)
+    named = find("keyed/x", combined({"keyed": {**_OPEN, "key": {"env": "KEYED_KEY"}}}, "/c/models.toml", {}))
     assert named is not None
-    assert authorization(named, None, searched)["Authorization"] == "Bearer sk-stand-in"
-    assert authorization(named, None, searched)["Authorization"] == "Bearer sk-stand-in"  # each request
-    models = tmp_path / "models.toml"
-    models.write_text(_KEYED)
-    values = Catalog(_Loader(_Entry("model", "models:model", {"models": str(models)})), searched=searched)
-    assert values.check("keyed/x") is None
-    assert Catalog(_Loader(_Entry("model", "models:model", {"models": str(models)}))).check("keyed/x")
+    with pytest.raises(ModelsError, match="not set in bh-02's environment"):
+        await headers_for(named)
+    monkeypatch.setenv("KEYED_KEY", "sk-stand-in")
+    assert (await headers_for(named))["Authorization"] == "Bearer sk-stand-in"
+    monkeypatch.setenv("KEYED_KEY", "sk-rotated")
+    assert (await headers_for(named))["Authorization"] == "Bearer sk-rotated"  # each request
+
+
+@pytest.mark.parametrize("auth", ["subscription", "api-key"])
+def test_a_claude_code_endpoint_says_explicitly_whether_its_key_is_a_subscription_token_or_an_api_key(
+    auth: str,
+) -> None:
+    table = {"provider": "claude-code", "auth": auth, "key": {"env": "ANTHROPIC_API_KEY"}, "models": _X}
+    (named,) = [m for m in combined({"m": table}, "/c/models.toml", {}) if m.name == "m"]
+    assert problem(named) is None and named.table["auth"] == auth

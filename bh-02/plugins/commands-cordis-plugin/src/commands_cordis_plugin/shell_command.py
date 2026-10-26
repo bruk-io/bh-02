@@ -4,8 +4,8 @@ it printed waits for the model.
 The person typed it, so it runs as them: not in the jail, in the project (`cwd`), through their
 shell (`$SHELL -c`, else `/bin/sh -c`), in bh-02's own environment less what is the host's alone
 (`ANTHROPIC_*` and `CLAUDE*`: a Claude credential the person exported, what a launching Claude
-Code left), as `runner:unconfined` drops them, since what it prints goes to the model. Nothing here
-reads `local.env`.
+Code left), as `runner:unconfined` drops them, and less the variables the models file's keys read
+(`host.key_envs`: a key the person declared is a secret), since what it prints goes to the model.
 
 The app owns the terminal, so the command gets none of it: no input, its output (stdout and
 stderr as one stream, as a terminal shows them) captured, and a session of its own, so the
@@ -28,7 +28,7 @@ import contextlib
 import os
 import re
 import signal
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -79,10 +79,15 @@ class Ran:
     status: int | None
 
 
-def environment(environ: Mapping[str, str]) -> dict[str, str]:
+def environment(environ: Mapping[str, str], withheld: Collection[str] = ()) -> dict[str, str]:
     """The command's environment: bh-02's, less what is the host's alone (`ANTHROPIC_*`,
-    `CLAUDE*`), since what the command prints goes to the model."""
-    return {name: value for name, value in environ.items() if not name.startswith(_HOST_ONLY)}
+    `CLAUDE*`) and the variables in `withheld` (the ones the models file's keys read: a key the
+    person declared is a secret), since what the command prints goes to the model."""
+    return {
+        name: value
+        for name, value in environ.items()
+        if not name.startswith(_HOST_ONLY) and name not in withheld
+    }
 
 
 def _plain(text: str) -> str:
@@ -140,15 +145,16 @@ class _Output:
         return _printed(bytes(self._head), bytes(self._tail), self._total)
 
 
-async def run_command(command: str, config: ShellCommandConfig) -> Ran:
+async def run_command(command: str, config: ShellCommandConfig, withheld: Collection[str] = ()) -> Ran:
     """Run `command` as the person (the module's docstring says how) and wait for it to end, at
-    most `config.timeout` seconds. Raises OSError when it can't start (no such shell or `cwd`)."""
+    most `config.timeout` seconds, without the variables in `withheld` (`environment`). Raises
+    OSError when it can't start (no such shell or `cwd`)."""
     process = await asyncio.create_subprocess_exec(
         config.shell or os.environ.get("SHELL") or "/bin/sh",
         "-c",
         command,
         cwd=config.cwd,
-        env=environment(os.environ),
+        env=environment(os.environ, withheld),
         stdin=asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
@@ -227,13 +233,15 @@ def answer(ran: Ran, timeout: float) -> list[dict[str, Any]]:
     return [{"type": "note", "text": note}, {"type": "for_model", "text": told}]
 
 
-async def run_line(command: str, *, config: ShellCommandConfig) -> str | list[dict[str, Any]]:
+async def run_line(
+    command: str, *, config: ShellCommandConfig, withheld: Collection[str] = ()
+) -> str | list[dict[str, Any]]:
     """What the prefix runs, given the rest of the line: the command, then its answer. An empty
     command, or one that can't start, is said, and nothing is held for the model."""
     if not command:
         return f"type a shell command after {config.prefix}, such as {config.prefix}git status"
     try:
-        ran = await run_command(command, config)
+        ran = await run_command(command, config, withheld)
     except OSError as error:
         shell = config.shell or "empty: your $SHELL, else /bin/sh"
         return (

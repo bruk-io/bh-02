@@ -1,7 +1,10 @@
 """`TMUX` and `TMUX_PANE` reach no program the runner starts: not under the confined runner (its
 environment is an allowlist) and not under the unconfined one (`--no-jail`, which passes the rest
-of bh-02's environment). A program that lists its environment is started in each, from a process
-that has both set."""
+of bh-02's environment). Nor does the Claude Code token (`CLAUDE_CODE_OAUTH_TOKEN`, which the
+person exports for a claude-code endpoint's `key`): it goes to the Claude Code CLI alone. A model's
+provider key in bh-02's environment reaches no confined program, and does reach an unconfined one:
+`--no-jail` scrubs only Claude's and tmux's variables. A program that lists its environment is
+started in each, from a process that has them set (stand-in values: never a real credential)."""
 
 import asyncio
 import json
@@ -33,11 +36,16 @@ while True:
 @dataclass(frozen=True)
 class _Host:
     paths: tuple[str, ...] = ()
-    credentials: tuple[str, ...] = ()
     secrets: tuple[str, ...] = ()
     trusted: tuple[str, ...] = ()
     code: tuple[str, ...] = ()
     auto_memory: str = ""
+
+
+@pytest.fixture(autouse=True)
+def _keys_exported(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "stand-in-token")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "stand-in-key")
 
 
 @pytest.fixture(autouse=True)
@@ -75,6 +83,22 @@ async def test_the_unconfined_runner_starts_programs_without_tmux_s_variables(tm
     assert seen["PATH"]  # the rest of bh-02's environment still passes
 
 
+async def test_the_unconfined_runner_keeps_the_claude_token_out_and_passes_provider_keys(
+    tmp_path: Path,
+) -> None:
+    """`--no-jail`: the model's code can read a provider key in bh-02's environment (the docs
+    say so), but never the Claude Code token, which only the CLI child gets."""
+    project = tmp_path / "project"
+    project.mkdir()
+
+    async def start(argv: list[str], cwd: str, endpoint: str) -> Any:
+        return await Unjailed().start(argv, cwd=cwd, endpoint=endpoint)
+
+    seen = await _environment_of(start, project)
+    assert "CLAUDE_CODE_OAUTH_TOKEN" not in seen["names"]
+    assert "OPENROUTER_API_KEY" in seen["names"]
+
+
 async def test_the_confined_runner_starts_programs_without_tmux_s_variables(tmp_path: Path) -> None:
     if sys.platform not in ("darwin", "linux") or (
         sys.platform == "linux" and not Path("/usr/bin/bwrap").exists()
@@ -90,3 +114,19 @@ async def test_the_confined_runner_starts_programs_without_tmux_s_variables(tmp_
     seen = await _environment_of(start, project)
     assert seen["TMUX"] is None and seen["TMUX_PANE"] is None
     assert seen["PATH"]
+
+
+async def test_the_confined_runner_passes_neither_the_claude_token_nor_a_provider_key(tmp_path: Path) -> None:
+    if sys.platform not in ("darwin", "linux") or (
+        sys.platform == "linux" and not Path("/usr/bin/bwrap").exists()
+    ):
+        pytest.skip("the confined runner is brig's: darwin, or Linux with /usr/bin/bwrap")
+    project = tmp_path / "project"
+    project.mkdir()
+    jail = BrigJail(BrigConfig(), _Host())
+
+    async def start(argv: list[str], cwd: str, endpoint: str) -> Any:
+        return await jail.start(argv, cwd=cwd, endpoint=endpoint)
+
+    seen = await _environment_of(start, project)
+    assert "CLAUDE_CODE_OAUTH_TOKEN" not in seen["names"] and "OPENROUTER_API_KEY" not in seen["names"]

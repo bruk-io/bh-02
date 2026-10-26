@@ -7,12 +7,12 @@ filled only by `refresh`, which `/model` awaits when it lists (a coroutine of it
 request never blocks the event loop the TUI shares). Everything that only reads, `/model`'s
 choices, the composer's completion, the status bar, reads `found` and never asks the server.
 
-A listing is kept under the endpoint's `base_url` and the name of its key's line (or its
-key_command), never under the key: what is kept is ids, and the key goes only into the headers of
-the one request that asks (`Ask`). A reader never expires an entry; only `refresh` decides to ask
-again, when what it has is `FRESH` seconds old or is no list at all (a failure is never fresh, so
-`/model` typed again after the server was started asks at once). One that fails drops the ids it
-had.
+A listing is kept under the endpoint's `base_url` and where its key comes from (the variable's
+name or the command, `KeySpec.label`), never under the key: what is kept is ids, and the key goes
+only into the headers of the one request that asks (`Ask`). A reader never expires an entry; only
+`refresh` decides to ask again, when what it has is `FRESH` seconds old or is no list at all (a
+failure is never fresh, so `/model` typed again after the server was started asks at once). One that
+fails drops the ids it had.
 """
 
 import asyncio
@@ -34,15 +34,15 @@ from models_cordis_plugin.openai.listing import (
 )
 from models_cordis_plugin.openai.wire import scrubbed
 
-__all__ = ["FRESH", "Ask", "Discovery", "Get", "Key", "httpx_get"]
+__all__ = ["FRESH", "Ask", "Discovery", "Get", "ListingKey", "httpx_get"]
 
 FRESH: Final = 30.0  # seconds a listing is not asked for again
 _CONNECT: Final = 3.0
 _DEADLINE: Final = 6.0  # the whole request, however slowly a server drips its answer
 _DETAIL: Final = 120  # how much of a library's error text a line quotes
 
-# an endpoint's base_url and how it gets its key: the name of its local.env line, or its key_command
-type Key = tuple[str, str | None]
+# what a listing is kept under: an endpoint's base_url and where its key comes from (`KeySpec.label`)
+type ListingKey = tuple[str, str | None]
 
 
 class Get(Protocol):
@@ -111,23 +111,23 @@ def _detail(error: Exception, headers: Mapping[str, str]) -> str:
 
 
 class Discovery:
-    """What endpoints listed, by `Key`, and the way to ask again (module docstring). `get` is the
+    """What endpoints listed, by `ListingKey`, and the way to ask again (module docstring). `get` is the
     network, `clock` says what time it is (seconds, steady): both are given, so a test needs neither
     a server nor a wait."""
 
     def __init__(self, get: Get, clock: Callable[[], float] = time.monotonic) -> None:
         self._get = get
         self._clock = clock
-        self._found: dict[Key, _Found] = {}
+        self._found: dict[ListingKey, _Found] = {}
 
-    def found(self, key: Key) -> Listed | Unlisted | None:
+    def found(self, key: ListingKey) -> Listed | Unlisted | None:
         """What was last found for `key`, however long ago; None when it was never asked."""
         entry = self._found.get(key)
         return None if entry is None else entry.outcome
 
-    async def refresh(self, wanted: Mapping[Key, Callable[[], Awaitable[Ask | Unlisted]]]) -> None:
-        """Ask for each endpoint of `wanted` (its request, made only now: it reads local.env or runs
-        its key_command) that
+    async def refresh(self, wanted: Mapping[ListingKey, Callable[[], Awaitable[Ask | Unlisted]]]) -> None:
+        """Ask for each endpoint of `wanted` (its request, made only now: it reads its key's variable
+        or runs its key command) that
         has no listing, a failed one, or one `FRESH` seconds old; all at once. Whatever is kept for
         an endpoint not in `wanted` is dropped. An `Unlisted` in place of a request is the
         endpoint's answer, as when its key's line is missing."""

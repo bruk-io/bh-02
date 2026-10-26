@@ -108,7 +108,10 @@ def _peer_refusal(peer: _Peer | None, *, group: int, leader_holds: bool) -> str 
 
 def _pidfd_alive(pidfd: int) -> bool:
     """Whether the process `pidfd` refers to still runs (a zombie counts):
-    signal 0 delivered or refused for permission."""
+    signal 0 delivered or refused for permission. A pidfd is Linux's (`os.pidfd_open`), so on
+    any other platform no process is held and none is alive."""
+    if sys.platform != "linux":
+        return False
     try:
         signal.pidfd_send_signal(pidfd, 0)
     except ProcessLookupError:

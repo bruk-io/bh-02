@@ -80,7 +80,9 @@ from claude_agent_sdk import (
 )
 
 from models_cordis_plugin.claude_code.credential import (
+    API_KEY_VARIABLE,
     TOKEN_VARIABLE,
+    ChildEnv,
     Gateway,
     child_env,
     gateway_env,
@@ -104,7 +106,9 @@ from models_cordis_plugin.claude_code.reconcile import (
 )
 from models_cordis_plugin.claude_code.records import session_file, write_session
 from models_cordis_plugin.claude_code.stream import SERVER, Step, visible
-from models_cordis_plugin.local_env import ENV_FILE, token_file
+from models_cordis_plugin.key import KeySpec
+from models_cordis_plugin.named import ModelsError
+from models_cordis_plugin.shell_key import command_key
 
 __all__ = [
     "ClaudeCodeModel",
@@ -133,12 +137,15 @@ _ALIASES: Final[Mapping[str, str]] = {
 # Claude Code names the declared tools `mcp__bh__<name>`, while bh-02's prompt names them as bh-02
 # does (`python`): the system prompt opens by saying which is which.
 _NAMED: Final = "bh-02's tools reach you under these names: {named}."
-_MAKE_ONE: Final = f"Make a token with `claude setup-token`, put `{TOKEN_VARIABLE}=<the token>` in"
+_MAKE_ONE: Final = (
+    f"Make a token with `claude setup-token`, export it as {TOKEN_VARIABLE} in the shell that starts "
+    f'bh-02, and give the endpoint in your models file `key = {{ env = "{TOKEN_VARIABLE}" }}`'
+)
 _ERRORS: Final[Mapping[str, str]] = {
     "authentication_failed": (
-        f"Claude refused the credential ({TOKEN_VARIABLE} in {ENV_FILE}): it may have expired or "
-        f"been revoked. Make a new one with `claude setup-token`, put it in {ENV_FILE}, and send the "
-        "message again."
+        "Claude refused the credential the endpoint's `key` gives: it may have expired or been "
+        "revoked. Make a new one with `claude setup-token`, put it where that `key` reads it, and "
+        "send the message again."
     ),
     "billing_error": (
         "Claude reported a billing problem with this account. Check the subscription at "
@@ -169,21 +176,23 @@ class ClaudeCodeConfig:
     gives one; `sonnet` only when built with none). `state`: the directory this
     conversation's Claude Code state lives in (its `CLAUDE_CONFIG_DIR`, the saved session, the
     CLI's stderr); a session's layer points it into the session's directory, and without one a
-    temporary directory is used and removed. `env_file`: where the credential is; when unset,
-    the first `local.env` of `searched` that is a file (the `host` value's `credentials`:
-    above bh-02's install and its environment, nearest first). `cwd`: the project Claude Code
+    temporary directory is used and removed. `token`: the endpoint's `key` (`env`, `cmd` or `op`),
+    where the subscription token is read from each time the CLI is started; it goes to the CLI's
+    environment alone (None: no key, and each step says to write one). `cwd`: the project Claude Code
     is told it works in (bh-02's working directory when unset). `gateway`: where Claude Code sends
     its requests and how it gets their key, instead of the subscription token (None: the
-    subscription). `name`: the named model (`ENDPOINT/MODEL`) the id belongs to, which the model's
-    `settings` name (empty when built with none: they then name the id)."""
+    subscription). `api_key`: the `token` is an Anthropic API key, not a subscription token (the
+    endpoint's `auth`); the CLI is given it as `ANTHROPIC_API_KEY`. `name`: the named model
+    (`ENDPOINT/MODEL`) the id belongs to, which the model's `settings` name (empty when built with
+    none: they then name the id)."""
 
     model: str = "sonnet"
     state: str | None = None
-    env_file: str | None = None
+    token: KeySpec | None = None
     cwd: str | None = None
-    searched: tuple[str, ...] = ()
     gateway: Gateway | None = None
     name: str = ""
+    api_key: bool = False
 
 
 class Session(Protocol):
@@ -214,31 +223,27 @@ def failure_of(error: str | None, detail: str, gateway: Gateway | None = None) -
     if kind == "authentication_failed" and gateway is not None:
         return ClaudeCodeError(
             kind,
-            f"The gateway {gateway.base_url} refused the key its key_command printed. Run "
-            f"`{gateway.key_command}` in a terminal to check it prints a key, then send the message again.",
+            f"The gateway {gateway.base_url} refused the key its `key` command printed. Run "
+            f"`{gateway.command}` in a terminal to check it prints a key, then send the message again.",
         )
     if kind == "authentication_failed":
         return ClaudeCodeError(kind, message)  # Claude Code's own advice (`/login`) is not bh-02's
     return ClaudeCodeError(kind, f"{message} ({detail})" if detail else message)
 
 
-def _no_token(path: Path | None, *, exists: bool) -> str:
-    """What to do when there is no credential: `path` is the file looked in (None when no
-    `local.env` was found above the install), `exists` whether it is there. Never a value."""
-    if path is None:
+def _no_token(token: KeySpec | None) -> str:
+    """What to do when there is no credential: `token` is the endpoint's `key` (None when it has
+    none). Never a value."""
+    if token is None:
+        return f"No Claude credential: the endpoint has no `key`. {_MAKE_ONE}, then send the message again."
+    if token.command is None:
         return (
-            f"No Claude credential: there is no {ENV_FILE} at the repository root. {_MAKE_ONE} "
-            f"{ENV_FILE} there (git-ignored), then send the message again."
-        )
-    if not exists:
-        return (
-            f"No Claude credential: {path}, the file the row's env_file names, does not exist. "
-            f"{_MAKE_ONE} that file, or point env_file at the file that has it, then send the "
-            "message again."
+            f"No Claude credential: {token.value} is not set in bh-02's environment (the one it was "
+            f"started with). {_MAKE_ONE}, then start bh-02 again."
         )
     return (
-        f"No Claude credential: {TOKEN_VARIABLE} is not in {path}. {_MAKE_ONE} {path}, then "
-        "send the message again."
+        f"No Claude credential: `{token.command}`, the endpoint's `key`, printed no token. Run it in a "
+        "terminal to see why, then send the message again."
     )
 
 
@@ -412,6 +417,28 @@ class ClaudeCodeModel:
 
     # -- the process ---------------------------------------------------------------------
 
+    async def _child_env(self, config_dir: str) -> ChildEnv:
+        """The CLI's environment without a gateway: the subscription token, or with `api_key` the
+        Anthropic API key, that the endpoint's `key` gives, read now, goes into it and nowhere else,
+        so no frame of bh-02's holds it as a local."""
+        spec = self._config.token
+        if spec is None:
+            raise ClaudeCodeError("authentication_failed", _no_token(spec))
+        command = spec.command
+        try:
+            env = child_env(
+                os.environ.get(spec.value, "")
+                if command is None
+                else await command_key(self._config.name, command),
+                config_dir,
+                api_key=self._config.api_key,
+            )
+        except ModelsError as error:
+            raise ClaudeCodeError(error.kind, error.message) from None
+        if not env[API_KEY_VARIABLE if self._config.api_key else TOKEN_VARIABLE]:
+            raise ClaudeCodeError("authentication_failed", _no_token(spec))
+        return env
+
     async def _start(self, system: str, specs: list[dict[str, Any]], resume: str | None) -> None:
         """Start Claude Code for this conversation: `resume` is the session to continue."""
         root = self._dir()
@@ -419,13 +446,7 @@ class ClaudeCodeModel:
         if gateway is not None:
             env = gateway_env(str(root / "config"))
         else:
-            path = token_file(self._config.env_file, self._config.searched)
-            found = child_env(path, str(root / "config"))
-            if found is None:
-                raise ClaudeCodeError(
-                    "authentication_failed", _no_token(path, exists=path is not None and path.is_file())
-                )
-            env = found
+            env = await self._child_env(str(root / "config"))
         cli = _detached_cli()
         if cli is None:
             raise ClaudeCodeError(

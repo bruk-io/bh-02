@@ -1,11 +1,9 @@
 """The openai provider against a stand-in OpenAI-compatible server on a real socket
 (`models_cordis_plugin.openai.testing.StubServer`): streamed text, a python call's round trip,
-a call that doesn't decode, the key from local.env, and the failures a person must read."""
+a call that doesn't decode, a key from the environment, and the failures a person must read."""
 
 import asyncio
-import os
 from collections.abc import Mapping, Sequence
-from pathlib import Path
 from typing import Any
 
 import pytest
@@ -79,28 +77,27 @@ async def test_a_call_whose_arguments_do_not_decode_carries_error() -> None:
     assert call["error"].startswith("arguments are not JSON") and call["input"] == {}
 
 
-async def test_the_key_is_read_from_local_env_and_sent_only_as_the_authorization_header(
-    tmp_path: Path,
+async def test_the_key_is_read_from_the_environment_and_sent_only_as_the_authorization_header(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    env = tmp_path / "local.env"
-    env.write_text("STUB_KEY=sk-stand-in\n")
+    monkeypatch.setenv("STUB_KEY", "sk-stand-in")
     with StubServer(key="sk-stand-in") as stub:
-        async with OpenAIModel(_named(stub.base_url, key="STUB_KEY"), str(env)) as model:
+        named = _named(stub.base_url, key={"env": "STUB_KEY"})
+        async with OpenAIModel(named) as model:
             chunks = await _step(model, [{"role": "user", "content": "hi"}])
             assert chunks[-2]["reason"] == "stop"
-            env.write_text("OTHER=1\n")  # read per request: gone now
+            monkeypatch.delenv("STUB_KEY")  # read per request: gone now
             with pytest.raises(ModelsError) as missing:
                 await _step(model, [{"role": "user", "content": "hi"}])
-        async with OpenAIModel(_named(stub.base_url), str(env)) as keyless:
+        async with OpenAIModel(_named(stub.base_url)) as keyless:
             with pytest.raises(ModelsError) as refused:
                 await _step(keyless, [{"role": "user", "content": "hi"}])
     assert stub.requests[0]["authorization"] == "Bearer sk-stand-in"
     assert "sk-stand-in" not in str(stub.requests[0]["body"])
-    # never in bh-02's environment, which the Python process's (and any child's) is made from
-    assert "STUB_KEY" not in os.environ and "sk-stand-in" not in os.environ.values()
     assert missing.value.kind == "authentication_failed"
     assert missing.value.message.startswith(
-        f"model 'stub' names the key STUB_KEY, which is not a line of {env}"
+        "model 'stub' reads its key from the environment variable STUB_KEY, which is not set in bh-02's "
+        "environment"
     )
     assert "sk-stand-in" not in missing.value.message
     assert (
@@ -110,13 +107,14 @@ async def test_the_key_is_read_from_local_env_and_sent_only_as_the_authorization
     assert "sends no key; if the endpoint needs one" in refused.value.message
 
 
-async def test_a_key_the_server_echoes_back_in_its_refusal_is_not_in_the_error(tmp_path: Path) -> None:
+async def test_a_key_the_server_echoes_back_in_its_refusal_is_not_in_the_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A wrong key, which the stub's 401 echoes whole and masked but for its end: neither is
     in the message the conversation (and the session's events) would keep."""
-    env = tmp_path / "local.env"
-    env.write_text("STUB_KEY=sk-wrong-one-9f8e7d6c5b4a\n")
+    monkeypatch.setenv("STUB_KEY", "sk-wrong-one-9f8e7d6c5b4a")
     with StubServer(key="sk-right") as stub:
-        async with OpenAIModel(_named(stub.base_url, key="STUB_KEY"), str(env)) as model:
+        async with OpenAIModel(_named(stub.base_url, key={"env": "STUB_KEY"})) as model:
             with pytest.raises(ModelsError) as refused:
                 await _step(model, [{"role": "user", "content": "hi"}])
     assert stub.requests[0]["authorization"] == "Bearer sk-wrong-one-9f8e7d6c5b4a"  # it was sent

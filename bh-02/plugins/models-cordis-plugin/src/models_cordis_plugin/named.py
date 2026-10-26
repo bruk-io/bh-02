@@ -14,7 +14,7 @@ the endpoint's `models`, named `ENDPOINT/MODEL`. The same shape for every provid
     [local]
     provider = "openai"                        # or "claude-code"
     base_url = "http://localhost:11434/v1"     # openai: where /chat/completions is
-    key = "OPENROUTER_API_KEY"                 # optional: a line of local.env
+    key = { env = "OPENROUTER_API_KEY" }       # optional: where its key comes from (see below)
 
     [local.models.llama]
     id = "llama3.2"                            # the provider's own name for the model
@@ -24,17 +24,22 @@ the endpoint's `models`, named `ENDPOINT/MODEL`. The same shape for every provid
     [work]
     provider = "claude-code"
     base_url = "https://gateway.example/anthropic"   # optional: Claude through this gateway
-    key_command = "print-a-token"              # with base_url: Claude Code's apiKeyHelper
-    key_ttl_ms = 300000                        # optional: how long a token is used
+    key = { cmd = "print-a-token", ttl_ms = 300000 }   # with base_url: Claude Code's apiKeyHelper
     experimental_betas = false                 # optional: false when the gateway refuses them
     models = { opus = { id = "claude-opus-5-5" } }   # the same data, written inline
+
+An endpoint's `key` is one table naming exactly one source, `env` (a variable of bh-02's process
+environment), `cmd` (a shell command that prints the key) or `op` (a 1Password reference, read by
+`op read`), and, for `cmd` and `op`, an optional `ttl_ms`: how long a printed key is used (`KeySpec`).
 
 A model's table is its endpoint's settings with its own over them (`derived`). `ENDPOINT/ID`, an id
 the endpoint's `models` doesn't name, is that id on the endpoint: no server is asked for it. An
 openai endpoint with `discover = true` also offers the models its server lists (`discovery.py`),
 narrowed by `include`, by glob; `/model` asks the server only when it lists. A claude-code endpoint
-with no `base_url` runs on the subscription token in local.env. An endpoint whose table has a
-problem names no model: `ENDPOINT/MODEL` is refused with that table's problem, as the table alone is.
+with no `base_url` runs on the subscription token, which its `key` says where to get (`env`, `cmd` or
+`op`, read when the CLI starts; no `ttl_ms`), and hands it to the Claude Code CLI alone. An endpoint whose
+table has a problem names no model: `ENDPOINT/MODEL` is refused with that table's problem, as the
+table alone is.
 
 A top-level `default = "NAME"` names the model a new session starts on. The model a session starts
 on is chosen, lowest first, by the file's `default`, a layer's model row `default` (the session's own
@@ -46,12 +51,12 @@ file's counts (`intended`); with neither, no model is chosen, and the model row 
 A provider can also be `module:attribute`, a factory each model's table is passed to (bh-02's fakes
 are one); its tables are its own.
 
-The models file is trusted whole: a factory it names runs in bh-02's own process, a `key_command` it
-names runs as the person, and a `key` it names is sent to its `base_url`. So it is not read when it is
-in the project, which the model's code can write (`in_project`: bh-02 run from the home directory,
-`$XDG_CONFIG_HOME` in the project, a link into it), and `discover` and `key_command` are read only from
-it, never from a layer's `extra`. Wherever a table comes from, an openai endpoint's `key` may not name
-the Claude Code token (`withheld`), which is the Claude Code CLI's alone.
+The models file is trusted whole: a factory it names runs in bh-02's own process, a `key` with a `cmd`
+or `op` it names runs as the person, and a `key` it names is sent to its `base_url`. So it is not read
+when it is in the project, which the model's code can write (`in_project`: bh-02 run from the home
+directory, `$XDG_CONFIG_HOME` in the project, a link into it), and `discover` and `key` are read only
+from it, never from a layer's `extra`. Wherever a table comes from, an openai endpoint's `key` may not
+name the Claude Code token (`withheld`), which is the Claude Code CLI's alone.
 
 Everything here is pure but `models_file`, which reads the environment, `read_models`, which
 reads the file, and `in_project`, which follows the file's links.
@@ -67,10 +72,11 @@ from typing import Any, Final
 from urllib.parse import urlsplit
 
 from host_paths import config_home, passes, roots
-from models_cordis_plugin.claude_code.credential import TOKEN_VARIABLE
+from models_cordis_plugin.key import TOKEN_VARIABLE, KeySpec
 
 __all__ = [
     "CLAUDE_CODE",
+    "DEFAULT_TTL_MS",
     "OPENAI",
     "Intended",
     "ModelConfig",
@@ -84,7 +90,7 @@ __all__ = [
     "from_file",
     "in_project",
     "intended",
-    "key_name",
+    "key_spec",
     "models_file",
     "named_models",
     "not_a_model",
@@ -107,9 +113,10 @@ _EXTRA_SOURCE: Final = "the model row's extra"
 _MODELS: Final = "models"
 _DISCOVER: Final = "discover"
 _INCLUDE: Final = "include"
-_KEY_COMMAND: Final = "key_command"
-_KEY_TTL: Final = "key_ttl_ms"
+_KEY: Final = "key"
 _BETAS: Final = "experimental_betas"
+_AUTH: Final = "auth"  # a claude-code endpoint's way in: subscription (default) or api-key
+_AUTHS: Final = ("subscription", "api-key")
 # What only an endpoint says: which models it has. A model made of it (`derived`) drops them.
 _LISTING: Final = frozenset({_MODELS, _DISCOVER, _INCLUDE})
 # The keys a model's own table may have, per provider (a factory's tables are its own).
@@ -120,16 +127,21 @@ _MODEL_KEYS: Final[Mapping[str, frozenset[str]]] = {
 # The keys an endpoint's table may have, per provider: how to reach it, its models, and the
 # settings its models share (each model's own table may set them again).
 _ENDPOINT_KEYS: Final[Mapping[str, frozenset[str]]] = {
-    CLAUDE_CODE: frozenset({"provider", "base_url", _KEY_COMMAND, _KEY_TTL, _BETAS, _MODELS}),
-    OPENAI: frozenset(
-        {"provider", "base_url", "key", _KEY_COMMAND, _KEY_TTL, "max_tokens", "temperature", *_LISTING}
-    ),
+    CLAUDE_CODE: frozenset({"provider", "base_url", _KEY, _BETAS, _AUTH, _MODELS}),
+    OPENAI: frozenset({"provider", "base_url", _KEY, "max_tokens", "temperature", *_LISTING}),
 }
-# A key is the name of a local.env line, never the key itself: a value that isn't such a name is
+# A key's `env` is the name of a variable, never the key itself: a value that isn't such a name is
 # never quoted back (an error is shown in the conversation and kept in the session's events).
 # Capitals only: a key itself nearly always has lower-case letters (`gsk_...`, `sk-...`), which
 # a name with `_` alone would let through.
-_KEY_NAME: Final = re.compile(r"[A-Z_][A-Z0-9_]*")
+_ENV_NAME: Final = re.compile(r"[A-Z_][A-Z0-9_]*")
+_SOURCES: Final = ("env", "cmd", "op")  # what a `key` table may name; exactly one
+_KEY_FIELDS: Final = frozenset({*_SOURCES, "ttl_ms"})
+DEFAULT_TTL_MS: Final = 300_000  # how long a printed key is used when `ttl_ms` is unset (Claude Code's own)
+_KEY_EXAMPLES: Final = (
+    '`key = { env = "OPENROUTER_API_KEY" }`, `key = { cmd = "my-token-helper", ttl_ms = 600000 }` '
+    'or `key = { op = "op://vault/item/field" }`'
+)
 # A model's name under its endpoint: 1 to 200 printable ASCII characters, no space and no `/` (a
 # name is `ENDPOINT/MODEL`, split at the first `/`; `/model NAME` takes one word; a layer file holds
 # it as TOML, which `format_layer` writes outside ASCII as an escape TOML refuses).
@@ -139,7 +151,7 @@ _DEFAULTED: Final = (
     '[local.models.MODEL]\nid = "MODEL ID"'
 )
 _EXAMPLE: Final = (
-    '[NAME]\nprovider = "openai"\nbase_url = "https://HOST/v1"\nkey = "LINE_IN_LOCAL_ENV"\n\n'
+    '[NAME]\nprovider = "openai"\nbase_url = "https://HOST/v1"\nkey = { env = "A_VARIABLE" }\n\n'
     '[NAME.models.MODEL]\nid = "MODEL ID"'
 )
 
@@ -161,16 +173,14 @@ class ModelConfig:
     `models`: the models file, when not the default one. `extra`: endpoints of the row's own, one
     table per name, as in the file. For the claude-code provider: `state`, the directory its
     Claude Code state lives in (the session's `claude/`, which the session layer sets);
-    `env_file`, where `local.env` is (found above the install when unset; the openai provider
-    reads an endpoint's `key` there too); `cwd`, the project Claude Code is told it works in (the
-    working directory when unset), which, like the working directory, a models file must be
-    outside of (`in_project`)."""
+    `cwd`, the project Claude
+    Code is told it works in (the working directory when unset), which, like the working directory,
+    a models file must be outside of (`in_project`)."""
 
     default: str | None = None
     models: str | None = None
     extra: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
     state: str | None = None
-    env_file: str | None = None
     cwd: str | None = None
 
 
@@ -253,8 +263,8 @@ def in_project(path: Path, root: Path) -> str | None:
 def _refused(path: Path, root: Path, how: str) -> str:
     return (
         f"the models file {path} is not read: it is in the project ({root}){how}, which the model's "
-        "code can write, and a models file the model wrote could run code as you (a `key_command`, "
-        "a `module:attribute` provider) or send a local.env key to a server of its choosing. Keep your "
+        "code can write, and a models file the model wrote could run code as you (a `key` with a `cmd`, "
+        "a `module:attribute` provider) or send a key to a server of its choosing. Keep your "
         "models file outside the project, and not a link into it: run bh-02 in the project's own "
         "directory rather than one that holds your config (such as your home), or set "
         "XDG_CONFIG_HOME (or the model row's `models`) to a directory outside it. Until then only "
@@ -414,11 +424,11 @@ def _endpoint_problem(named: Named, where: str, *, factory: bool) -> str | None:
             f"{where}: {', '.join(unknown)} is not a setting of {_article(named.provider)} "
             f"{named.provider} endpoint; it takes {allowed}"
         )
-    if named.source == _EXTRA_SOURCE and (said := sorted({_DISCOVER, _KEY_COMMAND} & set(table))):
+    if named.source == _EXTRA_SOURCE and (said := sorted({_DISCOVER, _KEY} & set(table))):
         return (
             f"{where}: {' and '.join(said)} is read only from the models file, never from a layer: it "
-            "makes bh-02 trust the table (ask a server what it lists, run a command as you). Move "
-            f"this table to the models file, or remove {' and '.join(said)}"
+            "makes bh-02 trust the table (ask a server what it lists, send a key to a server, run a "
+            f"command as you). Move this table to the models file, or remove {' and '.join(said)}"
         )
     if named.provider == OPENAI and (why := _discover_problem(named, where)) is not None:
         return why
@@ -531,39 +541,116 @@ def _settings_problem(named: Named, where: str) -> str | None:
 
 
 def _key_problem(named: Named, where: str) -> str | None:
-    """What is wrong with how a model or endpoint gets its key (`key`, `key_command`, `key_ttl_ms`),
-    or None. A claude-code one with a `base_url` needs a `key_command`, and one without has the
-    subscription token, so takes no `key_command`."""
+    """What is wrong with how a model or endpoint gets its key (`key`: `_read_key`), or None. A
+    claude-code one with a `base_url` (a gateway) needs a `key` of `cmd` or `op`, which the Claude
+    Code CLI runs: bh-02 never holds that key, so an `env` is refused. One without runs on the
+    subscription token its `key` gives (any source; bh-02 reads it when the CLI starts, so no `ttl_ms`)."""
     table = named.table
-    key, command, ttl = table.get("key"), table.get(_KEY_COMMAND), table.get(_KEY_TTL)
-    if key is not None and command is not None:
-        return f"{where}: give key (a line of local.env) or key_command (a command that prints one), not both"
-    if key is not None and key_name(key) is None:
-        return (
-            f"{where}: key must name a line of local.env (capitals, digits and _, like "
-            '`key = "OPENAI_API_KEY"`), not hold the key itself; put the key in local.env as '
-            "`OPENAI_API_KEY=<the key>` and name that line here"
-        )
-    if (why := withheld(named)) is not None:
+    key = table.get(_KEY)
+    spec = None
+    if _KEY in table:
+        read = _read_key(key)
+        if isinstance(read, str):
+            return f"{where}: {read}"
+        spec = read
+    if named.provider != CLAUDE_CODE and (why := withheld(named)) is not None:
         return why
-    if command is not None and (not isinstance(command, str) or not command.strip()):
-        return (
-            f"{where}: key_command must be a command that prints a key, like "
-            '`key_command = "my-token-helper"`'
-        )
-    if ttl is not None and command is None:
-        return f"{where}: key_ttl_ms says how long a key_command's key is used; add key_command, or remove it"
-    if ttl is not None and not _whole(ttl):
-        return f"{where}: key_ttl_ms must be a whole number of milliseconds above 0"
-    if named.provider == CLAUDE_CODE and ("base_url" in table) != (command is not None):
-        return (
-            f"{where}: a gateway needs both base_url (where Claude Code sends its requests) and "
-            "key_command (the command that prints its key, Claude Code's apiKeyHelper); give both, "
-            "or neither, which uses the subscription token in local.env"
-        )
-    if named.provider == CLAUDE_CODE and _BETAS in table and "base_url" not in table:
-        return f"{where}: experimental_betas is for a gateway; add base_url and key_command, or remove it"
+    if named.provider == CLAUDE_CODE:
+        if spec is not None and spec.source == "env" and "base_url" in table:
+            return (
+                f"{where}: a gateway's key can't be an env: the Claude Code CLI gets it by running a "
+                "command, and bh-02 never holds it. Give the command that prints it, "
+                '`key = { cmd = "my-token-helper" }`, or `key = { op = "op://vault/item/field" }`'
+            )
+        if "base_url" in table and spec is None:
+            return (
+                f"{where}: a gateway needs both base_url (where Claude Code sends its requests) and "
+                "key (the command that prints its key, Claude Code's apiKeyHelper), like "
+                '`key = { cmd = "my-token-helper", ttl_ms = 300000 }`; give both, or neither, which '
+                "uses the subscription token"
+            )
+        if "base_url" not in table and spec is not None and spec.ttl_ms is not None:
+            return (
+                f"{where}: key.ttl_ms is for a gateway's key, which Claude Code runs again when it is up; "
+                "bh-02 reads the subscription token each time it starts the Claude Code CLI, so remove ttl_ms"
+            )
+        if _BETAS in table and "base_url" not in table:
+            return f"{where}: experimental_betas is for a gateway; add base_url and key, or remove it"
+        if _AUTH in table:
+            auth = table[_AUTH]
+            if auth not in _AUTHS:
+                return (
+                    f'{where}: auth must be "subscription" (the key is a Claude Code subscription '
+                    'token, the default) or "api-key" (the key is an Anthropic API key)'
+                )
+            if "base_url" in table:
+                return (
+                    f"{where}: auth is for an endpoint that reaches Anthropic itself; a gateway's key is "
+                    "the command that prints it, so remove auth"
+                )
+            if auth == "api-key" and spec is None:
+                return (
+                    f'{where}: auth = "api-key" needs a key to read it from, like '
+                    '`key = { env = "BH02_ANTHROPIC_API_KEY" }` (a name of your own: other tools load '
+                    'ANTHROPIC_API_KEY on their own) or `key = { op = "op://vault/item/field" }`'
+                )
+            if auth == "api-key" and spec is not None and spec.ttl_ms is not None:
+                return (
+                    f"{where}: key.ttl_ms is for a gateway's key; bh-02 reads the API key each time it "
+                    "starts the Claude Code CLI, so remove ttl_ms"
+                )
     return None
+
+
+def _read_key(key: object) -> KeySpec | str:
+    """A `key` table as the `KeySpec` it says, or what is wrong with it (said after the table's
+    `where`, and never quoting its values: a key written here as text may be the key itself)."""
+    if not isinstance(key, Mapping):
+        return (
+            "key must be a table saying where the key comes from, never the key itself or a name; "
+            f"write {_KEY_EXAMPLES}"
+        )
+    if unknown := sorted(set(key) - _KEY_FIELDS):
+        return (
+            f"key has {', '.join(map(str, unknown))}, which a key does not take; it takes exactly one of "
+            f"env, cmd or op, and ttl_ms with cmd or op: {_KEY_EXAMPLES}"
+        )
+    given = [source for source in _SOURCES if source in key]
+    if not given:
+        return f"key names no source; give exactly one of env, cmd or op: {_KEY_EXAMPLES}"
+    if len(given) > 1:
+        return f"key gives {' and '.join(given)}; give exactly one of env, cmd or op: {_KEY_EXAMPLES}"
+    source = given[0]
+    value = key[source]
+    ttl = key.get("ttl_ms")
+    if not isinstance(value, str) or not value.strip():
+        return f"key.{source} must be {_SOURCE_IS[source]}"
+    if source == "env" and not _ENV_NAME.fullmatch(value):
+        return f"key.env must be {_SOURCE_IS['env']}, not hold the key itself"
+    if source == "op" and not value.startswith("op://"):
+        return f"key.op must be {_SOURCE_IS['op']}"
+    if "ttl_ms" in key and source == "env":
+        return (
+            "key.ttl_ms says how long a printed key is used; an env key is read from bh-02's "
+            "environment on every request, so remove ttl_ms (or give cmd or op)"
+        )
+    if "ttl_ms" in key and not _whole(ttl):
+        return "key.ttl_ms must be a whole number of milliseconds above 0"
+    return KeySpec(source, value, ttl if isinstance(ttl, int) else None)
+
+
+_SOURCE_IS: Final[Mapping[str, str]] = {
+    "env": 'the name of an environment variable (capitals, digits and _, like `env = "OPENAI_API_KEY"`)',
+    "cmd": 'a command that prints a key, like `cmd = "my-token-helper"`',
+    "op": 'a 1Password reference starting op://, like `op = "op://vault/item/field"`',
+}
+
+
+def key_spec(key: object) -> KeySpec | None:
+    """The `KeySpec` a `key` table says; None when there is no key or it is not a valid one
+    (`problem` says what is wrong first, so a provider only sees a valid one)."""
+    read = _read_key(key) if key is not None else None
+    return read if isinstance(read, KeySpec) else None
 
 
 def _whole(value: object) -> bool:
@@ -586,22 +673,17 @@ def _url_problem(url: object) -> str | None:
 
 
 def withheld(named: Named) -> str | None:
-    """Why `named`'s key is never sent: it names the Claude Code token, which bh-02 hands to the
-    Claude Code CLI alone, never to an endpoint; None when it names another line, or none."""
-    if named.table.get("key") != TOKEN_VARIABLE:
+    """Why `named`'s key is never sent: it reads the Claude Code token, which bh-02 hands to the
+    Claude Code CLI alone, never to an endpoint; None when it reads another variable, or none."""
+    spec = key_spec(named.table.get(_KEY))
+    if spec is None or spec.source != "env" or spec.value != TOKEN_VARIABLE:
         return None
     return (
-        f"{named.name!r} ({named.source}): key may not name {TOKEN_VARIABLE}, the Claude Code "
+        f"{named.name!r} ({named.source}): key may not read {TOKEN_VARIABLE}, the Claude Code "
         "token: bh-02 gives it to the Claude Code CLI alone and never sends it to an endpoint "
-        "(whoever holds it can use your subscription). Name the local.env line of this endpoint's "
-        "own key (add one as `ITS_API_KEY=<the key>`), or a claude-code endpoint for Claude"
+        "(whoever holds it can use your subscription). Name the variable of this endpoint's "
+        'own key (`key = { env = "ITS_API_KEY" }`), or use a claude-code endpoint for Claude'
     )
-
-
-def key_name(key: object) -> str | None:
-    """`key` when it is the name of a local.env line (`OPENAI_API_KEY`: capitals, digits, `_`);
-    None for anything else, which may be the key itself and so is never quoted."""
-    return key if isinstance(key, str) and _KEY_NAME.fullmatch(key) else None
 
 
 def derived(host: Named, model: str, *, checked: bool = True) -> Named:

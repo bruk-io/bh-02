@@ -146,9 +146,11 @@ What to keep when changing it; the detail is where each line points.
 
 ## The credential
 
-`CLAUDE_CODE_OAUTH_TOKEN`, in the git-ignored `local.env`, goes only from the model row to the
-Claude Code CLI, never to a program the runner starts. Never set or read `ANTHROPIC_API_KEY`;
-never print, log or commit the token ([the rules](plugins/models-cordis-plugin/README.md#the-credential)).
+`CLAUDE_CODE_OAUTH_TOKEN`, which a claude-code endpoint's `key` reads (from bh-02's environment, or
+a command), goes only from the model row to the Claude Code CLI's explicit environment, never to a
+program the runner starts. So does an Anthropic API key, for an endpoint with `auth = "api-key"`: it is
+`ANTHROPIC_API_KEY` in that environment alone, never in bh-02's own. Never print, log or commit either
+([the rules](plugins/models-cordis-plugin/README.md#the-credential)).
 
 ## Gate rules that are about this family
 

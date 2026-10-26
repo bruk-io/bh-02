@@ -151,7 +151,6 @@ class _Host:
     """The `host` value a confined runner reads: where the program's code is, which every jail reads."""
 
     paths: tuple[str, ...] = ()
-    credentials: tuple[str, ...] = ()
     secrets: tuple[str, ...] = ()
     trusted: tuple[str, ...] = ()
     code: tuple[str, ...] = ()

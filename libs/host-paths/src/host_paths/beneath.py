@@ -6,7 +6,7 @@ The walk starts at the root (the caller's to trust: opened as named, links and a
 each name beneath it on its own, with these flags, each for a reason:
 
 - `O_NOFOLLOW` on every name: a link the model made, anywhere on the way or at the end, could
-  lead to a file the jail hides (`local.env`). A link on the way stops the walk (`Linked`); one
+  lead to a file the jail hides (`private.txt`). A link on the way stops the walk (`Linked`); one
   at the end is not followed but answered (`Link`), for the caller to decide.
 - `O_DIRECTORY` on every name but the last: a file on the way is not walked through.
 - `O_NONBLOCK` on every name: opening a FIFO the model left in a file's place returns at once

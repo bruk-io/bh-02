@@ -50,10 +50,10 @@ def test_a_link_out_of_the_project_to_a_secret_is_not_read(tmp_path: Path) -> No
     (root / "CLAUDE.md").symlink_to(key)
     with pytest.raises(OSError, match="not another memory file"):
         read(root / "CLAUDE.md", [root / "CLAUDE.md"], root)
-    env = _write(root / "local.env", "FAKE")
+    env = _write(root / "prod.env", "FAKE")
     with pytest.raises(OSError, match="named like a secret"):
         read(env, [env], root)
-    (root / "AGENTS.md").symlink_to("local.env")
+    (root / "AGENTS.md").symlink_to("prod.env")
     with pytest.raises(OSError, match="not another memory file"):
         read(root / "AGENTS.md", [root / "AGENTS.md", env], root)
 

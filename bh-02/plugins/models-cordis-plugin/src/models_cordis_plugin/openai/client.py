@@ -1,32 +1,31 @@
 """The `openai` provider: one model on an OpenAI-compatible endpoint, as a `model` value.
 
 Each step is one streamed POST to `<base_url>/chat/completions` (`wire.py` builds it and
-folds what comes back). A model's `key` names a line of `local.env`, read when a request is
-made and put only in that request's `Authorization` header: never in an environment, never in
-anything whose repr shows it, and taken out of anything the server says back before an error
-quotes it. A model with a `key_command` has the key that command prints instead
-(`key_command.py`), in the same header, which is kept for `key_ttl_ms` (dropped sooner when the
-server refuses it) so the command does not run for every step. A model with no key sends none (a
-local server), and one whose key names the Claude Code token sends nothing at all
-(`named.withheld`: that is the CLI's alone). Usage is asked for
+folds what comes back). A model's `key` (`named.KeySpec`) says where its key comes from: `env`
+names a variable of bh-02's process environment, read when a request is made, and `cmd` or `op`
+is a command run as the person (`shell_key.py`) whose output is the key, kept for the key's `ttl_ms`
+(dropped sooner when the server refuses it) so the command does not run for every step. The key
+is put only in that request's `Authorization` header: never in an environment bh-02 hands on, never
+in anything whose repr shows it, and taken out of anything the server says back before an error
+quotes it. A model with no key sends none (a local server), and one whose key reads the Claude
+Code token sends nothing at all (`named.withheld`: that is the CLI's alone). Usage is asked for
 (`stream_options`) until the server refuses a step for it; that step is sent again without it,
 and so is every later one. Closing the step (the person stopped the reply) closes the HTTP
 stream with it.
 """
 
 import json
+import os
 import time
 import uuid
 from collections.abc import AsyncGenerator, AsyncIterator, Callable, Mapping, Sequence
 from contextlib import aclosing
-from pathlib import Path
 from typing import Any, Final
 
 import httpx2
 
-from models_cordis_plugin.key_command import DEFAULT_TTL_MS, command_key
-from models_cordis_plugin.local_env import ENV_FILE, parse_env, token_file
-from models_cordis_plugin.named import ModelsError, Named, key_name, withheld
+from models_cordis_plugin.key import KeySpec
+from models_cordis_plugin.named import DEFAULT_TTL_MS, ModelsError, Named, key_spec, withheld
 from models_cordis_plugin.openai.wire import (
     Fold,
     Where,
@@ -38,8 +37,9 @@ from models_cordis_plugin.openai.wire import (
     sse_data,
     stream_error,
 )
+from models_cordis_plugin.shell_key import command_key
 
-__all__ = ["OpenAIModel", "authorization", "headers_for", "missing_key"]
+__all__ = ["OpenAIModel", "headers_for", "missing_key"]
 
 type Json = Mapping[str, Any]
 
@@ -57,59 +57,36 @@ class _Headers(dict[str, str]):
     __str__ = __repr__
 
 
-def authorization(named: Named, env_file: str | None, searched: Sequence[str] = ()) -> dict[str, str]:
-    """The request's headers: JSON, and `Authorization: Bearer <key>` when the model names a
-    key, read from local.env now (`env_file`, else the first file of `searched`). A key named
-    but not there, or there as something a header can't carry (not printable ASCII), is a
-    `ModelsError` saying where to look; never the key itself."""
-    headers = _Headers({"Content-Type": "application/json", "Accept": "text/event-stream"})
-    if named.table.get("key") is None:
-        return headers
-    key = key_name(named.table["key"])
-    if key is None:  # never quoted: it may be the key itself (`named.problem` says so first)
-        raise ModelsError(
-            "model_config",
-            f"model {named.name!r}: key must name a line of local.env (like OPENAI_API_KEY), not hold "
-            "the key itself; move the key into local.env and name that line",
-        )
-    if (why := withheld(named)) is not None:  # `named.problem` says so first; this is the last wall
-        raise ModelsError("model_config", why)
-    path = token_file(env_file, searched)
-    # read into the header at once: no local of this frame holds the key (a crash prints locals)
-    headers["Authorization"] = "Bearer " + (
-        parse_env(path.read_text(encoding="utf-8")).get(key, "")
-        if path is not None and path.is_file()
-        else ""
-    )
-    if headers["Authorization"] == "Bearer ":
-        raise ModelsError(
-            "authentication_failed", _no_key_line(named.name, key, path) + " then send the message again."
-        )
-    if not _carried(headers["Authorization"]):
-        raise ModelsError("authentication_failed", _unsendable_line(named.name, key, path))
-    return headers
-
-
-async def headers_for(named: Named, env_file: str | None, searched: Sequence[str] = ()) -> dict[str, str]:
-    """The request's headers, as `authorization` makes them, but for a model with a `key_command`:
-    `Authorization: Bearer <what it prints>`, run now (`key_command.command_key`).
+async def headers_for(named: Named) -> dict[str, str]:
+    """The request's headers: JSON, and `Authorization: Bearer <key>` when the model has a `key`: the
+    variable it reads from bh-02's environment now, or what its command prints, run now
+    (`shell_key.command_key`).
 
     Raises:
-        ModelsError: the key can't be had (`authorization`'s reasons, or the command's), or what the
-            command printed can't go in a header.
+        ModelsError: the key can't be had (the variable is not set, the command fails or prints
+            nothing), or is not something a header can carry (not printable ASCII); never the key.
     """
-    command = named.table.get("key_command")
-    if not isinstance(command, str):
-        return authorization(named, env_file, searched)
     headers = _Headers({"Content-Type": "application/json", "Accept": "text/event-stream"})
+    spec = key_spec(named.table.get("key"))
+    if spec is None:
+        if "key" in named.table:  # never quoted: it may be the key itself (`named.problem` says so first)
+            raise ModelsError(
+                "model_config",
+                f"model {named.name!r}: key must be a table saying where the key comes from, never the "
+                'key itself, like `key = { env = "OPENAI_API_KEY" }`',
+            )
+        return headers
+    if (why := withheld(named)) is not None:  # `named.problem` says so first; this is the last wall
+        raise ModelsError("model_config", why)
+    command = spec.command
     # straight into the header: no local of this frame holds the key (a crash prints locals)
-    headers["Authorization"] = "Bearer " + await command_key(named.name, command)
+    headers["Authorization"] = "Bearer " + (
+        os.environ.get(spec.value, "") if command is None else await command_key(named.name, command)
+    )
+    if headers["Authorization"] == "Bearer ":
+        raise ModelsError("authentication_failed", _unset_line(named.name, spec) + ".")
     if not _carried(headers["Authorization"]):
-        raise ModelsError(
-            "authentication_failed",
-            f"model {named.name!r}'s key_command `{command}` printed something a request header can't "
-            "carry (a key is one line of printable ASCII). Run it in a terminal to check what it prints.",
-        )
+        raise ModelsError("authentication_failed", _unsendable_line(named.name, spec, command))
     return headers
 
 
@@ -119,36 +96,36 @@ def _carried(value: str) -> bool:
     return value.isascii() and value.isprintable()
 
 
-def _place(path: Path | None) -> str:
-    return str(path) if path is not None else f"{ENV_FILE} at the repository root"
-
-
-def _no_key_line(name: str, key: str, path: Path | None) -> str:
+def _unset_line(name: str, spec: KeySpec) -> str:
+    """Said for an `env` key whose variable is not set (or empty) in bh-02's environment."""
     return (
-        f"model {name!r} names the key {key}, which is not a line of {_place(path)}. Add "
-        f"`{key}=<the key>` there (keep that file out of git),"
+        f"model {name!r} reads its key from the environment variable {spec.value}, which is not set in "
+        "bh-02's environment (the one it was started with). Export "
+        f"{spec.value} in the shell that starts bh-02 (from direnv, `op run`, or your profile) and start it "
+        "again"
     )
 
 
-def _unsendable_line(name: str, key: str, path: Path | None) -> str:
+def _unsendable_line(name: str, spec: KeySpec, command: str | None) -> str:
     """Said without the key: it is what can't go in a header."""
+    came = f"the environment variable {spec.value}" if command is None else f"`{command}`"
+    check = (
+        "Check what the variable holds" if command is None else "Run it in a terminal to check what it prints"
+    )
     return (
-        f"model {name!r} names the key {key}, whose line in {_place(path)} holds a character a request "
-        "header can't carry (a key is printable ASCII). Fix that line, then try again."
+        f"model {name!r}'s key from {came} holds a character a request header can't carry (a key is one "
+        f"line of printable ASCII). {check}, fix it, then try again."
     )
 
 
-def missing_key(named: Named, env_file: str | None, searched: Sequence[str] = ()) -> str | None:
-    """Why `named`'s key can't be sent (it names a line local.env doesn't have), said so the
-    person can fix it; None when the model names no key, has a `key_command` (which is not run to
-    find out), or the line is there. Never quotes the key: it only asks whether the line is there."""
-    key = key_name(named.table.get("key"))
-    if key is None:
+def missing_key(named: Named) -> str | None:
+    """Why `named`'s key can't be sent (an `env` key whose variable bh-02's environment doesn't
+    have), said so the person can fix it; None when the model has no key, has a `cmd` or `op` (which is
+    not run to find out), or the variable is set. Never quotes the key: it only asks whether it is set."""
+    spec = key_spec(named.table.get("key"))
+    if spec is None or spec.source != "env" or os.environ.get(spec.value):
         return None
-    path = token_file(env_file, searched)
-    if path is not None and path.is_file() and parse_env(path.read_text(encoding="utf-8")).get(key):
-        return None
-    return _no_key_line(named.name, key, path) + f" then /model {named.name} again."
+    return _unset_line(named.name, spec) + "."
 
 
 class OpenAIModel:
@@ -168,38 +145,38 @@ class OpenAIModel:
     def __init__(
         self,
         named: Named,
-        env_file: str | None = None,
         transport: httpx2.AsyncBaseTransport | None = None,
         *,
-        searched: Sequence[str] = (),
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._named = named
         self.settings: Final = settings_for(named)
-        self._env_file = env_file
-        self._searched = tuple(searched)
         self._client = httpx2.AsyncClient(timeout=_TIMEOUT, transport=transport)
         url = str(named.table["base_url"]).rstrip("/") + "/chat/completions"
-        command = named.table.get("key_command")
-        self._command = command if isinstance(command, str) else None
+        spec = key_spec(named.table.get("key"))
+        self._command = spec.command if spec is not None else None
         self._where = Where(
-            named.name, url, named.id, key_name(named.table.get("key")), named.source, self._command
+            named.name,
+            url,
+            named.id,
+            spec.value if spec and spec.source == "env" else None,
+            named.source,
+            self._command,
         )
         self._usage = True  # whether to ask for usage: until the server refuses it (`rejects_usage`)
         self._clock = clock
-        ttl = named.table.get("key_ttl_ms", DEFAULT_TTL_MS)
-        self._ttl = (ttl if isinstance(ttl, int) else DEFAULT_TTL_MS) / 1000
-        self._kept: tuple[float, dict[str, str]] | None = None  # a key_command's headers, and until when
+        self._ttl = (spec.ttl_ms if spec and spec.ttl_ms else DEFAULT_TTL_MS) / 1000
+        self._kept: tuple[float, dict[str, str]] | None = None  # a command's headers, and until when
 
     async def _headers(self) -> dict[str, str]:
-        """This step's headers (`headers_for`); a key_command's are kept for `key_ttl_ms`.
+        """This step's headers (`headers_for`); a command key's are kept for its `ttl_ms`.
 
         Raises:
             ModelsError: the key can't be had.
         """
         if self._kept is not None and self._clock() < self._kept[0]:
             return self._kept[1]
-        headers = await headers_for(self._named, self._env_file, self._searched)
+        headers = await headers_for(self._named)
         if self._command is not None:
             self._kept = (self._clock() + self._ttl, headers)
         return headers
@@ -224,7 +201,7 @@ class OpenAIModel:
                             self._usage = False  # asked again without it, now and from now on
                             continue
                         if response.status_code in (401, 403):
-                            self._kept = None  # a refused key_command key: the next step runs it again
+                            self._kept = None  # a refused command key: the next step runs it again
                         raise http_error(response.status_code, said, where, headers)
                     async with aclosing(_streamed(response, where, headers)) as chunks:
                         async for chunk in chunks:

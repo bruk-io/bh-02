@@ -12,9 +12,9 @@ Usage: bh-02 [OPTIONS] [COMMAND] [ARGS]...
   A coding agent in a terminal app. The model acts in Python, through the
   python tool, in a persistent Python process inside a jail. Its models are
   the endpoints in the models file: Claude through Claude Code (on the Claude
-  subscription, with the CLAUDE_CODE_OAUTH_TOKEN in local.env that `claude
-  setup-token` makes, or through a gateway), and any OpenAI-compatible model.
-  Every run is a session that `--resume` continues.
+  subscription, with the token `claude setup-token` makes, read from the
+  environment by the endpoint's `key`, or through a gateway), and any OpenAI-
+  compatible model. Every run is a session that `--resume` continues.
 
 Options:
   --model TEXT   The model to start on, by name, ENDPOINT/MODEL: one of your
@@ -237,5 +237,7 @@ block that does not parse, or has no blank line before it).
 | `XDG_CONFIG_HOME` | where your models file and startup file are: `$XDG_CONFIG_HOME/bh-02/` (default `~/.config/bh-02/`) |
 | `SHELL` | the shell a `!COMMAND` line runs in (`/bin/sh` when unset) |
 
-The Claude credential is not an environment variable of bh-02's: it is read from `local.env`
-([Get started](../get-started.md#the-credential)).
+Provider keys and the Claude token are read from the environment through a model's `key`
+(`{ env = "NAME" }`), not from a file ([Get started](../get-started.md#the-credential),
+[Models](../using/models.md#the-key)). Under `--no-jail` they also reach the model's code
+([the jail](../using/jail.md#without-the-jail-no-jail)).

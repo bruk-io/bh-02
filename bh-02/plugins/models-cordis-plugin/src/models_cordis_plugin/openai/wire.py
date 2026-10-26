@@ -51,9 +51,9 @@ _MASKED: Final = re.compile(r"\S*(?:\*{2,}|\.{3,}|…)\S*")
 
 @dataclass(frozen=True, slots=True)
 class Where:
-    """What an error names: the model, the URL asked, the key's line in local.env (if any), where
-    the model was named, and the command that printed its key (if it has one), so the message says
-    what to change."""
+    """What an error names: the model, the URL asked, the environment variable its key is read from
+    (if it reads one), where the model was named, and the command that prints its key (if it has
+    one), so the message says what to change."""
 
     name: str
     url: str
@@ -352,18 +352,19 @@ def http_error(status: int, body: str, where: Where, sent: Mapping[str, str] | N
     if status in (401, 403):
         if where.command is not None:
             todo = (
-                f"check what model {where.name!r}'s key_command prints (run `{where.command}` in a "
+                f"check what model {where.name!r}'s key command prints (run `{where.command}` in a "
                 "terminal), then send the message again: the next request runs it again"
             )
         elif where.key is None:
             todo = (
-                f'model {where.name!r} sends no key; if the endpoint needs one, add `key = "NAME"` to its '
-                f"table ({where.source}) and `NAME=<the key>` to local.env, then send the message again"
+                f"model {where.name!r} sends no key; if the endpoint needs one, add "
+                f'`key = {{ env = "NAME" }}` to its table ({where.source}), export NAME in the shell '
+                "that starts bh-02, and start it again"
             )
         else:
             todo = (
-                f"check the key {where.key} in local.env (model {where.name!r} names it), then send the "
-                "message again"
+                f"check the environment variable {where.key} (model {where.name!r} reads its key from it; "
+                "in the environment bh-02 was started with), then start bh-02 again"
             )
         return ModelsError("authentication_failed", f"{heard}. The endpoint refused the credential: {todo}.")
     if status == 404:

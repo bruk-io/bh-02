@@ -29,7 +29,7 @@ models.llama.id = "llama3.2"
 provider = "openai"
 discover = true
 base_url = "http://localhost:1234/v1"
-key = "LOCAL_KEY"
+key = { env = "LOCAL_KEY" }
 max_tokens = 2048
 temperature = 0.1
 include = ["qwen*"]
@@ -134,7 +134,7 @@ def test_a_derived_model_has_the_endpoint_s_table_but_for_discover_include_and_i
     assert named.table == {
         "provider": "openai",
         "base_url": "http://localhost:1234/v1",
-        "key": "LOCAL_KEY",
+        "key": {"env": "LOCAL_KEY"},
         "max_tokens": 2048,
         "temperature": 0.1,
         "id": "x:7b",

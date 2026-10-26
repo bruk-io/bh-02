@@ -313,17 +313,17 @@ async def echo_model() -> Effects:
 
 @component
 async def host_seen(*, host: Any, config: Mapping[str, Any]) -> Effects:
-    """Writes the `host` value's `credentials`, `secrets`, `trusted` and `code` to
-    `config["out"]` as JSON: what the model rows search and what the jail keeps an input from, as
-    the composition was booted."""
+    """Writes the `host` value's `secrets`, `trusted` and `code` to `config["out"]` as JSON: what
+    the jail keeps an input from, as the composition was booted."""
     import json
     from pathlib import Path
 
     seen = {
-        "credentials": list(host.credentials),
         "secrets": list(host.secrets),
         "trusted": list(host.trusted),
         "code": list(host.code),
+        "key_envs": {name: list(endpoints) for name, endpoints in host.key_envs.items()},
+        "models_file": host.models_file,
     }
     Path(config["out"]).write_text(json.dumps(seen))
     return

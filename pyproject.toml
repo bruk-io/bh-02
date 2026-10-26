@@ -229,6 +229,8 @@ exclude = [
     "bh_02.cli:_run", "bh_02.cli:_writer.write",               # --trace FILE
     "bh_02.cli:_launch",                                      # makes the project's auto memory directory
     "bh_02.bootstrap:project_of",                             # reads .git: a worktree's main repository
+    "bh_02.bootstrap:models_keys",                            # reads the models file for the variables its keys read (host.key_envs); the pure part is key_variables
+    "runner_cordis_plugin.allowlist:read",                    # reads the person's runner.toml (the jail's environment list); the pure parts are parsed and effective
     # the session's rows.jsonl: a listener that reads the clock and queues each kept lifecycle event
     # to host_paths.Appender (a thread writes it), and `run`, which mounts it around the composition
     "bh_02.bootstrap:_row_log", "bh_02.bootstrap:_row_log.hear", "bh_02.bootstrap:run",
@@ -262,7 +264,7 @@ exclude = [
     "subagents_cordis_plugin.kinds:type_files", "subagents_cordis_plugin.kinds:type_names",
     "agent_cordis_plugin.transcript:MemoryTranscript.append",
     # Claude Code: one process per conversation and what it holds, saved in the session's
-    # state dir; the one read of local.env; a rebuilt session file; the CLI's stderr to a log;
+    # state dir; a rebuilt session file; the CLI's stderr to a log;
     # the console script that becomes the CLI
     "models_cordis_plugin.claude_code.provider:ClaudeCodeModel._dir",       # makes the state dir (a temporary one without a session)
     "models_cordis_plugin.claude_code.provider:ClaudeCodeModel._load",      # reads the saved state.json once
@@ -275,7 +277,6 @@ exclude = [
     "models_cordis_plugin.claude_code.provider:ClaudeCodeModel.close",      # ends the process, removes a temporary dir
     "models_cordis_plugin.claude_code.provider:ClaudeCodeModel.__aexit__",  # close()
     "models_cordis_plugin.claude_code.provider:_appender.append",
-    "models_cordis_plugin.claude_code.credential:child_env",
     "models_cordis_plugin.claude_code.records:write_session",
     "models_cordis_plugin.claude_code.detach:main",
     # the models file and the environment that says where it is, read when a model is chosen
@@ -298,17 +299,16 @@ exclude = [
     "models_cordis_plugin.catalog:Catalog.problem", "models_cordis_plugin.catalog:Catalog.default_problem",
     # the same value's endpoints (`discover = true`): `endpoints` reads the models file afresh, as
     # `listed` does, and says what `refresh` kept; `refresh` reads it too, then asks each endpoint for
-    # its models, the one place a server is asked; `_ask` makes one request, reading the key's line of
-    # local.env (or running its key_command) into its headers; `httpx_get` is the real `Get`, that
+    # its models, the one place a server is asked; `_ask` makes one request, reading the key's variable
+    # (or running its cmd or op) into its headers; `httpx_get` is the real `Get`, that
     # request over httpx2
     "models_cordis_plugin.catalog:Catalog.endpoints", "models_cordis_plugin.catalog:Catalog.refresh",
     "models_cordis_plugin.catalog:_ask", "models_cordis_plugin.openai.discovery:httpx_get",
-    # an OpenAI-compatible model: one streamed HTTP call per step, and its key read from local.env,
-    # or printed by its key_command (`headers_for` runs it; `_headers` keeps them for key_ttl_ms)
-    "models_cordis_plugin.openai.client:authorization",
+    # an OpenAI-compatible model: one streamed HTTP call per step, and its key read from the
+    # environment, or printed by its cmd or op (`headers_for` runs it; `_headers` keeps them for ttl_ms)
     "models_cordis_plugin.openai.client:headers_for",
     "models_cordis_plugin.openai.client:OpenAIModel._headers",
-    "models_cordis_plugin.openai.client:missing_key",  # /model looks for the key's line, reads no value out
+    "models_cordis_plugin.openai.client:missing_key",  # /model looks for the key's variable, reads no value out
     "models_cordis_plugin.openai.client:OpenAIModel.complete",
     # the stand-in OpenAI-compatible server tests run the provider against: its socket
     "models_cordis_plugin.openai.testing:_Handler.*",

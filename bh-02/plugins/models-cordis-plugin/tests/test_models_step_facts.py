@@ -7,8 +7,8 @@ from pathlib import Path
 from typing import Any
 
 from models_cordis_plugin import ModelsError, Named
-from models_cordis_plugin.claude_code import TOKEN_VARIABLE, ClaudeCodeConfig, ClaudeCodeModel, records_for
-from models_cordis_plugin.claude_code.testing import FakeClaudeCode, FakeStep
+from models_cordis_plugin.claude_code import ClaudeCodeConfig, ClaudeCodeModel, records_for
+from models_cordis_plugin.claude_code.testing import FAKE_TOKEN_KEY, FakeClaudeCode, FakeStep
 from models_cordis_plugin.named import ModelConfig
 from models_cordis_plugin.openai import Fold, OpenAIModel, replayed
 from models_cordis_plugin.openai.testing import StubServer
@@ -47,9 +47,7 @@ def _named(table: dict[str, Any]) -> Named:
 
 
 def _config(tmp_path: Path, **more: Any) -> ClaudeCodeConfig:
-    env = tmp_path / "local.env"
-    env.write_text(f"{TOKEN_VARIABLE}=sentinel-not-a-real-token\n")
-    return ClaudeCodeConfig(state=str(tmp_path / "state"), env_file=str(env), cwd=str(tmp_path), **more)
+    return ClaudeCodeConfig(state=str(tmp_path / "state"), token=FAKE_TOKEN_KEY, cwd=str(tmp_path), **more)
 
 
 def test_openai_names_the_model_the_server_answered_with_on_its_usage_chunk() -> None:

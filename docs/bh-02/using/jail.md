@@ -12,9 +12,9 @@ In short; the policy itself, path by path and why, is the
 | | Inside the jail |
 |---|---|
 | **Writes** | the project, a scratch directory of the jail's own, and the project's auto memory directory. Not, even in the project: bh-02's layer files, its own code, the Python it runs on (and the directories of the links that lead to it, uv's Python directory when your project is the home directory) and the paths it imports from, its config directory, `.git/hooks`, `.git/config`, `.claude`, shell rc files, editor settings, and other files that could run code later. `CLAUDE.md` and `AGENTS.md` may be edited. |
-| **Reads** | everything but credentials: `~/.ssh`, `~/.aws` and the like, bh-02's `local.env`, and the sessions' state. On Linux, only the system, the Python interpreter, the project and its auto memory directory are there at all; your home directory is not. |
+| **Reads** | everything but credentials: `~/.ssh`, `~/.aws` and the like, and the sessions' state. On Linux, only the system, the Python interpreter, the project and its auto memory directory are there at all; your home directory is not. |
 | **Network** | none |
-| **Environment** | scrubbed to a short list of variables |
+| **Environment** | scrubbed to a short list of variables: a provider key in your shell is not among them unless you list it |
 
 One thing bh-02 does writes outside the jail: the `memory` tool, which saves the model's auto
 memories, runs in bh-02's own process, not in the jail. It writes only in the auto memory
@@ -25,7 +25,7 @@ asking, jailed or under `--no-jail`. Every other tool declared to run in bh-02's
 
 Programs the model's code starts run inside the same jail. brig's host process, which starts the
 Python process from outside the jail, keeps the environment bh-02 was launched with (brig's
-launcher passes it on, and bh-02 never puts its own token there); a jailed input can't read it.
+launcher passes it on, so a key or token your shell exports is there, and bh-02 never adds one of its own); a jailed input can't read it.
 
 The jail is brig's. On macOS it is Seatbelt; on Linux it is bubblewrap, which must be installed
 (the `bubblewrap` package). Without it, bh-02 tells you to install it or run with `--no-jail`.
@@ -65,9 +65,14 @@ put to you the same way before each loads. The `memory` tool is not asked about,
 
 !!! warning
     An input you approve can do anything you can. Its environment has no `CLAUDE*` or
-    `ANTHROPIC_*` variables, but it could still open `local.env` itself, rewrite bh-02's config
-    directory or its own code, or read the environment of a process you own (the Claude Code
-    process's, which holds the token, among them). Read an input before you answer `y`.
+    `ANTHROPIC_*` variables, but **every other variable of bh-02's environment reaches the model's
+    code, your providers' keys among them**: an `OPENAI_API_KEY` or `OPENROUTER_API_KEY` that a
+    model's `key = { env = ... }` reads, exported in the shell that started bh-02, is in the
+    environment of the Python process, and the code can read it, print it or send it. Only the
+    jail keeps a key out. An input could also rewrite bh-02's config directory or its own code, or
+    read the environment of a process you own (the Claude Code process's, which holds the
+    subscription token, among them). Read an input before you answer `y`, and don't use
+    `--no-jail` with a key you can't afford to expose.
 
 A session keeps the jail it started with: `--resume` refuses `--no-jail`.
 
@@ -87,10 +92,40 @@ config = { allow = ["CLAUDE.md", "AGENTS.md", ".git/config"] }
 | `allow` | files taken off the list the jail protects. It replaces the default, `["CLAUDE.md", "AGENTS.md"]`, so name every file it should let through. |
 | `write` | where inputs may write, `["."]` (the project) by default |
 | `deny` | more paths inputs may not write |
-| `hide` | files inputs may not read, `["local.env"]` by default |
-| `env` | the environment variables that survive the scrub |
+| `hide` | files inside the project that inputs may not read, none by default |
+| `env` | the environment variables that survive the scrub; it replaces the list below, baseline included |
 
-A `config` in a layer replaces the row's whole config, so give every setting you want.
+A `config` in a layer replaces the row's whole config, so give every setting you want. The
+exception is `env`: a layer that leaves it out takes the list from your `runner.toml` (below).
+
+## Which environment variables the model's code sees
+
+The jail starts the model's code with an empty environment and adds back `PATH`, `HOME`, `LANG`,
+`LC_ALL` and `TERM`, and nothing else. A provider key you exported for a model's
+`key = { env = ... }` is in bh-02's own environment and **not** in the code's. To let more through
+(a `GITHUB_TOKEN` for `gh`, an `AWS_PROFILE`), list the names, never values, in
+`~/.config/bh-02/runner.toml` (`$XDG_CONFIG_HOME/bh-02/runner.toml`):
+
+```toml
+env = ["GITHUB_TOKEN", "AWS_PROFILE"]
+```
+
+- The names are added to the five above, for every session and with no `--patch`.
+- A layer whose `runner` config sets `env` replaces this list (and the five: a layer's `env` is the
+  whole list), and the jail says so when it starts. A layer that leaves `env` out takes the file's.
+- The file is read like the models file: one in the project, or reached through a link into it, is
+  not read, because the model's code could have written it. The jail then passes the five alone and
+  tells you where to put it (outside the project; if you run bh-02 from your home directory, set
+  `XDG_CONFIG_HOME` somewhere else). No file leaves the five.
+- A file that is not TOML, has a key other than `env`, or lists something that is not a variable
+  name is refused with a message saying what to fix, and bh-02 does not start the runner on it.
+- A name that a `key = { env = ... }` in your models file reads is refused at startup, naming the
+  variable, the endpoint and both files: the jail would hand that key to the model's code. Remove
+  it from `runner.toml` (or the layer), or change the key. (The models file checked is the default
+  one; a model row `models` setting naming another is not.)
+- `--no-jail` ignores the file: the unconfined runner passes bh-02's environment, as above.
+
+The model's code cannot write the file: bh-02's config directory is not writable in the jail.
 
 ## On Linux
 
@@ -105,20 +140,21 @@ holds the new file, and says why the model's variables are gone. A program an in
 can get a write in during the few milliseconds that takes, so stop the reply (or `/release`)
 before you edit a layer file while one runs.
 
-### Adding your credential mid-session
+### Creating a path the jail holds: `/release`
 
-Where bh-02 looks for `local.env` and finds none, the jail holds the path, so you can't create the
-file while the Python process runs. To add it:
+While the Python process runs, the jail holds the empty directories above where nothing was, so you
+can't create a file at one of those names (an `.envrc`, say) from outside. To create one:
 
 1. Type `/release`. Each row stops what it runs in the jail (the Python process, and the
-   extensions' process if one runs) until the next input, and it says which paths that freed.
-2. Create `local.env` ([Get started](../get-started.md#the-credential)).
-3. Send your message. The model row reads the file at its next step, and the next input starts a
-   new jail that hides it again.
+   extensions' process if one runs) until the next input, and the directories go.
+2. Create the file.
+3. Send your message. The next input starts a new jail, which holds what is still absent again and
+   the file you made read-only.
 
 Anything that starts in the jail before you create the file holds the path again (an input, or
 an extension you edit): `/release` again. `/restart python` won't do here: it starts the Python
-process and its jail again at once.
+process and its jail again at once. `/release` says so when a program still runs because its row
+did not stop it.
 
 [The jail and approval](../how-it-works/jail-and-approval.md) explains how the jail and the
 approval rule fit together, and the runner plugin's README has every detail:

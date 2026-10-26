@@ -183,7 +183,7 @@ async def test_the_grades_row_shows_each_start_s_grades_and_tells_a_new_notice_o
         remove = effects[1].args[0]()
         assert frame.fields() == {"jail": "unjailed fs_write ✗"}  # before any start: the runner's
         stop_watching = effects[2].args[0](*effects[2].args[1:])
-        held = "The jail keeps inputs from reading /w/local.env"
+        held = "The jail keeps inputs from reading /w/private.txt"
         runner.started(_Start(_CONFINED, held))
         assert frame.fields() == {"jail": render.jail_forms(True, _CONFINED)[0]}
         assert frame.fields()["jail"] == "jailed fs_write ✓ network ✓"

@@ -11,7 +11,6 @@ from cordis.composition import format_layer
 from cordis.loader import Loader as _Mounting
 from cordis.loader import read_layer
 from models_cordis_plugin.catalog import Catalog, Entries
-from models_cordis_plugin.local_env import Credentials
 from models_cordis_plugin.named import ModelConfig
 from models_cordis_plugin.providers import opened
 from models_cordis_plugin.switch import Models, Queue, Reloads, Switch, SwitchConfig
@@ -29,7 +28,7 @@ class _Registrar(Protocol):
 
 
 @component(provides=("model",))
-async def model(*, config: ModelConfig, host: Credentials) -> Effects:
+async def model(*, config: ModelConfig) -> Effects:
     """Fills a `model` row: `use = "models:model"`. The model `config.default` names, on its
     provider, entered for as long as the row is up (`/model` changes `default`, which reloads
     this row alone and whatever depends on `model`).
@@ -38,11 +37,8 @@ async def model(*, config: ModelConfig, host: Credentials) -> Effects:
     tools; a key is read per request), so a composition without a credential comes up, and
     each step says what is missing. A model that can't be used (an unknown name, a table
     with a problem) binds too, and each step says what is wrong with it.
-
-    The credential file is looked for where `host` says (`credentials`, nearest first,
-    every one a secret the jail keeps from an input), unless the config names an `env_file`.
     """
-    value = yield enter(opened(config, host.credentials))
+    value = yield enter(opened(config))
     yield bind("model", value)
 
 
@@ -54,12 +50,12 @@ class CatalogConfig:
 
 
 @component(provides=("models",))
-async def catalog(*, loader: Entries, host: Credentials, config: CatalogConfig) -> Effects:
+async def catalog(*, loader: Entries, config: CatalogConfig) -> Effects:
     """Fills a `models` row: `use = "models:catalog"`. The models there are and which one the
     model row names, read fresh from the layers and the models file each time; it depends on
-    the loader and `host` (where a key's `local.env` is looked for), neither of which a
-    `/model` replaces, so a switch never reloads it, nor `/model` itself, nor the status bar."""
-    yield bind("models", Catalog(loader, config.model_row, host.credentials))
+    the loader, which a `/model` does not replace, so a switch never reloads it, nor `/model` itself,
+    nor the status bar."""
+    yield bind("models", Catalog(loader, config.model_row))
 
 
 @component

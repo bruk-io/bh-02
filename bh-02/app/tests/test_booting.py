@@ -66,9 +66,11 @@ def test_every_shipped_layer_names_a_plugin_component_for_every_row() -> None:
     assert rows["grades"].use == "tui:grades"
     assert resolve(rows["grades"].use or "").inject == {"runner", "approval", "frame", "output"}
     assert "runner" not in resolve(rows["status"].use or "").inject
-    # `!COMMAND` is a layer's row, claiming its prefix in `commands`: no extension can
+    # `!COMMAND` is a layer's row, claiming its prefix in `commands`: no extension can. It reads
+    # `host` (never reloaded: the shell mounts it once) for the variables the models file's keys
+    # read, which its commands' environment leaves out
     assert rows["shell-command"].use == "commands:shell_command"
-    assert resolve(rows["shell-command"].use or "").inject == {"commands"}
+    assert resolve(rows["shell-command"].use or "").inject == {"commands", "host"}
     # the model row names its model by `default`, which is None until a layer says one (then the
     # models file's `default`, else none); the status bar asks the models row which, so it needs
     # no default of its own

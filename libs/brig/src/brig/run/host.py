@@ -473,6 +473,8 @@ def _source_fd() -> int:
 
     Raises:
         OSError: no memory file could be made (not Linux, or out of descriptors)."""
+    if sys.platform != "linux":
+        raise OSError("an anonymous memory file needs Linux (os.memfd_create)")
     fd = os.memfd_create("brig-supervisor")
     try:
         data = memoryview(SUPERVISOR_SOURCE.encode())

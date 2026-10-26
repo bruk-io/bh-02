@@ -53,7 +53,7 @@ extensions' own process. Two components can fill it:
 
 The runner starts a program, and the row that started it is the one that stops it. On
 `/release` (`runner:release`) the runner asks each such row to stop its own (the python row its
-Python process, the extensions row its process), then lets go of what its jails hold on the
+Python process, the extensions row its process), then lets go of the placeholders its jails hold on the
 host. It never stops a row's program itself: if one still runs, `/release` says so. The next
 start ends the release, whoever starts: the next input, or an extension that changed.
 
@@ -76,11 +76,13 @@ row) shows those grades. A jail that enforced less than asked would say so.
 
 ## The credential never gets in
 
-bh-02's `local.env` holds the Claude token. The jail denies reading it wherever bh-02 looks for
-it, and denies creating one there, so an input can't plant a credential for the next launch to
-read. It also hides the sessions' state, where Claude Code keeps its own config. The Python
-process's environment is scrubbed: without the jail, `runner:unconfined` still drops every
-`CLAUDE*` and `ANTHROPIC_*` variable. The models plugin's README has the credential's rules in
+bh-02 reads no credential file: a model's key and the Claude token come from the environment
+bh-02 was started with, through the endpoint's `key`, and the token goes only to the Claude Code CLI
+it starts. The jail hides the sessions' state, where Claude Code keeps its own config. The Python
+process's environment is scrubbed to an allow-list, so a provider key exported in your shell is not
+in it. Without the jail, `runner:unconfined` drops only every `CLAUDE*` and `ANTHROPIC_*` variable
+and tmux's, and passes the rest: a provider key then reaches the model's code
+([the jail](../using/jail.md#without-the-jail-no-jail)). The models plugin's README has the credential's rules in
 full: [models-cordis-plugin](../reference/plugins/models.md#the-credential).
 
 ## When the jail ends

@@ -12,8 +12,8 @@ from pathlib import Path
 from typing import Any
 
 from models_cordis_plugin import Named
-from models_cordis_plugin.claude_code import TOKEN_VARIABLE, ClaudeCodeConfig, ClaudeCodeModel
-from models_cordis_plugin.claude_code.testing import FakeClaudeCode, FakeStep
+from models_cordis_plugin.claude_code import ClaudeCodeConfig, ClaudeCodeModel
+from models_cordis_plugin.claude_code.testing import FAKE_TOKEN_KEY, FakeClaudeCode, FakeStep
 from models_cordis_plugin.openai import OpenAIModel
 from models_cordis_plugin.openai.testing import StubServer
 
@@ -40,8 +40,6 @@ def _entry(chunks: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
 
 
 async def test_claude_s_steps_reach_an_openai_model_rebuilt_as_its_own_messages(tmp_path: Path) -> None:
-    env = tmp_path / "local.env"
-    env.write_text(f"{TOKEN_VARIABLE}=sentinel-not-a-real-token\n")
     script = [
         FakeStep(
             [
@@ -52,7 +50,7 @@ async def test_claude_s_steps_reach_an_openai_model_rebuilt_as_its_own_messages(
         ),
         FakeStep([{"type": "text", "text": "It is 2."}]),
     ]
-    config = ClaudeCodeConfig(state=str(tmp_path / "state"), env_file=str(env), cwd=str(tmp_path))
+    config = ClaudeCodeConfig(state=str(tmp_path / "state"), token=FAKE_TOKEN_KEY, cwd=str(tmp_path))
     claude = ClaudeCodeModel(config, lambda options: FakeClaudeCode(options, script))
     asked = [{"role": "user", "content": "what is 1+1"}]
     first = [dict(c) async for c in claude.complete([_SYSTEM, *asked], [_SPEC])]

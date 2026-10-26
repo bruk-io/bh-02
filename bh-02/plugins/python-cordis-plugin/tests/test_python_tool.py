@@ -222,10 +222,10 @@ async def test_a_startup_file_that_ends_the_repl_keeps_what_the_opening_had_to_t
     async with _process(jail, PythonProcessConfig(root=str(tmp_path))) as k:
         assert await k.run("kept = MARK") == f"({person} ran first: no public functions)"
         _person_s("import os\nos._exit(3)\n")
-        await jail.trip("the host undid the jail's hold on /w/local.env; the next one holds it again")
+        await jail.trip("the host undid the jail's hold on /w/private.txt; the next one holds it again")
         ended = await k.run("kept")
     assert ended == (
-        "(the REPL was started again, because the host undid the jail's hold on /w/local.env; the "
+        "(the REPL was started again, because the host undid the jail's hold on /w/private.txt; the "
         "next one holds it again; what earlier inputs defined is gone)\n"
         f"the REPL's process ended as {person} ran, before this input, so this input did not run; "
         f"a new one starts with the next, without {person} (`/restart python` runs it again)"
@@ -240,14 +240,14 @@ async def test_a_startup_file_stopped_part_way_keeps_what_the_opening_had_to_tel
     async with _process(jail, PythonProcessConfig(root=str(tmp_path))) as k:
         await k.run("kept = MARK")
         _person_s("import time\ntime.sleep(60)\n")
-        await jail.trip("the host undid the jail's hold on /w/local.env")
+        await jail.trip("the host undid the jail's hold on /w/private.txt")
         hanging = asyncio.create_task(k.run("kept"))
         await asyncio.sleep(0.5)
         hanging.cancel()
         await asyncio.gather(hanging, return_exceptions=True)
         told = await asyncio.wait_for(k.run("'kept' in globals()"), 5)
     assert told == (
-        "(the REPL was started again, because the host undid the jail's hold on /w/local.env; what "
+        "(the REPL was started again, because the host undid the jail's hold on /w/private.txt; what "
         f"earlier inputs defined is gone. {person} was stopped as it ran, so what it defines may be "
         "missing, and no startup file after it ran)\nFalse"
     ), told
@@ -1756,7 +1756,7 @@ class Holding(Unjailed):
 
     async def release(self) -> str:
         self.released += 1
-        return "Nothing holds /w/local.env until the next input."
+        return "Nothing holds /w/private.txt until the next input."
 
 
 async def test_release_ends_the_worker_now_and_the_next_input_starts_another() -> None:
@@ -1769,7 +1769,7 @@ async def test_release_ends_the_worker_now_and_the_next_input_starts_another() -
         await k.run("kept = 1")
         said = await runner.release()
         assert said.startswith("The Python process is stopped")
-        assert said.endswith("Nothing holds /w/local.env until the next input.")
+        assert said.endswith("Nothing holds /w/private.txt until the next input.")
         assert runner.released()
         again = await k.run("'kept' in globals()")
         assert again.startswith("(the REPL was started again") and again.endswith("False")

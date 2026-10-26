@@ -10,9 +10,10 @@ The SDK always merges bh-02's environment into the child's; its options can over
 not remove one. So this is also where every `ANTHROPIC_*` (an API key, a base URL) and every
 `CLAUDE_*` (`CLAUDE_CODE_USE_BEDROCK`, `_VERTEX`, `_FOUNDRY`, `CLAUDE_CODE_MAX_OUTPUT_TOKENS`, ...)
 is dropped but the few the SDK and bh-02's options set, so a shell's settings can't route, bill or
-limit the session. The kept ones are the credential's variable (`CLAUDE_CODE_OAUTH_TOKEN`: the
-subscription token, or empty through a gateway), `CLAUDE_CONFIG_DIR`, and what the SDK sets for
-itself. The rest (PATH, HOME, locale, proxies) passes through.
+limit the session. The kept ones are the two credential variables (`CLAUDE_CODE_OAUTH_TOKEN`, the
+subscription token, and `ANTHROPIC_API_KEY`, an API key: bh-02 sets both on every start and one is
+always empty, so a shell's own value of either is overridden before it gets here),
+`CLAUDE_CONFIG_DIR`, and what the SDK sets for itself. The rest (PATH, HOME, locale, proxies) passes through.
 """
 
 import importlib.util
@@ -23,7 +24,7 @@ from pathlib import Path
 from sys import argv
 from typing import Final
 
-from models_cordis_plugin.claude_code.credential import TOKEN_VARIABLE
+from models_cordis_plugin.claude_code.credential import API_KEY_VARIABLE, TOKEN_VARIABLE
 
 __all__ = ["main", "scrubbed"]
 
@@ -31,7 +32,13 @@ _DROPPED: Final = ("ANTHROPIC_", "CLAUDE_")
 # The `CLAUDE_*` the child is started with on purpose: the options' credential and state
 # directory (credential.py), and what the SDK itself sets (its entry point, its version).
 _KEPT: Final = frozenset(
-    {TOKEN_VARIABLE, "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_AGENT_SDK_VERSION"}
+    {
+        TOKEN_VARIABLE,
+        API_KEY_VARIABLE,
+        "CLAUDE_CONFIG_DIR",
+        "CLAUDE_CODE_ENTRYPOINT",
+        "CLAUDE_AGENT_SDK_VERSION",
+    }
 )
 
 

@@ -32,7 +32,7 @@ follows no link there (`_opened`, `_read`, through `host_paths`): the directory 
 the project's root one name at a time, with `O_NOFOLLOW`, and a file is read only if the
 descriptor it was opened as says it is a regular file with one name (`watch.refusal`), of at
 most 256 KiB. A link, or a hard link, could otherwise hand
-the model a file the jail hides (`local.env`), as an extension's source, or as the line of its
+the model a file the jail hides (`private.txt`), as an extension's source, or as the line of its
 SyntaxError in status.json. status.json is written through the same descriptor, as a new file
 renamed over the old, so a link there leads no write elsewhere either.
 """
