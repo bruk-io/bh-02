@@ -3,10 +3,10 @@ id: TASK-0171
 title: >-
   A claude-code endpoint can run on an Anthropic API key, not only a
   subscription token
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-25 17:52'
-updated_date: '2026-10-26 00:56'
+updated_date: '2026-10-26 02:06'
 labels: []
 dependencies:
   - TASK-0169
@@ -50,7 +50,19 @@ A `claude-code` endpoint without a `base_url` runs on a subscription token (`CLA
 <!-- AC:BEGIN -->
 - [ ] #1 A `claude-code` endpoint without a `base_url` whose `key` is an Anthropic API key answers a message through the CLI, with no subscription token set.
 - [ ] #2 The API key is in the CLI child's explicit environment only; a test shows it is absent from `os.environ`, the Python worker's environment, the transcript and any error message.
-- [ ] #3 With both a token and an API key available, the endpoint uses the one its configuration says, and the other is blanked in the child's environment.
-- [ ] #4 A missing or refused key is a message that names the endpoint and what to write in its `key`, and `/model` with another name gets the person going again.
+- [x] #3 With both a token and an API key available, the endpoint uses the one its configuration says, and the other is blanked in the child's environment.
+- [x] #4 A missing or refused key is a message that names the endpoint and what to write in its `key`, and `/model` with another name gets the person going again.
 - [ ] #5 The project rule about `ANTHROPIC_API_KEY` is reworded to say where it may and may not appear, and docs/bh-02/using/models.md, the models plugin README and GLOSSARY.md describe the endpoint's API-key form, with scripts/check passing.
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Implemented directly (no spike, no separate provider) on task-0169-keys. A `claude-code` endpoint without a `base_url` takes `auth = "subscription"` (default) or `"api-key"`; `key` is the credential either way. `credential.child_env(secret, config_dir, api_key=...)` always sets both `CLAUDE_CODE_OAUTH_TOKEN` and `ANTHROPIC_API_KEY`, the one not chosen empty; `detach._KEPT` now keeps `ANTHROPIC_API_KEY` (it dropped every ANTHROPIC_* before, so an API key in the child's env would have been stripped). `named._key_problem` refuses an unknown `auth`, `auth` on a gateway, `api-key` without a `key`, and `ttl_ms` with it.
+
+Evidence: `scripts/check bh-02/plugins/models-cordis-plugin` all steps ok (398 passed, 2 skipped); `uv run mypy` clean. New tests: child env for both ways and the gateway, a shell's exported values overridden in all three, the provider handing the key to the CLI as ANTHROPIC_API_KEY with the token empty and os.environ unchanged, a missing key naming the variable, and the validation table.
+
+NOT verified: a real Claude Code CLI with a real API key (criterion 1), and how the real CLI behaves with the unchosen variable set empty. Both need the owner's key: set `auth = "api-key"` and `key = { env = "ANTHROPIC_API_KEY" }` on a claude-code endpoint and send one message. Criterion 2 is partly shown (os.environ and the error text are tested; the transcript and the Python worker's environment are not tested directly: the worker's is the runner's allow-list). Criterion 5 waits on a full `scripts/check`.
+
+The rule about ANTHROPIC_API_KEY is reworded in CLAUDE.md, bh-02/CLAUDE.md and the models README. `.claude/agents/bh-02-worker.md` still says never set ANTHROPIC_API_KEY and mentions local.env; it is the owner's configuration and was left alone.
+<!-- SECTION:NOTES:END -->
