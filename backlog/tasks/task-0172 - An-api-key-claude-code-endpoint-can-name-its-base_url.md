@@ -1,13 +1,17 @@
 ---
 id: TASK-0172
 title: An api-key claude-code endpoint can name its base_url
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-28T23:29:00Z'
-labels: []
+updated_date: '2026-10-28T23:29:00Z'
+labels:
+  - size-2
+  - models
 dependencies:
   - TASK-0171
 priority: medium
+type: task
 ---
 
 ## Description
