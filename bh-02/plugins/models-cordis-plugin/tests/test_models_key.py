@@ -22,7 +22,7 @@ from models_cordis_plugin import (
     opened,
     problem,
 )
-from models_cordis_plugin.claude_code import TOKEN_VARIABLE
+from models_cordis_plugin.claude_code import API_KEY_VARIABLE, TOKEN_VARIABLE
 from models_cordis_plugin.claude_code.testing import FakeClaudeCode, FakeStep
 from models_cordis_plugin.key import KeySpec
 from models_cordis_plugin.openai import OpenAIModel, Reply, headers_for
@@ -235,6 +235,39 @@ async def test_a_gateway_hands_its_command_and_ttl_to_the_claude_code_cli(
     settings = json.loads(fake.options.settings)
     assert settings["apiKeyHelper"] == helper
     assert settings["env"].get("CLAUDE_CODE_API_KEY_HELPER_TTL_MS") == ttl
+    assert fake.options.env[TOKEN_VARIABLE] == ""
+
+
+async def test_an_api_key_endpoint_s_base_url_reaches_the_cli_with_the_key_bh_02_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`auth = "api-key"` with a `base_url`: the CLI's settings layer names the URL and no helper, and
+    the key bh-02 read goes to the CLI's own environment as ANTHROPIC_API_KEY, the token's empty."""
+    models = tmp_path / "models.toml"
+    models.write_text(
+        '[api]\nprovider = "claude-code"\nauth = "api-key"\nbase_url = "https://api.anthropic.com"\n'
+        'key = { env = "BH_TEST_API_KEY" }\nexperimental_betas = false\n'
+        '[api.models.x]\nid = "claude-sonnet-5-5"\n'
+    )
+    monkeypatch.setenv("BH_TEST_API_KEY", "sk-ant-stand-in")
+    started: list[FakeClaudeCode] = []
+
+    def open_(options: Any) -> FakeClaudeCode:
+        started.append(FakeClaudeCode(options, [FakeStep([{"type": "text", "text": "Hello"}])]))
+        return started[-1]
+
+    monkeypatch.setattr("models_cordis_plugin.claude_code.provider.ClaudeSDKClient", open_)
+    config = ModelConfig(default="api/x", models=str(models), state=str(tmp_path / "state"))
+    async with opened(config) as model:
+        [chunk async for chunk in model.complete([{"role": "user", "content": "hi"}], [])]
+    (fake,) = started
+    assert json.loads(fake.options.settings) == {
+        "env": {
+            "ANTHROPIC_BASE_URL": "https://api.anthropic.com",
+            "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS": "1",
+        }
+    }
+    assert fake.options.env[API_KEY_VARIABLE] == "sk-ant-stand-in"
     assert fake.options.env[TOKEN_VARIABLE] == ""
 
 

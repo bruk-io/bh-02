@@ -84,6 +84,7 @@ from models_cordis_plugin.claude_code.credential import (
     TOKEN_VARIABLE,
     ChildEnv,
     Gateway,
+    api_settings,
     child_env,
     gateway_env,
     gateway_settings,
@@ -182,9 +183,11 @@ class ClaudeCodeConfig:
     is told it works in (bh-02's working directory when unset). `gateway`: where Claude Code sends
     its requests and how it gets their key, instead of the subscription token (None: the
     subscription). `api_key`: the `token` is an Anthropic API key, not a subscription token (the
-    endpoint's `auth`); the CLI is given it as `ANTHROPIC_API_KEY`. `name`: the named model
-    (`ENDPOINT/MODEL`) the id belongs to, which the model's `settings` name (empty when built with
-    none: they then name the id)."""
+    endpoint's `auth`); the CLI is given it as `ANTHROPIC_API_KEY`. `base_url`: where the CLI sends
+    an API key's requests (None: Anthropic's own default), and `experimental_betas` whether it may send
+    Anthropic's experimental beta headers there; neither is read through a gateway, which has its
+    own. `name`: the named model (`ENDPOINT/MODEL`) the id belongs to, which the model's `settings`
+    name (empty when built with none: they then name the id)."""
 
     model: str = "sonnet"
     state: str | None = None
@@ -193,6 +196,8 @@ class ClaudeCodeConfig:
     gateway: Gateway | None = None
     name: str = ""
     api_key: bool = False
+    base_url: str | None = None
+    experimental_betas: bool = True
 
 
 class Session(Protocol):
@@ -439,6 +444,16 @@ class ClaudeCodeModel:
             raise ClaudeCodeError("authentication_failed", _no_token(spec))
         return env
 
+    def _settings(self) -> str | None:
+        """The settings layer of bh-02's own the CLI is given: a gateway's, an API key endpoint's
+        `base_url`, or none."""
+        config = self._config
+        if config.gateway is not None:
+            return gateway_settings(config.gateway)
+        if config.base_url is not None:
+            return api_settings(config.base_url, experimental_betas=config.experimental_betas)
+        return None
+
     async def _start(self, system: str, specs: list[dict[str, Any]], resume: str | None) -> None:
         """Start Claude Code for this conversation: `resume` is the session to continue."""
         root = self._dir()
@@ -459,7 +474,7 @@ class ClaudeCodeModel:
             system_prompt=_carried(system, specs),
             tools=[],  # no built-in tool
             setting_sources=[],  # no settings file, no CLAUDE.md
-            settings=None if gateway is None else gateway_settings(gateway),  # bh-02's layer alone
+            settings=self._settings(),  # bh-02's layer alone
             strict_mcp_config=True,  # only the server given here: the account's connectors stay out
             include_partial_messages=True,  # the raw stream events, which `Step` folds
             max_turns=_MAX_TURNS,

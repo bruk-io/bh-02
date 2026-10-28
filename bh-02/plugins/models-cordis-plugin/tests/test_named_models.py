@@ -164,7 +164,34 @@ _GATE: dict[str, Any] = {
             {"provider": "claude-code", "key": {"env": "K"}, "auth": "oauth", "models": _X},
             'auth must be "subscription"',
         ),
-        ({**_GATE, "auth": "api-key"}, "auth is for an endpoint that reaches Anthropic itself"),
+        (
+            {**_GATE, "auth": "subscription"},
+            "the subscription token goes to Anthropic alone, so a subscription endpoint takes no base_url",
+        ),
+        (
+            {
+                "provider": "claude-code",
+                "auth": "subscription",
+                "key": {"env": "K"},
+                "experimental_betas": False,
+                "models": _X,
+            },
+            "experimental_betas is for an endpoint with a base_url",
+        ),
+        (
+            {
+                "provider": "claude-code",
+                "auth": "api-key",
+                "key": {"env": "K"},
+                "experimental_betas": False,
+                "models": _X,
+            },
+            "experimental_betas is for an endpoint with a base_url",
+        ),
+        (
+            {**_GATE, "auth": "api-key", "key": {"cmd": "c", "ttl_ms": 5}},
+            "key.ttl_ms is for a gateway's key",
+        ),
         (
             {"provider": "claude-code", "auth": "api-key", "models": _X},
             'auth = "api-key" needs a key to read it from',
@@ -455,3 +482,19 @@ def test_a_claude_code_endpoint_says_explicitly_whether_its_key_is_a_subscriptio
     table = {"provider": "claude-code", "auth": auth, "key": {"env": "ANTHROPIC_API_KEY"}, "models": _X}
     (named,) = [m for m in combined({"m": table}, "/c/models.toml", {}) if m.name == "m"]
     assert problem(named) is None and named.table["auth"] == auth
+
+
+@pytest.mark.parametrize("key", [{"env": "BH02_ANTHROPIC_API_KEY"}, {"cmd": "c"}, {"op": "op://v/i/f"}])
+def test_an_api_key_endpoint_may_name_its_base_url_with_a_key_from_any_source(key: dict[str, str]) -> None:
+    """An API key endpoint's `base_url` is where the CLI sends the key bh-02 reads (Anthropic's API,
+    named explicitly, or one compatible with it), so an `env` key is fine there, unlike a gateway's."""
+    table = {
+        "provider": "claude-code",
+        "auth": "api-key",
+        "base_url": "https://api.anthropic.com",
+        "key": key,
+        "experimental_betas": False,
+        "models": _X,
+    }
+    (named,) = [m for m in combined({"m": table}, "/c/models.toml", {}) if m.name == "m"]
+    assert problem(named) is None

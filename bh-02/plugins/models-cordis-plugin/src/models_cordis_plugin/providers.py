@@ -139,15 +139,19 @@ def resolved(config: ModelConfig) -> Named:
 def _provided(named: Named, config: ModelConfig) -> Any:
     """The provider's value for `named`: not entered yet."""
     if named.provider == CLAUDE_CODE:
+        api_key = named.table.get("auth") == "api-key"
+        gateway = None if api_key else _gateway(named.table)
         return ClaudeCodeModel(
             ClaudeCodeConfig(
                 model=named.id,
                 name=named.name,
                 state=config.state,
                 cwd=config.cwd,
-                token=None if "base_url" in named.table else key_spec(named.table.get("key")),
-                gateway=_gateway(named.table),
-                api_key=named.table.get("auth") == "api-key",
+                token=None if gateway is not None else key_spec(named.table.get("key")),
+                gateway=gateway,
+                api_key=api_key,
+                base_url=named.table.get("base_url") if api_key else None,
+                experimental_betas=named.table.get("experimental_betas") is not False,
             )
         )
     if named.provider == OPENAI:
@@ -176,7 +180,7 @@ def _provided(named: Named, config: ModelConfig) -> Any:
 
 def _gateway(table: Mapping[str, Any]) -> Gateway | None:
     """The gateway a claude-code model's table names (`base_url` and a `key` of `cmd` or `op`, which
-    `problem` has checked come together), or None: the subscription."""
+    `problem` has checked come together, and no `auth`), or None: the subscription or an API key."""
     url, spec = table.get("base_url"), key_spec(table.get("key"))
     if not isinstance(url, str) or spec is None or (command := spec.command) is None:
         return None
