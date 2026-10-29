@@ -1,11 +1,11 @@
 ---
-id: DRAFT-0019
+id: TASK-0173
 title: Models reuse what they keep in the python REPL
-status: Draft
+status: To Do
 assignee:
   - '@bruk'
 created_date: '2026-10-29T01:43:00Z'
-updated_date: '2026-10-29T01:44:00Z'
+updated_date: '2026-10-29T02:34:00Z'
 labels:
   - size-8
   - python
@@ -51,3 +51,9 @@ Candidate split, in order (for sizing):
 - [ ] #5 Must not break: no value's repr reaches the model unasked; a variable is described by type, size and signature only
 - [ ] #6 Must not break: an input's output stays within the 20,000-character cap, and a namespace line has its own cap
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Accepted by @bruk, 2026-10-29. Spec skipped by the owner: one owner, one repo, and the intent's criteria with the split below state the requirements. Split into TASK-0173.01 to .04; .03 and .04 wait on .01 because each is judged against its baseline.
+<!-- SECTION:NOTES:END -->
