@@ -5,7 +5,10 @@ status: Draft
 assignee:
   - '@bruk'
 created_date: '2026-10-29T01:43:00Z'
-labels: []
+updated_date: '2026-10-29T01:44:00Z'
+labels:
+  - size-8
+  - python
 dependencies: []
 type: intent
 ---
