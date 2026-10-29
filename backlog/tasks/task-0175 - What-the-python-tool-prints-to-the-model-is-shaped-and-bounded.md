@@ -1,10 +1,11 @@
 ---
-id: DRAFT-0019
+id: TASK-0175
 title: What the python tool prints to the model is shaped and bounded
-status: Draft
+status: To Do
 assignee:
   - '@bruk'
 created_date: '2026-10-29T13:37:00Z'
+updated_date: '2026-10-29T13:52:00Z'
 labels:
   - size-8
   - python
@@ -52,3 +53,9 @@ Candidate split, in order (for sizing):
 - [ ] #6 Must not break: the full output is still saved when it is cut, and a line stays under the host's 1 MiB read limit
 - [ ] #7 Must not break: the reuse_miss count (TASK-0173.01) does not rise because of a smaller cap
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Accepted by @bruk, 2026-10-29. Spec skipped: one owner, one plugin; the criteria and the split state the requirements. Split into TASK-0175.01 to .05. .02 to .05 change worker.py, as TASK-0173.04 will: run them one at a time, after TASK-0173.02 (landed).
+<!-- SECTION:NOTES:END -->
