@@ -6,6 +6,7 @@ assignee:
   - '@bruk'
 created_date: '2026-10-29T13:37:00Z'
 labels:
+  - size-8
   - python
   - codeact
   - context
@@ -34,11 +35,11 @@ Candidate split, in order (for sizing):
 - scripts/model-friction (cut_output) and TASK-0174's cache-efficiency script, which see the effect.
 
 ## Open questions
-- [ ] What is the right default cap? Too small, and the model reruns things, which works against TASK-0173 (its reuse_miss count is the check).
-- [ ] Should the model control the cap per input (a helper, or a comment directive), or is the saved file enough?
-- [ ] Does cleaning ever lose something the model needs (colour that marks a failure, a redraw that matters)?
-- [ ] Is stderr kept apart in the transcript record too, or only in what the model reads?
-- [ ] Out of scope unless the owner says otherwise: what the model may see (secrets in a project file such as .env) is redaction or an access rule on reads, not output shaping.
+- [ ] What is the right default cap? Too small, and the model reruns things, which works against TASK-0173 (its reuse_miss count is the check). Carried forward: item 5 sets it from item 1's distribution, checked against the reuse_miss count; nothing before item 5 depends on it.
+- [ ] Should the model control the cap per input (a helper, or a comment directive), or is the saved file enough? Carried forward: decided in item 5's plan; items 2 to 4 work either way.
+- [ ] Does cleaning ever lose something the model needs (colour that marks a failure, a redraw that matters)? Carried forward: item 3 answers it in its plan, from what item 1 finds in real outputs.
+- [ ] Is stderr kept apart in the transcript record too, or only in what the model reads? Carried forward: item 4's plan; only item 4 depends on it.
+- [ ] Out of scope unless the owner says otherwise: what the model may see (secrets in a project file such as .env) is redaction or an access rule on reads, not output shaping. Carried forward: out of scope for this intent; a separate intent if the owner wants it.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
