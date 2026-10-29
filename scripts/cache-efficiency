@@ -1,0 +1,520 @@
+#!/usr/bin/env -S uv run --quiet python
+"""How well bh-02's requests hit the prompt cache, and what broke it, from real sessions' transcripts.
+
+Reads every session's transcripts under bh-02's state directory (`$XDG_STATE_HOME/bh-02/sessions`,
+else `~/.local/state/bh-02/sessions`, or `--sessions DIR`): each assistant entry's `step` record
+carries the step's `usage` (CONTRACTS.md: step record, usage total), whose `input_tokens` is the
+whole of what the model read (uncached, cache read and cache written together). It reports, per
+session and then per model: the steps, the input, cache read and cache written tokens, the hit rate
+(cache read over input) and the write share (cache written over input), both weighted by tokens,
+the cache breaks by class, the cost, and the latest breaks as examples. A sub-agent's transcripts
+(`agents/NAME/`) are reported apart from the session's own, in the session list and in the model list.
+
+    scripts/cache-efficiency                  # every session here
+    scripts/cache-efficiency --model local/qwen    # only the sessions that started on one model
+    scripts/cache-efficiency --ttl 3600       # judge expiry against a one-hour cache
+    scripts/cache-efficiency --examples 10    # more breaks shown
+    scripts/cache-efficiency --json           # every figure, as one JSON object
+
+A cache break is a step whose cache read falls below `--threshold` (default 0.9) of the previous
+step's input in the same conversation. A request normally reads the whole of what the one before
+it sent, because that was written to the cache and is still its prefix; 90% leaves room for a
+provider that caches in blocks and so reads a little less than all of it. The first step of a
+conversation cannot break, and neither can one whose previous step was left out (below). A break is
+then sorted by the gap from the previous step's end (its `at` plus `took`) to this step's `at`:
+
+- an expiry, when the gap is longer than `--ttl`: the cache had lapsed;
+- inside the lifetime otherwise: the prefix changed. Its cause is the nearest thing between the two
+  steps that changes the prefix, searched back from the step: a `settings` change on the step (a
+  model switch), a `tools` entry, a `system` entry (a prompt edit, or a whole new prompt), a /compact
+  seed. With none of those, a run of bh-02 beginning between the two steps (a line of kind `run` in
+  the session's `rows.jsonl`) is a resume. With none of those either, "none found (the provider?)":
+  the claude-code provider rebuilt its Claude Code session, or the provider's cache missed.
+
+A conversation is one transcript file; `/compact` keeps the old one as `transcript.jsonl.bak` (then
+`.bak.2`, ...), ordered as `bh_02/trajectory.py` orders them (by first `at`, else modification time).
+The step after a /compact seed is compared with the last step before it, so the cost of compacting
+shows as a break caused by the seed. The first step of a file with no seed (after /clear) starts a new
+conversation. A step with no `usage`, or a `partial` one (its output count never arrived), is left out
+of every figure and counted as left out; the step after it cannot be judged.
+
+The cache lifetime (`--ttl SECONDS`, default 300, from the code of the claude-code provider):
+- The provider drives the Claude Code CLI through the Claude Agent SDK and sets nothing that chooses
+  a cache lifetime: the child's environment is a fixed list (`claude_code/credential.py:46-53`,
+  `_FIXED`) and `claude_code/detach.py:31,47` removes every `ANTHROPIC_*` and `CLAUDE_*` variable
+  bh-02's own environment had, bar the credentials, so no `ENABLE_PROMPT_CACHING_1H` or
+  `FORCE_PROMPT_CACHING_5M` reaches it. bh-02's `cost_usd` prices a write at 1.25x, a 5-minute write
+  (`claude_code/stream.py:36-37,52`). So the lifetime is the CLI's own default, which the code can't
+  settle: this script assumes 5 minutes, and `--ttl 3600` re-judges the same data for one hour. The
+  OpenAI-compatible provider (`openai/wire.py`) fills only cache read and has a lifetime of its
+  server's choosing. A cache read refreshes the lifetime, so the gap is taken from the previous step's end.
+- One step can hold several API requests. The CLI closes a stream that stalled or dropped and
+  streams it again (`claude_code/provider.py:29-31`, `claude_code/stream.py:13-17`), and one it
+  could not stream is asked for again without streaming and arrives whole (`provider.py:25-27`,
+  `stream.py:154-159`, though `credential.py:51-52` turns that fallback off); the step's usage is
+  summed over its parts. A break between those requests is invisible here: the step shows one
+  usage, and a retry's cache read may be above or below what the first request read.
+
+It only reads: nothing is written into a session directory. It is the standard library alone.
+"""
+
+import argparse
+import datetime
+import json
+import os
+import re
+import sys
+from collections import defaultdict
+from collections.abc import Iterator, Mapping, Sequence
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+type Message = Mapping[str, Any]
+
+TRANSCRIPT = "transcript.jsonl"
+_FILE = re.compile(re.escape(TRANSCRIPT) + r"(?:\.bak(?:\.([0-9]+))?)?")
+_NONE_FOUND = "none found (the provider?)"
+_UNKNOWN = "?"
+
+
+@dataclass(frozen=True, slots=True)
+class Step:
+    """A step that has its usage whole."""
+
+    at: datetime.datetime
+    ended: datetime.datetime  # `at` plus `took`
+    model: str
+    input: int
+    read: int
+    written: int
+    output: int
+    cost: float | None
+
+
+@dataclass(frozen=True, slots=True)
+class Break:
+    """A step that read less of the cache than the previous step's input."""
+
+    session: str
+    agent: str | None
+    at: datetime.datetime
+    model: str
+    gap: float  # seconds from the previous step's end to this step's start
+    kind: str  # "expiry" or "inside"
+    cause: str | None  # for "inside" only
+    read: int
+    previous_input: int
+
+
+@dataclass(slots=True)
+class Unit:
+    """One conversation chain whose figures are kept apart: a session's own, or one sub-agent's."""
+
+    session: str
+    agent: str | None
+    steps: list[Step] = field(default_factory=list[Step])
+    breaks: list[Break] = field(default_factory=list[Break])
+    left_out: list[str] = field(default_factory=list[str])  # the model of each step left out
+
+
+def _moment(value: object) -> datetime.datetime | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        moment = datetime.datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return moment if moment.tzinfo is not None else moment.replace(tzinfo=datetime.UTC)
+
+
+def _count(usage: Mapping[str, Any], key: str) -> int | None:
+    value = usage.get(key, 0)
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
+
+
+def _settings_model(settings: object) -> str | None:
+    model = settings.get("model") if isinstance(settings, dict) else None
+    return model if isinstance(model, str) else None
+
+
+def _model_of(record: Mapping[str, Any]) -> str:
+    named = record.get("model")
+    return named if isinstance(named, str) and named else _settings_model(record.get("settings")) or _UNKNOWN
+
+
+def _step(record: object, fallback: str) -> Step | None:
+    """The step a `step` record says, or None when its usage is missing, partial or unreadable."""
+    if not isinstance(record, dict):
+        return None
+    usage = record.get("usage")
+    at = _moment(record.get("at"))
+    if not isinstance(usage, dict) or usage.get("partial") or at is None:
+        return None
+    counts = [_count(usage, key) for key in _KEYS]
+    if None in counts or usage.get("input_tokens") is None:
+        return None
+    total, read, written, output = (n or 0 for n in counts)
+    took = record.get("took")
+    seconds = float(took) if isinstance(took, int | float) and not isinstance(took, bool) else 0.0
+    cost = usage.get("cost_usd")
+    return Step(
+        at=at,
+        ended=at + datetime.timedelta(seconds=seconds),
+        model=_model_of(record) if _model_of(record) != _UNKNOWN else fallback,
+        input=total,
+        read=read,
+        written=written,
+        output=output,
+        cost=float(cost) if isinstance(cost, int | float) and not isinstance(cost, bool) else None,
+    )
+
+
+_KEYS = ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens", "output_tokens")
+
+
+def _differs(old: Mapping[str, Any], new: Mapping[str, Any]) -> str:
+    """What changed from one settings record to the next, as text."""
+    if old.get("model") != new.get("model"):
+        return f"model {old.get('model')} -> {new.get('model')}"
+    changed = sorted(k for k in old.keys() | new.keys() if old.get(k) != new.get(k))
+    return ", ".join(f"{k} {old.get(k)} -> {new.get(k)}" for k in changed)
+
+
+def _tools_event(entry: Message) -> str:
+    if "tools" in entry:
+        return "tools entry (the list told)"
+    parts = [
+        f"{key} {', '.join(_names(entry[key]))}" for key in ("added", "removed", "redefined") if key in entry
+    ]
+    return "tools entry (" + "; ".join(parts) + ")" if parts else "tools entry"
+
+
+def _names(listed: object) -> list[str]:
+    if not isinstance(listed, list):
+        return []
+    return [str(item.get("name", _UNKNOWN)) if isinstance(item, dict) else str(item) for item in listed]
+
+
+def judged(
+    unit: Unit,
+    files: Sequence[Sequence[Message]],
+    runs: Sequence[datetime.datetime],
+    *,
+    ttl: float,
+    threshold: float,
+) -> None:
+    """Fill `unit` from its conversation files, oldest first (the live one last)."""
+    previous: Step | None = None
+    events: list[str] = []  # what changed the prefix since `previous`, oldest first
+    last_settings: Mapping[str, Any] | None = None
+    for number, entries in enumerate(files):
+        if number and not any(e.get("role") == "user" and "seed" in e for e in entries):
+            previous, events, last_settings = None, [], None  # a new conversation (/clear)
+        for entry in entries:
+            role = entry.get("role")
+            if role == "system":
+                events.append("system prompt edited" if "edits" in entry else "system prompt told afresh")
+            elif role == "tools":
+                events.append(_tools_event(entry))
+            elif role == "user" and "seed" in entry:
+                events.append("seed (/compact)")
+            elif role == "assistant":
+                record = entry.get("step")
+                step = _step(record, _UNKNOWN)
+                if step is None:
+                    unit.left_out.append(_model_of(record) if isinstance(record, dict) else _UNKNOWN)
+                    previous, events = None, []
+                    continue
+                settings = record.get("settings") if isinstance(record, dict) else None
+                changed = None
+                if isinstance(settings, dict):
+                    if last_settings is not None and settings != last_settings:
+                        changed = f"settings changed ({_differs(last_settings, settings)})"
+                    last_settings = settings
+                if previous is not None and previous.input > 0 and step.read < threshold * previous.input:
+                    unit.breaks.append(_break(unit, previous, step, changed, events, runs, ttl))
+                unit.steps.append(step)
+                previous, events = step, []
+
+
+def _break(
+    unit: Unit,
+    previous: Step,
+    step: Step,
+    changed: str | None,
+    events: Sequence[str],
+    runs: Sequence[datetime.datetime],
+    ttl: float,
+) -> Break:
+    gap = (step.at - previous.ended).total_seconds()
+    cause: str | None = None
+    if gap <= ttl:
+        if changed is not None:
+            cause = changed
+        elif events:
+            cause = events[-1]
+        elif any(previous.at < run <= step.at for run in runs):
+            cause = "resume (a run of bh-02 began between the steps)"
+        else:
+            cause = _NONE_FOUND
+    return Break(
+        session=unit.session,
+        agent=unit.agent,
+        at=step.at,
+        model=step.model,
+        gap=gap,
+        kind="expiry" if gap > ttl else "inside",
+        cause=cause,
+        read=step.read,
+        previous_input=previous.input,
+    )
+
+
+def _sessions_dir(given: str | None) -> Path:
+    if given:
+        return Path(given)
+    state = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
+    return Path(state) / "bh-02" / "sessions"
+
+
+def _started_on(session: Path) -> str | None:
+    """The model a session started on (its meta.json's `stack`), or None when it can't be read."""
+    try:
+        meta = json.loads((session / "meta.json").read_text(encoding="utf-8"))
+    except OSError, ValueError:
+        return None
+    return meta.get("stack") if isinstance(meta, dict) else None
+
+
+def _runs(session: Path) -> list[datetime.datetime]:
+    """When each run of bh-02 on a session began (its `rows.jsonl`'s `run` lines), oldest first."""
+    try:
+        lines = (session / "rows.jsonl").read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return []
+    starts: list[datetime.datetime] = []
+    for line in lines:
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(record, dict) and record.get("kind") == "run" and (at := _moment(record.get("at"))):
+            starts.append(at)
+    return sorted(starts)
+
+
+def _read(path: Path) -> list[Message]:
+    entries: list[Message] = []
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return entries
+    for line in text.splitlines():
+        try:
+            if isinstance(loaded := json.loads(line), dict):
+                entries.append(loaded)
+        except ValueError:
+            continue  # a line cut off when bh-02 was killed mid-write
+    return entries
+
+
+def _first_at(entries: Sequence[Message]) -> datetime.datetime | None:
+    for entry in entries:
+        step = entry.get("step")
+        if moment := _moment(entry.get("at") or (step.get("at") if isinstance(step, dict) else None)):
+            return moment
+    return None
+
+
+def _conversations(directory: Path) -> list[list[Message]]:
+    """The conversations in `directory`, oldest first: the backups by their first `at`, else by
+    modification time (name breaking a tie), then the live transcript."""
+    backups: list[tuple[datetime.datetime, int, list[Message]]] = []
+    live: list[Message] | None = None
+    for path in directory.glob(TRANSCRIPT + "*"):
+        found = _FILE.fullmatch(path.name)
+        if found is None or not path.is_file():
+            continue
+        entries = _read(path)
+        if path.name == TRANSCRIPT:
+            live = entries
+            continue
+        began = _first_at(entries) or datetime.datetime.fromtimestamp(path.stat().st_mtime, datetime.UTC)
+        backups.append((began, int(found.group(1) or 1), entries))
+    backups.sort(key=lambda b: (b[0], b[1]))
+    return [*(b[2] for b in backups), *([live] if live is not None else [])]
+
+
+def _units(root: Path, model: str | None, ttl: float, threshold: float) -> Iterator[Unit]:
+    for directory in sorted(p for p in root.iterdir() if p.is_dir()):
+        if not any(directory.glob(TRANSCRIPT + "*")) and not (directory / "agents").is_dir():
+            continue
+        if model is not None and _started_on(directory) != model:
+            continue
+        runs = _runs(directory)
+        own = Unit(directory.name, None)
+        judged(own, _conversations(directory), runs, ttl=ttl, threshold=threshold)
+        yield own
+        agents = directory / "agents"
+        for agent in sorted(p for p in agents.iterdir() if p.is_dir()) if agents.is_dir() else ():
+            sub = Unit(directory.name, agent.name)
+            judged(sub, _conversations(agent), runs, ttl=ttl, threshold=threshold)
+            yield sub
+
+
+def _ratio(part: int, whole: int) -> float | None:
+    return part / whole if whole else None
+
+
+def _figures(steps: Sequence[Step], breaks: Sequence[Break], left_out: int) -> dict[str, Any]:
+    total = sum(s.input for s in steps)
+    read = sum(s.read for s in steps)
+    written = sum(s.written for s in steps)
+    costed = [s.cost for s in steps if s.cost is not None]
+    cost = sum(costed)
+    return {
+        "steps": len(steps),
+        "left_out": left_out,
+        "input_tokens": total,
+        "cache_read_input_tokens": read,
+        "cache_creation_input_tokens": written,
+        "output_tokens": sum(s.output for s in steps),
+        "hit_rate": _ratio(read, total),
+        "write_share": _ratio(written, total),
+        "breaks": {
+            "expiry": sum(1 for b in breaks if b.kind == "expiry"),
+            "inside": sum(1 for b in breaks if b.kind == "inside"),
+        },
+        "cost_usd": cost,
+        "cost_per_step": cost / len(costed) if costed else None,
+    }
+
+
+def _break_json(b: Break) -> dict[str, Any]:
+    return {
+        "session": b.session,
+        "agent": b.agent,
+        "at": b.at.isoformat(),
+        "model": b.model,
+        "gap_seconds": round(b.gap, 3),
+        "kind": b.kind,
+        "cause": b.cause,
+        "cache_read_input_tokens": b.read,
+        "previous_input_tokens": b.previous_input,
+    }
+
+
+def _by_model(units: Sequence[Unit]) -> list[dict[str, Any]]:
+    """Per model, the session's own steps and the sub-agents' apart."""
+    groups: dict[tuple[str, bool], tuple[list[Step], list[Break], list[str]]] = defaultdict(
+        lambda: ([], [], [])
+    )
+    for unit in units:
+        sub = unit.agent is not None
+        for step in unit.steps:
+            groups[step.model, sub][0].append(step)
+        for found in unit.breaks:
+            groups[found.model, sub][1].append(found)
+        for model in unit.left_out:
+            groups[model, sub][2].append(model)
+    return [
+        {"model": model, "sub_agents": sub, **_figures(steps, breaks, len(left))}
+        for (model, sub), (steps, breaks, left) in sorted(groups.items())
+    ]
+
+
+def report(units: Sequence[Unit], ttl: float, threshold: float) -> dict[str, Any]:
+    """Every figure, as the `--json` object."""
+    return {
+        "ttl_seconds": ttl,
+        "threshold": threshold,
+        "sessions": [
+            {
+                "session": u.session,
+                "agent": u.agent,
+                **_figures(u.steps, u.breaks, len(u.left_out)),
+                "break_list": [_break_json(b) for b in u.breaks],
+            }
+            for u in units
+        ],
+        "models": _by_model(units),
+        "breaks": [_break_json(b) for b in sorted((b for u in units for b in u.breaks), key=lambda b: b.at)],
+    }
+
+
+def _percent(value: float | None) -> str:
+    return "-" if value is None else f"{100 * value:.1f}%"
+
+
+def _row(label: str, f: Mapping[str, Any]) -> str:
+    breaks = f["breaks"]
+    return (
+        f"{label:<36}{f['steps']:>6}{f['left_out']:>5}{f['input_tokens']:>12}"
+        f"{f['cache_read_input_tokens']:>12}{f['cache_creation_input_tokens']:>12}"
+        f"{_percent(f['hit_rate']):>8}{_percent(f['write_share']):>8}"
+        f"{breaks['expiry']:>7}{breaks['inside']:>7}{f['cost_usd']:>10.4f}"
+    )
+
+
+_HEADER = (
+    f"{'':<36}{'steps':>6}{'out':>5}{'input':>12}{'read':>12}{'written':>12}{'hit':>8}{'write':>8}"
+    f"{'expiry':>7}{'inside':>7}{'cost $':>10}"
+)
+
+
+def _text(data: Mapping[str, Any], examples: int) -> str:
+    lines = [
+        f"cache lifetime {data['ttl_seconds']:g}s, a break is a cache read under "
+        f"{100 * data['threshold']:g}% of the previous step's input; 'out' is steps left out "
+        "(no usage, or partial)",
+        "",
+        "per session" + _HEADER[11:],
+    ]
+    for s in data["sessions"]:
+        label = s["session"][:12] + (f"/agents/{s['agent']}" if s["agent"] else "")
+        lines.append(_row(label, s))
+    lines += ["", "per model" + _HEADER[9:]]
+    for m in data["models"]:
+        lines.append(_row(m["model"] + (" (sub-agents)" if m["sub_agents"] else ""), m))
+    latest = data["breaks"][-examples:] if examples else []
+    if latest:
+        lines += ["", "cache breaks, the latest:"]
+        for b in latest:
+            who = b["session"][:8] + (f"/{b['agent']}" if b["agent"] else "")
+            what = "expiry" if b["kind"] == "expiry" else f"inside: {b['cause']}"
+            lines.append(
+                f"  {who}  {b['at']}  {b['model']}  gap {b['gap_seconds']:g}s  "
+                f"read {b['cache_read_input_tokens']} of {b['previous_input_tokens']}  {what}"
+            )
+    return "\n".join(lines)
+
+
+def main(argv: Sequence[str]) -> int:
+    parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
+    parser.add_argument("--sessions", help="bh-02's sessions directory (default: its state directory's)")
+    parser.add_argument(
+        "--model", help="only the sessions that started on this model (by its name, ENDPOINT/MODEL)"
+    )
+    parser.add_argument("--ttl", type=float, default=300.0, help="cache lifetime in seconds (default 300)")
+    parser.add_argument(
+        "--threshold",
+        type=float,
+        default=0.9,
+        help="a break reads less than this share of the previous step's input (default 0.9)",
+    )
+    parser.add_argument("--examples", type=int, default=5, help="breaks to list (default 5)")
+    parser.add_argument("--json", action="store_true", help="print every figure as a JSON object")
+    args = parser.parse_args(argv)
+    root = _sessions_dir(args.sessions)
+    if not root.is_dir():
+        print(f"no sessions at {root}; run bh-02, or say where with --sessions DIR", file=sys.stderr)
+        return 1
+    units = list(_units(root, args.model, args.ttl, args.threshold))
+    data = report(units, args.ttl, args.threshold)
+    print(json.dumps(data) if args.json else _text(data, args.examples))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

@@ -1,10 +1,11 @@
 ---
 id: TASK-0174
 title: Measure prompt-cache efficiency across sessions
-status: To Do
+status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-29T13:34:00Z'
+updated_date: '2026-10-29T14:19:00Z'
 labels:
   - size-2
   - context
@@ -32,9 +33,21 @@ A baseline taken now lets later changes (TASK-0173's carried lines and per-input
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 scripts/cache-efficiency reports hit rate, write share, cache breaks (expiry or inside the lifetime, with the entry before an inside break) and cost per step, per session and per model, with --json
-- [ ] #2 The cache lifetime is a flag; its default, and whether a step can hold several API calls, are what the claude-code provider was found to do, said in the script's docstring
-- [ ] #3 Tests over hand-written transcripts: a steady conversation shows no break; a long gap is an expiry; a prompt edit entry or a /compact seed before a short-gap break is named as its cause; sub-agent transcripts are reported apart
-- [ ] #4 Must not break: it only reads; it never writes into a session directory
+- [x] #1 scripts/cache-efficiency reports hit rate, write share, cache breaks (expiry or inside the lifetime, with the entry before an inside break) and cost per step, per session and per model, with --json
+- [x] #2 The cache lifetime is a flag; its default, and whether a step can hold several API calls, are what the claude-code provider was found to do, said in the script's docstring
+- [x] #3 Tests over hand-written transcripts: a steady conversation shows no break; a long gap is an expiry; a prompt edit entry or a /compact seed before a short-gap break is named as its cause; sub-agent transcripts are reported apart
+- [x] #4 Must not break: it only reads; it never writes into a session directory
 - [ ] #5 A baseline over the owner's sessions is recorded in this task's notes (the owner runs it; this container has no sessions)
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Read the provider for the two facts (cache lifetime; several requests per step), write scripts/cache-efficiency beside model-friction, test over hand-written session dirs, strict mypy on a copy.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+scripts/cache-efficiency added with bh-02/app/tests/test_cache_efficiency.py (17 tests, pass; with the break test disabled 12 fail, seen). ruff format/check clean; mypy --strict clean on a copy. Facts (in the script docstring): lifetime not settable from code (credential.py _FIXED sets none, detach.py scrubs ANTHROPIC_*/CLAUDE_*; cost uses a 5-min write price), so default --ttl 300; a step can hold several API requests (provider.py:25-31, stream.py:13-17,154-159), so a break inside a step is invisible. A prefix-changing entry is preferred over a run start as the cause; a run start with none is a resume. AC5 (baseline) left for the owner; scripts/check not run.
+<!-- SECTION:NOTES:END -->
