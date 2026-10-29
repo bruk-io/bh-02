@@ -124,10 +124,10 @@ the endpoint's `max_tokens` and its own `temperature`.
 | Setting | Where | What it is |
 |---|---|---|
 | `provider` | endpoint | `claude-code` (Claude through Claude Code) or `openai` (any OpenAI-compatible `/chat/completions` endpoint) |
-| `base_url` | endpoint | `openai`: the endpoint, ending before `/chat/completions`. `claude-code`, optional: a gateway ([below](#claude-through-a-gateway)) |
-| `key` | endpoint | optional: one table saying where the API key comes from, `{ env = "NAME" }`, `{ cmd = "..." }` or `{ op = "op://..." }`, and for `cmd` and `op` a `ttl_ms` ([below](#the-key)). `claude-code` without a `base_url`: the subscription token's source, any of the three; with one: a gateway's, `cmd` or `op` only |
-| `auth` | endpoint | `claude-code` without a `base_url`, optional: `subscription` (the default: `key` is a Claude Code subscription token) or `api-key` (`key` is an Anthropic API key; [below](#an-anthropic-api-key)) |
-| `experimental_betas` | endpoint | `claude-code` through a gateway, optional: `false` when the gateway refuses Anthropic's beta headers |
+| `base_url` | endpoint | `openai`: the endpoint, ending before `/chat/completions`. `claude-code`, optional: a gateway ([below](#claude-through-a-gateway)), or with `auth = "api-key"` the API the key is sent to ([below](#an-anthropic-api-key)) |
+| `key` | endpoint | optional: one table saying where the API key comes from, `{ env = "NAME" }`, `{ cmd = "..." }` or `{ op = "op://..." }`, and for `cmd` and `op` a `ttl_ms` ([below](#the-key)). `claude-code` without a `base_url`: the subscription token's source, any of the three; with one: a gateway's, `cmd` or `op` only; with `auth = "api-key"`: the API key's, any of the three |
+| `auth` | endpoint | `claude-code`, optional: `subscription` (the default: `key` is a Claude Code subscription token) or `api-key` (`key` is an Anthropic API key; [below](#an-anthropic-api-key)) |
+| `experimental_betas` | endpoint | `claude-code` with a `base_url`, optional: `false` when the server refuses Anthropic's beta headers |
 | `models` | endpoint | its models, one table each, named `ENDPOINT/MODEL` |
 | `discover`, `include` | endpoint | `openai` only, optional: `discover = true` also offers the models its server lists, `include` narrows them ([below](#listing-an-endpoints-models-discover)) |
 | `id` | model | the model's id at that provider |
@@ -220,7 +220,27 @@ and you can have one of each side by side (`/model api/sonnet`, `/model claude/o
 the key each time it starts the Claude Code CLI and gives it to that CLI alone, as
 `ANTHROPIC_API_KEY`, with the subscription token's variable set empty; on the subscription it is the
 other way round, so a key or token your shell exports never reaches the CLI by accident. There is no
-`ttl_ms` here, and `auth` is refused on a gateway endpoint, whose key is a command Claude Code runs.
+`ttl_ms` here.
+
+To say explicitly where the key goes, give the endpoint a `base_url`: Anthropic's own API, or another
+Anthropic-compatible one.
+
+```toml
+[api]
+provider = "claude-code"
+auth = "api-key"
+base_url = "https://api.anthropic.com"
+key = { env = "BH02_ANTHROPIC_API_KEY" }
+
+[api.models.opus]
+id = "claude-opus-5-5"
+```
+
+bh-02 hands the CLI a settings layer of its own naming it as `ANTHROPIC_BASE_URL`, as for a gateway,
+but with no `apiKeyHelper`: bh-02 still reads the key and gives it to the CLI as `ANTHROPIC_API_KEY`,
+so any of `env`, `cmd` and `op` works. `experimental_betas = false` works here too. Without
+`base_url` the CLI uses Anthropic's default. A subscription endpoint takes no `base_url` (the token
+goes to Anthropic alone), and an endpoint with a `base_url` and no `auth` is a gateway.
 
 ### Listing an endpoint's models: discover
 

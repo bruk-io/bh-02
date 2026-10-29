@@ -13,6 +13,7 @@ from models_cordis_plugin.claude_code import (
     ClaudeCodeConfig,
     ClaudeCodeModel,
     Gateway,
+    api_settings,
     failure_of,
     gateway_env,
     gateway_settings,
@@ -34,6 +35,14 @@ def test_the_settings_layer_names_the_gateway_its_helper_and_what_the_table_says
     }
     plain = json.loads(gateway_settings(Gateway("https://g/anthropic", "c")))
     assert plain["env"] == {"ANTHROPIC_BASE_URL": "https://g/anthropic"}  # Claude Code's own ttl and betas
+
+
+def test_an_api_key_endpoint_s_layer_names_its_url_and_no_helper() -> None:
+    assert json.loads(api_settings("https://api.anthropic.com")) == {
+        "env": {"ANTHROPIC_BASE_URL": "https://api.anthropic.com"}
+    }
+    quiet = json.loads(api_settings("https://api.anthropic.com", experimental_betas=False))
+    assert quiet["env"]["CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS"] == "1" and "apiKeyHelper" not in quiet
 
 
 def test_the_environment_through_a_gateway_holds_no_token_even_one_bh_02_was_started_with() -> None:

@@ -28,6 +28,13 @@ the endpoint's `models`, named `ENDPOINT/MODEL`. The same shape for every provid
     experimental_betas = false                 # optional: false when the gateway refuses them
     models = { opus = { id = "claude-opus-5-5" } }   # the same data, written inline
 
+    [api]
+    provider = "claude-code"
+    auth = "api-key"                           # the key is an Anthropic API key, not a subscription token
+    base_url = "https://api.anthropic.com"     # optional: where the CLI sends it (Anthropic's by default)
+    key = { env = "BH02_ANTHROPIC_API_KEY" }
+    models = { sonnet = { id = "claude-sonnet-5-5" } }
+
 An endpoint's `key` is one table naming exactly one source, `env` (a variable of bh-02's process
 environment), `cmd` (a shell command that prints the key) or `op` (a 1Password reference, read by
 `op read`), and, for `cmd` and `op`, an optional `ttl_ms`: how long a printed key is used (`KeySpec`).
@@ -37,7 +44,9 @@ the endpoint's `models` doesn't name, is that id on the endpoint: no server is a
 openai endpoint with `discover = true` also offers the models its server lists (`discovery.py`),
 narrowed by `include`, by glob; `/model` asks the server only when it lists. A claude-code endpoint
 with no `base_url` runs on the subscription token, which its `key` says where to get (`env`, `cmd` or
-`op`, read when the CLI starts; no `ttl_ms`), and hands it to the Claude Code CLI alone. An endpoint whose
+`op`, read when the CLI starts; no `ttl_ms`), and hands it to the Claude Code CLI alone; with
+`auth = "api-key"` the key is an Anthropic API key, read the same way, and a `base_url` beside it is
+where the CLI sends it (the subscription token goes to Anthropic alone). An endpoint whose
 table has a problem names no model: `ENDPOINT/MODEL` is refused with that table's problem, as the
 table alone is.
 
@@ -542,9 +551,10 @@ def _settings_problem(named: Named, where: str) -> str | None:
 
 def _key_problem(named: Named, where: str) -> str | None:
     """What is wrong with how a model or endpoint gets its key (`key`: `_read_key`), or None. A
-    claude-code one with a `base_url` (a gateway) needs a `key` of `cmd` or `op`, which the Claude
-    Code CLI runs: bh-02 never holds that key, so an `env` is refused. One without runs on the
-    subscription token its `key` gives (any source; bh-02 reads it when the CLI starts, so no `ttl_ms`)."""
+    claude-code one that says its `auth` is `_auth_problem`'s. Otherwise one with a `base_url` (a
+    gateway) needs a `key` of `cmd` or `op`, which the Claude Code CLI runs: bh-02 never holds that
+    key, so an `env` is refused. One without runs on the subscription token its `key` gives (any
+    source; bh-02 reads it when the CLI starts, so no `ttl_ms`)."""
     table = named.table
     key = table.get(_KEY)
     spec = None
@@ -555,6 +565,8 @@ def _key_problem(named: Named, where: str) -> str | None:
         spec = read
     if named.provider != CLAUDE_CODE and (why := withheld(named)) is not None:
         return why
+    if named.provider == CLAUDE_CODE and _AUTH in table:
+        return _auth_problem(table, spec, where)
     if named.provider == CLAUDE_CODE:
         if spec is not None and spec.source == "env" and "base_url" in table:
             return (
@@ -576,29 +588,50 @@ def _key_problem(named: Named, where: str) -> str | None:
             )
         if _BETAS in table and "base_url" not in table:
             return f"{where}: experimental_betas is for a gateway; add base_url and key, or remove it"
-        if _AUTH in table:
-            auth = table[_AUTH]
-            if auth not in _AUTHS:
-                return (
-                    f'{where}: auth must be "subscription" (the key is a Claude Code subscription '
-                    'token, the default) or "api-key" (the key is an Anthropic API key)'
-                )
-            if "base_url" in table:
-                return (
-                    f"{where}: auth is for an endpoint that reaches Anthropic itself; a gateway's key is "
-                    "the command that prints it, so remove auth"
-                )
-            if auth == "api-key" and spec is None:
-                return (
-                    f'{where}: auth = "api-key" needs a key to read it from, like '
-                    '`key = { env = "BH02_ANTHROPIC_API_KEY" }` (a name of your own: other tools load '
-                    'ANTHROPIC_API_KEY on their own) or `key = { op = "op://vault/item/field" }`'
-                )
-            if auth == "api-key" and spec is not None and spec.ttl_ms is not None:
-                return (
-                    f"{where}: key.ttl_ms is for a gateway's key; bh-02 reads the API key each time it "
-                    "starts the Claude Code CLI, so remove ttl_ms"
-                )
+    return None
+
+
+def _auth_problem(table: Mapping[str, Any], spec: KeySpec | None, where: str) -> str | None:
+    """What is wrong with a claude-code endpoint that says its `auth`, or None. An `api-key` one may
+    name the API's `base_url` (Anthropic's, or one compatible with it), which the CLI sends the key
+    to; the subscription token goes to Anthropic alone, so `subscription` takes no `base_url`."""
+    auth = table[_AUTH]
+    if auth not in _AUTHS:
+        return (
+            f'{where}: auth must be "subscription" (the key is a Claude Code subscription '
+            'token, the default) or "api-key" (the key is an Anthropic API key)'
+        )
+    if auth == "subscription":
+        if "base_url" in table:
+            return (
+                f"{where}: the subscription token goes to Anthropic alone, so a subscription endpoint "
+                'takes no base_url; for an API key sent to it write `auth = "api-key"`, for a gateway '
+                "whose key a command prints remove auth"
+            )
+        if spec is not None and spec.ttl_ms is not None:
+            return (
+                f"{where}: key.ttl_ms is for a gateway's key, which Claude Code runs again when it is up; "
+                "bh-02 reads the subscription token each time it starts the Claude Code CLI, so remove ttl_ms"
+            )
+        if _BETAS in table:
+            return f"{where}: experimental_betas is for an endpoint with a base_url; remove it"
+        return None
+    if spec is None:
+        return (
+            f'{where}: auth = "api-key" needs a key to read it from, like '
+            '`key = { env = "BH02_ANTHROPIC_API_KEY" }` (a name of your own: other tools load '
+            'ANTHROPIC_API_KEY on their own) or `key = { op = "op://vault/item/field" }`'
+        )
+    if spec.ttl_ms is not None:
+        return (
+            f"{where}: key.ttl_ms is for a gateway's key; bh-02 reads the API key each time it "
+            "starts the Claude Code CLI, so remove ttl_ms"
+        )
+    if _BETAS in table and "base_url" not in table:
+        return (
+            f"{where}: experimental_betas is for an endpoint with a base_url; add "
+            '`base_url = "https://api.anthropic.com"` or remove it'
+        )
     return None
 
 

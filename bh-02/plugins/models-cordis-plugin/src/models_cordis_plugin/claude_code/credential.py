@@ -14,6 +14,10 @@ key's `ttl_ms` is up. The
 token's variable is set empty (`gateway_env`), so a token in bh-02's own environment never reaches
 that CLI. The layer is all the CLI reads of settings: the person's own still are not.
 
+An API key endpoint (`auth = "api-key"`) that names a `base_url` gets the same kind of layer with
+the URL alone (`api_settings`): bh-02 reads the key and hands it to the CLI's environment as
+`ANTHROPIC_API_KEY` (`child_env`), and the CLI sends it there.
+
 The token is never held in a named local of a long-lived frame nor in anything whose repr
 shows it: Textual prints a crash with every frame's locals, and `ChildEnv`'s repr names its keys
 only. An error about the credential names the variable or the command, never a value.
@@ -31,6 +35,7 @@ __all__ = [
     "TOKEN_VARIABLE",
     "ChildEnv",
     "Gateway",
+    "api_settings",
     "child_env",
     "gateway_env",
     "gateway_settings",
@@ -65,12 +70,25 @@ class Gateway:
 
 def gateway_settings(gateway: Gateway) -> str:
     """The settings layer, as JSON, that sends the CLI's requests through `gateway`."""
-    env = {"ANTHROPIC_BASE_URL": gateway.base_url}
+    env = _routed(gateway.base_url, gateway.experimental_betas)
     if gateway.ttl_ms is not None:
         env["CLAUDE_CODE_API_KEY_HELPER_TTL_MS"] = str(gateway.ttl_ms)
-    if not gateway.experimental_betas:
-        env["CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS"] = "1"
     return json.dumps({"apiKeyHelper": gateway.command, "env": env})
+
+
+def api_settings(base_url: str, *, experimental_betas: bool = True) -> str:
+    """The settings layer, as JSON, that sends the CLI's requests to `base_url` (an API key
+    endpoint's: Anthropic's API, or one compatible with it) with the key in its environment."""
+    return json.dumps({"env": _routed(base_url, experimental_betas)})
+
+
+def _routed(base_url: str, experimental_betas: bool) -> dict[str, str]:
+    """A settings layer's `env` naming where the CLI sends its requests, and whether it may send
+    Anthropic's experimental beta headers."""
+    env = {"ANTHROPIC_BASE_URL": base_url}
+    if not experimental_betas:
+        env["CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS"] = "1"
+    return env
 
 
 def gateway_env(config_dir: str) -> ChildEnv:

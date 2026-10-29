@@ -60,6 +60,13 @@ key = { cmd = "my-token-helper", ttl_ms = 300000 }   # Claude Code's apiKeyHelpe
 experimental_betas = false                # optional: for a gateway that refuses the beta headers
 models.opus = { id = "claude-opus-5-5" }
 
+[api]                                     # Claude on an Anthropic API key (below)
+provider = "claude-code"
+auth = "api-key"
+base_url = "https://api.anthropic.com"    # optional: where the CLI sends the key; Anthropic's when unset
+key = { env = "BH02_ANTHROPIC_API_KEY" }
+models.sonnet = { id = "claude-sonnet-5-5" }
+
 [local-server]                            # also lists what its server serves, local-server/ID
 provider = "openai"
 discover = true
@@ -121,7 +128,7 @@ with exactly one of `env`, `cmd` and `op` (a bare string, no source or several, 
 (capitals, digits and `_`: a value that isn't one may be the key itself, so it is never quoted back);
 each says what to write instead), a `key` that reads `CLAUDE_CODE_OAUTH_TOKEN` (below), a claude-code
 `base_url` without a `key` or the other way round or with an `env` key (bh-02 never holds a
-gateway's key), a `max_tokens`, `temperature` or `experimental_betas` of the wrong type (`ModelsError(kind, message)`, CONTRACTS.md:
+gateway's key), a `base_url` with `auth = "subscription"` (the token goes to Anthropic alone), a `max_tokens`, `temperature` or `experimental_betas` of the wrong type (`ModelsError(kind, message)`, CONTRACTS.md:
 Errors). An endpoint's problem is any of its models' too, so none of them is used while it has one. Each step
 raises it (`Unusable`), so a typo in the models file is a message in the conversation, and
 `/model` another model fixes it. `/model NAME` checks first
@@ -524,6 +531,13 @@ credential file: a claude-code endpoint without a `base_url` says where the toke
   shell exported never reaches the CLI (the detached launcher keeps both). bh-02 never puts either in
   its own `os.environ`, never sets `ANTHROPIC_AUTH_TOKEN`, and never prints, logs or commits a
   credential. No openai model's `key` may read the Claude Code token (above).
+- **An API key endpoint may name where it goes.** With `auth = "api-key"`, a `base_url` (Anthropic's
+  own, `https://api.anthropic.com`, written explicitly, or another Anthropic-compatible API) is where
+  the CLI sends the key: bh-02 gives the CLI a settings layer of its own naming it as
+  `ANTHROPIC_BASE_URL` (`credential.api_settings`, with `experimental_betas = false` as through a
+  gateway) and no `apiKeyHelper`; the key still reaches the CLI as `ANTHROPIC_API_KEY` alone. Unlike
+  a gateway's, its key may be an `env`, since bh-02 reads an API key either way. The subscription
+  token goes to Anthropic alone: `auth = "subscription"` with a `base_url` is refused.
 - **The model's code never gets it from bh-02.** The person may export it (that is where an `env`
   key reads it), and bh-02's own process then holds it. The jail's environment is an allow-list that
   leaves it out; `runner:unconfined` (`--no-jail`) starts every program without `CLAUDE*` or
@@ -552,7 +566,9 @@ the command (`failure_of`); the CLI retries it for about three minutes first (me
 - **No token.** The child's environment is `credential.gateway_env`: the fixed settings,
   `CLAUDE_CONFIG_DIR`, and `CLAUDE_CODE_OAUTH_TOKEN` set empty, so a token in bh-02's own
   environment never reaches it (the SDK merges that environment under the options' `env`).
-- **bh-02 never holds the key.** The CLI runs the command; bh-02 only names it. The base URL goes in
+- **bh-02 never holds the key.** The CLI runs the command; bh-02 only names it. (An endpoint that
+  says `auth = "api-key"` is not a gateway: bh-02 reads its key, and its `base_url` is only where
+  the CLI sends it; [the credential](#the-credential).) The base URL goes in
   the settings layer, not the environment, so the detached launcher's scrub of `ANTHROPIC_*` (below)
   stays as it is.
 
