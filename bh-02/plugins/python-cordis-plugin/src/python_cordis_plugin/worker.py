@@ -44,6 +44,7 @@ import json
 import linecache
 import os
 import queue
+import reprlib
 import signal
 import socket
 import tempfile
@@ -51,6 +52,7 @@ import threading
 import time
 import traceback
 from collections.abc import Callable, Mapping, Sequence
+from itertools import islice
 from sys import _getframe, addaudithook, modules
 from types import BuiltinFunctionType, FrameType, FunctionType, MethodType, ModuleType
 from typing import Any
@@ -284,6 +286,41 @@ class _Channel:
             self._waiting.pop(number, None)
 
 
+class _Shown(reprlib.Repr):
+    """How an input's last expression is shown: its `repr`, cut where it is large, as `reprlib`
+    cuts it (`...` where items, characters or levels were left out): at most 100 items of a list,
+    tuple or set, 50 of a dict, 4,000 characters of a string or of another object's own `repr`,
+    and 200 digits of an int. A small value reads exactly as `repr` gives it; `print` shows the
+    whole. A dict keeps its order (`reprlib` would sort its keys)."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            maxlist=100,
+            maxtuple=100,
+            maxset=100,
+            maxfrozenset=100,
+            maxdeque=100,
+            maxarray=100,
+            maxdict=50,
+            maxstring=4_000,
+            maxlong=200,
+            maxother=4_000,
+        )
+
+    def repr_dict(self, x: dict[Any, Any], level: int) -> str:
+        if not x:
+            return "{}"
+        if level <= 0:
+            return "{" + self.fillvalue + "}"
+        pieces = [
+            f"{self.repr1(k, level - 1)}: {self.repr1(v, level - 1)}"
+            for k, v in islice(x.items(), self.maxdict)
+        ]
+        if len(x) > self.maxdict:
+            pieces.append(self.fillvalue)
+        return "{" + ", ".join(pieces) + "}"
+
+
 class _Repl:
     """The namespace and the input loop. `root` is the directory the worker started in, the
     project's (a jail starts it there): the files `touched` names are under it."""
@@ -297,6 +334,7 @@ class _Repl:
         self._inputs = 0
         self._had = set(self._namespace)  # every name the namespace has held since the worker started
         self._saved: str | None = None  # where a cut output is kept whole: made at the first cut
+        self._shown = _Shown()  # how a last expression is shown
         self._under = os.path.join(root, "")  # the root, ending in a separator
         # The globals the import system's own code runs with: the frozen importlib modules'.
         self._importlib = (vars(modules["_frozen_importlib"]), vars(modules["_frozen_importlib_external"]))
@@ -431,13 +469,14 @@ class _Repl:
         }
 
     def _own(self, body: ast.Module, last: ast.Expression | None, name: str) -> str | None:
-        """Run the input's own code: its statements, then its last expression, whose repr is
-        returned when it is not None. Only while this runs is what the input opens heard."""
+        """Run the input's own code: its statements, then its last expression, whose repr, cut
+        where it is large (`_Shown`), is returned when it is not None. Only while this runs is what
+        the input opens heard."""
         self._hearing = True
         try:
             exec(compile(body, name, "exec"), self._namespace)
             value = None if last is None else eval(compile(last, name, "eval"), self._namespace)
-            return None if value is None else repr(value)
+            return None if value is None else self._shown.repr(value)
         finally:
             self._hearing = False
 

@@ -53,7 +53,10 @@ resume. The namespace holds only what inputs put there: an input reads and write
 runs programs itself, with plain Python, and the jail decides what it may touch. Inputs run on
 the Python process's main thread, so SIGINT lands as `KeyboardInterrupt` in the running input and the
 namespace survives; with no input running, SIGINT is ignored. An input's last expression is
-shown, and `print` is the observation channel. An audit hook (`sys.addaudithook`) hears each
+shown, its `repr` cut where it is large (`_Shown`, a `reprlib.Repr`: at most 100 items of a list,
+tuple or set, 50 of a dict, kept in its own order rather than `reprlib`'s sorted one, 4,000
+characters of a string or of another object's own `repr`, 200 digits of an int, `...` where it
+left something out), and `print` is the observation channel, never cut but by the output cap. An audit hook (`sys.addaudithook`) hears each
 file the input's own code opens with `open` or `pathlib` (an `open` event whose mode is a
 string), read or written, under the directory the Python process started in (the project root, where
 the jail starts it), and the `done` names them (`touched`, absolute, each once, at most 1,000,

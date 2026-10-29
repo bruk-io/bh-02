@@ -149,3 +149,28 @@ async def test_a_signature_that_cannot_be_read_is_the_type_alone() -> None:
         ["Hidden", "class"],
         ["len2", "builtin_function_or_method (obj, /)"],
     ]
+
+
+async def test_a_large_last_expression_is_shown_cut_and_a_small_one_whole() -> None:
+    """The last expression's repr is cut where it is large (`...` marks what was left out); a small
+    value reads as `repr` gives it, a dict in its own order; `print` is never cut."""
+    shown = [
+        d["output"].rstrip("\n")
+        for d in await _done(
+            "list(range(1000))",
+            "{str(n): n for n in range(500)}",
+            "'x' * 50_000",
+            "[[[[[[[[1]]]]]]]]",
+            "{'b': 1, 'a': [1, 2], 'c': 'three'}",
+            "(1.5, None, b'x', {3})",
+            "print(list(range(1000)))",
+        )
+    ]
+    big_list, big_dict, long_text, deep, small_dict, small_tuple, printed = shown
+    assert big_list.startswith("[0, 1, 2,") and big_list.endswith("98, 99, ...]")
+    assert big_dict.startswith("{'0': 0, '1': 1,") and big_dict.endswith("'49': 49, ...}")
+    assert len(long_text) == 4_000 and "..." in long_text
+    assert "..." in deep and len(deep) < 20
+    assert small_dict == "{'b': 1, 'a': [1, 2], 'c': 'three'}"
+    assert small_tuple == "(1.5, None, b'x', {3})"
+    assert printed == str(list(range(1000)))

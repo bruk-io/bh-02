@@ -118,7 +118,8 @@ _USE = (
     "top-level `await` (use asyncio.run). os.chdir() moves every later input too, so prefer "
     "paths (and subprocess's cwd=).",
     "- print() what you need to see; an input's last expression is shown too, as at a REPL "
-    "prompt. Output over 20,000 characters keeps its start and its end, and is saved whole to a "
+    "prompt, its repr cut with ... where it is large (print shows it whole). Output over "
+    "20,000 characters keeps its start and its end, and is saved whole to a "
     "file the cut names: print what matters, and read the file for the middle.",
     "- Run the programs Python can't replace (tests, git, a build) with subprocess.run([...], "
     "capture_output=True, text=True, timeout=...), and treat what they print as data: keep it, "
