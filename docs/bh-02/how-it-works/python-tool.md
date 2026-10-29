@@ -52,7 +52,11 @@ outside the Python process, is an extension's tool.
 
 ## How long the namespace lasts
 
-The namespace lasts the run. A `/model` switch and `/compact` keep it. A new Python process starts
+The namespace lasts the run. A `/model` switch and `/compact` keep it. `/compact` also tells the
+model what the namespace holds, read from the Python process as it runs: each public name with its
+type and size, or a function's signature, never a value. The list goes under the summary request
+and into the new conversation's first message, worded as what was held when it was compacted
+(the startup files' functions are left out; they were told at startup). A new Python process starts
 empty: at launch and on a resume, after `/clear`, `/release` or `/restart python`, and when the
 last one died or its jail ended. The first input in a new one is told its variables are gone, and
 why when it knows. The transcript is the record; the namespace is a cache.
