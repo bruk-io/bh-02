@@ -59,7 +59,13 @@ and into the new conversation's first message, worded as what was held when it w
 (the startup files' functions are left out; they were told at startup). A new Python process starts
 empty: at launch and on a resume, after `/clear`, `/release` or `/restart python`, and when the
 last one died or its jail ended. The first input in a new one is told its variables are gone, and
-why when it knows. The transcript is the record; the namespace is a cache.
+why when it knows, and which names the dead one held. The transcript is the record; the namespace is a cache.
+
+Each input's output starts with one line saying what that input did to the namespace, when it did
+something: `(namespace: + hits (list, 42 items); ~ config (dict, 7 keys); - tmp)`, for names added,
+rebound or changed, and removed. It compares the names' descriptions (type and size, never a value),
+so a built-in container that grew shows, and other changes made in place do not. It is capped at
+about 600 characters, the rest counted.
 
 `Ctrl+C` interrupts the running input, and the namespace survives it.
 

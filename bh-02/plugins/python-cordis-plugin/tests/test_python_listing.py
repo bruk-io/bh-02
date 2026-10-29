@@ -3,7 +3,7 @@ may have made anything of, and the aside it becomes, within the signature budget
 
 import json
 
-from python_cordis_plugin.client import signed, startup_ran
+from python_cordis_plugin.client import changed, gone, signed, startup_ran
 
 _FULL = 600  # what a REPL starts with: the model's whole budget of signatures
 
@@ -162,3 +162,49 @@ def test_a_line_that_is_not_the_listing_is_said_not_to_be_listed_and_spends_noth
         '{"helpers": [["a", "()"]], "hidden": 0}',  # the shape before decision-0006
     ):
         assert startup_ran("PATH", "first", line, _FULL) == (said, _FULL), line
+
+
+def test_a_namespace_change_is_told_as_added_rebound_and_removed() -> None:
+    before = {"config": "dict, 7 keys", "tmp": "str, 3 chars", "kept": "int"}
+    after = {
+        "config": "dict, 8 keys",
+        "kept": "int",
+        "hits": "list, 42 items",
+        "edit": "function (path, old, new)",
+    }
+    assert changed(before, after) == (
+        "namespace: + hits (list, 42 items), edit(path, old, new) (function); ~ config (dict, 8 keys); - tmp"
+    )
+
+
+def test_a_size_change_of_a_container_is_a_rebinding() -> None:
+    assert changed({"x": "list, 1 item"}, {"x": "list, 2 items"}) == "namespace: ~ x (list, 2 items)"
+
+
+def test_no_change_says_nothing() -> None:
+    assert changed({}, {}) == ""
+    assert changed({"x": "int"}, {"x": "int"}) == ""
+
+
+def test_a_callable_thatchanged_is_worded_by_its_signature() -> None:
+    assert changed({"f": "function ()"}, {"f": "function (a)"}) == "namespace: ~ f(a) (function)"
+
+
+def test_the_line_is_capped_and_the_rest_counted() -> None:
+    after = {f"name_{n:03}": "list, 42 items" for n in range(100)}
+    line = changed({}, after)
+    assert line.endswith(", and 80 more") or ", and " in line and line.endswith(" more")
+    assert len(line) < 700 and line.startswith("namespace: + name_000 (list, 42 items), name_001")
+    shown = line.count("name_")
+    assert f", and {100 - shown} more" in line
+    removals = changed({f"name_{n:03}": "int" for n in range(300)}, {})
+    assert removals.startswith("namespace: - name_000, name_001") and ", and " in removals
+    assert len(removals) < 700
+
+
+def test_the_names_an_earlier_repl_held_are_listed_and_capped() -> None:
+    assert gone(["hits", "edit"]) == "the earlier REPL's names are gone: hits, edit"
+    assert gone([]) == ""
+    many = gone([f"name_{n:03}" for n in range(300)])
+    assert many.startswith("the earlier REPL's names are gone: name_000, name_001")
+    assert len(many) < 700 and ", and " in many and many.endswith(" more")

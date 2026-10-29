@@ -101,6 +101,26 @@ running, and when the namespace holds no names. The row adds it to `carried`
 either reloading the other; `/clear` restarts the row (the listing starts empty), `/compact`
 keeps it.
 
+**What an input changed, told with its output.** The host compares the listing before an input
+with the one after it (`changed`, pure) and, when they differ, puts one line before the input's
+output, right after the aside about bh-02's tools: `(namespace: + hits (list, 42 items), edit(path,
+old, new) (function); ~ config (dict, 7 keys); - tmp)`. `+` is a name added, `~` one whose
+description changed, `-` one removed; a callable is worded as `carried()` words it (`_phrase`). It
+is capped at 600 characters of names (removals count), and what is past it is counted
+(`, and 5 more`). The listing it starts from is the one after the previous input in the same
+worker, and for the first input the one after the opening's startup files ran, so a startup file's
+functions are never reported as added (the opening's own asides told them). It reports bindings
+and the size of the built-in containers: a list that grew in place (`list, 42 items` to `list, 43
+items`) shows as `~`, but an object changed in place in any other way, or a name rebound to another
+object of the same description (`x = 1`, then `x = 2`), is not seen, as only descriptions are
+compared (never a `repr`). An input that changes nothing adds nothing, and when either listing was
+cut at 200 names no line is told, since a name past the cut would look removed. After a worker
+died or was stopped, the new one's first input is also told which names the dead one last held,
+apart from the startup files' (`(the earlier REPL's names are gone: hits, edit, config)`, same cap),
+once, in the same parenthesis as the aside that the REPL was started again, after it. A new
+session or a resume has no earlier listing and adds nothing. The python section of the system
+prompt has one sentence saying the line exists.
+
 Before the input's own Python opens one of those files, the same audit hook can ask bh-02 about
 it (`access`, `agent:access`): each input's `exec` names the kinds some row asks about
 (`"ask": ["write"]`, say), and for an open of that kind the Python process sends `{"op": "ask", "id",

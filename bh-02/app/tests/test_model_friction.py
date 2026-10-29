@@ -109,6 +109,19 @@ def test_work_done_again_in_a_new_repl_is_not_a_reuse_miss(tmp_path: Path) -> No
     assert _reuse_findings(tmp_path / "resume", [(_SEARCH, ""), (_SEARCH, "")], resumed) == []
 
 
+def test_a_result_carrying_the_namespace_line_is_read_as_before(tmp_path: Path) -> None:
+    """The line `(namespace: + hits (list, 3 items))` comes after the restart aside and before the
+    output: a new REPL is still seen, and a miss is still counted when the line is there."""
+    restarted = (
+        "(the REPL was started again; what earlier inputs defined is gone. the earlier REPL's names "
+        "are gone: hits)\n(namespace: + hits (list, 3 items))\n3"
+    )
+    assert _reuse_findings(tmp_path / "restart", [(_SEARCH, ""), (_SEARCH, restarted)]) == []
+    line = "(namespace: + hits (list, 3 items))\n3"
+    found = _reuse_findings(tmp_path / "miss", [(_SEARCH, line), ("print(len(hits))", "3"), (_SEARCH, line)])
+    assert len(found) == 1 and found[0].startswith("input 3, kept again in `hits`")
+
+
 def test_work_done_again_after_something_could_change_it_is_not_a_reuse_miss(tmp_path: Path) -> None:
     """A file written, a program that may change files, a name the work reads bound again, the
     variable bound to something else: each makes the work worth doing again."""

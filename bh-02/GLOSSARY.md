@@ -83,6 +83,7 @@ As [cordis's README](../libs/cordis/README.md) defines them (its "Concepts").
 - **input**: one `python` call: the code the model sent the Python process and what it printed (not a cell: there is no notebook; not the `input` key, below).
 - **Python process**: the process the runner starts to run inputs and keep the namespace for the run; to the model, a Python REPL of its own that persists.
 - **namespace**: what the inputs have defined in the Python process (variables, functions, imports): the model's working state for the run, and a cache, since the transcript is the record.
+- **namespace line**: the one line before an input's output, `(namespace: + hits (list, 42 items); ~ config (dict, 7 keys); - tmp)`, saying which names the input added (`+`), rebound or changed in size (`~`) and removed (`-`); capped, the rest counted.
 - **python** (row): `python:tool`, bh-02's handle on the Python process, which registers the `python` tool; its class is `PythonProcess` (its config `PythonProcessConfig`).
 - **extensions process**: the process the model's extensions run in, the second one the runner starts.
 - **worker**: an older word, still in some messages and in the code (`worker.py`), for a process the jail started: the Python process or the extensions process.

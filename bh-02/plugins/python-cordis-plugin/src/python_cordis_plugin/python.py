@@ -112,7 +112,8 @@ _USE = (
     "",
     "- Build up state: define a function once (one that runs the tests and prints only the "
     "failures, say) and call it later. A variable holds what was read, not the file: read a "
-    "file again after you change it.",
+    "file again after you change it. A line before an input's output says what it added (+), "
+    "rebound (~) or removed (-).",
     "- It is plain Python, not IPython or a notebook: no `!command` or `%magic`, and no "
     "top-level `await` (use asyncio.run). os.chdir() moves every later input too, so prefer "
     "paths (and subprocess's cwd=).",

@@ -1414,7 +1414,7 @@ async def test_an_input_that_opens_a_file_is_told_the_guidance_and_rules_for_it_
     inputs = (
         "len(open('src/db/models.py').read())",
         "len(open('src/db/models.py').read())",
-        "import subprocess; subprocess.run(['cat', 'src/db/models.py'], capture_output=True).returncode",
+        "__import__('subprocess').run(['cat', 'src/db/models.py'], capture_output=True).returncode",
     )
     patch = _inputs(
         composition,
@@ -1453,7 +1453,7 @@ async def test_a_write_to_a_file_with_untold_instructions_waits_until_they_are_t
     inputs = (
         "import pathlib; pathlib.Path('src/db/models.py').write_text('X = 2\\n')",
         "pathlib.Path('src/db/models.py').write_text('X = 3\\n')",
-        "import subprocess; subprocess.run(['sh', '-c', 'echo X = 4 > src/db/other.py']).returncode",
+        "__import__('subprocess').run(['sh', '-c', 'echo X = 4 > src/db/other.py']).returncode",
     )
     patch = _inputs(
         composition,
@@ -1536,7 +1536,7 @@ async def test_a_resumed_conversation_is_told_its_asides_once_and_clear_tells_th
     (project / ".claude" / "rules" / "db.md").write_text("---\npaths: src/db/**\n---\nMigrations by hand.")
     transcript = tmp_path / "transcript.jsonl"
     opens = "len(open('src/db/models.py').read())"
-    cats = "import subprocess; subprocess.run(['cat', 'src/db/models.py'], capture_output=True).returncode"
+    cats = "__import__('subprocess').run(['cat', 'src/db/models.py'], capture_output=True).returncode"
     session = (
         f'[[plugin]]\nid = "python"\nconfig = {{ root = "{project}" }}\n'
         f'[[plugin]]\nid = "system"\nconfig = {{ root = "{project}" }}\n'
