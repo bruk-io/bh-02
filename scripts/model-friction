@@ -4,7 +4,8 @@
 Reads every session's `transcript.jsonl` under bh-02's state directory (`$XDG_STATE_HOME/bh-02/
 sessions`, else `~/.local/state/bh-02/sessions`, or `--sessions DIR`) and counts, per signal,
 how often it happened and in how many sessions, with a few examples of each. A transcript holds
-the conversation since its last /clear. Run it after using bh-02 for a while: the signals that
+the conversation since its last /clear; a session's `rows.jsonl` says when each run of bh-02 on it
+began, so work redone after a resume, in a new REPL, is not counted as a reuse miss. Run it after using bh-02 for a while: the signals that
 come up most are where the prompt, the Python process or the loop should change next.
 
     scripts/model-friction                 # every session here
@@ -51,6 +52,10 @@ SIGNALS = {
     "timeout": "a program that ran out of its timeout",
     "cut_output": "an input whose output was cut at 20,000 characters",
     "repl_restarted": "the REPL died and was started again",
+    "reuse_miss": (
+        "redid work a variable held (read files, ran a program, called a tool) in the same REPL, "
+        "with nothing between that could change it: a floor"
+    ),
     "declined": "an input the person said no to (unjailed)",
     "interrupted": "a reply the person stopped mid-input",
     "claude_code": "the model's own text mentions Claude Code",
@@ -216,9 +221,11 @@ def _calls(messages: Sequence[Message]) -> dict[str, Mapping[str, Any]]:
     }
 
 
-def findings(session: str, messages: Sequence[Message]) -> Iterator[Finding]:
-    """The signals in one transcript, pure: what happened, never why."""
+def findings(session: str, messages: Sequence[Message], runs: Sequence[str] = ()) -> Iterator[Finding]:
+    """The signals in one transcript, pure: what happened, never why. `runs`: when each run of
+    bh-02 on the session began, which `reuse_misses` needs."""
     calls = _calls(messages)
+    inputs: list[Input] = []
     for message in messages:
         role, content = message.get("role"), str(message.get("content") or "")
         if role in ("user", "tool") and _CHANGED in content:
@@ -231,6 +238,9 @@ def findings(session: str, messages: Sequence[Message]) -> Iterator[Finding]:
             call = calls.get(str(message.get("call_id")), {})
             code = str((call.get("input") or {}).get("code") or "")
             yield from _one_input(session, code, _result(message))
+            record = message.get("call")
+            at = str(record.get("at") or "") if isinstance(record, dict) else ""
+            inputs.append(Input(str(call.get("name") or ""), code, _result(message), at))
         if role == "assistant":
             for call in message.get("tool_calls") or ():
                 code = str((call.get("input") or {}).get("code") or "")
@@ -238,6 +248,7 @@ def findings(session: str, messages: Sequence[Message]) -> Iterator[Finding]:
                     yield Finding("extension_written", session, _short(code))
                 if _STARTUP_FILE in code and _WRITES.search(code):
                     yield Finding("startup_file", session, _short(code))
+    yield from reuse_misses(session, inputs, runs)
 
 
 def _shell_shaped(code: str) -> bool:
@@ -298,6 +309,190 @@ def _one_input(session: str, code: str, result: str) -> Iterator[Finding]:
         yield Finding("uncaptured_output", session, _short(code))
 
 
+# What makes an expression work worth keeping: a call that reads the disk, runs a program or calls
+# one of bh-02's tools (`tools.NAME`), by the function's own name.
+_WORK = {
+    "read_text", "read_bytes", "readlines", "open", "glob", "rglob", "iterdir", "walk", "listdir",
+    "scandir", "run", "check_output", "getoutput", "getstatusoutput", "popen", "system",
+}  # fmt: skip
+# The programs that change no file, and git's subcommands that change nothing.
+_READ_ONLY = {
+    "cat",
+    "head",
+    "tail",
+    "wc",
+    "ls",
+    "find",
+    "tree",
+    "grep",
+    "rg",
+    "sort",
+    "uniq",
+    "echo",
+    "pwd",
+    "diff",
+}
+_GIT_READS = re.compile(r"\bgit\s+(?:-C\s+\S+\s+)?(?:status|diff|log|show|ls-files|grep|blame|rev-parse)\b")
+_NOT_RUN = ("denied:", "interrupted:", "not run:", "error:")  # a result whose input never ran
+_RESTARTED = "(the REPL was started again"  # the opening's first aside, in a new worker's first input
+# What has a scope of its own, whose names an input's namespace never holds.
+_SCOPES = (
+    ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda,
+    ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp,
+)  # fmt: skip
+
+
+@dataclass(frozen=True, slots=True)
+class Input:
+    """One call the model made, as the reuse signal reads it: the tool, its code (python's; "" for
+    another tool's), what it gave, and when it reached approval (`at`, "" when not recorded)."""
+
+    tool: str
+    code: str
+    result: str
+    at: str
+
+
+@dataclass(frozen=True, slots=True)
+class _Kept:
+    """An expression whose value a variable holds: the variable, and the names the expression
+    reads (binding one of them again means running it again is not a miss)."""
+
+    name: str
+    reads: frozenset[str]
+
+
+def _works(node: ast.AST) -> bool:
+    """Whether evaluating `node` reads the disk, runs a program or calls a tool."""
+    for inner in ast.walk(node):
+        if not isinstance(inner, ast.Call):
+            continue
+        func = inner.func
+        if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name) and func.value.id == "tools":
+            return True
+        if (func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)) in _WORK:
+            return True
+    return False
+
+
+def _bound(statement: ast.stmt) -> set[str]:
+    """The names a top-level statement binds or deletes in the namespace (an assignment's targets, a
+    loop's, a `with`'s, an import, a def or a class), not those a function or comprehension keeps
+    to itself."""
+    names: set[str] = set()
+    pending: list[ast.AST] = [statement]
+    while pending:
+        node = pending.pop()
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            names.add(node.name)
+            if node is not statement:
+                continue
+            pending.extend(node.decorator_list)
+            continue
+        if isinstance(node, ast.Import | ast.ImportFrom):
+            names |= {(a.asname or a.name).partition(".")[0] for a in node.names}
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store | ast.Del):
+            names.add(node.id)
+        elif isinstance(node, ast.NamedExpr) and isinstance(node.target, ast.Name):
+            names.add(node.target.id)
+        if isinstance(node, _SCOPES) and node is not statement:
+            continue
+        pending.extend(ast.iter_child_nodes(node))
+    return names
+
+
+def _changes_files(statement: ast.stmt) -> bool:
+    """Whether a statement could change what an expression kept before it would give: it writes a
+    file, calls a tool, or runs a program that is not read-only (or sends one's output to a file)."""
+    text = ast.unparse(statement)
+    if _WRITES.search(text) or re.search(r"\btools\.\w+\(", text):
+        return True
+    for line in _command_lines(statement):
+        for name, redirected in _split(line):
+            if redirected or not (name in _READ_ONLY or (name == "git" and _GIT_READS.search(line))):
+                return True
+    return False
+
+
+def _new_repl(previous: str, now: Input, runs: Sequence[str]) -> bool:
+    """Whether `now` ran in another REPL than the input before it (`previous`, its `at`): its result
+    opens with the REPL started again, or a run of bh-02 began between the two (a resume)."""
+    if any(line.startswith(_RESTARTED) for line in now.result.splitlines()[:3]):
+        return True
+    return bool(previous and now.at) and any(previous < run <= now.at for run in runs)
+
+
+def reuse_misses(session: str, inputs: Sequence[Input], runs: Sequence[str] = ()) -> Iterator[Finding]:
+    """The inputs that computed again what a variable already held (`reuse_miss`), pure. `runs`:
+    when each run of bh-02 on this session began (`rows.jsonl`), so a resumed session's new REPL is
+    not counted as forgetting the old one's. An expression is kept when a top-level assignment of an
+    input that ran without an error binds it to a name, and it works (`_works`); it is computed again
+    when a later top-level statement holds the same expression, as `ast.unparse` writes it. Anything
+    that might change its answer forgets it: a statement that changes files, another tool's call,
+    binding again the name that holds it or a name it reads, a new REPL."""
+    kept: dict[str, _Kept] = {}
+    previous = ""
+    for number, one in enumerate(inputs, 1):
+        if _new_repl(previous, one, runs) or one.tool != "python":
+            kept = {}  # another tool may have changed anything
+        previous = one.at or previous
+        if one.tool != "python" or one.result.startswith(_NOT_RUN):
+            continue
+        try:
+            body = ast.parse(one.code).body
+        except SyntaxError, ValueError:
+            continue
+        failed = "Traceback (most recent call last)" in one.result
+        said: set[str] = set()
+        for statement in body:
+            for source, how in _done_again(statement, kept):
+                if source not in said:
+                    said.add(source)
+                    yield Finding("reuse_miss", session, f"input {number}, {how}: {_short(source, 100)}")
+            kept = _after(statement, {} if _changes_files(statement) else kept, keeps=not failed)
+
+
+def _kept_as(statement: ast.stmt) -> tuple[str, ast.expr] | None:
+    """The name and the expression of a statement that keeps one value in one name (`x = ...`)."""
+    if isinstance(statement, ast.Assign) and len(statement.targets) == 1:
+        target = statement.targets[0]
+        if isinstance(target, ast.Name):
+            return target.id, statement.value
+    return None
+
+
+def _done_again(statement: ast.stmt, kept: Mapping[str, _Kept]) -> Iterator[tuple[str, str]]:
+    """Each expression in a top-level statement that a variable already holds (`kept`), with how
+    it was done again: kept again in the same name, kept under another, or used without keeping. A
+    def or a class runs nothing of its body yet, so it does nothing again."""
+    if isinstance(statement, _SCOPES):
+        return
+    keeps = _kept_as(statement)
+    for node in ast.walk(statement):
+        if not isinstance(node, ast.expr) or not _works(node) or (source := ast.unparse(node)) not in kept:
+            continue
+        was, again = kept[source].name, keeps[0] if keeps and keeps[1] is node else None
+        if again == was:
+            yield source, f"kept again in `{was}`"
+        elif again:
+            yield source, f"held by `{was}`, kept again as `{again}`"
+        else:
+            yield source, f"held by `{was}`, computed again"
+
+
+def _after(statement: ast.stmt, kept: Mapping[str, _Kept], *, keeps: bool) -> dict[str, _Kept]:
+    """What the variables hold after a top-level statement ran: what it bound again forgotten (the
+    name holding a value, or one the value was computed from), and what it keeps added, when its
+    input ran (`keeps`) and the value is work (`_works`)."""
+    bound = _bound(statement)
+    after = {s: k for s, k in kept.items() if k.name not in bound and not k.reads & bound}
+    if keeps and (keeping := _kept_as(statement)) and _works(keeping[1]):
+        name, value = keeping
+        reads = frozenset(n.id for n in ast.walk(value) if isinstance(n, ast.Name))
+        after[ast.unparse(value)] = _Kept(name, reads)
+    return after
+
+
 def _sessions_dir(given: str | None) -> Path:
     if given:
         return Path(given)
@@ -312,6 +507,24 @@ def _started_on(session: Path) -> str | None:
     except OSError, ValueError:
         return None
     return meta.get("stack") if isinstance(meta, dict) else None
+
+
+def _runs(session: Path) -> list[str]:
+    """When each run of bh-02 on a session began (its `rows.jsonl`'s `run` lines), oldest first; []
+    when there is no such file."""
+    try:
+        lines = (session / "rows.jsonl").read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return []
+    starts = []
+    for line in lines:
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(record, dict) and record.get("kind") == "run" and isinstance(record.get("at"), str):
+            starts.append(record["at"])
+    return sorted(starts)
 
 
 def _transcripts(root: Path, model: str | None) -> Iterator[tuple[str, list[Message]]]:
@@ -372,9 +585,10 @@ def main(argv: Sequence[str]) -> int:
     sessions = replies = inputs = 0
     for session, messages in _transcripts(root, args.model):
         sessions += 1
+        runs = _runs(root / session)
         replies += sum(1 for m in messages if m.get("role") == "user" and not m.get("feedback"))
         inputs += sum(1 for m in messages if m.get("role") == "tool")
-        found.extend(findings(session, messages))
+        found.extend(findings(session, messages, runs))
     if args.json:
         for f in found:
             print(json.dumps({"signal": f.signal, "session": f.session, "detail": f.detail}))
