@@ -44,7 +44,7 @@ from agent_cordis_plugin.testing import Stepped, noon, on
 from cordis import Effects, Runtime, bind, component
 from cordis.composition import Entry
 from cordis.loader import resolve
-from cordis_helpers import Job
+from cordis_helpers import Hooks, Job
 
 type Json = Mapping[str, Any]
 
@@ -204,12 +204,14 @@ async def _compact(
     screen: Screen | None = None,
     jobs: Jobs | None = None,
     clock: Clock | None = None,
+    carried: Sequence[Callable[[], str]] = (),
 ) -> Any:
     """`/compact ARGS` over the session's file at `path`, as the conversation row runs it."""
     return await compact_conversation(
         args,
         model=model,
         tools=Offered(),
+        carried=carried,
         loader=loader or Loader(str(path) if path else None),
         output=screen or Screen(),
         config=ConversationConfig(),
@@ -835,18 +837,27 @@ class Registry:
 async def test_the_conversation_row_registers_clear_and_compact_and_queues_restarts_in_jobs(
     tmp_path: Path,
 ) -> None:
-    """It depends on the model, `tools` (the specs), the loader, `commands`, `output` and `jobs`,
+    """It depends on the model, `tools` (the specs), `carried`, the loader, `commands`, `output` and `jobs`,
     never on the loop or the transcript, which it restarts. Each restart is queued in `jobs`,
     with what the person is told if it fails: the new conversation is written by then."""
-    assert resolve("agent:conversation").inject == {"model", "tools", "loader", "commands", "output", "jobs"}
+    assert resolve("agent:conversation").inject == {
+        "model",
+        "tools",
+        "carried",
+        "loader",
+        "commands",
+        "output",
+        "jobs",
+    }
     path = _session(tmp_path)
     loader, commands, screen, jobs = Loader(str(path)), Registry(), Screen(), Jobs()
     model = Scripted([text("x holds 42"), stop("end_turn")], [text("x holds 42"), stop("end_turn")])
 
-    @component(provides=("model", "tools", "loader", "commands", "output", "jobs"))
+    @component(provides=("model", "tools", "carried", "loader", "commands", "output", "jobs"))
     async def values() -> Effects:
         yield bind("model", model)
         yield bind("tools", Offered())
+        yield bind("carried", Hooks[Callable[[], str]]())
         yield bind("loader", loader)
         yield bind("commands", commands)
         yield bind("output", screen)
@@ -1164,3 +1175,81 @@ async def test_a_transcript_row_whose_file_could_not_be_written_restarts_from_wh
     # the conversation went on from the lines the file held (the tools it began with among them)
     assert [m["role"] for m in _entries(path)][len(held) :] == ["user", "assistant", "tool", "assistant"]
     assert b"lost" not in path.read_bytes()
+
+
+_HELD = "the python REPL holds: hits (list, 42 items), edit(path, old, new) (function)"
+
+
+def _says(line: str) -> Callable[[], str]:
+    return lambda: line
+
+
+def _raises() -> str:
+    raise RuntimeError("a row that cannot say")
+
+
+def test_the_summary_request_lists_what_rows_carry_and_says_so() -> None:
+    plain = str(asked(CONVERSATION, at=NOW)[-1]["content"])
+    listed = str(
+        asked(CONVERSATION, "the endpoints", at=NOW, carried=[_HELD, "another row's line"])[-1]["content"]
+    )
+    assert "Your Python namespace is kept: name what in it the work needs" in plain
+    assert "bh-02 lists its names below" in listed and "bh-02 lists its names below" not in plain
+    assert listed.endswith(f"\n\n(bh-02, read just now:\n{_HELD}\nanother row's line)")
+    assert (
+        "(The person asks that the summary keep, in particular: the endpoints)" in listed
+    )  # before the list
+
+
+def test_the_seed_tells_what_was_held_in_the_past_and_nothing_carried_leaves_it_as_it_was() -> None:
+    step: Json = {"at": AT}
+    bare = seeded("s", "", step)
+    assert bare == seeded("s", "", step, ())
+    assert bare[0]["content"] == (
+        "(bh-02: this conversation carries on from an earlier one, compacted (/compact) to the summary "
+        "of it you wrote, which follows. Your Python namespace was kept when it was compacted, holding "
+        "what the earlier inputs defined; it empties as your instructions about python say (bh-02 "
+        "starting again, a resumed session too), so check that a name is still there before relying on it.)"
+    )
+    told = seeded("s", "", step, [_HELD])
+    assert told[0]["content"] == (
+        f"{bare[0]['content']}\n\n(bh-02, read when the conversation was compacted, so what was held "
+        f"then and not necessarily now:\n{_HELD})"
+    )
+    assert told[0]["seed"] == {"keep": ""} and told[1] == bare[1]  # no system prompt, same shape
+
+
+async def test_compact_asks_with_what_rows_carry_and_seeds_the_new_conversation_with_it(
+    tmp_path: Path,
+) -> None:
+    path = _session(tmp_path)
+    model = Scripted([text("x holds 42."), stop("end_turn")])
+    carried = [_says(_HELD), _says("  "), _says("")]
+    await _compact(path, model, carried=carried, clock=Stepped().clock)
+    ((sent, _),) = model.requests
+    assert sent == asked(CONVERSATION, at=NOW, carried=[_HELD])
+    user, assistant = FileTranscript(str(path)).messages
+    assert str(user["content"]).endswith(f"{_HELD})") and "read when the conversation was compacted" in str(
+        user["content"]
+    )
+    assert assistant["content"] == "x holds 42."
+
+
+async def test_an_entry_that_raises_is_left_out_and_compact_goes_on(tmp_path: Path) -> None:
+    path = _session(tmp_path)
+    model = Scripted([text("x holds 42."), stop("end_turn")])
+    said = await _compact(path, model, carried=[_raises, _says("kept: a"), _raises, _says("kept: b")])
+    assert isinstance(said, list) and said[0] == {"type": "cleared", "compacted": True}
+    ((sent, _),) = model.requests
+    assert str(sent[-1]["content"]).endswith("(bh-02, read just now:\nkept: a\nkept: b)")
+    assert str(FileTranscript(str(path)).messages[0]["content"]).endswith("kept: a\nkept: b)")
+
+
+async def test_nothing_carried_asks_and_seeds_as_before(tmp_path: Path) -> None:
+    path = _session(tmp_path)
+    for carried in ([], [_says("")], [_raises]):
+        model = Scripted([text("x holds 42."), stop("end_turn")])
+        path.write_text("".join(json.dumps(m) + "\n" for m in CONVERSATION))
+        await _compact(path, model, carried=carried, clock=Stepped().clock)
+        assert model.requests == [(asked(CONVERSATION, at=NOW), [PYTHON])]
+        assert FileTranscript(str(path)).messages[0]["content"] == seeded("x", "", {"at": AT})[0]["content"]

@@ -8,7 +8,11 @@ jail decides what it may touch.
 Wire: newline-delimited JSON. The host sends ``{"op": "hello"}`` once (a readiness probe
 connects and closes without a word, so the worker keeps accepting until one speaks), then
 ``{"op": "exec", "code", "ask"}`` per input, and the worker ends every input with
-``{"op": "done", "output", "error", "touched", "refused"}``: `touched` the files under the
+``{"op": "done", "output", "error", "touched", "refused", "names", "unlisted"}``: `names` the
+namespace's public names as ``[[name, description], ...]`` in namespace order (`_listed`: a type, a
+size for the built-in containers and strings, a signature for a function or class, never a value
+and never anything of the model's code run), `unlisted` how many it left out for want of room;
+`touched` the files under the
 directory the worker started in (the project root) that the input's own code opened with
 `open()` or `pathlib`, read or written, each once by its absolute path (an audit hook,
 `_Repl.heard`: what Python opens, not what a program it runs does, nor an `os.open`). `ask`
@@ -48,7 +52,7 @@ import time
 import traceback
 from collections.abc import Callable, Mapping, Sequence
 from sys import _getframe, addaudithook, modules
-from types import FrameType
+from types import BuiltinFunctionType, FrameType, FunctionType, MethodType, ModuleType
 from typing import Any
 
 __all__ = ["input_traceback", "main", "split_last_expression"]
@@ -62,6 +66,21 @@ _HELLO_S = 60.0  # the host says hello within milliseconds of the worker listeni
 _READ, _WRITE = "read", "write"  # the kinds of opening the host may ask to be asked about
 _LOOK_S = 0.5  # how often a worker waiting for its hello checks that its parent is still there
 _TOOLS = "tools"  # the name an input calls bh-02's other tools by: `tools.NAME(...)`
+_NAMES = 200  # the most names a `done` lists; the rest are counted (`unlisted`)
+_NAME = 100  # the longest name listed (a name is any string `globals()` takes)
+_KIND = 60  # the longest type name told
+_SIGNATURE = 160  # the longest signature told, in characters, as the host cuts a startup file's
+# the types whose length is read: exactly these, so no `__len__` of the model's runs
+_SIZED: Mapping[type, str] = {
+    list: "items",
+    tuple: "items",
+    dict: "items",
+    set: "items",
+    frozenset: "items",
+    str: "chars",
+    bytes: "bytes",
+}
+_CALLABLES = (FunctionType, BuiltinFunctionType, MethodType)
 
 
 class ToolError(Exception):
@@ -140,6 +159,58 @@ class _Offered:
         return (
             f"<bh-02's tools: {listed}; tools.NAME(arg=...) calls one, help(tools.NAME) says what it takes>"
         )
+
+
+def _sized(kind: type, size: int) -> str:
+    """The length of a built-in container or string as it is told: `list, 42 items`,
+    `str, 1,204 chars`; a count of one in the singular."""
+    unit = _SIZED[kind]
+    return f"{kind.__name__}, {size:,} {unit[:-1] if size == 1 else unit}"
+
+
+def _signed(value: object) -> str:
+    """` (a, b=1)`: the signature of a function or class, `inspect.signature`'s, cut at
+    `_SIGNATURE` characters; "" when it cannot be read (it may raise, or be none)."""
+    try:
+        text = str(inspect.signature(value))  # type: ignore[arg-type]
+    except Exception:
+        return ""
+    return f" {text[:_SIGNATURE]}\u2026" if len(text) > _SIGNATURE else f" {text}"
+
+
+def _described(value: object) -> str:
+    """What the model is told of a value: its type's name; for a built-in container or string
+    its length (an exact type check, so no `__len__` of the model's runs); for a function or class
+    its type's name and its signature; `module` for a module. Never a `repr`, nor an
+    attribute of the value itself: only what `type()` and the built-in types give."""
+    kind = type(value)
+    if kind in _SIZED:
+        return _sized(kind, len(value))  # type: ignore[arg-type]
+    if kind is ModuleType:
+        return "module"
+    if kind in _CALLABLES:
+        return f"{kind.__name__}{_signed(value)}"
+    if issubclass(kind, type):
+        return f"class{_signed(value)}"
+    return str(kind.__name__)[:_KIND]
+
+
+def _listed(namespace: Mapping[str, Any]) -> tuple[list[list[str]], int]:
+    """The namespace's names for the host's `names` and how many were left out: in namespace
+    order, `[name, description]` (`_described`), leaving out names with a leading underscore
+    (`__builtins__` and the dunders among them) and `tools`, bh-02's view. At most `_NAMES` are
+    listed, and a name that is no identifier, or longer than `_NAME`, is not (both are counted in
+    the second)."""
+    found: list[list[str]] = []
+    left = 0
+    for name, value in list(namespace.items()):
+        if not isinstance(name, str) or name.startswith("_") or type(value) is _Offered:
+            continue
+        if len(found) >= _NAMES or len(name) > _NAME or not name.isidentifier():
+            left += 1
+            continue
+        found.append([name, _described(value)])
+    return found, left
 
 
 def split_last_expression(code: str, name: str = "<input>") -> tuple[ast.Module, ast.Expression | None]:
@@ -348,12 +419,15 @@ class _Repl:
             self.running = False
             self._had.update(self._namespace)
         output = self._capped(out.getvalue(), "")
+        names, unlisted = _listed(self._namespace)
         return {
             "op": "done",
             "output": output,
             "error": error and self._capped(error, "-error"),
             "touched": list(self._touched),
             "refused": list(self._refused),
+            "names": names,
+            "unlisted": unlisted,
         }
 
     def _own(self, body: ast.Module, last: ast.Expression | None, name: str) -> str | None:

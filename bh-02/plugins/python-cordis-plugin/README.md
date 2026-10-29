@@ -9,12 +9,12 @@ runner for `/release`. It binds no key. Whether an input runs unasked is the `ap
 
 | Row | Binds | Consumes |
 |---|---|---|
-| `python:tool` | nothing: registers `python` with `tools` (`PYTHON`, its call the `PythonProcess`'s `call(input) -> {"content", "touched"}`, shown as its code, `shown_call`), adds the `system` section `python` (`instructions()`), and registers `stopped()` with the runner (`/release`); config: `root` (default `.`), `grace` (seconds an interrupted input gets), `startup` (the files a new Python process runs first, in order: default the person's `$XDG_CONFIG_HOME/bh-02/startup.py`, then the project's `.bh-02/startup.py`), `mypy_cache` (where mypy keeps its cache for the type check of those files: default `.bh-02/mypy_cache`, from `root`) | `runner` (`start`, and of the process it starts `report()`, `notice()`, `reads()` and `writes()`, the last where the person's startup file is not read on the host; `report()` before any; `on_release`: its stop), `approval` (`confined`), `tools` (`register`: `python`), `system` (`add`: `python`), `access` (`asking`, `refusal`: before an input opens a project file) |
+| `python:tool` | nothing: registers `python` with `tools` (`PYTHON`, its call the `PythonProcess`'s `call(input) -> {"content", "touched"}`, shown as its code, `shown_call`), adds the `system` section `python` (`instructions()`), and registers `stopped()` with the runner (`/release`); config: `root` (default `.`), `grace` (seconds an interrupted input gets), `startup` (the files a new Python process runs first, in order: default the person's `$XDG_CONFIG_HOME/bh-02/startup.py`, then the project's `.bh-02/startup.py`), `mypy_cache` (where mypy keeps its cache for the type check of those files: default `.bh-02/mypy_cache`, from `root`) | `runner` (`start`, and of the process it starts `report()`, `notice()`, `reads()` and `writes()`, the last where the person's startup file is not read on the host; `report()` before any; `on_release`: its stop), `approval` (`confined`), `tools` (`register`: `python`), `system` (`add`: `python`), `access` (`asking`, `refusal`: before an input opens a project file), `carried` (`add`: `carried()`, what `/compact` says of the namespace) |
 
 `PythonProcess` (`client.py`) is the value the row enters (given `tools` too, the `Calls` it offers
 an input: `specs()`, `call(name, input)`): `call(input)`, `instructions()`, `run(code) -> str`, `confined` (the `approval` rule's), `report()`, `notice()` and `reads()` (its own start's:
 the process it last started, never another program the runner started), `stopped()`,
-`touched()`.
+`touched()`, `carried()`.
 
 `python.py` is the tool, pure: its spec (`PYTHON`), how a call is put to the person
 (`shown_call`: its code, whole) and `instructions_for(confined, startup, reads, theirs=,
@@ -79,6 +79,27 @@ and why when its jail ended it (`started.ended()`: a Linux `runner:confined` jai
 when the host undoes one of its mounts). A process that died between inputs is noticed before the next input
 is sent, so that input runs in the new one. After each input, `touched()` is the files under
 `root` it opened, which `call` answers with (what the loop gives `asides`' functions).
+
+**The namespace, told after `/compact`.** Every `done` carries the namespace as it stands: `names`,
+`[[name, description], ...]` in namespace order, and `unlisted`, how many names it left out. A
+description is the type's name; for a `list`, `tuple`, `dict`, `set`, `frozenset`, `str` or `bytes`
+(an exact type check, so no `__len__` of the model's runs) its length (`list, 42 items`, `str,
+1,204 chars`); for a function or class its type's name and `str(inspect.signature(...))` (`function
+(path, old, new)`), cut at 160 characters; `module` for a module. Never a `repr`, and nothing
+that runs the model's code on a user object (no `__len__`, `__repr__`, property or
+`__class__`; a signature's formatting is the one place Python formats a default). Names with a
+leading underscore (`__builtins__` and the dunders among them) and `tools` (bh-02's view) are
+left out, as is a name that is no identifier or is longer than 100 characters; at most 200 are
+listed, the rest counted in `unlisted`, so a `done` stays far inside the 1 MiB line. The host keeps
+the latest listing as data (name to description, cleaned and cut as it reads it) and never adds
+it to an input's output. `carried()` words it for `/compact` on demand, reading what it holds and
+asking the worker nothing: `the python REPL holds: hits (list, 42 items), edit(path, old, new)
+(function), ...`, in order up to 3,000 characters and then `, and N more not listed`, leaving out
+the functions the startup files told (the host knows which). It is "" with no Python process
+running, and when the namespace holds no names. The row adds it to `carried`
+(`agent:carried`), a broker that depends on nothing, so the conversation row reads it without
+either reloading the other; `/clear` restarts the row (the listing starts empty), `/compact`
+keeps it.
 
 Before the input's own Python opens one of those files, the same audit hook can ask bh-02 about
 it (`access`, `agent:access`): each input's `exec` names the kinds some row asks about
@@ -189,7 +210,7 @@ all this once, in the `python` section, which stays fixed for a conversation (wh
 told, what they cost, and the docstring convention for a file the model writes); the signatures
 arrive with the first input's output, never in the prompt. They are told at startup only: a REPL
 started again runs the files and tells them again, a function an input defines later is not
-announced, and after `/compact` they live only in the model's summary. Unconfined, nothing is
+announced, and after `/compact` they live only in the model's summary (the listing `/compact` is given leaves them out, since the model was told them). Unconfined, nothing is
 listed (the model runs the file as an input of its own, which the person is asked about), so the
 section does not say it is, though it says the docstring convention. There is no decorator and
 nothing of bh-02's in a startup file: it runs unchanged outside bh-02, and one that still marks its

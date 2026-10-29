@@ -11,10 +11,12 @@ from agent_cordis_plugin import (
     ToolBroker,
     TranscriptConfig,
     asides,
+    carried,
     executor,
     loop,
     transcript,
 )
+from cordis.loader import resolve
 from cordis.testing import drive
 from cordis_helpers import Hooks
 
@@ -49,6 +51,13 @@ async def test_loop_binds_a_model_over_what_it_was_given() -> None:
 async def test_asides_binds_an_empty_broker() -> None:
     effects = await drive(asides())
     assert [(e.name, e.args[0]) for e in effects] == [("bind", "asides")]
+    assert isinstance(effects[0].args[1], Hooks) and list(effects[0].args[1]) == []
+
+
+async def test_carried_binds_an_empty_broker_that_depends_on_nothing() -> None:
+    assert resolve("agent:carried").inject == frozenset()
+    effects = await drive(carried())
+    assert [(e.name, e.args[0]) for e in effects] == [("bind", "carried")]
     assert isinstance(effects[0].args[1], Hooks) and list(effects[0].args[1]) == []
 
 

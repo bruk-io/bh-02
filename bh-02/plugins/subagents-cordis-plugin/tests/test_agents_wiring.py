@@ -221,7 +221,7 @@ async def echo_tool(*, tools: Any) -> Effects:
 
 
 # the agents row's default rows, but python: a child's conversation
-_KEPT = ["loop", "tools", "transcript", "model", "system", "asides", "access", "executor"]
+_KEPT = ["loop", "tools", "transcript", "model", "system", "asides", "carried", "access", "executor"]
 
 
 def _call(id: str, name: str, **input: Any) -> Json:
@@ -242,6 +242,7 @@ def _rows(model: _Model, screen: _Screen, path: Path | None = None, /, **more: A
         "model": Row("model", f"{__name__}:fake_model", {"model": model}),
         "system": Row("system", "agent:system"),
         "asides": Row("asides", "agent:asides"),
+        "carried": Row("carried", "agent:carried"),
         "access": Row("access", "agent:access"),
         "executor": Row("executor", "agent:executor"),
         "output": Row("output", f"{__name__}:fake_output", {"screen": screen}),

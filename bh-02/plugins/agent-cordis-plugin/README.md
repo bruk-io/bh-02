@@ -12,9 +12,10 @@ and asks `asides`, and `/compact`, which begins a new conversation from the mode
 | `agent:transcript` | `transcript`; config: `path` (a JSON-lines file, made 0600 and written off the event loop), in memory when unset | |
 | `agent:system` | `system`: the system prompt (`text()`: who the model is, the working directory and branch (its `.git/HEAD`, read from the root through no link), then the sections rows add, sorted by name); a broker, `add(name, section)`; config: `root` (default `.`) | |
 | `agent:asides` | `asides`: a `Hooks` (cordis-helpers) of functions rows `acquire` with `add(fn)` | |
+| `agent:carried` | `carried`: a `Hooks` of `() -> str` functions rows `acquire` with `add(fn)`, each one line of what the row keeps across `/compact` (the python row's: its namespace's names) | |
 | `agent:access` | `access`: an `Access`, the functions rows `acquire` with `before_read(fn)` and `before_write(fn)`, which a tool asks before it opens a file (`refusal(kind, path)`) | |
 | `agent:executor` | `executor`: a `OneAtATime`, which runs a call off the event loop once the one before it has ended | |
-| `agent:conversation` | registers `/clear` and `/compact [WHAT TO KEEP]`, each restart queued in `jobs`; config: `timeout` (seconds, 300: /compact's summary), `loop` and `transcript` (the rows /compact restarts), `clear` (the rows /clear restarts: `loop`, `transcript`, `python`) | `model` (`complete`), `tools` (`specs`), `loader` (`status`, `rows`, `restart`), `commands` (`register`), `output` (`show`), `jobs` (`put`) |
+| `agent:conversation` | registers `/clear` and `/compact [WHAT TO KEEP]`, each restart queued in `jobs`; config: `timeout` (seconds, 300: /compact's summary), `loop` and `transcript` (the rows /compact restarts), `clear` (the rows /clear restarts: `loop`, `transcript`, `python`) | `model` (`complete`), `tools` (`specs`), `carried` (iterates), `loader` (`status`, `rows`, `restart`), `commands` (`register`), `output` (`show`), `jobs` (`put`) |
 
 A reply answers one message: a model step, the calls it asked for, and again, until a
 step asks for none. The model is
@@ -246,7 +247,12 @@ the model for a summary in one step: the request is the loop's own (`loop.reques
 prompt the conversation began with, then the conversation) with the registered tools offered
 as with every step (`tools.specs()`), so a model server reuses its work on the conversation, then bh-02's message
 asking for the summary in plain text, for the model itself to carry on from, naming what its
-Python namespace holds (`asked`; `/compact WHAT TO KEEP` adds what the person wants kept). A call
+Python namespace holds (`asked`; `/compact WHAT TO KEEP` adds what the person wants kept). What the
+namespace holds comes from the Python process, not the model's memory: `/compact` calls each
+function in `carried` (in a thread, as it runs; one that raises, or gives no text, is left out and
+`/compact` goes on), and the lines go last in the request (`the python REPL holds: hits (list, 42
+items), ...`), where the request says the names are listed below it. Nothing carried (no Python
+process, or an empty namespace) leaves the request as it was. A call
 a crash left unanswered, in a session resumed and compacted before its next message (the loop
 answers it at its next reply, which `/compact` does not go through), is answered in that request
 as the loop would answer it (`loop.lost_answers`: `interrupted: bh-02 stopped before this call
@@ -265,7 +271,9 @@ closed and nothing has been written. The summary then begins the new conversatio
 bh-02's message that the conversation carries on from an earlier one, as the person's,
 then the summary as the model's answer, so the roles alternate; the message stays at the
 conversation's start, a resume's too, so it says the namespace was kept at the compaction and
-empties as the python tool's instructions say). The seed also records the step (decision-0009,
+empties as the python tool's instructions say; with lines carried, it ends with them as what was
+held when the conversation was compacted, "and not necessarily now", since a resumed session's REPL
+is empty). The system prompt does not change, and nothing is told with an input. The seed also records the step (decision-0009,
 Conversations): the message carries `at` and `seed: {keep}`, the text the person gave `/compact
 WHAT TO KEEP` (`""` for none), so no reader matches the seed's wording (`/compact` itself knows a
 seed by the field alone), and the summary carries the

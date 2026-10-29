@@ -1622,16 +1622,29 @@ class _Brokers:
         return lambda: self.sections.pop(name, None)
 
 
+class _Carrying:
+    """The `carried` value as the python row needs it: the functions added, by their remover."""
+
+    def __init__(self) -> None:
+        self.added: list[Any] = []
+
+    def add(self, fn: Any) -> Any:
+        self.added.append(fn)
+        return lambda: self.added.remove(fn)
+
+
 async def test_the_row_starts_the_worker_registers_python_and_leaving_stops_it() -> None:
     """The python row registers `python` with `tools` (its call, shown as its code, run in the
     runner) and what the model is told about it as the `system` section `python`, asks `access`
     before an input writes a project file, and registers its process's stop for `/release`; the
     registrations leave with the row, and so does the worker."""
     brokers = _Brokers(refusing="not here")
+    carrying = _Carrying()
     runner = Runner(Unjailed())
 
-    @component(provides=("runner", "approval", "tools", "system", "access"))
+    @component(provides=("runner", "approval", "tools", "system", "access", "carried"))
     async def around() -> Effects:
+        yield bind("carried", carrying)
         yield bind("runner", runner)
         yield bind("approval", Approval(runner))
         yield bind("tools", brokers)
@@ -1646,6 +1659,7 @@ async def test_the_row_starts_the_worker_registers_python_and_leaving_stops_it()
     spec, run, how = brokers.tools["python"]
     assert spec is PYTHON and run == k.call and how == {"show": shown_call}
     assert brokers.sections["python"]() == k.instructions()
+    assert carrying.added == [k.carried]  # what /compact says of the namespace
     pid = int((await run({"code": "import os; os.getpid()"}))["content"])
     assert not k.confined and k.report() == UNENFORCED
     probe = Path("bh-02-refused-probe.txt").resolve()  # under the row's root, the working directory
@@ -2097,3 +2111,63 @@ def test_mypy_cache_is_a_config_key_and_a_directory_name() -> None:
     for bad in ("", None, 3, [".bh-02"]):
         with pytest.raises(TypeError, match="`mypy_cache` must be a directory name"):
             PythonProcessConfig(mypy_cache=bad)  # type: ignore[arg-type]
+
+
+async def test_carried_says_what_the_namespace_holds_by_type_size_and_signature() -> None:
+    async with _process(Unjailed(), PythonProcessConfig()) as k:
+        assert k.carried() == ""  # the worker is up, and holds nothing yet
+        await k.run(
+            "hits = [1, 2, 3]\n_hidden = 1\nword = 'abc'\n"
+            "def edit(path, old, new): ...\n"
+            "class Box: ...\n"
+            "import json\n"
+            "class Loud:\n    def __repr__(self): return 'SECRET-REPR'\n"
+            "loud = Loud()\n"
+        )
+        line = k.carried()
+        assert line == (
+            "the python REPL holds: hits (list, 3 items), word (str, 3 chars), edit(path, old, new) "
+            "(function), Box() (class), json (module), Loud() (class), loud (Loud)"
+        )
+        assert "SECRET-REPR" not in line and "_hidden" not in line
+        out = await k.run("hits")
+        assert out == "[1, 2, 3]"  # an input's output carries no listing
+
+
+async def test_carried_is_empty_with_no_process_or_no_names() -> None:
+    k = _process(Unjailed(), PythonProcessConfig())
+    assert k.carried() == ""  # never started
+    async with k:
+        await k.run("x = 1")
+        assert k.carried() == "the python REPL holds: x (int)"
+        await k.run("del x")
+        assert k.carried() == ""  # a worker that holds no names
+        await k.run("y = 2")
+        await k.stopped()  # `/release`
+        assert k.carried() == ""
+        await k.run("z = 3")  # a new worker
+        assert k.carried() == "the python REPL holds: z (int)"
+
+
+async def test_carried_leaves_out_the_functions_the_startup_files_told(tmp_path: Path) -> None:
+    _project_s(tmp_path, "def sh(cmd):\n    return cmd\n\nTOOLS = 2\n")
+    async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:
+        await k.run("mine = [1]\ndef own(a): ...")
+        assert k.carried() == "the python REPL holds: TOOLS (int), mine (list, 1 item), own(a) (function)"
+
+
+async def test_carried_says_how_many_names_were_left_out() -> None:
+    async with _process(Unjailed(), PythonProcessConfig()) as k:
+        await k.run("for n in range(300): globals()[f'name{n}'] = n")
+        line = k.carried()
+        assert line.startswith("the python REPL holds: n (int), name0 (int), name1 (int)")
+        assert line.endswith(" more not listed") and len(line) < 3_100
+        assert " (int), name" in line
+
+
+async def test_the_namespace_listing_is_cleaned_and_read_as_data() -> None:
+    async with _process(Unjailed(), PythonProcessConfig()) as k:
+        await k.run("T = type('Wide\\x1b[31m\\nName', (), {})\nobj = T()\nglobals()['bad name'] = 1")
+        line = k.carried()
+        assert "\x1b" not in line and "\n" not in line and "bad name" not in line
+        assert "obj (Wide[31mName)" in line

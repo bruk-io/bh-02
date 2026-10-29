@@ -141,6 +141,7 @@ As [cordis's README](../libs/cordis/README.md) defines them (its "Concepts").
 - **conversation** (row): `agent:conversation`: `/clear` and `/compact`, each a new conversation written over the transcript's file ([agent-cordis-plugin](plugins/agent-cordis-plugin/README.md)).
 - **asides** (row and key): `agent:asides`: a broker of functions rows add, each of which may add an aside to a call's result.
 - **access** (row and key): `agent:access`: a broker of functions rows add that a tool asks before it opens a file, each answering go ahead or why not.
+- **carried** (row and key): `agent:carried`: a broker of functions rows add, each giving one line of what the row keeps across `/compact` (the python row: its namespace's names), told in the summary request and the new conversation's first message.
 - **executor** (row and key): `agent:executor`: where the loop reads the prompt and asks `asides`, in a thread off the app's event loop, one call at a time.
 - **touched**: the files a call opened, as its tool answers (an input's: what its own Python code opened, `touched()`).
 - **on-touch** (row): `memory:on_touch`: memory that loads on demand (a subdirectory's CLAUDE.md, a rule whose `paths` match), told whole as an aside to the first input in a conversation that opens a file it covers.

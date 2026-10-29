@@ -48,6 +48,14 @@ class _Sections(Protocol):
     def add(self, name: str, section: Callable[[], str]) -> Callable[[], None]: ...
 
 
+@runtime_checkable
+class _Keeps(Protocol):
+    """What the python row needs of the `carried` value (CONTRACTS.md: carried): a function
+    added, and its remover back."""
+
+    def add(self, fn: Callable[[], str]) -> Callable[[], None]: ...
+
+
 @component
 async def tool(
     *,
@@ -56,6 +64,7 @@ async def tool(
     tools: _Tools,
     system: _Sections,
     access: Access,
+    carried: _Keeps,
     config: PythonProcessConfig,
 ) -> Effects:
     """Fills a `python` row: `use = "python:tool"`. Starts a persistent Python process in the
@@ -68,7 +77,11 @@ async def tool(
     of opening (read, write), and a refusal stops the open. On `/release` the row stops its own
     process (`runner.on_release`); the next input starts it again.
 
-    Depends on the runner, the rule and the three brokers, none of which reload, so swapping the
+    Adds to `carried` what /compact says of the namespace (`PythonProcess.carried`: its names, by
+    type and size, from the listing the last input brought), so the model is told it after the
+    summary; /compact keeps this row, so the namespace stays.
+
+    Depends on the runner, the rule and the four brokers, none of which reload, so swapping the
     model or the ui keeps the namespace, and so does a reload of the loop; swapping the runner
     starts a new process, which is the honest thing for a new runner to mean. A restart
     (`/clear`) registers the same tool again, so the loop reloads with nothing."""
@@ -76,3 +89,4 @@ async def tool(
     yield acquire(runner.on_release, started.stopped)
     yield acquire(tools.register, PYTHON, started.call, show=shown_call)
     yield acquire(system.add, "python", started.instructions)
+    yield acquire(carried.add, started.carried)

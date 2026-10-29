@@ -99,6 +99,10 @@ _READ = 4 * _CUT  # how much of one the Python process sends: the host cleans it
 # REPL's startup files, the person's first; the first function that does not fit, and every one
 # after it, is told by name only. The python section says the same number (`python._TOLD`).
 _BUDGET = 600
+# What /compact is told of the namespace (`carried`): at most this many characters of the names,
+# the rest counted; a description is cut at `_CUT` plus the type's name.
+_CARRIED = 3_000
+_CALLS = frozenset({"function", "class", "method", "builtin_function_or_method"})  # told by signature
 # Unicode's control (C0, DEL, C1) and format (bidi overrides, zero-width) categories: what no line
 # the model reads as bh-02's own may hold, since they break the line, or reorder or hide its text
 _STRIPPED = frozenset({"Cc", "Cf"})
@@ -245,6 +249,41 @@ class _Output:
             parts.append(self.error)
         parts += [f"({refused})" for refused in self.refused]
         return "\n".join(parts) or "(no output)"
+
+
+def _listing(message: Mapping[str, Any]) -> tuple[dict[str, str], int]:
+    """The namespace a `done` reports, as data: name to description, and how many names the
+    worker left out. The worker's code is the model's to run, so each is read for its shape: a
+    name Python could not have written is dropped, a description is cleaned (`_plain`) and cut."""
+    names, unlisted = message.get("names"), message.get("unlisted")
+    found: dict[str, str] = {}
+    for each in names if isinstance(names, list) else ():
+        match each:
+            case [str() as name, str() as description] if name.isidentifier():
+                found[name] = _plain(description)[: _CUT + 80]
+    return found, unlisted if isinstance(unlisted, int) and unlisted > 0 else 0
+
+
+def _carried(names: Mapping[str, str], told: frozenset[str], unlisted: int) -> str:
+    """What /compact is told of a namespace: `the python REPL holds: hits (list, 42 items),
+    edit(path, old, new) (function), ...`, leaving out the functions the startup files `told`,
+    in order up to `_CARRIED` characters, then how many more there were. "" when nothing is
+    left to tell."""
+    parts: list[str] = []
+    used = 0
+    shown = [(name, description) for name, description in names.items() if name not in told]
+    for index, (name, description) in enumerate(shown):
+        kind, opened, signature = description.partition(" (")
+        part = f"{name}({signature} ({kind})" if opened and kind in _CALLS else f"{name} ({description})"
+        if used + len(part) > _CARRIED:
+            unlisted += len(shown) - index
+            break
+        parts.append(part)
+        used += len(part) + 2
+    if not parts:
+        return ""
+    more = f", and {unlisted} more not listed" if unlisted else ""
+    return f"the python REPL holds: {', '.join(parts)}{more}"
 
 
 def _told(asides: Sequence[str]) -> str:
@@ -548,6 +587,12 @@ class PythonProcess:
         self._touched: tuple[str, ...] = ()  # the project's files the last input opened
         self._passed: dict[str, str] = {}  # startup files later workers pass over, and why
         self._pending = ""  # what the next input is told of an opening cut short (Ctrl-C)
+        # The namespace as the last input left it (`done`'s `names`: name to description, in order),
+        # how many names the worker left out, and the functions the startup files told. Each is
+        # replaced whole, never changed, so `carried` reads them from another thread.
+        self._names: dict[str, str] = {}
+        self._unlisted = 0
+        self._startup_told: frozenset[str] = frozenset()
 
     @property
     def confined(self) -> bool:
@@ -582,6 +627,17 @@ class PythonProcess:
             theirs=tuple(s.name for s in placed if not s.project),
             elsewhere=tuple(w for w in writes if not Path(w).is_relative_to(root)),
         )
+
+    def carried(self) -> str:
+        """What /compact says of the namespace (the `carried` broker's entry): one line naming
+        each public name with its type and size, or a function's signature (`the python REPL
+        holds: hits (list, 42 items), edit(path, old, new) (function)`), without the functions
+        the startup files told. "" when no Python process is running, or it holds no names. Read
+        from the listing the last input's `done` brought: it asks the worker nothing, so it
+        never waits, and no value's `repr` is in it."""
+        if self._process is None:
+            return ""
+        return _carried(self._names, self._startup_told, self._unlisted)
 
     async def __aenter__(self) -> PythonProcess:
         await self._start()
@@ -755,6 +811,7 @@ class PythonProcess:
                 line = _last(ran.output)
                 told, spare = startup_ran(startup.name, when, line, spare)
                 asides.append(told)
+                self._startup_told |= frozenset(each for each, _ in _bound(line) or ())
                 if checked is not None:  # the file told something: its docstrings and types were checked
                     names = [each for each, _ in _bound(line) or ()]
                     said = startup_checked(
@@ -845,6 +902,7 @@ class PythonProcess:
                 self._send({"op": "answer", "id": message.get("id"), **answer})
             elif message.get("op") == "done":
                 touched, refused = message.get("touched"), message.get("refused")
+                self._names, self._unlisted = _listing(message)
                 return _Output(
                     str(message.get("output", "")),
                     message.get("error"),
@@ -942,6 +1000,7 @@ class PythonProcess:
         self._reader, self._writer = await asyncio.open_unix_connection(endpoint, limit=_LINE_LIMIT)
         self._send({"op": "hello"})
         self._fresh, self._pending = True, ""  # a new worker runs its startup files afresh
+        self._names, self._unlisted, self._startup_told = {}, 0, frozenset()
 
     async def _stop(self) -> None:
         if self._writer is not None:
