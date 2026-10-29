@@ -5,8 +5,9 @@ Reads every session's `transcript.jsonl` under bh-02's state directory (`$XDG_ST
 sessions`, else `~/.local/state/bh-02/sessions`, or `--sessions DIR`) and counts, per signal,
 how often it happened and in how many sessions, with a few examples of each. A transcript holds
 the conversation since its last /clear; a session's `rows.jsonl` says when each run of bh-02 on it
-began, so work redone after a resume, in a new REPL, is not counted as a reuse miss. Run it after using bh-02 for a while: the signals that
-come up most are where the prompt, the Python process or the loop should change next.
+began, so work redone after a resume, in a new REPL, is not counted as a reuse miss. Run it after
+using bh-02 for a while: the signals that come up most are where the prompt, the Python process or
+the loop should change next.
 
     scripts/model-friction                 # every session here
     scripts/model-friction --model local/qwen    # only the sessions that started on one model
