@@ -9,6 +9,7 @@ updated_date: '2026-10-29T01:44:00Z'
 labels:
   - size-8
   - python
+  - codeact
 dependencies: []
 type: intent
 ---
@@ -34,11 +35,11 @@ Candidate split, in order (for sizing):
 - scripts/model-friction.
 
 ## Open questions
-- [ ] What counts as a reuse miss the friction script can see: the same program or search run again, a name assigned again from the same expression, a file read again unchanged?
-- [ ] Is the cause forgetting a name, not trusting that state lasts, or not knowing what a variable holds? The baseline should tell these apart if it can.
-- [ ] How much context a per-input line may cost, and its cap.
-- [ ] Is in-place mutation (a list appended to) worth reporting, or only bindings?
-- [ ] Can /compact ask the Python process for its namespace, and what does it say when the process is not running?
+- [ ] What counts as a reuse miss the friction script can see: the same program or search run again, a name assigned again from the same expression, a file read again unchanged? Carried forward: the baseline task (split item 1) answers it, since its finish line is that definition written in SIGNALS.
+- [ ] Is the cause forgetting a name, not trusting that state lasts, or not knowing what a variable holds? The baseline should tell these apart if it can. Carried forward: the baseline task tries; whatever it can't separate, the before-and-after comparison of items 3 and 4 shows indirectly.
+- [ ] How much context a per-input line may cost, and its cap. Carried forward: the per-input line task (item 4) sets the cap; it doesn't block the baseline or the compaction list.
+- [ ] Is in-place mutation (a list appended to) worth reporting, or only bindings? Carried forward: decided in item 4's plan, bindings first; only item 4 depends on it.
+- [ ] Can /compact ask the Python process for its namespace, and what does it say when the process is not running? Carried forward: the compaction task (item 2) answers it in its plan; nothing else depends on it.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
