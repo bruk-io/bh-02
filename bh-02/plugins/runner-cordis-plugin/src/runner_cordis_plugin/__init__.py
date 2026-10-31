@@ -6,7 +6,9 @@ from runner_cordis_plugin import allowlist
 from runner_cordis_plugin.approval import Approval, Graded, is_confined
 from runner_cordis_plugin.jail import (
     BASELINE_ENV,
+    CREDENTIALS,
     MARK,
+    SELF_MODIFYING,
     SYSTEM_READABLE,
     BrigConfig,
     BrigJail,
@@ -46,7 +48,9 @@ from runner_cordis_plugin.wiring import approval, confined, release, unconfined
 
 __all__ = [
     "BASELINE_ENV",
+    "CREDENTIALS",
     "MARK",
+    "SELF_MODIFYING",
     "SYSTEM_READABLE",
     "UNENFORCED",
     "Approval",

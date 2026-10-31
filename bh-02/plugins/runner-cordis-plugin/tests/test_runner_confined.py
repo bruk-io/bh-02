@@ -504,7 +504,7 @@ def test_a_linux_jail_reads_bh_02_s_own_code_and_writes_none_of_it(tmp_path: Pat
     assert argv[at - 1] == "--ro-bind" and argv[at + 1] == str(package)
 
 
-def test_allow_takes_names_off_brig_s_self_modification_list_and_only_those() -> None:
+def test_allow_takes_names_off_the_self_modification_list_and_only_those() -> None:
     assert "CLAUDE.md" not in self_modify_denied(("CLAUDE.md",))
     assert {".git/hooks", ".git/config", "AGENTS.md"} <= set(self_modify_denied(("CLAUDE.md",)))
     assert ".git/config" in self_modify_denied(())  # nothing allowed: the whole list
@@ -521,7 +521,7 @@ async def test_the_row_binds_a_runner_over_a_brig_jail_over_the_layers_it_was_gi
 
 def test_on_linux_the_policy_reads_by_allowlist_and_keeps_every_deny() -> None:
     """The same policy, one read model over: what is readable is named, and every read deny
-    (brig's credential list, `hide`, `secrets`) is a carve-out inside it; writes and env are
+    (the credential paths, `hide`, `secrets`) is a carve-out inside it; writes and env are
     untouched, but for a secret under the project, whose read mask refuses writes by itself."""
     policy = spec_for(
         root="/w/app",

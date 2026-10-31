@@ -752,7 +752,7 @@ async def test_a_jailed_input_can_t_write_bh_02_s_own_code_when_the_project_is_i
         Path(cordis.__file__).with_name("planted_by_an_input.py"),
     ]
     before = shipped.read_bytes()
-    # brig's self-modification list let through, so the jail makes no placeholder in the checkout
+    # the self-modification list let through, so the jail makes no placeholder in the checkout
     # (`.envrc/`, ...): what this is about is bh-02's own code alone
     config = BrigConfig(allow=self_modify_denied(()))
     inputs = [
@@ -949,7 +949,7 @@ async def test_a_session_run_from_home_can_t_choose_what_a_later_session_reads_a
     (home / ".config").mkdir()  # the default directory's parent, without a bh-02 of its own
     person = xdg / "startup.py"
     person.write_text("MARK = 1\n")
-    key = home / ".ssh" / "id_ed25519"  # a file the jail hides (brig's credential list)
+    key = home / ".ssh" / "id_ed25519"  # a file the jail hides (the runner's credential paths)
     key.parent.mkdir()
     key.write_text("-----BEGIN STAND-IN KEY, NOT A SECRET-----\nc3RhbmQtaW4K\n")
     monkeypatch.setenv("HOME", str(home))

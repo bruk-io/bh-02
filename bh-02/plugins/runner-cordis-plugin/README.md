@@ -7,7 +7,7 @@ over it; and `/release`. The only package in the workspace that imports brig (th
 
 | Row | Binds | Consumes |
 |---|---|---|
-| `runner:confined` | `runner` over brig's `scratch_darwin()` (darwin) or `strict_linux()` (Linux), a jail per start; config: `write` (default `["."]`), `deny`, `allow` (names taken off brig's self-modification list; default `["CLAUDE.md", "AGENTS.md"]`), `hide` (files in the project inputs may not read; none by default), `env` (the names that survive the scrub; unset, they are the baseline `PATH`, `HOME`, `LANG`, `LC_ALL`, `TERM` plus the names in the person's `runner.toml`, below) | `host` (also `key_envs` and `models_file`, below) |
+| `runner:confined` | `runner` over brig's `scratch_darwin()` (darwin) or `strict_linux()` (Linux), a jail per start; config: `write` (default `["."]`), `deny`, `allow` (names taken off the self-modification list, `SELF_MODIFYING`; default `["CLAUDE.md", "AGENTS.md"]`), `hide` (files in the project inputs may not read; none by default), `env` (the names that survive the scrub; unset, they are the baseline `PATH`, `HOME`, `LANG`, `LC_ALL`, `TERM` plus the names in the person's `runner.toml`, below) | `host` (also `key_envs` and `models_file`, below) |
 | `runner:unconfined` | `runner`: each program as a plain subprocess (`--no-jail`), every axis reported `unenforced`, its environment without `CLAUDE*` (`CLAUDE_CODE_OAUTH_TOKEN`, and what a Claude Code that launched bh-02 leaves, a messaging token among them), `ANTHROPIC_*`, `TMUX` or `TMUX_PANE` (hygiene, not a boundary: an input without a jail can find the tmux socket itself; the confined runner's `env` allowlist never passes them, `tests/test_runner_tmux.py` shows both) | |
 | `runner:approval` | `approval`: `confined` (whether the runner confines what runs in it), `unasked(question) -> bool` (whether it runs without asking the person) | `runner` (`report`) |
 | `runner:release` | (nothing: registers `/release`) | `runner` (`release`), `commands` (`register`) |
@@ -79,11 +79,11 @@ policy seam, not this).
   project's auto memory directory (`host.auto_memory`, outside the project: the model keeps its
   memories there across sessions, and only the memory rows read it, through no link), except
   the composition's layer files (`host.paths`), every path the host imports code from that sits
-  under a writable root (`sys.path` entries, the interpreter's prefix), brig's
-  self-modification list (`.git/hooks`, `.git/config`, `.claude`, shell rc files, editor
+  under a writable root (`sys.path` entries, the interpreter's prefix), the
+  self-modification list (`SELF_MODIFYING`: `.git/hooks`, `.git/config`, `.claude`, shell rc files, editor
   settings, ...: what can run code outside the jail later) minus what `allow` names, and `deny`.
   `allow` defaults to the project's guidance files (CLAUDE.md, AGENTS.md), which editing is
-  ordinary work; a name not on brig's list is a config error, since `write` is for other paths.
+  ordinary work; a name not on the list is a config error, since `write` is for other paths.
   An `allow` in a layer replaces the default, so name every file it should let through. Nor
   bh-02's configuration directories (`host.trusted`: `$XDG_CONFIG_HOME/bh-02` and
   `~/.config/bh-02`, as named and as resolved) where one is under a writable root, as when bh-02
@@ -163,7 +163,7 @@ policy seam, not this).
 
   A started program's `writes()` names the roots its inputs may write (the
   python row reads nothing on the host whose way passes through one);
-- **reads**: everything except brig's credential list under `$HOME` (`.ssh`, `.aws`, ...) and
+- **reads**: everything except the credential paths under `$HOME` (`CREDENTIALS`: `.ssh`, `.aws`, ...) and
   what `host` names as `secrets`: the sessions' state directories, this run's
   (`$XDG_STATE_HOME/bh-02/sessions`) and the default one (`~/.local/state/bh-02/sessions`),
   where each session's `claude/` holds its Claude Code child's config and messaging peer token.

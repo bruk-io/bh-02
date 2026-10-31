@@ -11,13 +11,13 @@ directory of every link on the way to it, which a mount on the file cannot hold:
 could rename the link and plant a Python of its own at its name), the
 directory of every package bh-02 runs code from (`code`: bh-02's own, cordis's,
 brig's and each plugin's, as installed; under a writable root when bh-02 works on its own
-checkout, an editable install), whose modules bh-02 imports in its own process, brig's own
-self-modification list (`.git/hooks`, `.git/config`, shell rc
+checkout, an editable install), whose modules bh-02 imports in its own process, the
+self-modification list (`SELF_MODIFYING`: `.git/hooks`, `.git/config`, shell rc
 files, CLAUDE.md, ...), any secret below under a writable root (it may not replace what it can't
 read), and bh-02's configuration directories under one (`trusted`: the person's
 `$XDG_CONFIG_HOME/bh-02` and `~/.config/bh-02`, when bh-02 runs from the home directory), whose
 models file and startup file a later session reads on the host and trusts. What
-it may not read: brig's credential list under the home directory, `hide`
+it may not read: the credential paths under the home directory (`CREDENTIALS`), `hide`
 under the project (nothing by default), and what the `host` value names as `secrets` (the
 sessions' state, where Claude Code keeps its tokens). No
 network: the program's own socket is the one way in or out. The worker's environment is scrubbed
@@ -84,8 +84,6 @@ from sys import platform as host_platform
 from typing import Protocol, runtime_checkable
 
 from brig.core import (
-    CREDENTIAL_READ_DENIES_HOME_RELATIVE,
-    SELF_MODIFY_WORKSPACE_RELATIVE,
     Channel,
     ChannelKind,
     EnvMode,
@@ -113,6 +111,8 @@ from runner_cordis_plugin.tripwire import Tripwire
 __all__ = [
     "MARK",
     "BASELINE_ENV",
+    "CREDENTIALS",
+    "SELF_MODIFYING",
     "SYSTEM_READABLE",
     "BrigConfig",
     "BrigJail",
@@ -163,6 +163,40 @@ def _seatbelt(python: str) -> Stack:
     return scratch_darwin()
 
 
+#: What under a root an input may write it may not, unless the row's `allow` names it: a path that
+#: runs code outside the jail later (git hooks and config, shell rc files, an `.envrc`, editor and
+#: Claude settings) or steers the next session (its guidance files). Relative to each root.
+SELF_MODIFYING: tuple[str, ...] = (
+    ".git/hooks",
+    ".git/config",
+    ".bashrc",
+    ".zshrc",
+    ".profile",
+    ".envrc",
+    ".vscode",
+    ".idea",
+    "AGENTS.md",
+    "CLAUDE.md",
+    ".claude",
+)
+
+#: What under the home directory an input may not read: the person's credentials (keys, tokens,
+#: cloud and registry logins, Claude Code's own). Relative to the home directory.
+CREDENTIALS: tuple[str, ...] = (
+    ".ssh",
+    ".aws",
+    ".gnupg",
+    ".netrc",
+    ".config/gh",
+    ".docker",
+    ".kube",
+    ".npmrc",
+    ".git-credentials",
+    ".config/gcloud",
+    ".claude",
+    ".claude.json",
+)
+
 #: Each platform's preset, given the interpreter brig's supervisor runs under (`stack_for`).
 _STACKS: Mapping[str, Callable[[str], Stack]] = {"darwin": _seatbelt, "linux": strict_linux}
 
@@ -194,8 +228,8 @@ BASELINE_ENV: tuple[str, ...] = ("PATH", "HOME", "LANG", "LC_ALL", "TERM")
 @dataclass(frozen=True, slots=True)
 class BrigConfig:
     """`write`: where an input may write besides its scratch dir (relative to the python row's root).
-    `deny`: more paths it may not write. `allow`: names from brig's self-modification list
-    (`SELF_MODIFY_WORKSPACE_RELATIVE`: `.git/hooks`, `CLAUDE.md`, ...) an input may write after all;
+    `deny`: more paths it may not write. `allow`: names from the self-modification list
+    (`SELF_MODIFYING`: `.git/hooks`, `CLAUDE.md`, ...) an input may write after all;
     by default the project's guidance files, which editing is ordinary work. The rest stay denied:
     they can run code outside the jail later (hooks, shell rc files, editor and Claude settings).
     `hide`: paths it may not read (relative to the root; none by default). `env`: the variables that
@@ -226,7 +260,7 @@ def spec_for(
     memory: str = "",
 ) -> Spec:
     """The jail's Spec. `host` is every path the host process loads code from; any under a
-    writable root is denied, as are the layer files and brig's self-modification list.
+    writable root is denied, as are the layer files and the self-modification list.
     `secrets` (absolute) may not be read, wherever they are. `trusted` (absolute directories:
     bh-02's configuration, whose files the host reads and trusts) and `code` (absolute: the
     directory of every package bh-02 runs code from) may not be written where they are under a
@@ -292,7 +326,7 @@ def spec_for(
             write_allows=allows,
             write_denies=tuple(dict.fromkeys(denies)),
             read_denies=(
-                *(str(Path(home, name)) for name in CREDENTIAL_READ_DENIES_HOME_RELATIVE),
+                *(str(Path(home, name)) for name in CREDENTIALS),
                 *hidden,
             ),
         ),
@@ -625,17 +659,17 @@ def stack_for(platform: str, python: str = DEFAULT_INTERPRETER) -> Stack:
 
 
 def self_modify_denied(allow: Sequence[str]) -> tuple[str, ...]:
-    """brig's self-modification list without the names `allow` lets an input write. A name that
-    is not on the list is a mistake in the row's config, never silently ignored."""
-    unknown = [name for name in allow if name not in SELF_MODIFY_WORKSPACE_RELATIVE]
+    """The self-modification list (`SELF_MODIFYING`) without the names `allow` lets an input
+    write. A name that is not on the list is a mistake in the row's config, never silently
+    ignored."""
+    unknown = [name for name in allow if name not in SELF_MODIFYING]
     if unknown:
         raise ValueError(
-            f"the runner row's `allow` names {', '.join(map(repr, unknown))}, which brig does not deny "
-            f"in the first place; `allow` takes only names from its self-modification list: "
-            f"{', '.join(SELF_MODIFY_WORKSPACE_RELATIVE)}. To let an input write another path, "
-            "use `write`"
+            f"the runner row's `allow` names {', '.join(map(repr, unknown))}, which the jail does not "
+            f"deny in the first place; `allow` takes only names from its self-modification list: "
+            f"{', '.join(SELF_MODIFYING)}. To let an input write another path, use `write`"
         )
-    return tuple(name for name in SELF_MODIFY_WORKSPACE_RELATIVE if name not in allow)
+    return tuple(name for name in SELF_MODIFYING if name not in allow)
 
 
 def mountable(denies: Sequence[str], instead: Mapping[str, str]) -> tuple[str, ...]:
