@@ -37,9 +37,12 @@ GROUPS = (
             "placeholders of a jail another worker stops, and the tests that assert nothing is left "
             "behind fail. Every test that starts a BrigJail on the default lock is in these modules; "
             "the ones that give their BrigJail a lock of their own (TASK-0085, TASK-0091) are among "
-            "them, safe alone and so only as slow as the others."
+            "them, safe alone and so only as slow as the others. test_host_values.py boots "
+            "runner:confined and expects it to refuse before any jail starts; it is here because a "
+            "regression in that refusal would start one on the default lock."
         ),
         modules=(
+            "bh-02/app/tests/test_host_values.py",
             "bh-02/app/tests/test_python_repl.py",
             "bh-02/plugins/runner-cordis-plugin/tests/test_runner_confined.py",
             "bh-02/plugins/runner-cordis-plugin/tests/test_runner_tmux.py",

@@ -953,16 +953,17 @@ def test_a_patch_that_sets_the_model_row_s_config_keeps_its_model_and_says_so(tm
 
 
 def test_a_keyed_model_s_key_never_reaches_an_input_s_environment(tmp_path: Path) -> None:
-    """A model's key goes only into its requests' Authorization header: an unjailed input (whose
-    environment is scrubbed of Claude's names alone) finds neither its name nor its value."""
+    """A key a command prints (`key = { cmd = ... }`) goes only into its requests' Authorization
+    header: bh-02 holds it and sets it in no environment, so an unjailed input (whose environment
+    is scrubbed of Claude's names alone) does not find it. A key read from bh-02's environment
+    (`{ env = ... }`) would be there under `--no-jail`, by design (the jail docs say so)."""
     work, state, config = tmp_path / "work", tmp_path / "state", tmp_path / "config"
     work.mkdir()
-    env = tmp_path / "scratch.env"
-    env.write_text("VERIFY_STUB_KEY=fake-verify-key\n")
-    pin = tmp_path / "keyed.toml"  # the env file is the model row's config, so it names the model too
-    pin.write_text(f'[[plugin]]\nid = "model"\nconfig = {{ default = "k/keyed", env_file = "{env}" }}\n')
+    pin = tmp_path / "keyed.toml"
+    pin.write_text('[[plugin]]\nid = "model"\nconfig = { default = "k/keyed" }\n')
     with StubServer(key="fake-verify-key") as stub:
-        keyed = f'[k]\nprovider = "openai"\nbase_url = "{stub.base_url}"\nkey = "VERIFY_STUB_KEY"\n'
+        keyed = f'[k]\nprovider = "openai"\nbase_url = "{stub.base_url}"\n'
+        keyed += 'key = { cmd = "printf fake-verify-key" }\n'
         keyed += '[k.models.keyed]\nid = "stub-1"\n'
         _models_file(config, keyed)
         app = Launched(["--no-jail", "--patch", str(pin)], work, state, config=config)

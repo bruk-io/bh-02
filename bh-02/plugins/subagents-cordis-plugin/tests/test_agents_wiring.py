@@ -13,7 +13,7 @@ import stat
 import sys
 import threading
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -148,13 +148,16 @@ _ECHO = {
 
 @dataclass(frozen=True)
 class _Host:
-    """The `host` value a confined runner reads: where the program's code is, which every jail reads."""
+    """The `host` value a confined runner reads: where the program's code is, which every jail reads,
+    and what the models file's keys read (none here)."""
 
     paths: tuple[str, ...] = ()
     secrets: tuple[str, ...] = ()
     trusted: tuple[str, ...] = ()
     code: tuple[str, ...] = ()
     auto_memory: str = ""
+    key_envs: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+    models_file: str = ""
 
 
 @component(provides=("host",))
