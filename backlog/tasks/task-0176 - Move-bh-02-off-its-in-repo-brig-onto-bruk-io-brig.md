@@ -5,7 +5,7 @@ status: To Do
 assignee:
   - '@bruk'
 created_date: '2026-10-31T03:54:00Z'
-updated_date: '2026-10-31T03:57:00Z'
+updated_date: '2026-10-31T10:59:00Z'
 labels:
   - brig
   - size-8
@@ -51,4 +51,6 @@ bh-02 still jails the model's code with its own copy of brig (`libs/brig`, the o
 
 <!-- SECTION:NOTES:BEGIN -->
 Accepted 2026-10-31 by Claude under the owner's delegation ("can you handle all the implementation and planning without my input"), as size-8: two repositories, brig-side work with unknowns that need a Mac to settle, and a security property to hold. No spec: the owner is away, so there is no one to approve one. The split below and decision-0011 carry the design, for the owner to confirm or redirect on return.
+
+decision-0011 accepted by @bruk, 2026-10-31; Seatbelt waits for a Mac run (TASK-0176.05). The owner granted this session push access to bruk-io/brig to file .02, .03 and .04 on its board.
 <!-- SECTION:NOTES:END -->
