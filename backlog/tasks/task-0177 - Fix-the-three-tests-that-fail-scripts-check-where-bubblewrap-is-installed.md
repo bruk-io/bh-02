@@ -23,8 +23,8 @@ With bubblewrap installed, scripts/check fails on three tests (seen in the TASK-
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 scripts/check passes on a machine with bubblewrap installed
-- [ ] #2 No test config passes env_file
+- [x] #1 scripts/check passes on a machine with bubblewrap installed
+- [x] #2 No test config passes env_file
 <!-- AC:END -->
 
 ## Implementation Plan
