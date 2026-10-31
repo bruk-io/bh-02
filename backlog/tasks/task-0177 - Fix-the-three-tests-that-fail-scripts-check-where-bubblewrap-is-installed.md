@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-31T04:13:00Z'
-updated_date: '2026-10-31T14:54:00Z'
+updated_date: '2026-10-31T14:55:00Z'
 labels: []
 dependencies: []
 modified_files:
@@ -92,5 +92,19 @@ INFO    -  Documentation built in 4.60 seconds
    ok
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
+```
+
+Repro at 907f9398c5b2, test files: bh-02/app/tests/test_real_launch.py, bh-02/app/tests/test_xdist_groups.py, bh-02/plugins/subagents-cordis-plugin/tests/test_agents_wiring.py; command: `uv run pytest -q -p no:randomly -p no:cacheprovider bh-02/app/tests/test_real_launch.py::test_a_keyed_model_s_key_never_reaches_an_input_s_environment bh-02/app/tests/test_xdist_groups.py::test_every_test_file_that_starts_a_jail_is_in_a_group bh-02/plugins/subagents-cordis-plugin/tests/test_agents_wiring.py::test_a_child_s_python_runs_in_a_jail_of_its_own_under_the_confined_runner` exited 1
+
+(161 earlier lines omitted)
+```text
+E        +  where False = all(<generator object _booted.<locals>.<genexpr> at 0x7f81ca2b35a0>)
+
+bh-02/plugins/subagents-cordis-plugin/tests/test_agents_wiring.py:317: AssertionError
+=========================== short test summary info ============================
+FAILED bh-02/app/tests/test_real_launch.py::test_a_keyed_model_s_key_never_reaches_an_input_s_environment
+FAILED bh-02/app/tests/test_xdist_groups.py::test_every_test_file_that_starts_a_jail_is_in_a_group
+FAILED bh-02/plugins/subagents-cordis-plugin/tests/test_agents_wiring.py::test_a_child_s_python_runs_in_a_jail_of_its_own_under_the_confined_runner
+3 failed in 3.59s
 ```
 <!-- SECTION:NOTES:END -->
