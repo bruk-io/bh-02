@@ -1,7 +1,7 @@
 ---
-id: DRAFT-0019
+id: TASK-0177
 title: Fix the three tests that fail scripts/check where bubblewrap is installed
-status: Draft
+status: To Do
 assignee: []
 created_date: '2026-10-31T04:13:00Z'
 labels: []
