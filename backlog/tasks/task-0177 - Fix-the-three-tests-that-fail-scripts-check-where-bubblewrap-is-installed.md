@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-31T04:13:00Z'
-updated_date: '2026-10-31T14:59:00Z'
+updated_date: '2026-10-31T15:00:00Z'
 labels: []
 dependencies: []
 modified_files:
@@ -184,4 +184,6 @@ INFO    -  Documentation built in 3.99 seconds
 ```
 
 Review (not the worker): every criterion met and ticked. Full scripts/check passed with bubblewrap installed (recorded above). No env_file in any model config or test. The cmd key keeps the test's property: the input checks for neither name nor value, and the stub checks the header. Adding test_host_values.py to jail-lock is right; narrowing the pattern would hide a regression. The fake _Host now has the two fields the runner's host Protocol reads. close-task refused: the repro tests were edited since 907f939. Here the bug was in those tests, so editing them is the fix. The worker or owner needs to record a new repro that close-task accepts (or say why there is none), then run close again. Status left In Progress.
+
+Worker, 2026-10-31, on the refused close: close-task's repro rule ("a fix doesn't edit the test that reproduced the bug") cannot be met here. The bug was in test_real_launch.py and test_agents_wiring.py themselves (a retired config key, a fake missing two contract members), so restoring them brings the failure back and no unchanged test fails without the fix. Removing the recorded repro from the notes would get past the rule without meeting it, so it stays. Left In Progress for the owner: close it with the rule's exception noted, or say what repro would satisfy it. The reviewer's notes above confirm both criteria and that the rewrite keeps each test's property.
 <!-- SECTION:NOTES:END -->
