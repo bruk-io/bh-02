@@ -107,4 +107,13 @@ FAILED bh-02/app/tests/test_xdist_groups.py::test_every_test_file_that_starts_a_
 FAILED bh-02/plugins/subagents-cordis-plugin/tests/test_agents_wiring.py::test_a_child_s_python_runs_in_a_jail_of_its_own_under_the_confined_runner
 3 failed in 3.59s
 ```
+
+Worker's report (Claude, 2026-10-31).
+
+Root causes (the failing repro above is the three node ids with these fixes stashed):
+- test_agents_wiring.py: the runner row failed its contract, `ContractViolation('runner: host is bound to a _Host, which is missing key_envs, models_file')`, which left loop, approval and python inactive. The fake `host` predates TASK-0169.05; it gains `key_envs` (empty) and `models_file` (""), as the runner's own test fakes have them.
+- test_real_launch.py: the keyed-model test still passed the retired `env_file`. The key now comes from `key = { cmd = "printf fake-verify-key" }`, the source bh-02 holds itself and sets in no environment, so the property tested is the same; the docstring says why `{ env = ... }` would not be (under `--no-jail` it reaches an input by design). The stub still sees exactly `Bearer fake-verify-key`.
+- test_xdist_groups.py: test_host_values.py boots `runner:confined` (expecting a refusal before any jail starts) and was in no group. It joins `jail-lock`, with that reason in the group's `why`.
+
+After: the three pass, and `scripts/check` passes on this host with bubblewrap installed (3958 passed, 118 skipped, recorded above). `git grep env_file -- '*.py'` finds only the old brig's Docker `--env-file` code (libs/brig, removed in TASK-0176.08), no model config.
 <!-- SECTION:NOTES:END -->
