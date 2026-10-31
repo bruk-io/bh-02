@@ -62,6 +62,9 @@ What did not, all on brig's side:
   way and changes no behaviour (TASK-0176.06). Nothing is written against the new API before it
   can be run end to end.
 
+Accepted by @bruk, 2026-10-31, with one answer: Seatbelt waits for a Mac run (it is not built
+before one can prove it). So the swap waits on that too.
+
 ## Consequences
 
 - bh-02 keeps the old brig until bruk-io/brig closes the four gaps; how long is that board's.
