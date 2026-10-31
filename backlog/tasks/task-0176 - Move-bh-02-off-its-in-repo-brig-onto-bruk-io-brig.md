@@ -5,11 +5,15 @@ status: To Do
 assignee:
   - '@bruk'
 created_date: '2026-10-31T03:54:00Z'
-updated_date: '2026-10-31T03:55:00Z'
+updated_date: '2026-10-31T03:57:00Z'
 labels:
   - brig
   - size-8
 dependencies: []
+references:
+  - >-
+    backlog/decisions/decision-0011 -
+    Swap-to-bruk-io-brig-in-one-change-once-it-jails-what-runner-confined-runs-on-both-platforms.md
 type: intent
 ---
 
