@@ -1,7 +1,7 @@
 ---
-id: DRAFT-0019
+id: TASK-0176
 title: Move bh-02 off its in-repo brig onto bruk-io/brig
-status: Draft
+status: To Do
 assignee:
   - '@bruk'
 created_date: '2026-10-31T03:54:00Z'
@@ -28,7 +28,7 @@ bh-02 still jails the model's code with its own copy of brig (`libs/brig`, the o
 ## Open questions
 
 - [x] Can the new brig jail what `runner:confined` runs today? Answered by TASK-0173.01's spike (2026-10-31): on Linux, mostly yes; four gaps on brig's side, one of them a security hole, and no darwin driver at all.
-- [ ] When bruk-io/brig closes those gaps, does its API stay the shape the spike used (ordered `Bind`s, `reserve_channels`, `await_channel_ready`, `destroy_jail`)? The swap's plan is written against that commit and is re-checked against the one it pins.
+- [ ] Carried forward: answered only at the commit the swap pins (TASK-0173.04 re-checks it). When bruk-io/brig closes those gaps, does its API stay the shape the spike used (ordered `Bind`s, `reserve_channels`, `await_channel_ready`, `destroy_jail`)? The swap's plan is written against that commit and is re-checked against the one it pins.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
