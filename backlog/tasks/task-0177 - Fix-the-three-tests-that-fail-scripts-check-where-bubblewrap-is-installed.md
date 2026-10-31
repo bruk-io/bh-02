@@ -182,4 +182,6 @@ INFO    -  Documentation built in 3.99 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+Review (not the worker): every criterion met and ticked. Full scripts/check passed with bubblewrap installed (recorded above). No env_file in any model config or test. The cmd key keeps the test's property: the input checks for neither name nor value, and the stub checks the header. Adding test_host_values.py to jail-lock is right; narrowing the pattern would hide a regression. The fake _Host now has the two fields the runner's host Protocol reads. close-task refused: the repro tests were edited since 907f939. Here the bug was in those tests, so editing them is the fix. The worker or owner needs to record a new repro that close-task accepts (or say why there is none), then run close again. Status left In Progress.
 <!-- SECTION:NOTES:END -->
