@@ -5,8 +5,10 @@ status: To Do
 assignee:
   - '@bruk'
 created_date: '2026-10-31T03:54:00Z'
+updated_date: '2026-10-31T03:55:00Z'
 labels:
   - brig
+  - size-8
 dependencies: []
 type: intent
 ---
@@ -27,8 +29,8 @@ bh-02 still jails the model's code with its own copy of brig (`libs/brig`, the o
 
 ## Open questions
 
-- [x] Can the new brig jail what `runner:confined` runs today? Answered by TASK-0173.01's spike (2026-10-31): on Linux, mostly yes; four gaps on brig's side, one of them a security hole, and no darwin driver at all.
-- [ ] Carried forward: answered only at the commit the swap pins (TASK-0173.04 re-checks it). When bruk-io/brig closes those gaps, does its API stay the shape the spike used (ordered `Bind`s, `reserve_channels`, `await_channel_ready`, `destroy_jail`)? The swap's plan is written against that commit and is re-checked against the one it pins.
+- [x] Can the new brig jail what `runner:confined` runs today? Answered by TASK-0176.01's spike (2026-10-31): on Linux, mostly yes; four gaps on brig's side, one of them a security hole, and no darwin driver at all.
+- [ ] Carried forward: answered only at the commit the swap pins (TASK-0176.04 re-checks it). When bruk-io/brig closes those gaps, does its API stay the shape the spike used (ordered `Bind`s, `reserve_channels`, `await_channel_ready`, `destroy_jail`)? The swap's plan is written against that commit and is re-checked against the one it pins.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
@@ -40,3 +42,9 @@ bh-02 still jails the model's code with its own copy of brig (`libs/brig`, the o
 - [ ] #5 What bh-02 alone knows (the self-modification list, the credential paths) lives in the runner plugin, not in brig
 - [ ] #6 scripts/check and scripts/linux-jail-check pass
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Accepted 2026-10-31 by Claude under the owner's delegation ("can you handle all the implementation and planning without my input"), as size-8: two repositories, brig-side work with unknowns that need a Mac to settle, and a security property to hold. No spec: the owner is away, so there is no one to approve one. The split below and decision-0011 carry the design, for the owner to confirm or redirect on return.
+<!-- SECTION:NOTES:END -->
