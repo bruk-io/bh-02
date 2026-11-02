@@ -5,7 +5,7 @@ status: To Do
 assignee:
   - '@bruk'
 created_date: '2026-10-31T03:54:00Z'
-updated_date: '2026-10-31T10:59:00Z'
+updated_date: '2026-11-02T17:24:00Z'
 labels:
   - brig
   - size-8
@@ -53,4 +53,6 @@ bh-02 still jails the model's code with its own copy of brig (`libs/brig`, the o
 Accepted 2026-10-31 by Claude under the owner's delegation ("can you handle all the implementation and planning without my input"), as size-8: two repositories, brig-side work with unknowns that need a Mac to settle, and a security property to hold. No spec: the owner is away, so there is no one to approve one. The split below and decision-0011 carry the design, for the owner to confirm or redirect on return.
 
 decision-0011 accepted by @bruk, 2026-10-31; Seatbelt waits for a Mac run (TASK-0176.05). The owner granted this session push access to bruk-io/brig to file .02, .03 and .04 on its board.
+
+Architecture review, 2026-11-02 (three reviewers: brig's internals, the bh-02/brig seam, brig's security). Where it challenges decision-0011: (1) spec_for producing the new brig's ordered Binds bakes bwrap into bh-02's policy and forces a second rewrite when darwin lands; better, spec_for returns bh-02's own intent type and brig compiles an intent policy per jail type (brig DRAFT-0013); (2) the swap is not the adapter alone: the runner's endpoint contract changes (draft above); (3) the new brig lacks more than the four gaps listed: cwd and stdio (brig DRAFT-0016), cleanup of mountpoints for absent paths (DRAFT-0015, measured), a refusal for an unreachable interpreter (DRAFT-0017), and a runtime report (noted on brig TASK-0021). (4) Critical, measured: the jailed command can forge the supervisor's events and ptrace it (brig TASK-0022); the swap waits on it too. decision-0011 stays as accepted until the owner revisits it.
 <!-- SECTION:NOTES:END -->
