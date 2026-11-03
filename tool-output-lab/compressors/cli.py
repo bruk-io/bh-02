@@ -19,7 +19,7 @@ that copy, and the header says so. The first line of output is a header, unless 
 
 import argparse
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from compressors.code import fold_code, language_for
@@ -31,8 +31,10 @@ FORMATS = ("auto", "code", "json", "xml", "html", "outline", "lines", "text")
 
 @dataclass(frozen=True)
 class Result:
-    text: str  # the folded view, header included unless quiet
+    text: str  # the folded view, header included unless quiet; the input itself when it passed through
     source: str | None  # the text the line numbers refer to, when it is not the input
+    branch: str | None  # what folded it: code, json, xml, html, outline, lines or text; None if nothing did
+    language: str | None = None  # the language, when the branch is code
 
 
 def fold_text(
@@ -47,35 +49,42 @@ def fold_text(
 ) -> Result:
     """The folded view of `text`; pure, so the CLI's behaviour is testable without files.
 
+    Text within the budget passes through. Text over it folds by its structure; when that saves
+    under 10%, it is cut by characters; when even that saves under 10%, it is shown whole, since
+    hiding a tenth would cost more to recover than it saves (`branch` is None, as for text that fits).
+
     Raises:
-        ValueError: `fmt` is "code" but no language is known from --lang or the path.
+        ValueError: `fmt` is "code" but no language is known from --lang or the path; `fmt` names a
+            format the text cannot take (JSON that does not parse, XML that is not well formed).
     """
     raw_tokens = estimate_tokens(text)
     if raw_tokens <= budget:
-        return Result(text, None)
+        return Result(text, None, None)
     terms = query_words(query)
     language = lang or (language_for(path) if path else None)
     if fmt == "code" and language is None:
         raise ValueError("--as code needs a language: pass --lang python (or typescript, rust, go, ...)")
     if fmt in ("auto", "code") and language is not None:
         tree = fold_code(text, language, budget, terms)
-        body, branch, source = tree.text, f"code ({language})", None
+        body, branch, source = tree.text, "code", None
     else:
         folded = fold(text, budget_tokens=budget, terms=terms, force=None if fmt == "auto" else fmt)
         if folded is None:  # the structured fold saved too little: cut by characters instead
             folded = fold(text, budget_tokens=budget, terms=terms, force="text")
         if folded is None:
-            return Result(text, None)
+            return Result(text, None, None)
         body, branch, source = folded.body, folded.branch, folded.source
+    result = Result(body, source, branch, language if branch == "code" else None)
     if quiet:
-        return Result(body, source)
+        return result
     where = (
         "line numbers refer to the pretty-printed copy"
         if source is not None
         else "line numbers refer to the input"
     )
-    header = f"[fold: {branch}, ~{raw_tokens} -> ~{estimate_tokens(body)} tokens; {where}]"
-    return Result(f"{header}\n{body}", source)
+    kind = f"code ({language})" if branch == "code" else branch
+    header = f"[fold: {kind}, ~{raw_tokens} -> ~{estimate_tokens(body)} tokens; {where}]"
+    return replace(result, text=f"{header}\n{body}")
 
 
 def main(argv: list[str] | None = None) -> int:

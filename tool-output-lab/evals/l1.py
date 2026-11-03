@@ -27,11 +27,9 @@ from pathlib import Path
 
 from compressors import markers
 from compressors.cli import fold_text
-from compressors.code import language_for
 from compressors.common import estimate_tokens, split_lines
 from compressors.json_fold import parse_json_or_jsonl
 from compressors.recovery import RecoveryError, resolve
-from compressors.route import detect
 from evals.tasks import BUDGET, FORMATS, Task, tasks
 from evals.truth import score_fold
 
@@ -153,9 +151,10 @@ def check(task: Task, budget: int, query_on: bool) -> Row:
     result = fold_text(raw, budget=budget, path=task.path, query=query, quiet=True)
     again = fold_text(raw, budget=budget, path=task.path, query=query, quiet=True)
     out = result.text
-    passthrough = out == raw
-    language = language_for(task.path) if task.path else None
-    branch = "passthrough" if passthrough else (f"code-{language}" if language else detect(raw))
+    passthrough = result.branch is None
+    branch = (
+        "passthrough" if passthrough else (f"code-{result.language}" if result.language else result.branch)
+    )
     violations: list[str] = []
     if again.text != out:
         violations.append("folding twice gave different text")
