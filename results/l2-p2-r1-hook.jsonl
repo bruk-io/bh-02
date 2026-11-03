@@ -150,3 +150,7 @@
 {"tool": "mcp__fixture__get_figma_metadata", "tool_use_id": "toolu_01F1B7ChcGRLoDC9vBDg2AVC", "spilled": true, "raw_tokens": 36744, "branch": "xml", "out_tokens": 1867}
 {"tool": "mcp__fixture__get_figma_metadata", "tool_use_id": "toolu_01RHrvLDoTsEWstUphFpPZki", "spilled": true, "raw_tokens": 36766, "branch": "xml", "out_tokens": 1880}
 {"tool": "mcp__fixture__get_figma_metadata", "tool_use_id": "toolu_01VzNzFeUF2LB6R2cUq6RBJz", "spilled": true, "raw_tokens": 36766, "branch": "xml", "out_tokens": 1880}
+{"tool": "mcp__fixture__get_figma_metadata", "tool_use_id": "toolu_01RcbeWgjX2q8jxZUB4a2EpC", "spilled": true, "raw_tokens": 36730, "branch": "xml", "out_tokens": 1832}
+{"tool": "mcp__fixture__get_figma_metadata", "tool_use_id": "toolu_01WH2YRwbSUbRDeXuo3p1N7k", "spilled": true, "raw_tokens": 36730, "branch": "xml", "out_tokens": 1832}
+{"tool": "mcp__fixture__get_figma_metadata", "tool_use_id": "toolu_01H63SKxc97gGhmryTKJReoE", "spilled": true, "raw_tokens": 36724, "branch": "xml", "out_tokens": 1834}
+{"tool": "mcp__fixture__get_figma_metadata", "tool_use_id": "toolu_016t2GzbS53FPCStdNCqhWFm", "spilled": true, "raw_tokens": 36724, "branch": "xml", "out_tokens": 1834}
