@@ -53,5 +53,50 @@ post-harness.
 | C6 | Tree folding: code (ast-grep), XML, outlines | done |
 | C7 | A/B 2: accessibility snapshots and Figma XML, Haiku | done: same split |
 | C8 | Read gate (PreToolUse) with ast-grep outlines | removed (review 1, R2): it showed file content before Claude Code's permission check, and models page on their own |
-| C9 | A/B with Sonnet, spilled-only mode, large cases | next |
-| C10 | The outline as a tool Claude calls, against its own grep outlines | next |
+| C9 | A/B with Sonnet, spilled-only mode, large cases | done (A/B 3); superseded by P2 and P3 (EVALS.md) |
+| C10 | The outline as a tool Claude calls, against its own grep outlines | done: P2 and P3 offered it as `lab-fold` and as an MCP tool; used once in 76 runs (FINDINGS 36, 42) |
+| C11 | Fold Bash output from the hook (after the command runs) | done: FINDINGS 46-48; the second-look regress is open |
+
+## Schema views for data (from 2026-11-03)
+
+What the evals showed about the current fold: after a fold, models query the raw (grep, `jq` or a
+script in 89% of first moves, FINDINGS 46-48 and the transcripts), they use the commands the output
+names, and they almost never open a marker's range. The fold shows samples (head, tail, stand-outs)
+and leaves the model to infer the data's shape from them; quiet anomalies, which no rule names, are
+lost at M and L in every format (R7), and counts past the stand-out cap survive only in JSON,
+because its summary states them.
+
+So for data, show its schema instead: what fields there are, what values they take and how many of
+each, where the rows that break the pattern are, and the query that fetches instances. A schema's
+size depends on the structure, not on the number of rows.
+
+    .items: array[500], every item has the same 10 keys
+      name      str, unique, like web-<hex>
+      phase     Running 488, CrashLoopBackOff 12
+      restarts  int 0..97, median 1; 97 at .items[312] (next highest 3)
+    exceptions: .items[312] (web-a9da82d697) restarts=97; ...
+    query:      jq '.items[] | select(.phase != "Running") | .name' FILE
+
+Rules:
+
+- **Exact.** Every count, range and exception is computed over all rows, never sampled, and layer
+  1 checks each claim against the data. A model will trust "Failed 3".
+- **Exceptions with addresses.** A row breaks the pattern when it holds a value few rows hold, a
+  number far outside the rest, or a key most rows lack (or lacks one most have). Each is listed with
+  its path and its identifying field (a unique name or id), so it can be named and fetched.
+- **Native addresses and a query.** Paths are `jq` paths (`yq` for YAML, XPath or ids for XML), and
+  the view names one ready query, since models use the commands the output names.
+- **Mixed trees.** Show unique nodes as an outline, and replace each run of same-shaped siblings by
+  its schema and exceptions (Figma and accessibility trees are document-like at the top and data
+  where siblings repeat).
+- **Documents are not data.** Code and Markdown keep the outline (their signatures and headings are
+  their schema), with open, find and read verbs later. Logs (line templates) are paused.
+
+| # | Stage | Needs a model | Status |
+|---|---|---|---|
+| S1 | JSON schema view (`compressors/schema.py`): structure, field statistics, exceptions, a query; `--view schema`, the sample fold staying for comparison | no | in progress |
+| S2 | Layer 1 on both views: the claims checked against the data; sufficiency on spot (rule and quiet), count (past the cap), enumerate, absent, and lookup (expected to need the raw) | no | |
+| S3 | Repeated siblings in XML and accessibility trees as schemas | no | |
+| S4 | YAML through the same schema (multi-document manifests) | no | |
+| S5 | Layer 2 on Haiku: the schema view against the sample fold and native, M and L | yes, about $2 | |
+| S6 | The second-look regress in forced Bash folding (FINDINGS 48), before any Bash run of S5 | yes, about $0.70 | |
