@@ -67,3 +67,23 @@ def test_every_edit_task_fails_unedited_and_passes_a_correct_edit_of_the_real_fi
         original = t.payload()
         assert t.truth.check(original, original) is not None, t.task_id
         assert t.truth.check(original, _scripted(t, original)) is None, t.task_id
+
+
+def test_a_schema_views_query_runs_in_jq_and_returns_the_rows_its_select_names():
+    import json as _json
+    import shutil
+
+    from compressors.schema import schema_view
+    from evals.schema_check import query_runs
+
+    data = {"items": [{"name": f"p{i}", "phase": "Failed" if i in (3, 7) else "Running"} for i in range(50)]}
+    raw = _json.dumps(data)
+    view = schema_view(data, frozenset(), 2000)
+    if shutil.which("jq") is None:
+        return
+    assert query_runs(raw, data, view) == []
+    wrong = view.replace('select(.phase != "Running")', 'select(.phase != "Failed")')
+    assert query_runs(raw, data, wrong) == [
+        'the query selects against "Failed", which 2 of 50 rows hold: not the dominant value'
+    ]
+    assert query_runs(raw, data, view.replace("| .name'", "| .name |'"))[0].startswith("jq rejects the query")

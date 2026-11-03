@@ -91,4 +91,15 @@ JSON_SLICE = re.compile(
 JSON_SLICE_IN_TEXT = re.compile(r'"_folded": "(?P<path>\$[^"\s]*)\[(?P<start>\d+):(?P<stop>\d+)\] omitted')
 JSON_KEYS = re.compile(r"^(?P<omitted>\d+) of (?P<total>\d+) keys of (?P<path>\$\S*) omitted")
 PROMOTION_KEY = "_next_item_shown_because"
+
+
+# --- schema views ---------------------------------------------------------------------------------
+
+
+def schema_exceptions(rows: int) -> str:
+    """The line above a collection's exception rows: the rows that break its pattern."""
+    return f"exceptions in {rows} rows:"
+
+
+SCHEMA_EXCEPTIONS = re.compile(r"(?m)^ *exceptions in \d+ rows:$")
 JSONL_NOTE = re.compile(r"\AJSONL shown as one array of (?P<records>\d+) records; (?P<where>[^;]+);[^\n]*\n")

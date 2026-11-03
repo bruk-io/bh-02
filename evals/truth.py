@@ -188,9 +188,9 @@ def _score_prose(truth: Truth, answer: str) -> Score:
 
 def promotes(fold: str) -> bool:
     """Whether the fold shows something as standing out: JSON's promotion marker; a list of siblings
-    with something shown between two hidden runs (a tree stand-out); or a log with lines shown
-    between two gaps (a window around a signal)."""
-    if f'"{markers.PROMOTION_KEY}"' in fold:
+    with something shown between two hidden runs (a tree stand-out); a log with lines shown between
+    two gaps (a window around a signal); or a schema view's exception rows."""
+    if f'"{markers.PROMOTION_KEY}"' in fold or markers.SCHEMA_EXCEPTIONS.search(fold):
         return True
     runs_per_indent: dict[str, int] = {}
     for indent in markers.SIBLING_RUN.findall(fold):
@@ -221,7 +221,7 @@ def score_fold(truth: Truth, fold: str) -> Score:
             recall = sum(mentions(fold, x) for x in e) / len(e) if e else 1.0
             return Score(recall >= 0.9, recall)
         case Number(items=items, stated=stated):
-            if any(s in fold for s in stated):
+            if any(re.search(re.escape(s) + r"(?!\d)", fold) for s in stated):  # a count of 2 is not 20
                 return Score(True)
             seen = sum(mentions(fold, x) for x in items) / len(items) if items else 0.0
             return Score(bool(items) and seen == 1.0, seen)

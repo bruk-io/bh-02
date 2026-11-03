@@ -395,6 +395,32 @@ Claude Code 2.1.317 before anything was built; the scripts are in this session's
     tell it from noise. Before a verdict on forcing: fold a command's output once per session (run
     it again and it comes whole), then re-run M (104 runs, about $0.70).
 
+## Schema views of JSON, layer 1 (`l1-19-json-sample.md`, `l1-19-json-schema.md`, PLAN.md S1-S2)
+
+After a fold, models query the raw (48 and the transcripts: grep, `jq` or a script in 89% of first
+moves). So for data, the view now shows its schema rather than samples: each collection's fields
+over every row (types, presence, value counts, ranges, string shapes), the rows that break the
+pattern with their jq paths and names, keyed objects with their keys, collections inside rows, and
+one ready `jq` query (`--view schema`; the sample fold is still the default). Layer 1 checks every
+claim of a schema view against the data with its own path walker, and runs the query in `jq`.
+
+49. **On the 47 JSON and PyPI folds, the schema view is sufficient for 41 against the sample fold's
+    38, at half the size (median 219 tokens against 431), with 0 false claims.** It gains both
+    quiet anomalies (the pod with 97 restarts, at M and L), which the sample fold loses, as one
+    exception line in a view of about 170 tokens. Counts are stated outright (`"CrashLoopBackOff"
+    20`) in 150 to 700 tokens where the sample fold took up to 1,500. One gain is spurious: for
+    "which versions of click were first uploaded in 2023" the view lists all 65 versions as keys,
+    and the scorer, which looks for the expected names, cannot tell that nothing says which are
+    from 2023. Still insufficient in both views: lookups without the query (the answer is one row,
+    which a schema does not show; the query line gets it), and 12 failures among 100 pods (12% is
+    not rare under the 10% rule; the count is stated, the names are not).
+50. **The claims check found a false statement before any model saw one.** PyPI's `core-metadata`
+    is `false` in 65 files and an object in 63; the view opened the objects into their fields and
+    said the key was "in 65 of 128". It now counts an opened object as the key being there, with
+    the type `object`. The check's own blind spots, found by doctoring views in its tests: a query
+    of the right shape that selects against the wrong value passed until the check also required
+    the selected-against value to be the dominant one.
+
 ## Where the design stands
 
 | Piece | Evidence | Leaning |

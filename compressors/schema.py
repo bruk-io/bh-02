@@ -26,6 +26,7 @@ import statistics
 from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any
 
 from compressors import markers
@@ -78,6 +79,7 @@ class Field:
     median: float | None
     shape: tuple[str, float] | None  # the strings' dominant shape and its share
     lengths: tuple[int, int] | None  # for arrays: the shortest and the longest
+    objects: int  # rows where it holds an object (opened into fields of its own) or an array
     span: tuple[str, str] | None  # for strings of one ordered shape (dates, versions): the first and last
 
 
@@ -127,12 +129,19 @@ def _key(path: str, key: str | int) -> str:
     return f"{path}.{key}" if _IDENTIFIER.match(key) else f"{path}[{json.dumps(key)}]"
 
 
+# Where a row's object was opened into its fields: the key is there, and holds an object. A field that
+# is only ever this is structure, not shown; one that is this in some rows and a value in others
+# (PyPI's "core-metadata": false, or {sha256}) says so in its types.
+_OPENED: Mapping[str, Any] = MappingProxyType({})
+
+
 def _flatten(item: Mapping[str, Any], prefix: str = "", depth: int = 0) -> dict[str, Any]:
     """A row's fields: nested objects opened up to a depth, arrays and deeper objects kept whole."""
     out: dict[str, Any] = {}
     for k, v in item.items():
         p = _key(prefix, k)
         if isinstance(v, Mapping) and v and depth < _FLATTEN_DEPTH:
+            out[p] = _OPENED
             out |= _flatten(v, p, depth + 1)
         else:
             out[p] = v
@@ -150,6 +159,10 @@ def _dominant_shape(strings: list[str]) -> tuple[str, float] | None:
         return None
     shape, n = Counter(_shape_of(s) for s in strings).most_common(1)[0]
     return shape, n / len(strings)
+
+
+def _opened(v: Any) -> bool:
+    return v is _OPENED
 
 
 def _is_number(v: Any) -> bool:
@@ -172,6 +185,7 @@ def _field(path: str, values: list[Any], rows: int) -> Field:
         median=statistics.median(numbers) if numbers else None,
         shape=(shape := _dominant_shape(strings := [v for v in values if isinstance(v, str)])),
         lengths=(min(arrays), max(arrays)) if arrays else None,
+        objects=len(values) - len(scalars),
         span=(min(strings), max(strings))
         if shape and shape[1] >= 0.9 and _ORDERED_SHAPE.search(shape[0])
         else None,
@@ -284,7 +298,8 @@ def collection(
         seen: dict[str, None] = {}
         for r in rows:
             seen.update(dict.fromkeys(r))
-        fields = tuple(_field(p, [r[p] for r in rows if p in r], len(rows)) for p in seen)
+        every = (_field(p, [r[p] for r in rows if p in r], len(rows)) for p in seen)
+        fields = tuple(f for f in every if any(not _opened(r.get(f.path)) for r in rows if f.path in r))
         of = "object"
     else:
         rows = [{"": x} for x in items]
@@ -351,7 +366,7 @@ def describe(f: Field, rows: int, values: int = 8, clip: int = 60) -> str:
         parts.append(f"{kind}, unique{like}{span}")
     elif len(f.counts) == 1 and f.counts[0][1] == f.present:
         parts.append(f"{markers.clipped(f.counts[0][0], clip)} (all {f.present})")
-    elif f.counts and len(f.counts) <= values and sum(c for _, c in f.counts) == f.present:
+    elif f.counts and len(f.counts) <= values and sum(c for _, c in f.counts) == f.present - f.objects:
         parts.append(", ".join(f"{markers.clipped(v, clip)} {c}" for v, c in f.counts))
     elif f.low is not None and f.high is not None and f.median is not None:
         parts.append(f"{kind} {_number(f.low)}..{_number(f.high)}, median {_number(f.median)}")
@@ -395,14 +410,15 @@ def _render(c: Collection, indent: str, lim: _Limits) -> list[str]:
         more = ", ..." if len(c.fields) > lim.fields + 12 else ""
         out.append(f"{indent}  [... {len(c.fields) - lim.fields} more fields: {rest}{more}]")
     if c.exceptions:
-        out.append(f"{indent}  exceptions in {len(c.exceptions)} rows:")
+        out.append(f"{indent}  {markers.schema_exceptions(len(c.exceptions))}")
         for e in c.exceptions[: lim.rows]:
             who = f" {markers.clipped(e.ident, lim.clip)}" if e.ident else ""
             out.append(f"{indent}    {e.row}{who}: {', '.join(e.notes)}")
         if len(c.exceptions) > lim.rows:
             out.append(f"{indent}    [... {len(c.exceptions) - lim.rows} more exception rows]")
     for row, text in c.matched:
-        out.append(f"{indent}  matches the query: {row} {markers.clipped(text, 4 * lim.clip)}")
+        # a row that holds the query is likely the answer: shown near whole
+        out.append(f"{indent}  matches the query: {row} {markers.clipped(text, 25 * lim.clip)}")
     for sub in c.inner:
         out += _render(sub, indent + "  ", lim)
     return out
