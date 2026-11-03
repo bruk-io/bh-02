@@ -87,3 +87,18 @@ def test_a_schema_views_query_runs_in_jq_and_returns_the_rows_its_select_names()
         'the query selects against "Failed", which 2 of 50 rows hold: not the dominant value'
     ]
     assert query_runs(raw, data, view.replace("| .name'", "| .name |'"))[0].startswith("jq rejects the query")
+
+
+def test_a_toml_file_of_knobs_loads_and_a_bad_one_says_why(tmp_path):
+    import pytest
+
+    from compressors.config import load
+
+    good = tmp_path / "knobs.toml"
+    good.write_text("worth_it = 0.8\n\n[schema]\nrare = 0.2\n")
+    config = load(good)
+    assert (config.worth_it, config.schema.rare) == (0.8, 0.2)
+    bad = tmp_path / "bad.toml"
+    bad.write_text("[schema\nrare = 0.2\n")
+    with pytest.raises(ValueError, match="not TOML"):
+        load(bad)

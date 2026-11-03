@@ -31,14 +31,8 @@ from typing import Any
 
 from compressors import markers
 from compressors.common import discriminating, estimate_tokens, matches
+from compressors.config import DEFAULT, SchemaKnobs
 
-_MIN_ROWS = 5  # fewer rows than this and a list is shown as values, not as a schema
-_MAP_MIN_KEYS = 20  # an object with this many keys of one shape is a collection keyed by its keys
-_DOMINANT = 0.75  # a value held by this share of rows makes the rows without it exceptions,
-_RARE = 0.1  # when the value they hold instead is at most this share
-_KEY_RARE = 0.1  # a key in at most this share of rows marks the rows that have it,
-_KEY_COMMON = 0.9  # and one in at least this share (but not all) the rows that lack it
-_IQR_FACTOR = 3.0
 _IDENT_NAMES = ("name", "id", "uid", "key", "ref", "title", "slug", "filename", "sha", "version")
 _HEX = re.compile(r"[0-9a-fA-F]{6,}")
 _DIGITS = re.compile(r"\d+")
@@ -55,14 +49,21 @@ class _Limits:
     fields: int  # fields shown per collection, keys per plain object
     rows: int  # exception rows shown per collection
     clip: int  # characters of a value shown
+    knobs: SchemaKnobs
 
 
-_LEVELS = (
-    _Limits(values=8, fields=40, rows=25, clip=60),
-    _Limits(values=6, fields=25, rows=12, clip=48),
-    _Limits(values=4, fields=15, rows=6, clip=36),
-    _Limits(values=3, fields=10, rows=3, clip=24),
-)
+# Each tighter level shows this share of the roomiest (the knobs): values, fields, rows, characters.
+_TIGHTER = ((1, 1, 1, 1), (0.75, 0.625, 0.48, 0.8), (0.5, 0.375, 0.24, 0.6), (0.375, 0.25, 0.12, 0.4))
+
+
+def _levels(k: SchemaKnobs) -> tuple[_Limits, ...]:
+    def scaled(n: int, share: float) -> int:
+        return max(1, round(n * share))
+
+    return tuple(
+        _Limits(scaled(k.values, v), scaled(k.fields, f), scaled(k.rows, r), scaled(k.clip, c), k)
+        for v, f, r, c in _TIGHTER
+    )
 
 
 @dataclass(frozen=True)
@@ -192,16 +193,16 @@ def _field(path: str, values: list[Any], rows: int) -> Field:
     )
 
 
-def _outliers(values: list[tuple[int, float]]) -> list[int]:
+def _outliers(values: list[tuple[int, float]], k: SchemaKnobs) -> list[int]:
     """Rows whose number is far outside the rest: beyond three interquartile ranges of the middle
     half, or an extreme further from the next value than the whole range of the others."""
-    if len(values) < _MIN_ROWS:
+    if len(values) < k.min_rows:
         return []
     ordered = sorted(values, key=lambda x: x[1])
     nums = [v for _, v in ordered]
     q1, _, q3 = statistics.quantiles(nums, n=4)
     iqr = q3 - q1
-    out = {i for i, v in values if iqr > 0 and not q1 - _IQR_FACTOR * iqr <= v <= q3 + _IQR_FACTOR * iqr}
+    out = {i for i, v in values if iqr > 0 and not q1 - k.iqr_factor * iqr <= v <= q3 + k.iqr_factor * iqr}
     for (i, v), nxt, rest in (
         ((ordered[-1][0], nums[-1]), nums[-2], nums[:-1]),
         ((ordered[0][0], nums[0]), nums[1], nums[1:]),
@@ -212,7 +213,7 @@ def _outliers(values: list[tuple[int, float]]) -> list[int]:
     return sorted(out)
 
 
-def _notes(rows: list[dict[str, Any]], fields: tuple[Field, ...]) -> dict[int, list[str]]:
+def _notes(rows: list[dict[str, Any]], fields: tuple[Field, ...], k: SchemaKnobs) -> dict[int, list[str]]:
     """What breaks the pattern, per row index."""
     n = len(rows)
     notes: dict[int, list[str]] = {}
@@ -223,22 +224,22 @@ def _notes(rows: list[dict[str, Any]], fields: tuple[Field, ...]) -> dict[int, l
     for f in fields:
         present = [(i, r[f.path]) for i, r in enumerate(rows) if f.path in r]
         share = f.present / n
-        if share <= _KEY_RARE:  # a key few rows have
+        if share <= k.key_rare:  # a key few rows have
             for i, v in present:
                 note(i, f"has {f.path} {_show(v, 40)}")
             continue
-        if _KEY_COMMON <= share < 1:  # a key nearly every row has
+        if k.key_common <= share < 1:  # a key nearly every row has
             for i in sorted(set(range(n)) - {i for i, _ in present}):
                 note(i, f"lacks {f.path}")
         flagged = set()  # one note per field per row: a rare value, else another type, else an outlier
-        if f.counts and f.counts[0][1] / n >= _DOMINANT:
-            rare = {value for value, c in f.counts[1:] if c / n <= _RARE}
+        if f.counts and f.counts[0][1] / n >= k.dominant:
+            rare = {value for value, c in f.counts[1:] if c / n <= k.rare}
             for i, v in present:
                 if not isinstance(v, list | Mapping) and json.dumps(v, ensure_ascii=False) in rare:
                     note(i, f"{f.path} {_show(v, 40)}")
                     flagged.add(i)
         main_type, main_n = f.types[0]
-        if main_n / f.present >= _KEY_COMMON:
+        if main_n / f.present >= k.key_common:
             for i, v in present:
                 if (
                     i not in flagged
@@ -247,7 +248,7 @@ def _notes(rows: list[dict[str, Any]], fields: tuple[Field, ...]) -> dict[int, l
                 ):
                     note(i, f"{f.path} is {_type(v)} {_show(v, 40)}")
                     flagged.add(i)
-        for i in _outliers([(i, float(v)) for i, v in present if _is_number(v)]):
+        for i in _outliers([(i, float(v)) for i, v in present if _is_number(v)], k):
             if i not in flagged:
                 note(i, f"{f.path} {_show(rows[i][f.path], 40)} (outlier)")
     return notes
@@ -270,12 +271,12 @@ def _matched(paths: list[str], items: list[Any], terms: frozenset[str]) -> tuple
     return tuple((paths[i], texts[i]) for i in hits[:3])
 
 
-def _rows_of(path: str, value: Any) -> tuple[list[str], list[Any], list[str] | None] | None:
+def _rows_of(path: str, value: Any, k: SchemaKnobs) -> tuple[list[str], list[Any], list[str] | None] | None:
     """A value's rows, if it is a collection: their concrete paths, the rows, and their keys when the
     value is an object keyed by them."""
-    if isinstance(value, list) and len(value) >= _MIN_ROWS:
+    if isinstance(value, list) and len(value) >= k.min_rows:
         return [_key(path, i) for i in range(len(value))], value, None
-    if isinstance(value, Mapping) and len(value) >= _MAP_MIN_KEYS:
+    if isinstance(value, Mapping) and len(value) >= k.map_min_keys:
         kind, n = Counter(_type(v) for v in value.values()).most_common(1)[0]
         if n / len(value) >= 0.8 and kind in ("object", "array"):
             keys = list(value)
@@ -290,6 +291,7 @@ def collection(
     keys: list[str] | None,
     terms: frozenset[str],
     depth: int = 0,
+    k: SchemaKnobs = DEFAULT.schema,
 ) -> Collection:
     """`items` (whose own jq paths are `paths`) as one collection, iterated by `path`."""
     objects = all(isinstance(x, Mapping) for x in items)
@@ -306,7 +308,7 @@ def collection(
         fields = (_field("", items, len(items)),)
         of = Counter(_type(x) for x in items).most_common(1)[0][0]
     ident = "key" if keys is not None else _ident(fields)
-    notes = _notes(rows, fields)
+    notes = _notes(rows, fields, k)
     exceptions = tuple(
         RowException(
             paths[i],
@@ -326,9 +328,9 @@ def collection(
                 if isinstance(v, list):
                     sub_paths += [f"{p}{f.path}[{j}]" for j in range(len(v))]
                     sub_items += v
-            if len(sub_items) >= _MIN_ROWS and all(isinstance(x, Mapping) for x in sub_items):
+            if len(sub_items) >= k.min_rows and all(isinstance(x, Mapping) for x in sub_items):
                 iterate = f"{path}[]{f.path}"
-                inner.append(collection(iterate, sub_paths, sub_items, None, terms, depth + 1))
+                inner.append(collection(iterate, sub_paths, sub_items, None, terms, depth + 1, k))
     return Collection(
         path=path,
         keyed=keys is not None,
@@ -428,15 +430,15 @@ def _outline(
     path: str, value: Any, terms: frozenset[str], lim: _Limits, found: list[Collection]
 ) -> list[str]:
     """The unique structure as an outline, and every collection in it as its schema."""
-    if (rows := _rows_of(path, value)) is not None:
-        c = collection(path, *rows, terms)
+    if (rows := _rows_of(path, value, lim.knobs)) is not None:
+        c = collection(path, *rows, terms, 0, lim.knobs)
         found.append(c)
         return _render(c, "", lim)
     if isinstance(value, Mapping) and value:
         out = []
         for k, v in list(value.items())[: lim.fields]:
             p = _key(path, k)
-            nested = (isinstance(v, Mapping) and v) or _rows_of(p, v) is not None
+            nested = (isinstance(v, Mapping) and v) or _rows_of(p, v, lim.knobs) is not None
             out += _outline(p, v, terms, lim, found) if nested else [f"{p}  {_show(v, lim.clip)}"]
         if len(value) > lim.fields:
             rest = ", ".join(str(k) for k in list(value)[lim.fields : lim.fields + 12])
@@ -445,7 +447,7 @@ def _outline(
     return [f"{path or '.'}  {_show(value, 4 * lim.clip)}"]
 
 
-def _query(found: list[Collection], slurp: bool) -> str | None:
+def _query(found: list[Collection], slurp: bool, k: SchemaKnobs) -> str | None:
     """A ready jq query: the rows of the first collection whose dominant value some rows break."""
     jq = "jq -s" if slurp else "jq"
     for c in found:
@@ -454,21 +456,27 @@ def _query(found: list[Collection], slurp: bool) -> str | None:
                 continue
             broken = {note.split(" ", 1)[0] for e in sub.exceptions for note in e.notes}
             for f in sub.fields:
-                dominant = len(f.counts) > 1 and f.counts[0][1] / sub.rows >= _DOMINANT
+                dominant = len(f.counts) > 1 and f.counts[0][1] / sub.rows >= k.dominant
                 if f.path in broken and f.present == sub.rows and dominant:
                     pick = f" | {sub.ident}" if sub.ident else ""
                     return f"{jq} '{sub.path or '.'}[] | select({f.path} != {f.counts[0][0]}){pick}' FILE"
     return None
 
 
-def schema_view(value: Any, terms: frozenset[str], budget_tokens: int, slurp: bool = False) -> str:
+def schema_view(
+    value: Any,
+    terms: frozenset[str],
+    budget_tokens: int,
+    slurp: bool = False,
+    knobs: SchemaKnobs = DEFAULT.schema,
+) -> str:
     """The schema view of a parsed JSON value within the budget (JSON Lines: `slurp`, read as one
     array), or the tightest view when nothing fits."""
     text = ""
-    for lim in _LEVELS:
+    for lim in _levels(knobs):
         found: list[Collection] = []
         lines = _outline("", value, terms, lim, found)
-        if (q := _query(found, slurp)) is not None:
+        if (q := _query(found, slurp, knobs)) is not None:
             lines.append(f"query: {q}")
         text = "\n".join(lines)
         if estimate_tokens(text) <= budget_tokens:

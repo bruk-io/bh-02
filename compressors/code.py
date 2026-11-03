@@ -14,6 +14,7 @@ from pathlib import Path
 from ast_grep_py import SgNode, SgRoot
 
 from compressors.common import split_lines
+from compressors.config import DEFAULT, TreeKnobs
 from compressors.tree import Node, TreeFold, fold_tree
 
 _BODY_KINDS = frozenset(
@@ -160,13 +161,17 @@ def code_tree(source: str, language: str) -> tuple[Node, ...]:
 
 
 def fold_code(
-    source: str, language: str, budget_tokens: int, terms: frozenset[str] = frozenset()
+    source: str,
+    language: str,
+    budget_tokens: int,
+    terms: frozenset[str] = frozenset(),
+    knobs: TreeKnobs = DEFAULT.tree,
 ) -> TreeFold:
     """The outline of a source file, opened as far as the budget allows, with real line numbers;
     definitions that hold a query term (few others do) open first. A language ast-grep has no
     grammar for raises ValueError, from `_parse`."""
     lines = split_lines(source)
     text, opened, folded = fold_tree(
-        lines, code_tree(source, language), budget_tokens, numbered=True, terms=terms
+        lines, code_tree(source, language), budget_tokens, numbered=True, terms=terms, knobs=knobs
     )
     return TreeFold(text, source, opened, folded)

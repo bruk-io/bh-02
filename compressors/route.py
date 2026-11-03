@@ -5,6 +5,7 @@ from typing import Any
 
 from compressors import markers
 from compressors.common import estimate_tokens, split_lines
+from compressors.config import DEFAULT, FoldConfig
 from compressors.html import html_to_text, looks_like_html
 from compressors.json_fold import fold_json, parse_json_or_jsonl
 from compressors.lines import fold_lines
@@ -21,7 +22,6 @@ from compressors.tree import (
 _MIN_LINES = 40  # fewer lines than this and the text is cut by characters instead
 _MAX_AVG_LINE = 500
 _BOM = "\ufeff"
-_WORTH_IT = 0.9  # a result that keeps more than this share of the raw tokens is passed through
 
 
 # What detection parsed, handed to the fold so nothing is parsed twice: a JSON document and its
@@ -92,7 +92,7 @@ def _cut_chars(raw: str, budget_tokens: int) -> str:
 
 
 def _body(
-    branch: str, parsed: _Parsed, raw: str, terms: frozenset[str], budget_tokens: int
+    branch: str, parsed: _Parsed, raw: str, terms: frozenset[str], budget_tokens: int, config: FoldConfig
 ) -> tuple[str, str | None]:
     """The folded text, and the text its line numbers refer to when that is not `raw`.
 
@@ -101,21 +101,24 @@ def _body(
     """
     match branch, parsed:
         case "xml", XmlTree() as tree:
-            return fold_xml_tree(tree, budget_tokens, terms).text, (
+            return fold_xml_tree(tree, budget_tokens, terms, config.tree).text, (
                 "\n".join(tree.lines) if tree.pretty else None
             )
         case "json", (value, "json"):
             return fold_json(value, terms, budget_tokens), None
         case "json-schema", (value, "json"):
-            return schema_view(value, terms, budget_tokens), None
+            return schema_view(value, terms, budget_tokens, knobs=config.schema), None
         case "jsonl", (list() as records, "jsonl"):
             note = markers.jsonl_note(len(records), _records_by_line(raw))
             return f"{note}\n{fold_json(records, terms, budget_tokens)}", None
         case "jsonl-schema", (list() as records, "jsonl"):
             note = markers.jsonl_note(len(records), _records_by_line(raw))
-            return f"{note}\n{schema_view(records, terms, budget_tokens, slurp=True)}", None
+            return (
+                f"{note}\n{schema_view(records, terms, budget_tokens, slurp=True, knobs=config.schema)}",
+                None,
+            )
         case "outline", None:
-            return fold_outline(raw, budget_tokens, terms).text, None
+            return fold_outline(raw, budget_tokens, terms, config.tree).text, None
         case "html", None:
             text = html_to_text(raw)
             return (
@@ -146,13 +149,15 @@ def fold(
     terms: frozenset[str] = frozenset(),
     force: str | None = None,
     view: str = "sample",
+    config: FoldConfig = DEFAULT,
 ) -> Folded | None:
     """The folded body of a large result, or None when it should pass through untouched.
 
     None when the result fits the budget, or when folding would keep more than 90% of it. `terms`
     are the query (`common.query_words` of a query, `common.query_terms` of a tool call's
     arguments); `force` names the branch instead of detecting it; `view` says how a data branch
-    shows its data, by samples or by its schema (`compressors.schema`). A `force` the text cannot
+    shows its data, by samples or by its schema (`compressors.schema`); `config` holds the knobs
+    (`compressors.config`). A `force` the text cannot
     take (JSON that does not parse, XML that is not well formed) or that is no branch at all raises
     ValueError, from `_parse_as`.
 
@@ -168,7 +173,7 @@ def fold(
     branch, parsed = _parse_as(force, raw) if force else _detect(raw)
     if view == "schema" and branch in ("json", "jsonl"):  # data: its schema instead of samples
         branch += "-schema"
-    body, source = _body(branch, parsed, raw, terms, budget_tokens)
-    if estimate_tokens(body) > raw_tokens * _WORTH_IT:
+    body, source = _body(branch, parsed, raw, terms, budget_tokens, config)
+    if estimate_tokens(body) > raw_tokens * config.worth_it:
         return None
     return Folded(branch, body, raw_tokens, source)
