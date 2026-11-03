@@ -260,11 +260,4 @@ being set is not seen.
 `PLANNED`, no stronger than any start can earn. `channel_exclusivity` is `violated` when a root
 shows `/run`, `/tmp` and the like (brig's rule), as a project under `/tmp` does.
 
-**Known gaps** (TASK-0180 files the first two against brig):
-
-- brig does not pin the directories between a writable root and a protected path (the old brig's
-  decision-168), so an input can move the directory a layer file, `.git` or bh-02's config is in
-  and plant its own. The xfail tests in `test_runner_confined.py` and `test_python_repl.py` name it.
-- brig's sweep of a crashed jail's placeholders can forget a directory when two records made nested
-  ones (`.git`, then `.git/hooks`).
-- darwin has no jail (above).
+**Known gap**: darwin has no jail (above).

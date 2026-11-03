@@ -914,14 +914,6 @@ async def test_on_linux_a_second_start_in_the_project_reuses_mypy_s_cache_from_i
     assert warm < cold * 0.7, (cold, warm)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "bruk-io/brig does not pin the directories between a writable root and a deny or a mask (the "
-        "old brig's decision-168): an input can move the directory a protected path is in and plant "
-        "its own. Blocks landing the swap; TASK-0180 names it."
-    ),
-)
 @pytest.mark.usefixtures("_needs_a_jail")
 async def test_a_session_run_from_home_can_t_choose_what_a_later_session_reads_as_the_person_s(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -1064,14 +1056,6 @@ async def test_on_linux_a_host_rename_over_a_denied_path_ends_the_jail_and_the_n
     assert "planted" not in config.read_text() and "Pat" in config.read_text()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "bruk-io/brig does not pin the directories between a writable root and a deny or a mask (the "
-        "old brig's decision-168): an input can move the directory a protected path is in and plant "
-        "its own. Blocks landing the swap; TASK-0180 names it."
-    ),
-)
 @pytest.mark.usefixtures("_needs_a_jail")
 async def test_an_input_can_t_put_its_own_git_config_in_place_by_moving_the_directory_it_is_in(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -1191,14 +1175,6 @@ async def test_on_linux_a_layer_file_saved_by_rename_reloads_and_no_later_input_
         await booted.runtime.shutdown()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "bruk-io/brig does not pin the directories between a writable root and a deny or a mask (the "
-        "old brig's decision-168): an input can move the directory a protected path is in and plant "
-        "its own. Blocks landing the swap; TASK-0180 names it."
-    ),
-)
 @pytest.mark.usefixtures("_needs_a_jail")
 async def test_a_layer_file_in_a_directory_of_the_project_can_t_be_swapped_by_moving_that_directory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

@@ -855,15 +855,6 @@ time.sleep(60)
 """
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "bruk-io/brig at the pinned commit does not pin the directories between a writable root and a "
-        "deny (the old brig's decision-168): `uv` and `venv` can be renamed in the jail, and a Python "
-        "planted at the old name is what the next `uv run` on the host runs. Blocks landing the swap: "
-        "the task filed for brig's board (TASK-0180) names it."
-    ),
-)
 async def test_a_linux_jail_refuses_a_rename_of_a_directory_on_the_way_to_the_interpreter_bh_02_runs_on(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1956,11 +1947,7 @@ async def test_a_killed_bh_02_s_jail_ends_with_it_and_the_next_jail_removes_what
     assert (project / ".claude").is_dir() and not list((project / ".claude").iterdir())
     one = BrigJail(BrigConfig(), Host())
     await (await one.start(_listening, cwd=str(project))).stop()  # brig swept
-    # `.git` is the exception, by a fault in brig's sweep (TASK-0180): the dead jail's record
-    # made `.git`, this jail's made `.git/hooks` and `.git/config` inside it, and when the sweep
-    # reads the dead record first it finds `.git` not empty and forgets it. It stays, empty.
-    assert sorted(p.name for p in project.iterdir() if p.name != ".git") == ["alive", "alive.pid"]
-    assert not list((project / ".git").iterdir()) if (project / ".git").exists() else True
+    assert sorted(p.name for p in project.iterdir()) == ["alive", "alive.pid"]
 
 
 async def test_on_linux_the_tripwire_ends_what_it_was_armed_with_when_a_held_file_is_renamed_over(
