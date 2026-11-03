@@ -167,3 +167,16 @@ def test_the_last_line_of_a_stack_trace_counts_as_an_error():
     lines = _log(2000)
     lines[1000] = "ValueError: order total is negative (needle-7)"
     assert "needle-7" in compress("Bash", {}, "\n".join(lines), budget_tokens=500).text
+
+
+def test_a_query_term_most_items_share_promotes_nothing():
+    raw = json.dumps([{"repo": "bh-02", "owner": "bruk-io", "sha": f"{i:040x}"} for i in range(60)])
+    pods = _folded_json(
+        compress("list_commits", {"owner": "bruk-io", "repo": "bh-02"}, raw, budget_tokens=200)
+    )
+    assert not any("_next_item_shown_because" in p for p in pods)
+
+
+def test_the_banner_example_is_a_real_folded_slice():
+    c = compress("t", {}, json.dumps({"pods": _pods(500)}), budget_tokens=500)
+    assert '"$.pods[2:7]"' in c.text.splitlines()[0]
