@@ -343,6 +343,11 @@ def main(argv: list[str] | None = None) -> int:
         "--dry-run", action="store_true", help="list the runs and an estimated cost; run nothing"
     )
     ns = parser.parse_args(argv)
+    if unknown := set(ns.ids) - {t.task_id for t in tasks()}:
+        parser.error(
+            f"no eval task {', '.join(sorted(unknown))}: ids look like json-M-spot-at50 or "
+            "python-L-locate-communicate, and every one is in the task_id field of results/l1-*.jsonl"
+        )
     jobs = [
         (t, c, rep)
         for rep in range(ns.reps)
