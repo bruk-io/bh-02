@@ -1,14 +1,14 @@
-# Layer 2: Claude Code on the eval tasks (claude-sonnet-5-5)
+# Layer 2: Claude Code on the eval tasks (claude-haiku-5-5)
 
-1 runs, $0.07; 1 scored, 0 failed to answer (listed at the end). Correct = the ANSWER line matches the computed truth; intervals are 95% (Wilson for accuracy, bootstrap for paired differences). 0 answers had no ANSWER line (scored on their prose); 0 ran out of turns (scored as wrong).
+4 runs, $0.03; 4 scored, 0 failed to answer (listed at the end). Correct = the ANSWER line matches the computed truth; intervals are 95% (Wilson for accuracy, bootstrap for paired differences). 0 answers had no ANSWER line (scored on their prose); 0 ran out of turns (scored as wrong).
 
 ## By task group
 
 | format | kind | band | condition | correct | median cost | median final context | median calls | read the saved file | ran lab-fold |
 |---|---|---|---|---|---|---|---|---|---|
-| python | locate | L | native | 1/1 [21%, 100%] | $0.0741 | 44469 | 1 | 0/1 | 0/1 |
+| python | edit | L | native | 4/4 [51%, 100%] | $0.0066 | 49656 | 4.0 | 0/4 | 0/4 |
 
-## Each condition against native, paired by task and repetition, per size band
+## Each condition against native (or its baseline), paired by task and repetition, per band
 
 | format | band | condition | pairs | accuracy change | right only here / only native | cost change | final context change | input change | time change | verdict |
 |---|---|---|---|---|---|---|---|---|---|---|
