@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from compressors import markers
-from compressors.common import ANOMALY_RE, discriminating, matches
+from compressors.common import ANOMALY_RE, discriminating, matches, split_lines
 
 _ERROR_KEYS = frozenset({"error", "errors", "err", "exception", "traceback", "fault", "failure", "stderr"})
 _STATUS_KEYS = frozenset({"status", "state", "phase", "health", "result", "outcome", "conclusion", "reason"})
@@ -77,7 +77,7 @@ def parse_json_or_jsonl(raw: str) -> tuple[Any, str] | None:
     except ValueError:
         pass
     items = []
-    for line in stripped.splitlines():
+    for line in split_lines(stripped):  # newline only: a record may hold a raw U+2028 or form feed
         if not line.strip():
             continue
         try:

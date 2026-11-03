@@ -23,7 +23,8 @@ _WORTH_IT = 0.9  # a result that keeps more than this share of the raw tokens is
 
 
 # What detection parsed, handed to the fold so nothing is parsed twice: a JSON document and its
-# kind ("json" or "jsonl"), an XML element tree, or nothing for the branches that parse as they fold.
+# kind ("json" or "jsonl", which is also its branch), an XML element tree, or nothing for the branches
+# that parse as they fold.
 type _Parsed = tuple[Any, str] | XmlTree | None
 
 _BRANCHES = ("json", "xml", "html", "outline", "lines", "text")
@@ -31,7 +32,7 @@ _BRANCHES = ("json", "xml", "html", "outline", "lines", "text")
 
 def _detect(raw: str) -> tuple[str, _Parsed]:
     if (doc := parse_json_or_jsonl(raw)) is not None:
-        return "json", doc
+        return doc[1], doc
     if looks_like_xml(raw) and (tree := xml_tree(raw)) is not None:
         return "xml", tree
     if looks_like_html(raw):
@@ -45,12 +46,13 @@ def _detect(raw: str) -> tuple[str, _Parsed]:
 
 
 def detect(raw: str) -> str:
-    """The branch a large result would take: json, xml, html, outline, lines or text."""
+    """The branch a large result would take: json, jsonl, xml, html, outline, lines or text."""
     return _detect(raw)[0]
 
 
-def _parse_as(branch: str, raw: str) -> _Parsed:
-    """What `branch` needs parsed, for a branch named instead of detected.
+def _parse_as(branch: str, raw: str) -> tuple[str, _Parsed]:
+    """The branch and what it needs parsed, for a branch named instead of detected ("json" takes
+    JSON Lines too, and becomes "jsonl").
 
     Raises:
         ValueError: the text cannot take that branch, or there is no such branch.
@@ -59,15 +61,21 @@ def _parse_as(branch: str, raw: str) -> _Parsed:
         case "json":
             if (doc := parse_json_or_jsonl(raw)) is None:
                 raise ValueError("--as json: the text does not parse as JSON or JSON Lines")
-            return doc
+            return doc[1], doc
         case "xml":
             if (tree := xml_tree(raw)) is None:
                 raise ValueError("--as xml: the text is not well-formed XML")
-            return tree
+            return "xml", tree
         case _ if branch in _BRANCHES:
-            return None
+            return branch, None
         case _:
             raise ValueError(f"unknown branch {branch!r}: use one of {', '.join(_BRANCHES)}")
+
+
+def _records_by_line(raw: str) -> bool:
+    """Whether JSON Lines record i is on line i+1: no blank line before the last record."""
+    filled = [i for i, line in enumerate(split_lines(raw)) if line.strip()]
+    return filled == list(range(len(filled)))
 
 
 def _cut_chars(raw: str, budget_tokens: int) -> str:
@@ -85,9 +93,11 @@ def _body(
             return fold_xml_tree(tree, budget_tokens, terms).text, (
                 "\n".join(tree.lines) if tree.pretty else None
             )
-        case "json", (value, kind):
-            note = "JSONL shown as one array; index i is line i+1.\n" if kind == "jsonl" else ""
-            return note + fold_json(value, terms, budget_tokens), None
+        case "json", (value, "json"):
+            return fold_json(value, terms, budget_tokens), None
+        case "jsonl", (list() as records, "jsonl"):
+            note = markers.jsonl_note(len(records), _records_by_line(raw))
+            return f"{note}\n{fold_json(records, terms, budget_tokens)}", None
         case "outline", None:
             return fold_outline(raw, budget_tokens, terms).text, None
         case "html", None:
@@ -133,7 +143,7 @@ def fold(
     raw_tokens = estimate_tokens(raw)
     if raw_tokens <= budget_tokens:
         return None
-    branch, parsed = (force, _parse_as(force, raw)) if force else _detect(raw)
+    branch, parsed = _parse_as(force, raw) if force else _detect(raw)
     body, source = _body(branch, parsed, raw, terms, budget_tokens)
     if estimate_tokens(body) > raw_tokens * _WORTH_IT:
         return None
