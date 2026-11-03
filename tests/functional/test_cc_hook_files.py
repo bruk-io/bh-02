@@ -2,11 +2,14 @@
 
 import json
 import os
-import random
 import stat
 
 from claude_code.hook import handle
-from harness.needle import json_case
+from evals.synthetic import pods
+
+
+def _payload(size: int):
+    return pods(size, frozenset({size // 2}), "hook-test")
 
 
 def _notice(path) -> str:
@@ -35,13 +38,13 @@ def _event(response, transcript, tool_use_id="toolu_1"):
 
 def test_a_real_spill_is_folded_from_claude_codes_file(tmp_path):
     transcript, results = _session(tmp_path)
-    case = json_case("error_key", 500, 0.5, random.Random(2))
+    case = _payload(500)
     spill = results / "mcp-fixture-list_pods-1793711514016.txt"
     spill.write_text(case.raw)
     reply = handle(_event(_notice(spill), transcript), budget=2000)
     text = reply["hookSpecificOutput"]["updatedToolOutput"]
     assert str(spill) in text.splitlines()[0]
-    assert case.needle in text
+    assert case.planted[0] in text
     assert json.loads(text.split("\n", 1)[1])["items"][0]["namespace"] == "default"
 
 
@@ -70,7 +73,7 @@ def test_a_device_or_a_huge_file_is_not_read(tmp_path):
 
 def test_inline_folding_keeps_the_raw_privately_when_asked(tmp_path):
     transcript, results = _session(tmp_path)
-    case = json_case("rare_value", 50, 0.5, random.Random(1))
+    case = _payload(50)
     blocks = [{"type": "text", "text": case.raw}]
     assert handle(_event(blocks, transcript), budget=500) is None  # off by default
     reply = handle(_event(blocks, transcript), budget=500, fold_inline=True)
@@ -84,5 +87,5 @@ def test_a_failing_log_does_not_stop_the_fold(tmp_path, monkeypatch):
     transcript, results = _session(tmp_path)
     monkeypatch.setenv("TOOL_OUTPUT_LAB_LOG", str(tmp_path / "no-such-dir" / "log.jsonl"))
     spill = results / "mcp-fixture-list_pods-3.txt"
-    spill.write_text(json_case("error_key", 500, 0.5, random.Random(2)).raw)
+    spill.write_text(_payload(500).raw)
     assert handle(_event(_notice(spill), transcript), budget=2000) is not None

@@ -51,7 +51,7 @@ _SIZES = {
     "figma": {"S": 20, "M": 100, "L": 500},
 }
 _MAKE = {"json": synthetic.pods, "log": synthetic.logs, "a11y": synthetic.snapshot, "figma": synthetic.figma}
-_TOOL = {"json": "list_pods", "log": "get_logs", "a11y": "browser_snapshot", "figma": "get_figma_metadata"}
+TOOLS = {"json": "list_pods", "log": "get_logs", "a11y": "browser_snapshot", "figma": "get_figma_metadata"}
 _ASK = {
     "json": {
         "spot": "Does any pod look wrong or unusual? Name it, or say none.",
@@ -92,7 +92,7 @@ def _payload(
 
 def _prompt(fmt: str, kind: str, subject: str = "") -> str:
     ask = _ASK[fmt]["spot" if kind == "absent" else kind].format(subject=subject)
-    return f"Use the {_TOOL[fmt]} tool. {ask} {ANSWER_INSTRUCTION[kind]}."
+    return f"Use the {TOOLS[fmt]} tool. {ask} {ANSWER_INSTRUCTION[kind]}."
 
 
 def _count(fmt: str, p: synthetic.Payload) -> Number:
@@ -370,6 +370,18 @@ def _pypi() -> list[Task]:
             query="8.1.7",
         ),
     ]
+
+
+def task(task_id: str) -> Task:
+    """One task by id.
+
+    Raises:
+        KeyError: no task has this id; the message lists a few that do.
+    """
+    found = {t.task_id: t for t in tasks()}
+    if task_id not in found:
+        raise KeyError(f"no eval task {task_id!r}; ids look like {', '.join(list(found)[:3])}")
+    return found[task_id]
 
 
 def tasks() -> list[Task]:

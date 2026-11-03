@@ -1,31 +1,14 @@
 """Shared pieces: the token estimate, call ids, query terms and the anomaly signal."""
 
-import hashlib
 import math
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass
 from typing import Any
 
 
 def estimate_tokens(text: str) -> int:
     """About four characters per token: fine for comparing branches, not for billing."""
     return math.ceil(len(text) / 4)
-
-
-def call_id_for(raw: str) -> str:
-    return "call_" + hashlib.sha256(raw.encode("utf-8", "replace")).hexdigest()[:12]
-
-
-@dataclass(frozen=True)
-class Compressed:
-    """What the model sees in place of a tool result, and how it got there."""
-
-    text: str
-    branch: str  # passthrough | json | lines | html | text
-    call_id: str | None  # None when nothing was folded, so nothing needs recovering
-    raw_tokens: int
-    out_tokens: int
 
 
 ANOMALY_RE = re.compile(
