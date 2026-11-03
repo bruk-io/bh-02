@@ -4,6 +4,43 @@ The running summary. Each entry names the result file or sample it rests on. Num
 files in this folder, not from memory. Since 2026-11-03 the target is Claude Code: the hooks in
 `claude_code/` and headless `claude -p` runs against native Claude Code.
 
+## Corrections after review 1 (`REVIEW-1.md`)
+
+Four reviewers checked these findings against the result files. What they corrected:
+
+- **K1. Every A/B result here is indicative, not a verdict.** Cells had 13 or 14 runs (one run is
+  7 points; 13/14 has a 95% interval of 68% to 99%), seeds at a fixed position are near-replicates,
+  and no interval was computed. The kill criteria could not be judged at these sizes. Layer 2
+  (`evals/l2.py`) now reports Wilson and paired bootstrap intervals and applies the criteria to them.
+- **K2. "Input tokens summed over requests" mostly counted turns** (about 29k + 39k per turn, R2 of
+  0.90 to 0.94): "a third fewer input tokens" (1, 13, 19) means fewer round trips, not a smaller
+  context. The cache breakdown behind 19 was not recorded. Layer 2 records usage per request by
+  cache class and the final context's size.
+- **K3. The A/B JSON and log needles gave themselves away:** the planted pod was named `needle-...`
+  among `web-...` pods (29 of 32 Haiku and 7 of 8 Sonnet JSON answers cite the name), and the log
+  needle held the word `needle-`. JSON accuracy in A/B 1 and 3 is inflated in both conditions.
+- **K4. The tree prompts named the planted kinds** ("an invoice that cannot be paid or an error",
+  "a hidden layer or a different component") while the JSON and log prompts were generic: A/B 2
+  and the tree cells of A/B 3 tell the native condition what to look for. Prompts are now generic.
+- **K5. Entry 15:** Claude recovered lookups from the saved file only in the 500-item runs; at 50
+  items the target was in the fold.
+- **K6. Entry 18:** the fold used more tokens than native in 4 of 6 Sonnet tree cells (5 of 13
+  overall), not two, and folded trees cost more ($0.635 against $0.600): by the second kill
+  criterion, folding spilled trees fails with Sonnet (indicatively).
+- **K7. Entry 24:** 18 of 20 comprehension runs were right, not 20: both fold-condition answers to
+  the Action question missed `_ChoicesPseudoAction` (a nested class) and passed only because the
+  scorer took recall 0.9 as correct. The scorer read recall only, so listing every name would also
+  have passed; and with native at ceiling, "adds nothing" could not have shown a gain.
+- **K8. Entries 28 to 31 (layer 1):** the budget was not an enforced invariant then (PyPI folds ran
+  3.0k to 3.4k tokens against 2,000; logs, code and long strings ignored it, R4); counts passed on
+  any token equal to the number, line numbers included (code at 2,000 was 4/17, not 7/17); and
+  every planted anomaly was a kind the fold has a rule for, with k under its cap, so "spot and
+  absent are sufficient everywhere" held by construction. Restated: for the anomaly kinds the fold
+  has rules for, the planted item is in view; quiet anomalies (no rule) are lost at M and L in
+  every format; past the cap, trees now say how many more stand out. Current numbers: `l1-15-*.md`.
+
+Entries below keep their original wording; a tag such as (K3) marks one these corrections qualify.
+
 ## What Claude Code already does (docs for v2.1.317, read 2026-11-03)
 
 Most of the source document's ideas are already in Claude Code, in their simplest form:
@@ -43,7 +80,7 @@ Small = 50 pods or 200 log lines (~3k tokens, inline natively); large = 500 pods
 | small, native | 14 | 14 | $0.084 | 142k | 1 | 9.7s |
 | small, fold | 14 | 12 | $0.085 | 186k | 2 | 14.3s |
 
-1. **Where Claude Code spills, the fold wins:** a third fewer input tokens, a third less time,
+1. (K1, K2, K3) **Where Claude Code spills, the fold wins:** a third fewer input tokens, a third less time,
    half the tool calls, equal accuracy. It replaces a head-only preview that sent Claude exploring.
 2. **Below the spill threshold it loses:** Claude opened the saved raw file in every folded run,
    apparently to check the fold, which costs a round trip the inline result did not need.
@@ -107,12 +144,12 @@ by invoice; a hidden layer, a different button variant and a lookup by card name
 | small, native | 12 | 12 | $0.073 | 142k | 1 | 7.4s |
 | small, fold | 12 | 12 | $0.078 | 190k | 2 | 14.9s |
 
-13. **The same split as A/B 1:** on spilled results the fold saves 37% of input tokens, 19% of the
+13. (K1, K2, K4) **The same split as A/B 1:** on spilled results the fold saves 37% of input tokens, 19% of the
     cost and a quarter of the time, with no answer lost; on inline results it costs more and takes
     twice as long, because Claude opens the saved file anyway.
 14. **Accessibility snapshots gain the most.** Natively, Claude explored a spilled 500-invoice
     snapshot in 6.5 calls and 27s; with the outline fold it answered in 2 calls and 9.5s.
-15. **Lookups recover as designed.** The fold hid the asked-for invoice and card (the tool calls
+15. (K5) **Lookups recover as designed.** The fold hid the asked-for invoice and card (the tool calls
     carry no query), and Claude grepped the saved file and answered correctly in every run.
 16. **Claude opens the saved file in nearly every folded run**, even when the answer is in the fold.
     That one extra call is the fold's whole cost on small results. Whether a banner that says what
@@ -130,9 +167,9 @@ One seed per cell, so each cell is a single run: read the totals, not the cells.
 
 17. **JSON and logs: the same clear win as with Haiku**, 4 calls down to 2 and about a third fewer
     input tokens in most cells.
-18. **Trees: no win with Sonnet.** It explores a spilled snapshot or Figma file efficiently on its
+18. (K6) **Trees: no win with Sonnet.** It explores a spilled snapshot or Figma file efficiently on its
     own (2 to 4 calls), and in two cells the fold used more tokens than native.
-19. **20% fewer input tokens bought 3% of the cost.** Most input tokens are cache reads, which are
+19. (K2) **20% fewer input tokens bought 3% of the cost.** Most input tokens are cache reads, which are
     cheap; Sonnet's cost is mostly cache writes and output. In Claude Code the fold's value is fewer
     calls, less time and slower context growth, more than money. Context growth itself is not yet
     measured (the harness sums tokens over requests; the size of the final context would show it).
@@ -173,7 +210,7 @@ Popen methods are defined in both platform branches, which classes subclass Acti
 define close and where, which top-level functions are cached), answers computed with `ast`. Both
 conditions had `fold` on the PATH; only `fold` had a CLAUDE.md naming it.
 
-24. **Every run was right in both conditions** (20/20, recall 1.00 and 0.98), in 1 or 2 tool calls.
+24. (K7) **Every run was right in both conditions** (20/20, recall 1.00 and 0.98), in 1 or 2 tool calls.
 25. **Claude computes structural answers rather than reading structure.** Of 25 tool calls, 10 were
     its own Python `ast` scripts, the same way the ground truth was computed, and most others were
     grep or awk one-liners. For a question with an exact answer that beats any outline.
@@ -195,9 +232,9 @@ look up, enumerate, count, locate), every answer computed by a program. Each is 
 `fold` interface with no query and, where the tool call would name it, with the query. Free: the
 whole run takes about 15 seconds.
 
-28. **No invariant has ever failed** (0 of 160 folds in every run): every fold accounts for every
+28. (K8) **No invariant has ever failed** (0 of 160 folds in every run): every fold accounts for every
     source line exactly once, and every JSON marker holds exactly the count it claims.
-29. **Spot and absent are sufficient everywhere:** the planted anomaly is in view in every format,
+29. (K8) **Spot and absent are sufficient everywhere:** the planted anomaly is in view in every format,
     size and position, and no fold ever promoted something in a payload with nothing planted.
 30. **Layer 1 found eleven problems in an afternoon**, each fixed with a test, which moved
     sufficiency from 109/160 to 128/160 at 2,000 tokens (139/160 at 6,000):
@@ -213,7 +250,7 @@ whole run takes about 15 seconds.
       (`code="AD"`) weighed no more than `Ad` in other countries' place names;
     - the tightest JSON level still went over budget on PyPI JSON, and cut SHA-256 digests;
     - opening by cost, added for docstrings, left the biggest class last (`l1-9-ranks.md`).
-31. **What remains insufficient is by design or by budget:** a lookup with no query has nothing to
+31. (K8) **What remains insufficient is by design or by budget:** a lookup with no query has nothing to
     mark the asked-for item, so it needs the saved file (that is the recovery path layer 2
     measures); and a 20k-token source file's outline does not fit 2,000 tokens. At 6,000, code is
     13/17; a file that fits is passed through unchanged, so "on which line" cannot be read off it.
