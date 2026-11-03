@@ -10,7 +10,9 @@ same truths (`evals.truth.score_answer`, from the ANSWER line every prompt asks 
   serves that task; conditions: `native`, and the PostToolUse hook in each of its modes: `fold`
   (spilled), `fold-inline` (inline, its default) and `fold-all` (all).
 - A real-file task names its file in the prompt; conditions: `native` and `fold-tool` (`lab-fold`,
-  the fold CLI, on the PATH in both, and named in a CLAUDE.md only in `fold-tool`).
+  the fold CLI, on the PATH in both, and named in a CLAUDE.md only in `fold-tool`), and, with Bash
+  disallowed, `noshell` (Read, Grep, Glob) and `noshell-fold` (the same and the `fold` MCP tool,
+  `claude_code/fold_mcp.py`), which is paired against `noshell`.
 
 Each run records the answer and its score, the tool calls, whether Claude read a saved raw file or
 ran `lab-fold`, cost, time, and usage per API request by cache class, with the size of the final
@@ -47,7 +49,10 @@ HOOK_MODE = {
     "fold-inline": "inline",
     "fold-all": "all",
 }  # condition -> TOOL_OUTPUT_LAB_MODE
-FILE_CONDITIONS = ("native", "fold-tool")
+FILE_CONDITIONS = ("native", "fold-tool", "noshell", "noshell-fold")
+# What each condition is paired against: a fold condition against the same session without it.
+BASELINE = {"noshell-fold": "noshell"}
+_FOLD_TOOL = "mcp__fold__fold"
 _STOP_AFTER_FAILURES = 5
 _COST_PER_RUN = {"haiku": 0.007, "sonnet": 0.10, "opus": 0.25}  # rough, from the A/Bs so far
 _CLAUDE_MD = """# Tools
@@ -66,7 +71,7 @@ class Session:
     answer: str
     tool_calls: int  # excluding ToolSearch
     read_saved_file: bool  # a call opened a file under tool-results/
-    ran_fold: bool  # a Bash call ran lab-fold
+    ran_fold: bool  # a Bash call ran lab-fold, or the fold MCP tool was called
     turns: int
     hit_max_turns: bool  # it ran out of turns: the model's failure, scored as a wrong answer
     cost_usd: float
@@ -99,7 +104,9 @@ def parse_stream(lines: Iterable[str]) -> Session:
                     calls += 1
                     text = json.dumps(block.get("input", {}))
                     read_saved |= "tool-results/" in text
-                    ran_fold |= block.get("name") == "Bash" and "lab-fold" in text
+                    ran_fold |= (block.get("name") == "Bash" and "lab-fold" in text) or block.get(
+                        "name"
+                    ) == _FOLD_TOOL
         elif event.get("type") == "result":
             result = event
 
@@ -157,19 +164,33 @@ def _fold_shim(bin_dir: Path) -> None:
     shim.chmod(0o755)
 
 
+def file_tools(condition: str, w: Path) -> list[str]:
+    """The flags (and files in the run's folder) that set up a file task's condition."""
+    if condition in ("noshell", "noshell-fold"):
+        tools = "Read,Grep,Glob"
+        flags = ["--strict-mcp-config", "--disallowedTools", "Bash"]
+        if condition == "noshell-fold":
+            server = {"command": "sh", "args": ["-c", f"cd {_LAB} && exec {_UV} -m claude_code.fold_mcp"]}
+            (w / "mcp.json").write_text(json.dumps({"mcpServers": {"fold": server}}))
+            flags += ["--mcp-config", "mcp.json"]
+            tools += f",{_FOLD_TOOL}"
+        return [*flags, "--allowedTools", tools]
+    _fold_shim(w / "bin")
+    if condition == "fold-tool":
+        (w / "CLAUDE.md").write_text(_CLAUDE_MD)
+    return ["--strict-mcp-config", "--allowedTools", "Read,Grep,Glob,Bash"]
+
+
 def run_one(t: Task, condition: str, model: str, rep: int, log: Path) -> dict[str, Any]:
     """One Claude Code session for one task under one condition, scored."""
     with tempfile.TemporaryDirectory(prefix="l2-") as work:
         w = Path(work)
         env = dict(os.environ)
+        env["PATH"] = f"{w / 'bin'}:{env.get('PATH', '')}"  # lab-fold, where the condition puts it there
         command = ["claude", "-p", t.prompt, "--model", model, "--max-turns", "25"]
         command += ["--output-format", "stream-json", "--verbose"]
         if t.path:
-            _fold_shim(w / "bin")
-            env["PATH"] = f"{w / 'bin'}:{env.get('PATH', '')}"
-            if condition == "fold-tool":
-                (w / "CLAUDE.md").write_text(_CLAUDE_MD)
-            command += ["--allowedTools", "Read,Grep,Glob,Bash"]
+            command += file_tools(condition, w)
         else:
             server = {
                 "command": "sh",
@@ -234,6 +255,12 @@ def _diffs(
         {k: float(v[field]) * scale for k, v in base.items()},
         {k: float(v[field]) * scale for k, v in runs.items()},
     )
+
+
+def _against(condition: str) -> str:
+    """The condition, and what it is paired against when that is not native."""
+    base = BASELINE.get(condition)
+    return f"{condition} (against {base})" if base else condition
 
 
 def _paired(base: dict[str, dict[str, Any]], runs: dict[str, dict[str, Any]]) -> str:
@@ -307,22 +334,28 @@ def report(rows: list[dict[str, Any]], model: str) -> str:
         "| pairs | accuracy change | right only here / only native | cost change | final context change "
         "| input change | time change | verdict |"
     )
-    out += ["", "## Each condition against native, paired by task and repetition, per size band", ""]
+    out += [
+        "",
+        "## Each condition against native (or its baseline), paired by task and repetition, per band",
+        "",
+    ]
     out += [f"| format | band | condition {columns}", "|---|---|---|---|---|---|---|---|---|---|---|"]
     by_cell: dict[tuple[str, str, str], dict[str, dict[str, Any]]] = defaultdict(dict)
     for r in scored:  # a pair needs both runs scored
         by_cell[(r["fmt"], r["band"], r["condition"])][f"{r['task_id']}#{r['rep']}"] = r
     for (fmt, band, cond), runs in sorted(by_cell.items()):
-        if cond != "native" and (fmt, band, "native") in by_cell:
-            out.append(f"| {fmt} | {band} | {cond} {_paired(by_cell[(fmt, band, 'native')], runs)}")
+        base = BASELINE.get(cond, "native")
+        if cond != base and (fmt, band, base) in by_cell:
+            out.append(f"| {fmt} | {band} | {_against(cond)} {_paired(by_cell[(fmt, band, base)], runs)}")
     out += ["", "## Every format together, per size band", ""]
     out += [f"| band | condition {columns}", "|---|---|---|---|---|---|---|---|---|---|"]
     by_band: dict[tuple[str, str], dict[str, dict[str, Any]]] = defaultdict(dict)
     for r in scored:
         by_band[(r["band"], r["condition"])][f"{r['task_id']}#{r['rep']}"] = r
     for (band, cond), runs in sorted(by_band.items()):
-        if cond != "native" and (band, "native") in by_band:  # pairs: the tasks both conditions ran
-            out.append(f"| {band} | {cond} {_paired(by_band[(band, 'native')], runs)}")
+        base = BASELINE.get(cond, "native")
+        if cond != base and (band, base) in by_band:  # pairs: the tasks both conditions ran
+            out.append(f"| {band} | {_against(cond)} {_paired(by_band[(band, base)], runs)}")
     out += [
         "",
         "Verdict: passes when the accuracy change's lower bound is above -3 points and the final context "

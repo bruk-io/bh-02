@@ -148,3 +148,14 @@ def test_a_saved_run_is_rescored_from_its_answer_line_and_a_failed_one_is_left_a
 def test_every_hook_condition_names_a_mode_the_hook_accepts():
     assert set(HOOK_MODE) == set(MCP_CONDITIONS) - {"native"}
     assert {mode_of(m) for m in HOOK_MODE.values()} == set(Mode)
+
+
+def test_noshell_fold_is_paired_against_noshell_and_noshell_against_native():
+    rows = []
+    for cond, ctx in (("native", 50000), ("noshell", 48000), ("noshell-fold", 40000)):
+        for r in _rows(3):
+            if r["condition"] == "native":
+                rows.append(r | {"condition": cond, "final_context": ctx, "cache_read": ctx, "fmt": "python"})
+    text = report(rows, "test")
+    assert "| python | M | noshell-fold (against noshell) | 3 |" in text and "| -8000 [" in text
+    assert "| python | M | noshell | 3 |" in text and "| -2000 [" in text
