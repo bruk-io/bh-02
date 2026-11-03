@@ -20,8 +20,11 @@ def test_folds_account_for_every_line_and_every_marker_is_true(task_id):
         assert check(task, 2000, query_on).violations == []
 
 
-@pytest.mark.parametrize("task_id", [t for t in _sample() if _BY_ID[t].kind in ("spot", "absent")])
-def test_an_anomaly_is_always_in_view_and_none_is_ever_invented(task_id):
+@pytest.mark.parametrize(
+    "task_id", [t for t in _sample() if _BY_ID[t].kind in ("spot", "absent") and "quiet" not in t]
+)
+def test_an_anomaly_the_fold_has_a_rule_for_is_in_view_and_none_is_ever_invented(task_id):
+    """Quiet anomalies (no rule) are measured, not promised: they are in the l1 report."""
     assert check(_BY_ID[task_id], 2000, query_on=False).sufficient
 
 
