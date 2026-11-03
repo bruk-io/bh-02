@@ -1,0 +1,348 @@
+"""Layer 2: headless Claude Code on the eval tasks, native against fold, paired and scored.
+
+    ./lab evals l2 --dry-run [--formats json log] [--bands M L] [--kinds spot count] [--conditions ...]
+    ./lab evals l2 --model claude-haiku-5-5 --reps 1 --workers 4 --name l2-haiku-1 [same filters]
+
+The same tasks as layer 1 (`evals.tasks`), answered by real Claude Code sessions and scored by the
+same truths (`evals.truth.score_answer`, from the ANSWER line every prompt asks for).
+
+- A synthetic task's payload comes from a fixture MCP server (`claude_code/fixture_mcp.py`) that
+  serves that task; conditions: `native`, `fold` (the PostToolUse hook, spilled-only, its default)
+  and `fold-all` (the hook folding inline results too).
+- A real-file task names its file in the prompt; conditions: `native` and `fold-tool` (`lab-fold`,
+  the fold CLI, on the PATH in both, and named in a CLAUDE.md only in `fold-tool`).
+
+Each run records the answer and its score, the tool calls, whether Claude read a saved raw file or
+ran `lab-fold`, cost, time, and usage per API request by cache class, with the size of the final
+context. The report gives accuracy with Wilson intervals and, per condition against native, paired
+differences with bootstrap intervals, and applies the README's kill criteria to the intervals.
+`--dry-run` lists the runs and an estimate of their cost without running anything. Costs money.
+"""
+
+import argparse
+import json
+import os
+import statistics
+import subprocess
+import tempfile
+from collections import defaultdict
+from collections.abc import Iterable
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import Any
+
+from evals.stats import bootstrap, paired, wilson
+from evals.tasks import FORMATS, KINDS, TOOLS, Task, tasks
+from evals.truth import answer_line, score_answer
+
+_LAB = Path(__file__).resolve().parent.parent
+_UV = "uv run -q --no-project --python 3.15 --with ast-grep-py python"
+MCP_CONDITIONS = ("native", "fold", "fold-all")
+FILE_CONDITIONS = ("native", "fold-tool")
+_COST_PER_RUN = {"haiku": 0.007, "sonnet": 0.10, "opus": 0.25}  # rough, from the A/Bs so far
+_CLAUDE_MD = """# Tools
+
+`lab-fold FILE` prints a file's outline with its real line numbers: every class, function and method
+header, and the blocks inside them, opened as far as a token budget allows (`--budget N`, default
+2000; 6000 or more suits a large file). A folded part shows as `[... lines A-B folded]`; read it with
+Read offset=A limit=B-A+1. Use it to see the structure of a large file before reading parts of it.
+"""
+
+
+@dataclass(frozen=True)
+class Session:
+    """What one stream-json session says about itself."""
+
+    answer: str
+    tool_calls: int  # excluding ToolSearch
+    read_saved_file: bool  # a call opened a file under tool-results/
+    ran_fold: bool  # a Bash call ran lab-fold
+    turns: int
+    cost_usd: float
+    duration_ms: int
+    requests: int  # API requests
+    input_tokens: int  # uncached input, summed over requests
+    cache_read: int
+    cache_write: int
+    output_tokens: int
+    final_context: int  # the last request's whole input: how big the context grew
+    error: str | None
+
+
+def parse_stream(lines: Iterable[str]) -> Session:
+    """Read a `--output-format stream-json --verbose` session."""
+    calls, read_saved, ran_fold = 0, False, False
+    usage: dict[str, dict[str, int]] = {}  # per API request (assistant message id), last seen
+    result: dict[str, Any] = {}
+    for line in lines:
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if event.get("type") == "assistant":
+            message = event.get("message", {})
+            if message.get("id") and isinstance(message.get("usage"), dict):
+                usage[message["id"]] = message["usage"]
+            for block in message.get("content", []):
+                if block.get("type") == "tool_use" and block.get("name") != "ToolSearch":
+                    calls += 1
+                    text = json.dumps(block.get("input", {}))
+                    read_saved |= "tool-results/" in text
+                    ran_fold |= block.get("name") == "Bash" and "lab-fold" in text
+        elif event.get("type") == "result":
+            result = event
+
+    def total(key: str) -> int:
+        return sum(int(u.get(key, 0) or 0) for u in usage.values())
+
+    last = list(usage.values())[-1] if usage else {}
+    final = sum(
+        int(last.get(k, 0) or 0)
+        for k in ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
+    )
+    return Session(
+        answer=str(result.get("result") or ""),
+        tool_calls=calls,
+        read_saved_file=read_saved,
+        ran_fold=ran_fold,
+        turns=int(result.get("num_turns", 0) or 0),
+        cost_usd=float(result.get("total_cost_usd", 0.0) or 0.0),
+        duration_ms=int(result.get("duration_ms", 0) or 0),
+        requests=len(usage),
+        input_tokens=total("input_tokens"),
+        cache_read=total("cache_read_input_tokens"),
+        cache_write=total("cache_creation_input_tokens"),
+        output_tokens=total("output_tokens"),
+        final_context=final,
+        error=None if result else "no result event",
+    )
+
+
+def conditions_for(t: Task) -> tuple[str, ...]:
+    return FILE_CONDITIONS if t.path else MCP_CONDITIONS
+
+
+def _hook_settings(mode: str, log: Path) -> dict[str, Any]:
+    command = f"cd {_LAB} && TOOL_OUTPUT_LAB_LOG={log} TOOL_OUTPUT_LAB_MODE={mode} {_UV} -m claude_code.hook"
+    hook = {"type": "command", "timeout": 30, "command": command}
+    return {"hooks": {"PostToolUse": [{"matcher": "mcp__.*", "hooks": [hook]}]}}
+
+
+def _fold_shim(bin_dir: Path) -> None:
+    bin_dir.mkdir()
+    shim = bin_dir / "lab-fold"  # not `fold`, which would shadow coreutils fold
+    shim.write_text(f'#!/bin/sh\nexec env PYTHONPATH="{_LAB}" {_UV} -m compressors.cli "$@"\n')
+    shim.chmod(0o755)
+
+
+def run_one(t: Task, condition: str, model: str, rep: int, log: Path) -> dict[str, Any]:
+    """One Claude Code session for one task under one condition, scored."""
+    with tempfile.TemporaryDirectory(prefix="l2-") as work:
+        w = Path(work)
+        env = dict(os.environ)
+        command = ["claude", "-p", t.prompt, "--model", model, "--max-turns", "25"]
+        command += ["--output-format", "stream-json", "--verbose"]
+        if t.path:
+            _fold_shim(w / "bin")
+            env["PATH"] = f"{w / 'bin'}:{env.get('PATH', '')}"
+            if condition == "fold-tool":
+                (w / "CLAUDE.md").write_text(_CLAUDE_MD)
+            command += ["--allowedTools", "Read,Grep,Glob,Bash"]
+        else:
+            server = {
+                "command": "sh",
+                "args": ["-c", f"cd {_LAB} && exec {_UV} -m claude_code.fixture_mcp"],
+                "env": {"TOOL_OUTPUT_LAB_TASK": t.task_id},
+            }
+            (w / "mcp.json").write_text(json.dumps({"mcpServers": {"fixture": server}}))
+            mode = {"fold": "spilled-only", "fold-all": "all"}.get(condition)
+            (w / "settings.json").write_text(json.dumps(_hook_settings(mode, log) if mode else {}))
+            command += ["--mcp-config", "mcp.json", "--strict-mcp-config", "--settings", "settings.json"]
+            command += ["--allowedTools", f"mcp__fixture__{TOOLS[t.fmt]},Bash,Read,Grep"]
+        try:
+            proc = subprocess.run(
+                command, cwd=w, env=env, capture_output=True, text=True, timeout=900, check=False
+            )
+            session = parse_stream(proc.stdout.splitlines())
+            if session.error:
+                session = Session(**{**asdict(session), "error": f"{session.error}; {proc.stderr[-300:]}"})
+        except subprocess.TimeoutExpired:
+            session = Session("", 0, False, False, 0, 0.0, 900_000, 0, 0, 0, 0, 0, 0, "timed out after 900s")
+    score = score_answer(t.truth, session.answer)
+    head = {"task_id": t.task_id, "fmt": t.fmt, "kind": t.kind, "band": t.band, "condition": condition}
+    return {
+        **head,
+        "rep": rep,
+        "model": model,
+        "correct": score.correct,
+        "parsed": score.parsed,
+        "recall": score.recall,
+        "precision": score.precision,
+        "answer_line": answer_line(session.answer),
+        **{k: v for k, v in asdict(session).items() if k != "answer"},
+        "answer": session.answer[:2000],
+    }
+
+
+def _ci(k: int, n: int) -> str:
+    lo, hi = wilson(k, n)
+    return f"{k}/{n} [{lo:.0%}, {hi:.0%}]"
+
+
+def _diffs(
+    base: dict[str, dict[str, Any]], runs: dict[str, dict[str, Any]], field: str, scale: float
+) -> list[float]:
+    return paired(
+        {k: float(v[field]) * scale for k, v in base.items()},
+        {k: float(v[field]) * scale for k, v in runs.items()},
+    )
+
+
+def report(rows: list[dict[str, Any]], model: str) -> str:
+    out = [
+        f"# Layer 2: Claude Code on the eval tasks ({model})",
+        "",
+        f"{len(rows)} runs, ${sum(r['cost_usd'] for r in rows):.2f}. Correct = the ANSWER line matches the "
+        "computed truth; intervals are 95% (Wilson for accuracy, bootstrap for paired differences). "
+        f"{sum(not r['parsed'] for r in rows)} answers had no ANSWER line (scored on their prose).",
+        "",
+        "## By task group",
+        "",
+        "| format | kind | band | condition | correct | median cost | median final context | median calls |",
+        "|---|---|---|---|---|---|---|---|",
+    ]
+    groups: dict[tuple[str, str, str, str], list[dict[str, Any]]] = defaultdict(list)
+    for r in rows:
+        groups[(r["fmt"], r["kind"], r["band"], r["condition"])].append(r)
+    for (fmt, kind, band, cond), rs in sorted(groups.items()):
+        out.append(
+            f"| {fmt} | {kind} | {band} | {cond} | {_ci(sum(r['correct'] for r in rs), len(rs))} "
+            f"| ${statistics.median(r['cost_usd'] for r in rs):.4f} "
+            f"| {int(statistics.median(r['final_context'] for r in rs))} "
+            f"| {statistics.median(r['tool_calls'] for r in rs)} |"
+        )
+    out += ["", "## Each condition against native, paired by task and repetition", ""]
+    out += [
+        "| format | condition | pairs | accuracy change | cost change | final context change | time change "
+        "| verdict |"
+    ]
+    out.append("|---|---|---|---|---|---|---|---|")
+    by_fmt_cond: dict[tuple[str, str], dict[str, dict[str, Any]]] = defaultdict(dict)
+    for r in rows:
+        by_fmt_cond[(r["fmt"], r["condition"])][f"{r['task_id']}#{r['rep']}"] = r
+    for (fmt, cond), runs in sorted(by_fmt_cond.items()):
+        if cond == "native" or (fmt, "native") not in by_fmt_cond:
+            continue
+        base = by_fmt_cond[(fmt, "native")]
+
+        def diffs(field: str, scale: float = 1.0, base=base, runs=runs) -> list[float]:
+            return _diffs(base, runs, field, scale)
+
+        acc = bootstrap(diffs("correct"), statistics.mean)
+        cost, ctx, secs = (
+            bootstrap(diffs("cost_usd")),
+            bootstrap(diffs("final_context")),
+            bootstrap(diffs("duration_ms", 1e-3)),
+        )
+        n = len(diffs("correct"))
+        keeps_answers = acc[1] > -0.03
+        saves = ctx[2] < 0
+        verdict = (
+            "passes" if keeps_answers and saves else "fails" if acc[2] < -0.03 or ctx[1] > 0 else "undecided"
+        )
+        verdict += " (indicative: under 30 pairs)" if n < 30 else ""
+        out.append(
+            f"| {fmt} | {cond} | {n} | {acc[0]:+.0%} [{acc[1]:+.0%}, {acc[2]:+.0%}] "
+            f"| ${cost[0]:+.4f} [{cost[1]:+.4f}, {cost[2]:+.4f}] "
+            f"| {ctx[0]:+.0f} [{ctx[1]:+.0f}, {ctx[2]:+.0f}] "
+            f"| {secs[0]:+.1f}s [{secs[1]:+.1f}, {secs[2]:+.1f}] | {verdict} |"
+        )
+    out += [
+        "",
+        "Verdict: passes when the accuracy change's lower bound is above -3 points and the final context "
+        "shrinks (its upper bound below zero); fails when accuracy surely drops more than 3 points or the "
+        "context surely grows; undecided otherwise.",
+    ]
+    errors = [r for r in rows if r["error"]]
+    if errors:
+        out += ["", f"{len(errors)} runs had errors:"] + [
+            f"- {r['task_id']} {r['condition']}: {r['error']}" for r in errors
+        ]
+    return "\n".join(out) + "\n"
+
+
+def select(
+    formats: Iterable[str],
+    kinds: Iterable[str],
+    bands: Iterable[str],
+    conditions: Iterable[str] | None,
+    ids: Iterable[str] = (),
+) -> list[tuple[Task, str]]:
+    want_f, want_k, want_b, want_ids = set(formats), set(kinds), set(bands), set(ids)
+    jobs = []
+    for t in tasks():
+        if (
+            (t.task_id in want_ids)
+            if want_ids
+            else (t.fmt in want_f and t.kind in want_k and t.band in want_b)
+        ):
+            jobs += [(t, c) for c in conditions_for(t) if conditions is None or c in conditions]
+    return jobs
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument("--model", default="claude-haiku-5-5")
+    parser.add_argument("--formats", nargs="+", choices=FORMATS, default=list(FORMATS))
+    parser.add_argument("--kinds", nargs="+", choices=KINDS, default=list(KINDS))
+    parser.add_argument("--bands", nargs="+", choices=("S", "M", "L"), default=["M", "L"])
+    parser.add_argument("--conditions", nargs="+", choices=sorted({*MCP_CONDITIONS, *FILE_CONDITIONS}))
+    parser.add_argument("--ids", nargs="+", default=(), help="exact task ids (overrides the other filters)")
+    parser.add_argument("--reps", type=int, default=1)
+    parser.add_argument("--workers", type=int, default=4)
+    parser.add_argument("--name", default="l2-1")
+    parser.add_argument(
+        "--dry-run", action="store_true", help="list the runs and an estimated cost; run nothing"
+    )
+    ns = parser.parse_args(argv)
+    jobs = [
+        (t, c, rep)
+        for rep in range(ns.reps)
+        for t, c in select(ns.formats, ns.kinds, ns.bands, ns.conditions, ns.ids)
+    ]
+    per_run = next((v for k, v in _COST_PER_RUN.items() if k in ns.model), _COST_PER_RUN["sonnet"])
+    if ns.dry_run:
+        counts: dict[str, int] = defaultdict(int)
+        for t, c, _ in jobs:
+            counts[f"{t.fmt}/{c}"] += 1
+        for key, n in sorted(counts.items()):
+            print(f"{key:24} {n:4} runs")
+        print(f"{len(jobs)} runs, about ${len(jobs) * per_run:.2f} on {ns.model} (a rough estimate)")
+        return 0
+    results = _LAB / "results"
+    log = results / f"{ns.name}-hook.jsonl"
+    rows: list[dict[str, Any]] = []
+    with (
+        ThreadPoolExecutor(ns.workers) as pool,
+        (results / f"{ns.name}.jsonl").open("w", encoding="utf-8") as f,
+    ):
+        for row in pool.map(lambda job: run_one(job[0], job[1], ns.model, job[2], log), jobs):
+            f.write(json.dumps(row) + "\n")
+            f.flush()
+            rows.append(row)
+            mark = "ok" if row["correct"] else "MISS"
+            print(
+                f"{len(rows)}/{len(jobs)} {row['task_id']} {row['condition']}: {mark} ${row['cost_usd']:.4f}",
+                flush=True,
+            )
+    text = report(rows, ns.model)
+    (results / f"{ns.name}.md").write_text(text, encoding="utf-8")
+    print(text, end="")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

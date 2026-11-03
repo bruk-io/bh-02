@@ -34,7 +34,7 @@ find it by recovering. L2 answers all four.
 
 | Kind | Example | Scorer | What it catches |
 |---|---|---|---|
-| Spot | "Is any pod unhealthy? Name it." | the needle as a whole token in the answer | lost anomalies |
+| Spot | "Does any pod look wrong or unusual? Name it." (and quiet anomalies the fold has no rule for) | the planted item on the ANSWER line | lost anomalies |
 | Absent (control) | the same question, no anomaly planted | no candidate named; says none | invented anomalies from promotion noise |
 | Look up | "What is the ref of the Pay button for INV-0417?" | exact value | recovery |
 | Enumerate | "List every async method of BaseEventLoop." | recall and precision against the computed set (precision against the set of all candidate names) | partial views read as complete |
@@ -51,7 +51,7 @@ confident is the harm, so it is reported separately from wrong and hedged.
 
 | Format | Synthetic (generator plants the answer) | Real (answer computed from the file) |
 |---|---|---|
-| JSON lists | pods, users, commits (`harness/needle.py`) | PyPI release JSON (3 MB, saved once); `uv pip list --format json` |
+| JSON lists | pods (`evals/synthetic.py`) | PyPI release JSON (3 MB, saved once); `uv pip list --format json` |
 | JSON Lines | logs as records | |
 | Logs | app logs with planted lines | `python -m test -v` output for a stdlib module; a real CI log |
 | Test output | | pytest and unittest runs with a planted failing test |
@@ -69,7 +69,7 @@ confident is the harm, so it is reported separately from wrong and hedged.
 |---|---|---|
 | MCP tool result | `PostToolUse` hook, spilled-only or all | built, A/B 1 to 3 |
 | Bash output | the same hook on `Bash` (`stdout` in the tool's output shape) | not built |
-| File read | `fold FILE` as a command Claude may run | built, comprehension A/B |
+| File read | `lab-fold FILE` as a command Claude may run (named in CLAUDE.md) | built; `evals/l2.py` condition `fold-tool` |
 | No shell | an MCP tool that returns `fold`'s output, with Bash disabled | not built; where `fold` should matter most |
 
 ## Conditions, sizes, models

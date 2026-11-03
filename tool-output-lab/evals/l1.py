@@ -8,7 +8,7 @@ through `compressors.cli.fold_text`, then check:
 - invariants (any failure is a bug):
   - coverage: walking the output accounts for every source line exactly once, shown at its own
     number or inside exactly one marker;
-  - JSON markers: every `_folded` path and slice, read back with `recover`, holds the count it
+  - JSON markers: every `_folded` path and slice, read back with `resolve`, holds the count it
     claims;
   - the output is no larger than the input, and folding twice gives the same text;
 - sufficiency: the task's own scorer, run on the fold text (can the answer be read off it?);
@@ -28,7 +28,8 @@ from pathlib import Path
 from compressors.cli import fold_text
 from compressors.code import language_for
 from compressors.common import estimate_tokens, split_lines
-from compressors.recovery import recover
+from compressors.json_fold import parse_json_or_jsonl
+from compressors.recovery import RecoveryError, resolve
 from compressors.route import detect
 from evals.tasks import BUDGET, FORMATS, Task, tasks
 from evals.truth import score_fold
@@ -93,7 +94,11 @@ def coverage(source: str, out: str, numbered: bool) -> list[str]:
 
 
 def json_markers(raw: str, out: str) -> list[str]:
-    """Problems with the JSON fold's markers, each checked against the source with `recover`."""
+    """Problems with the JSON fold's markers, each checked against the source with `resolve`."""
+    parsed = parse_json_or_jsonl(raw)
+    if parsed is None:
+        return ["the JSON fold's source does not parse"]
+    source = parsed[0]
     body = out.split("\n", 1)[1] if out.startswith("JSONL") else out
     try:
         folded = json.loads(body)
@@ -106,13 +111,20 @@ def json_markers(raw: str, out: str) -> list[str]:
             note = v.get("_folded")
             if isinstance(note, str) and (m := _JSON_FOLD.match(note)):
                 path, a, b, k, n = m[1], int(m[2]), int(m[3]), int(m[4]), int(m[5])
-                hidden = json.loads(recover(raw, f"{path}[{a}:{b}]", max_tokens=10**9))
-                whole = json.loads(recover(raw, path, max_tokens=10**9))
+                try:
+                    hidden, whole = resolve(source, f"{path}[{a}:{b}]"), resolve(source, path)
+                except RecoveryError as e:
+                    problems.append(f"{note!r}: {e}")
+                    return
                 if len(hidden) != k or b - a != k or len(whole) != n:
                     problems.append(f"{note!r}: the source has {len(hidden)} there, {len(whole)} in all")
             keys = v.get("_folded_keys")
             if isinstance(keys, str) and (m := _JSON_KEYS.match(keys)):
-                whole = json.loads(recover(raw, m[3], max_tokens=10**9))
+                try:
+                    whole = resolve(source, m[3])
+                except RecoveryError as e:
+                    problems.append(f"{keys[:60]!r}: {e}")
+                    return
                 if not isinstance(whole, dict) or len(whole) != int(m[2]) or int(m[1]) > int(m[2]):
                     problems.append(f"{keys[:60]!r}: the source object has {len(whole)} keys")
             for x in v.values():

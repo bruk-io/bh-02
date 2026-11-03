@@ -27,8 +27,9 @@ The lab now tests the idea inside Claude Code, through two hooks and a headless 
   accessibility outlines, logs), including the ones Claude Code itself spilled to a file, and
   points Claude at the saved raw output. By default it folds only what Claude Code spilled, which
   is what the A/Bs recommend; `TOOL_OUTPUT_LAB_MODE=all` folds inline results too.
-- `claude_code/ab.py` with `claude_code/fixture_mcp.py`: headless `claude -p` runs on synthetic
-  needle payloads, native against the hook, scored on the answer, tokens, cost and tool calls.
+- `evals/l2.py` with `claude_code/fixture_mcp.py`: headless `claude -p` runs on the eval tasks,
+  native against the hook (or against `lab-fold` named in CLAUDE.md, for files), scored from the
+  answer's ANSWER line, with tokens per request, the final context, cost, calls and intervals.
 
 Results and what they mean: `results/FINDINGS.md`.
 
@@ -60,8 +61,9 @@ spilled passes both; folding inline results fails the second (A/B 1 and 2).
 ./lab check                                   # format, lint, tests (Python 3.15 through uv)
 ./lab extract ~/.claude/projects              # transcripts -> corpus/results.jsonl
 ./lab stats [--budget 2000] [-o results/x.md] # corpus sizes, formats, deterministic compression
-./lab needle [--seeds 5] [-o results/x.md]    # synthetic needle survival grid
-./lab ab [--model M] [--seeds N] [--only json log a11y figma] [--name x]  # headless Claude Code A/B (costs money)
+./lab evals l1 [--budget 2000]                # layer 1: every eval task folded and checked (free)
+./lab evals l2 --dry-run [filters]            # layer 2: the runs it would make and their rough cost
+./lab evals l2 --model M [filters] --name x   # layer 2: headless Claude Code on the eval tasks
 ```
 
 ## Layout
@@ -70,8 +72,9 @@ spilled passes both; folding inline results fails the second (A/B 1 and 2).
 lab            the one entry point
 corpus/        private transcripts and extracted results (gitignored)
 compressors/   route.fold/compress (the router), json_fold, tree, code, lines, html, recovery
-claude_code/   hook (PostToolUse), fixture_mcp, ab, comprehension
-harness/       extract, stats, needle
+claude_code/   hook (PostToolUse), fixture_mcp (serves an eval task to Claude Code)
+evals/         truth, synthetic, real, tasks, l1, l2, stats
+harness/       extract, stats (corpus tools)
 tests/unit/    pure-function tests
 results/       one file per run, never edited after; FINDINGS.md is the running summary
 ```

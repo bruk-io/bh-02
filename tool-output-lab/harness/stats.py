@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from compressors.common import estimate_tokens
-from compressors.route import compress, detect
+from compressors.route import detect, fold
 
 _BUCKETS = ((500, "<500"), (2000, "500-2k"), (8000, "2k-8k"), (32000, "8k-32k"), (None, ">=32k"))
 
@@ -86,9 +86,12 @@ def summarise(rows: list[dict[str, Any]], budget: int) -> str:
     detected: Counter[str] = Counter()
     for r in large:
         detected[detect(r["text"])] += 1
-        c = compress(r["tool_name"], r["args"], r["text"], budget_tokens=budget)
-        per_branch[c.branch].append((c.raw_tokens, c.out_tokens))
-        per_tool_compressed[r["tool_name"]].append((c.raw_tokens, c.out_tokens))
+        folded = fold(r["args"], r["text"], budget_tokens=budget)
+        raw_tokens = estimate_tokens(r["text"])
+        out_tokens = estimate_tokens(folded.body) if folded else raw_tokens
+        branch = folded.branch if folded else "passthrough"
+        per_branch[branch].append((raw_tokens, out_tokens))
+        per_tool_compressed[r["tool_name"]].append((raw_tokens, out_tokens))
     out.append(_table(["format", "results"], ([k, v] for k, v in detected.most_common())))
     out += ["", "Compression by branch (passthrough means folding saved under 10%):", ""]
     out.append(
