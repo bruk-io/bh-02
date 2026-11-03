@@ -7,6 +7,7 @@ status: To Do
 assignee:
   - '@bruk'
 created_date: '2026-11-03T18:22:00Z'
+updated_date: '2026-11-03T19:28:00Z'
 labels:
   - runner
   - approval
@@ -49,3 +50,9 @@ Today approval is one rule (runner:approval) that asks about every call unless b
 - [ ] #5 Must not break: the jailed model cannot grant itself anything (always-grants live where no jail can write them), and what runs unasked is never wider than what the person granted
 - [ ] #6 Must not break: runner:confined still refuses where it cannot jail, and an unconfined run still asks about every call
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+2026-11-03: the network question has a proposed answer in bruk-io/brig decision-0009 (TASK-0048): grants are host and port (exact hostname, *.suffix, or an IP literal; port always), names are resolved by the proxy, never the jail, and a resolved private address needs an IP grant; allow_egress adds a destination to a running jail without a restart; refusals come back as data (egress_decisions) so the runner can ask. Ticked once the owner accepts it.
+<!-- SECTION:NOTES:END -->
