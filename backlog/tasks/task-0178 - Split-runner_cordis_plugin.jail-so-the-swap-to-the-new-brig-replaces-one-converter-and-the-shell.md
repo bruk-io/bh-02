@@ -3,7 +3,7 @@ id: TASK-0178
 title: >-
   Split runner_cordis_plugin.jail so the swap to the new brig replaces one
   converter and the shell
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-11-02T17:24:00Z'
@@ -108,4 +108,6 @@ INFO    -  Documentation built in 7.65 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+Review (reviewer): closed. AC1: spec_for returns policy.Policy; brig_spec.to_brig_spec is the one converter. AC2: only jail.py and brig_spec.py import brig (grep); scripts/arch-check --no-fix ok. AC3: full scripts/check exit 0, recorded; it fixed or reformatted nothing; test diffs are imports and field names. Findings, none filed: (low) the tests' _denied helper takes a Policy or compiled.spec, the old brig Spec a CompiledJail carries today. Both types are live, so it is not compatibility code, but it ties the tests to brig's Spec, and the swap must drop its Spec branch or split it in two. (low) the group_alive re-export stays until the swap replaces it, as the notes say. (info) Policy is stated as intent (writable, write_denies, masks, read_model and readable, env_allow and env_set, channel), with no bwrap terms, so it suits DRAFT-0013. The link walk gives the policy every entry and the Linux readable set only the through ones, as the two old walks did; the one difference is '..' after a link, now resolved as the kernel does. The lock moved to state_home beside the records: tests pass their own lock= paths, the jail-lock group is unchanged, and an older bh-02 still running on /tmp/bh-02-jails-<uid>.lock does not share the lock with a new one during an upgrade. That is accepted under the no-compatibility rule.
 <!-- SECTION:NOTES:END -->
