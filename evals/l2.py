@@ -27,7 +27,7 @@ import subprocess
 import tempfile
 from collections import defaultdict
 from collections.abc import Iterable
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
 from functools import partial
 from pathlib import Path
@@ -41,6 +41,7 @@ _LAB = Path(__file__).resolve().parent.parent
 _UV = "uv run -q --no-project --python 3.15 --with ast-grep-py python"
 MCP_CONDITIONS = ("native", "fold", "fold-all")
 FILE_CONDITIONS = ("native", "fold-tool")
+_STOP_AFTER_FAILURES = 5
 _COST_PER_RUN = {"haiku": 0.007, "sonnet": 0.10, "opus": 0.25}  # rough, from the A/Bs so far
 _CLAUDE_MD = """# Tools
 
@@ -60,6 +61,7 @@ class Session:
     read_saved_file: bool  # a call opened a file under tool-results/
     ran_fold: bool  # a Bash call ran lab-fold
     turns: int
+    hit_max_turns: bool  # it ran out of turns: the model's failure, scored as a wrong answer
     cost_usd: float
     duration_ms: int
     requests: int  # API requests
@@ -68,7 +70,7 @@ class Session:
     cache_write: int
     output_tokens: int
     final_context: int  # the last request's whole input: how big the context grew
-    error: str | None
+    error: str | None  # the run failed to produce an answer (no result, an API or usage error): not scored
 
 
 def parse_stream(lines: Iterable[str]) -> Session:
@@ -108,6 +110,7 @@ def parse_stream(lines: Iterable[str]) -> Session:
         read_saved_file=read_saved,
         ran_fold=ran_fold,
         turns=int(result.get("num_turns", 0) or 0),
+        hit_max_turns=result.get("subtype") == "error_max_turns",
         cost_usd=float(result.get("total_cost_usd", 0.0) or 0.0),
         duration_ms=int(result.get("duration_ms", 0) or 0),
         requests=len(usage),
@@ -116,8 +119,18 @@ def parse_stream(lines: Iterable[str]) -> Session:
         cache_write=total("cache_creation_input_tokens"),
         output_tokens=total("output_tokens"),
         final_context=final,
-        error=None if result else "no result event",
+        error=_run_error(result),
     )
+
+
+def _run_error(result: dict[str, Any]) -> str | None:
+    """Why a session produced no answer to score, or None. Running out of turns is not one: it is
+    an outcome of the condition (recovering spent the turns), so it is scored as a wrong answer."""
+    if not result:
+        return "no result event"
+    if result.get("is_error") and result.get("subtype") != "error_max_turns":
+        return f"{result.get('subtype', 'error')}: {str(result.get('result', ''))[:200]}"
+    return None
 
 
 def conditions_for(t: Task) -> tuple[str, ...]:
@@ -169,7 +182,23 @@ def run_one(t: Task, condition: str, model: str, rep: int, log: Path) -> dict[st
             if session.error:
                 session = Session(**{**asdict(session), "error": f"{session.error}; {proc.stderr[-300:]}"})
         except subprocess.TimeoutExpired:
-            session = Session("", 0, False, False, 0, 0.0, 900_000, 0, 0, 0, 0, 0, 0, "timed out after 900s")
+            session = Session(
+                answer="",
+                tool_calls=0,
+                read_saved_file=False,
+                ran_fold=False,
+                turns=0,
+                hit_max_turns=False,
+                cost_usd=0.0,
+                duration_ms=900_000,
+                requests=0,
+                input_tokens=0,
+                cache_read=0,
+                cache_write=0,
+                output_tokens=0,
+                final_context=0,
+                error="timed out after 900s",
+            )
     score = score_answer(t.truth, session.answer)
     head = {"task_id": t.task_id, "fmt": t.fmt, "kind": t.kind, "band": t.band, "condition": condition}
     return {
@@ -201,12 +230,18 @@ def _diffs(
 
 
 def report(rows: list[dict[str, Any]], model: str) -> str:
+    """The run as tables. Runs that failed to produce an answer (see `_run_error`) are listed, not
+    scored: counted as wrong at no cost, they would make a condition look both worse and cheaper."""
+    scored = [r for r in rows if not r["error"]]
     out = [
         f"# Layer 2: Claude Code on the eval tasks ({model})",
         "",
-        f"{len(rows)} runs, ${sum(r['cost_usd'] for r in rows):.2f}. Correct = the ANSWER line matches the "
-        "computed truth; intervals are 95% (Wilson for accuracy, bootstrap for paired differences). "
-        f"{sum(not r['parsed'] for r in rows)} answers had no ANSWER line (scored on their prose).",
+        f"{len(rows)} runs, ${sum(r['cost_usd'] for r in rows):.2f}; {len(scored)} scored, "
+        f"{len(rows) - len(scored)} failed to answer (listed at the end). Correct = the ANSWER line "
+        "matches the computed truth; intervals are 95% (Wilson for accuracy, bootstrap for paired "
+        f"differences). {sum(not r['parsed'] for r in scored)} answers had no ANSWER line (scored on "
+        f"their prose); {sum(r.get('hit_max_turns', False) for r in scored)} ran out of turns "
+        "(scored as wrong).",
         "",
         "## By task group",
         "",
@@ -214,7 +249,7 @@ def report(rows: list[dict[str, Any]], model: str) -> str:
         "|---|---|---|---|---|---|---|---|",
     ]
     groups: dict[tuple[str, str, str, str], list[dict[str, Any]]] = defaultdict(list)
-    for r in rows:
+    for r in scored:
         groups[(r["fmt"], r["kind"], r["band"], r["condition"])].append(r)
     for (fmt, kind, band, cond), rs in sorted(groups.items()):
         out.append(
@@ -230,7 +265,7 @@ def report(rows: list[dict[str, Any]], model: str) -> str:
     ]
     out.append("|---|---|---|---|---|---|---|---|")
     by_fmt_cond: dict[tuple[str, str], dict[str, dict[str, Any]]] = defaultdict(dict)
-    for r in rows:
+    for r in scored:  # a pair needs both runs scored
         by_fmt_cond[(r["fmt"], r["condition"])][f"{r['task_id']}#{r['rep']}"] = r
     for (fmt, cond), runs in sorted(by_fmt_cond.items()):
         if cond == "native" or (fmt, "native") not in by_fmt_cond:
@@ -331,15 +366,23 @@ def main(argv: list[str] | None = None) -> int:
         ThreadPoolExecutor(ns.workers) as pool,
         (results / f"{ns.name}.jsonl").open("w", encoding="utf-8") as f,
     ):
-        for row in pool.map(lambda job: run_one(job[0], job[1], ns.model, job[2], log), jobs):
+        pending = [pool.submit(run_one, t, c, ns.model, rep, log) for t, c, rep in jobs]
+        failed_in_a_row = 0
+        for future in as_completed(pending):
+            row = future.result()
             f.write(json.dumps(row) + "\n")
             f.flush()
             rows.append(row)
-            mark = "ok" if row["correct"] else "MISS"
+            mark = "FAILED" if row["error"] else "ok" if row["correct"] else "MISS"
             print(
                 f"{len(rows)}/{len(jobs)} {row['task_id']} {row['condition']}: {mark} ${row['cost_usd']:.4f}",
                 flush=True,
             )
+            failed_in_a_row = failed_in_a_row + 1 if row["error"] else 0
+            if failed_in_a_row == _STOP_AFTER_FAILURES:  # a usage limit or an outage: stop spending
+                print(f"stopping: {failed_in_a_row} runs in a row failed; last: {row['error']}", flush=True)
+                for p in pending:
+                    p.cancel()
     text = report(rows, ns.model)
     (results / f"{ns.name}.md").write_text(text, encoding="utf-8")
     print(text, end="")
