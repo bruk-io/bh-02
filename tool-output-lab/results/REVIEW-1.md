@@ -148,3 +148,81 @@ validated one by one: fixed (with the test that pins it) or closed (with the rea
 - Sound: ISO, Rust and PyPI truths recomputed independently (regex); Python truths by ast;
   determinism across hash seeds; fixture and harness seeds match; hook fired once per folded run;
   every reported A/B and L1 number reproduces from the rows; mentions() rejects partial tokens.
+
+### CORE (fold core correctness)
+
+- CORE-1 (high) every module splits with str.splitlines() (also \f, \x0b, \x1c-\x1e, \x85, U+2028/9)
+  and the CLI reads with universal newlines (bare \r -> \n), while sed, Read and ast-grep count \n:
+  a form feed in a .py shifts every later number; a progress line with \r pushes log markers past
+  the end of the file; l1's coverage check uses the same split, so it cannot see it.
+- CORE-2 (high) log dedupe hides lines that differ only in numbers, the anomaly included: 2,000
+  `... 200 <bytes>` lines with one `500` fold to the first line and "repeated 1999 more times".
+- CORE-3 (high) fold_lines ignores the budget (= DESIGN-2): ~4.6k tokens at budgets 200 to 20,000.
+- CORE-4 (high) code folds have no floor: 3,000 assignment lines as .py go 25.7k -> 29.2k tokens at
+  budget 500 (23 tokens as .txt); unparsable code (one ERROR node) prints whole, larger.
+- CORE-5 (high) exempt-key strings are never cut (error, message, path, url; and `sha`/`hash` match
+  inside shape, shared_notes, hashtags): a 66 KB traceback under "error" prints whole at budget 500;
+  when folding saves under 10% the CLI prints the raw with no header.
+- CORE-6 (medium) RecursionError (a 260-branch else-if chain, a 600-deep outline, 100,000-deep
+  JSON) crashes the CLI with a traceback.
+- CORE-7 (medium) fold_tree's cost model differs from render: the gap after a hidden sibling run is
+  not costed (2,174 tokens out of a 2,059-token input); `opened` keyed by (first, last), so a
+  parent and its only child on the same lines share a key and the child renders open in full.
+- CORE-8 (medium) --query is silently ignored for source code (fold_code takes no terms).
+- CORE-9 (medium) tree query: share 0.05 gives cut 1 for 20-39 siblings (Kyoto in 2 of 30 offices:
+  none shown); under 10 siblings, matches are stand-outs but can still be hidden in a run.
+- CORE-10 (medium) JSON key names match the raw terms, not the discriminating ones (5,000 keys
+  `node-i` with --query node: the whole input back, no header); set(kept) rebuilt per key:
+  quadratic (40,000 keys: 242 s).
+- CORE-11 (medium) the `_all_items` summary is unbounded (3,000 distinct keys: a 66 KB marker,
+  16.6k tokens at budget 2,000), and every item promoted as "few items have".
+- CORE-12 (medium) HTML detection fires on text that contains tags (a git diff of .jsx, markdown
+  badges) and strips the code to text.
+- CORE-13 (low-medium) parseString on bytes obeys the declared encoding (ISO-8859-1 -> mojibake,
+  utf-16 -> error); a BOM defeats JSON and XML detection.
+- CORE-14 (low) "pretty-printed copy" header on any XML ending in a newline (= DESIGN-8); the
+  JSONL note's index-to-line mapping is wrong with blank lines; the dropped-errors count counts
+  runs and already-shown lines.
+- CORE-15 (low) BrokenPipeError caught as OSError (= DESIGN-14); `--lang cobol` panics with a
+  pyo3 traceback.
+- Sound: code-fold coverage over 150 random stdlib modules at four budgets; outline and XML
+  coverage over 300 random trees; JSON slices, counts and quoting; determinism; linear scaling
+  (except packed XML parsed twice); non-UTF-8 stdin does not crash.
+
+## Consolidated (duplicates merged), in the order they are worked
+
+| # | Finding | From | Severity |
+|---|---|---|---|
+| R1 | The hook trusts a spill notice inside the tool's output: arbitrary file read, device hang | HOOK-1, HOOK-2, DESIGN-9 | high |
+| R2 | The read gate shows file content before Claude Code's permission check | HOOK-3 (+HOOK-10, HOOK-14) | high |
+| R3 | Line numbers from splitlines() and universal newlines drift from what sed, Read and grep count | CORE-1, HOOK-6 | high |
+| R4 | The budget is not kept: lines branch, code with no floor, exempt strings, unbounded summary, passthrough over budget, tree cost model and key collision; l1 does not enforce it | CORE-3, CORE-4, CORE-5, CORE-7, CORE-11, DESIGN-2, EVAL-12 | high |
+| R5 | Log dedupe hides lines that differ only in numbers | CORE-2 | high |
+| R6 | Scorers: Number accepts any token, Items precision counts prose, Absent blind outside JSON and accepts invented claims; three whole-word rules; L2 harnesses score differently | DESIGN-1, EVAL-1, EVAL-2, EVAL-3, DESIGN-4 | high |
+| R7 | Eval tasks hold only anomalies the fold has rules for, and k under every cap | EVAL-4 | high |
+| R8 | Fixtures give the answer away: `needle-` names, arithmetic ids and refs | EVAL-5, EVAL-11 | high |
+| R9 | Two drifted generators; the fixture cannot serve the eval tasks; mappings written four times | DESIGN-3 | high |
+| R10 | Findings overstated or unmeasured: comprehension 20/20, Sonnet tree cells, FINDINGS 15, no intervals, tokens are turns, prompts name the kinds, no no-needle cases in L2 | EVAL-6..10, EVAL-13 | medium |
+| R11 | Query handling: two term rules, ignored for code, tree share and small lists, JSON key names and quadratic time, items x terms cost | DESIGN-5, CORE-8, CORE-9, CORE-10, HOOK-4 | medium |
+| R12 | Markers are an unshared text protocol: hook banner examples wrong for xml/outline, jq for keys with `-`, unquoted paths and paths with spaces | DESIGN-6, HOOK-11, HOOK-12 | medium |
+| R13 | The fold interface carries no branch, re-parses, and "saved under 10%" looks like "fits" | DESIGN-7 | medium |
+| R14 | Source copies: wrong "pretty-printed" header, the hook saves the text copy instead of the raw, the JSONL mapping note | DESIGN-8, HOOK-5, CORE-14 | medium |
+| R15 | compress/recover leftovers; needle and stats measure them, not the CLI or hook | DESIGN-10 | medium |
+| R16 | fold_tree is one 200-line function over shared closure state | DESIGN-11 | medium |
+| R17 | Hook defaults and wiring: no cd in the documented config, inline folding on by default, shared /tmp fallback, log failure silent, no timeout, `fold` shadows coreutils | HOOK-7, HOOK-8, HOOK-9, HOOK-13, HOOK-14 | medium |
+| R18 | RecursionError on deep nesting | CORE-6 | medium |
+| R19 | HTML detection fires on text that contains tags | CORE-12 | medium |
+| R20 | Encoding declarations and BOMs | CORE-13 | low-medium |
+| R21 | The log fold's dropped-errors count | CORE-14 | low |
+| R22 | CLI errors: broken pipe, unknown language | CORE-15, DESIGN-14 | low |
+| R23 | Eval tasks read host paths eagerly | DESIGN-12 | low |
+| R24 | Test layering; read gate and fixture untested; a test pins a weakness | DESIGN-13 | low |
+| R25 | `./lab check` rewrites instead of checking; no type checker | DESIGN-15 | low |
+
+## Outcomes
+
+Each finding is reproduced first, then fixed with a test that fails before and passes after, or
+closed with the reason.
+
+| # | Outcome |
+|---|---|
