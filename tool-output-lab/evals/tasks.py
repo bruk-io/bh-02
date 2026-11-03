@@ -124,9 +124,11 @@ def bash_prompt(t: Task) -> str:
 
 
 def _count(fmt: str, p: synthetic.Payload) -> Number:
-    """A count's truth: the planted items, and for JSON the summary entry that states the count."""
+    """A count's truth: the planted items, and for JSON where a view states the count: the sample
+    view's summary entry, or the schema view's value count."""
     k = len(p.planted)
-    stated = (json.dumps({json.dumps("CrashLoopBackOff"): k})[1:-1],) if fmt == "json" else ()
+    sample = json.dumps({json.dumps("CrashLoopBackOff"): k})[1:-1]
+    stated = (sample, f'"CrashLoopBackOff" {k}') if fmt == "json" else ()
     return Number(k, frozenset(p.planted), stated)
 
 

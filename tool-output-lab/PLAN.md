@@ -94,8 +94,8 @@ Rules:
 
 | # | Stage | Needs a model | Status |
 |---|---|---|---|
-| S1 | JSON schema view (`compressors/schema.py`): structure, field statistics, exceptions, a query; `--view schema`, the sample fold staying for comparison | no | in progress |
-| S2 | Layer 1 on both views: the claims checked against the data; sufficiency on spot (rule and quiet), count (past the cap), enumerate, absent, and lookup (expected to need the raw) | no | |
+| S1 | JSON schema view (`compressors/schema.py`): structure, field statistics, exceptions, a query; `--view schema`, the sample fold staying for comparison | no | done |
+| S2 | Layer 1 on both views: the claims checked against the data; sufficiency on spot (rule and quiet), count (past the cap), enumerate, absent, and lookup (expected to need the raw) | no | done: schema 41/47, sample 38/47, half the size, 0 false claims (FINDINGS 49-50) |
 | S3 | Repeated siblings in XML and accessibility trees as schemas | no | |
 | S4 | YAML through the same schema (multi-document manifests) | no | |
 | S5 | Layer 2 on Haiku: the schema view against the sample fold and native, M and L | yes, about $2 | |

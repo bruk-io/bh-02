@@ -30,6 +30,8 @@ from compressors.cli import fold_text
 from compressors.common import estimate_tokens, split_lines
 from compressors.json_fold import parse_json_or_jsonl
 from compressors.recovery import RecoveryError, resolve
+from compressors.route import VIEWS
+from evals import schema_check
 from evals.tasks import BUDGET, FORMATS, Task, skipped, tasks
 from evals.truth import score_fold
 
@@ -161,11 +163,11 @@ class Row:
     violations: list[str]
 
 
-def check(task: Task, budget: int, query_on: bool) -> Row:
+def check(task: Task, budget: int, query_on: bool, view: str = "sample") -> Row:
     raw = task.payload()
     query = task.query if query_on else ""
-    result = fold_text(raw, budget=budget, path=task.path, query=query, quiet=True)
-    again = fold_text(raw, budget=budget, path=task.path, query=query, quiet=True)
+    result = fold_text(raw, budget=budget, path=task.path, query=query, quiet=True, view=view)
+    again = fold_text(raw, budget=budget, path=task.path, query=query, quiet=True, view=view)
     out = result.text
     passthrough = result.branch is None
     branch = f"code-{result.language}" if result.language else (result.branch or "passthrough")
@@ -175,12 +177,17 @@ def check(task: Task, budget: int, query_on: bool) -> Row:
     if estimate_tokens(out) > estimate_tokens(raw):
         violations.append("the fold is larger than the input")
     if estimate_tokens(out) > budget * 1.1:  # over the budget is a bug unless nothing smaller exists
-        floor = fold_text(raw, budget=1, path=task.path, query=query, quiet=True).text
+        floor = fold_text(raw, budget=1, path=task.path, query=query, quiet=True, view=view).text
         if out != floor:
             violations.append(f"{estimate_tokens(out)} tokens for a budget of {budget}, and not the floor")
     if not passthrough:
         if branch in ("json", "jsonl"):
             violations += json_markers(raw, out)
+        elif branch in ("json-schema", "jsonl-schema"):
+            parsed = parse_json_or_jsonl(raw)
+            assert parsed is not None
+            body = out[note.end() :] if (note := markers.JSONL_NOTE.match(out)) else out
+            violations += schema_check.claims(parsed[0], body) + schema_check.query_runs(raw, parsed[0], body)
         elif branch in ("xml", "outline", "lines") or branch.startswith("code-"):
             source = result.source if result.source is not None else raw
             violations += coverage(source, out, numbered=branch.startswith("code-"))
@@ -201,14 +208,14 @@ def check(task: Task, budget: int, query_on: bool) -> Row:
     )
 
 
-def run(budget: int, only: tuple[str, ...] = ()) -> list[Row]:
+def run(budget: int, only: tuple[str, ...] = (), view: str = "sample") -> list[Row]:
     rows = []
     for t in tasks():
         if only and t.fmt not in only:
             continue
-        rows.append(check(t, budget, query_on=False))
+        rows.append(check(t, budget, query_on=False, view=view))
         if t.query:
-            rows.append(check(t, budget, query_on=True))
+            rows.append(check(t, budget, query_on=True, view=view))
     return rows
 
 
@@ -280,8 +287,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--budget", type=int, default=BUDGET)
     parser.add_argument("--only", nargs="+", choices=FORMATS, default=())
     parser.add_argument("--name", default="l1-1")
+    parser.add_argument("--view", choices=VIEWS, default="sample", help="how data (JSON) is shown")
     ns = parser.parse_args(argv)
-    rows = run(ns.budget, tuple(ns.only))
+    rows = run(ns.budget, tuple(ns.only), ns.view)
     results = _LAB / "results"
     with (results / f"{ns.name}.jsonl").open("w", encoding="utf-8") as f:
         for r in rows:
