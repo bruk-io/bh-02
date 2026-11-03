@@ -103,3 +103,58 @@ def test_a_view_is_saved_when_the_line_numbers_refer_to_one_and_the_raw_is_still
 def test_a_result_that_fits_is_left_alone_and_logged():
     out = decide(_event(""), Inline("small"), "small", 300, _SESSION)
     assert (out.saves, out.reply, out.log["branch"]) == ((), None, "passthrough")
+
+
+def _bash(stdout, command="./get_logs", **fields):
+    response = {
+        "stdout": stdout,
+        "stderr": "",
+        "interrupted": False,
+        "isImage": False,
+        "noOutputExpected": False,
+    }
+    return {"tool_name": "Bash", "tool_input": {"command": command}, "tool_response": response | fields,
+            "tool_use_id": "toolu_1", "transcript_path": "/s/session.jsonl"}  # fmt: skip
+
+
+def test_bash_stdout_is_an_inline_result_and_its_saved_output_a_spill_in_the_modes_that_take_each():
+    saved = "/s/session/tool-results/by0t1jzcz.txt"
+    big = _bash("x", persistedOutputPath=saved, persistedOutputSize=288894)
+    assert [plan(_bash("1\n2"), m) for m in Mode] == [Inline("1\n2"), None, Inline("1\n2")]
+    assert [plan(big, m) for m in Mode] == [
+        None,
+        Spilled(saved, from_field=True),
+        Spilled(saved, from_field=True),
+    ]
+
+
+def test_bash_never_folds_an_image_or_a_command_that_reads_a_saved_output():
+    assert plan(_bash("", isImage=True), Mode.ALL) is None
+    assert (
+        plan(_bash("x" * 9000, command="sed -n '40,80p' /s/session/tool-results/folded-toolu_9.txt")) is None
+    )
+    assert plan(_bash("x" * 9000, command="grep -n ERROR /s/session/tool-results/by0t1jzcz.txt")) is None
+    assert plan(_bash(None), Mode.ALL) is None
+
+
+def test_a_bash_saved_output_is_trusted_by_folder_and_the_hooks_own_copies_never():
+    session = "/s/session/tool-results"
+    assert trusted_spill(f"{session}/by0t1jzcz.txt", session, from_field=True)
+    assert not trusted_spill(f"{session}/by0t1jzcz.txt", session)  # from a notice, it needs MCP naming
+    assert not trusted_spill(f"{session}/folded-toolu_1.txt", session, from_field=True)
+    assert not trusted_spill("/etc/passwd", session, from_field=True)
+
+
+def test_folded_bash_output_keeps_bashs_shape_and_stderr_and_drops_the_saved_output_fields():
+    raw = "\n".join(f"2026-11-03T10:00:{i % 60:02d}Z INFO GET /api/items/{i} 200" for i in range(2000))
+    event = _bash(raw, stderr="warning: slow disk")
+    out = decide(event, Inline(raw), raw, 300, _SESSION)
+    updated = out.reply["hookSpecificOutput"]["updatedToolOutput"]
+    assert set(updated) == {"stdout", "stderr", "interrupted", "isImage", "noOutputExpected"}
+    assert updated["stderr"] == "warning: slow disk" and updated["stdout"].startswith("[Folded:")
+    assert out.saves == ((_SESSION / "folded-toolu_1.txt", raw),)
+    spilled = _bash(
+        raw[:30000], persistedOutputPath=str(_SESSION / "by0t1jzcz.txt"), persistedOutputSize=len(raw)
+    )
+    updated = decide(spilled, Spilled(str(_SESSION / "by0t1jzcz.txt"), True), raw, 300, _SESSION).reply
+    assert "persistedOutputPath" not in updated["hookSpecificOutput"]["updatedToolOutput"]

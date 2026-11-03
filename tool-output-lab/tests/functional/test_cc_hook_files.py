@@ -89,3 +89,23 @@ def test_a_failing_log_does_not_stop_the_fold(tmp_path, monkeypatch):
     spill = results / "mcp-fixture-list_pods-3.txt"
     spill.write_text(_payload(500).raw)
     assert handle(_event(_notice(spill), transcript), budget=2000, mode=Mode.SPILLED) is not None
+
+
+def _bash_event(transcript, saved):
+    response = {"stdout": "1\n2\n", "stderr": "", "interrupted": False, "isImage": False}
+    response |= {"noOutputExpected": False, "persistedOutputPath": str(saved), "persistedOutputSize": 300000}
+    event = {"tool_name": "Bash", "tool_input": {"command": "./list_pods"}, "tool_response": response}
+    return event | {"tool_use_id": "toolu_2", "transcript_path": str(transcript)}
+
+
+def test_bashs_saved_output_is_folded_from_its_file_and_one_outside_the_session_is_not_read(tmp_path):
+    transcript, results = _session(tmp_path)
+    case = _payload(500)
+    saved = results / "by0t1jzcz.txt"
+    saved.write_text(case.raw)
+    reply = handle(_bash_event(transcript, saved), budget=2000, mode=Mode.ALL)
+    stdout = reply["hookSpecificOutput"]["updatedToolOutput"]["stdout"]
+    assert str(saved) in stdout.splitlines()[0] and case.planted[0] in stdout
+    outside = tmp_path / "secrets.txt"
+    outside.write_text("s3cret\n" * 5000)
+    assert handle(_bash_event(transcript, outside), budget=2000, mode=Mode.ALL) is None
