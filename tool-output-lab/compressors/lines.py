@@ -11,6 +11,7 @@ from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass
 
+from compressors import markers
 from compressors.common import ANOMALY_RE, discriminating, estimate_tokens, matches, split_lines
 
 _VARIABLE = re.compile(r"0x[0-9a-fA-F]+|[0-9a-fA-F]{8,}|\d+")
@@ -104,19 +105,11 @@ def _choose_runs(
     return sorted(keep), hidden_signals
 
 
-def _clip(line: str, max_chars: int) -> str:
-    if len(line) <= max_chars:
-        return line
-    return line[:max_chars] + f"...[+{len(line) - max_chars} chars]"
-
-
 def _render_run(run: _Run, max_chars: int) -> list[str]:
-    out = [_clip(run.line, max_chars)]
+    out = [markers.clipped(run.line, max_chars)]
     if run.last > run.first:
         count = run.last - run.first
-        out.append(
-            f"[... same line pattern repeated {count} more times, lines {run.first + 2}-{run.last + 1}]"
-        )
+        out.append(markers.repeated(count, run.first + 2, run.last + 1))
     return out
 
 
@@ -149,13 +142,11 @@ def _fold_once(runs: list[_Run], terms: frozenset[str], lim: _Limits) -> str:
         if prev is not None and idx > prev + 1:
             gap_first = runs[prev + 1].first
             gap_last = runs[idx - 1].last
-            out.append(
-                f"[... lines {gap_first + 1}-{gap_last + 1} omitted ({gap_last - gap_first + 1} lines)]"
-            )
+            out.append(markers.lines_omitted(gap_first + 1, gap_last + 1))
         out.extend(_render_run(runs[idx], lim.max_line_chars))
         prev = idx
     if hidden_signals:
-        out.append(f"[{hidden_signals} more lines matching error words or the query were omitted; use grep]")
+        out.append(markers.signals_hidden(hidden_signals))
     return "\n".join(out)
 
 

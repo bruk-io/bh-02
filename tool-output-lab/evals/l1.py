@@ -25,6 +25,7 @@ from collections import defaultdict
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from compressors import markers
 from compressors.cli import fold_text
 from compressors.code import language_for
 from compressors.common import estimate_tokens, split_lines
@@ -35,15 +36,8 @@ from evals.tasks import BUDGET, FORMATS, Task, tasks
 from evals.truth import score_fold
 
 _LAB = Path(__file__).resolve().parent.parent
-_MARKER = re.compile(
-    r"^\[\.\.\. (?:same line pattern repeated \d+ more times, )?"
-    r"lines (\d+)-(\d+)(?:\]| folded \(| omitted \()"
-)
-_INLINE = re.compile(r"  \[\.\.\. lines (\d+)-(\d+) folded \([^)]*\)\]$")
-_CLIPPED = re.compile(r"\.\.\.\[\+(\d+) chars\]$")
-_NOTE = re.compile(r"^\[\d+ more lines matching")
-_JSON_FOLD = re.compile(r"^(\$\S*)\[(\d+):(\d+)\] omitted \((\d+) of (\d+) items\)$")
-_JSON_KEYS = re.compile(r"^(\d+) of (\d+) keys of (\$\S*) omitted")
+_MARKER, _INLINE, _CLIPPED, _NOTE = markers.LINE_RANGE, markers.INLINE, markers.CLIPPED, markers.NOTE
+_JSON_FOLD, _JSON_KEYS = markers.JSON_SLICE, markers.JSON_KEYS
 
 
 def _same(shown: str, source: str) -> bool:

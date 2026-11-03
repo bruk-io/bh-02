@@ -14,6 +14,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from compressors import markers
 from compressors.common import ANOMALY_RE, discriminating, matches
 
 _ERROR_KEYS = frozenset({"error", "errors", "err", "exception", "traceback", "fault", "failure", "stderr"})
@@ -41,7 +42,7 @@ _WHOLE_STRING_KEYS = frozenset(
 # keys whose values are identifiers or digests: cut, they are useless (sha256, md5, blake2b_256, node_id)
 _IDENTIFYING = re.compile(r"(^|_)(sha\d*|md5|blake\w*|digest|hash|checksum|uuid|id|url|uri)($|_)")
 _MAX_IDENTIFYING = 256  # a digest, an id or a URL is shown whole up to this; past it, it is text
-_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_-]*\Z")
+_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")  # other keys are quoted: $["pod-list"], valid jq too
 
 
 @dataclass(frozen=True)
@@ -247,9 +248,7 @@ def _fold_array(arr: list[Any], path: str, terms: frozenset[str], lim: _Limits, 
     prev = -1
     for idx in [*sorted(shown | why.keys()), n]:
         if idx > prev + 1:
-            marker: dict[str, Any] = {
-                "_folded": f"{path}[{prev + 1}:{idx}] omitted ({idx - prev - 1} of {n} items)"
-            }
+            marker: dict[str, Any] = {"_folded": markers.json_slice(path, prev + 1, idx, n)}
             if not summarised:
                 marker["_all_items"] = _summary(arr)
                 summarised = True
@@ -284,14 +283,13 @@ def _fold_object(obj: Mapping[str, Any], path: str, terms: frozenset[str], lim: 
     if len(kept) < len(keys):
         kept_set = set(kept)
         omitted = [k for k in keys if k not in kept_set]
-        names = ", ".join(omitted[:40]) + (", ..." if len(omitted) > 40 else "")
-        out["_folded_keys"] = f"{len(omitted)} of {len(keys)} keys of {path} omitted: {names}"
+        out["_folded_keys"] = markers.json_keys(omitted, len(keys), path)
     return out
 
 
 def _fold(value: Any, path: str, terms: frozenset[str], lim: _Limits, depth: int) -> Any:
     if depth > lim.max_depth and isinstance(value, Mapping | list):
-        return {"_folded": f"{path} omitted (nested deeper than {lim.max_depth})"}
+        return {"_folded": markers.json_deep(path, lim.max_depth)}
     if isinstance(value, Mapping):
         return _fold_object(value, path, terms, lim, depth)
     if isinstance(value, list):
@@ -303,7 +301,7 @@ def _fold(value: Any, path: str, terms: frozenset[str], lim: _Limits, depth: int
         cut = lim.max_whole if leaf in _WHOLE_STRING_KEYS else lim.max_str
         if len(value) <= cut:
             return value
-        return value[:cut] + f"...[+{len(value) - cut} chars]"
+        return markers.clipped(value, cut)
     return value
 
 
