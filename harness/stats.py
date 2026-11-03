@@ -33,6 +33,10 @@ def _table(header: list[str], rows: Iterable[list[Any]]) -> str:
     return "\n".join(lines)
 
 
+def _kept(pairs: list[tuple[int, int]]) -> str:
+    return f"{sum(o for _, o in pairs) / sum(i for i, _ in pairs):.0%}"
+
+
 def summarise(rows: list[dict[str, Any]], budget: int) -> str:
     sizes = [estimate_tokens(r["text"]) for r in rows]
     total = sum(sizes) or 1
@@ -78,11 +82,13 @@ def summarise(rows: list[dict[str, Any]], budget: int) -> str:
         out.append("None: at this budget the middleware would pass everything through.")
         return "\n".join(out) + "\n"
     per_branch: dict[str, list[tuple[int, int]]] = defaultdict(list)
+    per_tool_compressed: dict[str, list[tuple[int, int]]] = defaultdict(list)
     detected: Counter[str] = Counter()
     for r in large:
         detected[detect(r["text"])] += 1
         c = compress(r["tool_name"], r["args"], r["text"], budget_tokens=budget)
         per_branch[c.branch].append((c.raw_tokens, c.out_tokens))
+        per_tool_compressed[r["tool_name"]].append((c.raw_tokens, c.out_tokens))
     out.append(_table(["format", "results"], ([k, v] for k, v in detected.most_common())))
     out += ["", "Compression by branch (passthrough means folding saved under 10%):", ""]
     out.append(
@@ -94,14 +100,27 @@ def summarise(rows: list[dict[str, Any]], budget: int) -> str:
                     len(v),
                     sum(i for i, _ in v),
                     sum(o for _, o in v),
-                    f"{sum(o for _, o in v) / sum(i for i, _ in v):.0%}",
+                    _kept(v),
                 ]
                 for b, v in sorted(per_branch.items())
             ),
         )
     )
+    out += ["", "Compression by tool (to see a tool that should never be folded):", ""]
+    out.append(
+        _table(
+            ["tool", "results", "tokens in", "tokens out", "kept"],
+            (
+                [t, len(v), sum(i for i, _ in v), sum(o for _, o in v), _kept(v)]
+                for t, v in sorted(per_tool_compressed.items())
+            ),
+        )
+    )
     saved = sum(i - o for v in per_branch.values() for i, o in v)
     out += ["", f"Tokens saved over the whole corpus: ~{saved} of ~{total} ({saved / total:.0%})."]
+    for tool in sorted(per_tool_compressed):
+        rest = sum(i - o for t, w in per_tool_compressed.items() if t != tool for i, o in w)
+        out.append(f"Without folding {tool}: ~{rest} ({rest / total:.0%}).")
     return "\n".join(out) + "\n"
 
 
