@@ -8,6 +8,7 @@ Python docstring's first line stays in the header. Nothing here is language-spec
 names of body-like node kinds, so every language ast-grep parses works the same way.
 """
 
+from collections.abc import Iterator
 from pathlib import Path
 
 from ast_grep_py import SgNode, SgRoot
@@ -89,31 +90,48 @@ def _header_end(node: SgNode, body: SgNode, lines: list[str]) -> int:
     return end
 
 
-def _nodes(node: SgNode, lines: list[str]) -> list[Node]:
-    """The foldable nodes among `node`'s descendants, nearest first."""
-    out: list[Node] = []
-    for child in node.children():
-        if child.is_named():
-            out.extend(_as_nodes(child, lines))
-    return out
+def _named(node: SgNode) -> Iterator[SgNode]:
+    return (c for c in node.children() if c.is_named())
 
 
-def _as_nodes(node: SgNode, lines: list[str]) -> list[Node]:
-    r = node.range()
-    if r.end.line == r.start.line:
-        return []
-    target = node
-    if node.kind() == "decorated_definition":  # python: the decorators belong to the header
-        inner = node.field("definition")
-        target = inner if inner is not None else node
-    body = _body_of(target)
-    if body is not None:
-        return [
-            Node(r.start.line, _header_end(target, body, lines), r.end.line, tuple(_nodes(target, lines)))
-        ]
-    if node.kind() in _LITERAL_KINDS:
-        return [Node(r.start.line, r.start.line, r.end.line, tuple(_nodes(node, lines)))]
-    return _nodes(node, lines)
+def _nodes(root: SgNode, lines: list[str]) -> list[Node]:
+    """The foldable nodes among `root`'s descendants, nearest first.
+
+    A syntax node with a body (a function, a class, a block) or a multi-line literal is a node, its
+    own foldable descendants its children; any other multi-line syntax node is looked through.
+    Iterative, since an `else if` chain nests one level per branch and generated code has hundreds.
+    """
+    top: list[Node] = []
+    # a frame: the syntax children left to visit, where their nodes go, and the node they become
+    # children of when the frame closes (None when they belong to the frame below, looked through)
+    stack: list[tuple[Iterator[SgNode], list[Node], tuple[int, int, int, list[Node]] | None]] = [
+        (_named(root), top, None)
+    ]
+    while stack:
+        pending, collected, parent = stack[-1]
+        node = next(pending, None)
+        if node is None:
+            stack.pop()
+            if parent is not None:
+                first, head_end, last, dest = parent
+                dest.append(Node(first, head_end, last, tuple(collected)))
+            continue
+        r = node.range()
+        if r.end.line == r.start.line:
+            continue
+        target = node
+        if node.kind() == "decorated_definition":  # python: the decorators belong to the header
+            inner = node.field("definition")
+            target = inner if inner is not None else node
+        body = _body_of(target)
+        if body is not None:
+            head = (r.start.line, _header_end(target, body, lines), r.end.line, collected)
+            stack.append((_named(target), [], head))
+        elif node.kind() in _LITERAL_KINDS:
+            stack.append((_named(node), [], (r.start.line, r.start.line, r.end.line, collected)))
+        else:
+            stack.append((_named(node), collected, None))
+    return top
 
 
 def code_tree(source: str, language: str) -> tuple[Node, ...]:
