@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# The lab's one entry point, so nobody retypes the uv flags.
+#   ./lab check                 format, lint, tests
+#   ./lab extract PATH... [-o]  transcripts -> corpus/results.jsonl
+#   ./lab stats [...]           corpus size and format report
+#   ./lab needle [...]          synthetic needle-survival grid
+set -euo pipefail
+cd "$(dirname "$0")"
+export UV_SYSTEM_CERTS="${UV_SYSTEM_CERTS:-${UV_NATIVE_TLS:-}}"; unset UV_NATIVE_TLS
+run() { uv run --quiet --no-project --python 3.15 --with pytest --with ruff "$@"; }
+cmd="${1:-check}"; shift || true
+case "$cmd" in
+  check) run ruff format . && run ruff check . && run pytest "$@" ;;
+  extract|stats|needle) run python -m "harness.$cmd" "$@" ;;
+  *) echo "unknown command '$cmd': use check, extract, stats or needle" >&2; exit 2 ;;
+esac

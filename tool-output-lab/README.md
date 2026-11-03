@@ -51,15 +51,26 @@ A branch is cut if either holds:
 
 Change these numbers only before a run, never after seeing one.
 
+## Running
+
+```
+./lab check                                   # format, lint, tests (Python 3.15 through uv)
+./lab extract ~/.claude/projects              # transcripts -> corpus/results.jsonl
+./lab stats [--budget 2000] [-o results/x.md] # corpus sizes, formats, deterministic compression
+./lab needle [--seeds 5] [-o results/x.md]    # synthetic needle survival grid
+```
+
 ## Layout
 
 ```
+lab            the one entry point
 corpus/        private transcripts and extracted results (gitignored)
-compressors/   pure functions: (tool_name, args, raw) -> (compressed, cache_entry)
-harness/       corpus extraction, replay, needle generation, metrics
-results/       one file per run: config, numbers, notes
+compressors/   route.compress (the middleware), json_fold, lines, html, recovery.recover
+harness/       extract, stats, needle
+tests/unit/    pure-function tests
+results/       one file per run, never edited after; FINDINGS.md is the running summary
 ```
 
 ## Status
 
-Nothing built. Next: corpus extraction and the size/format distribution.
+See PLAN.md for the stages and results/FINDINGS.md for what has been learned.
