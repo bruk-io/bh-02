@@ -1,0 +1,79 @@
+"""The scorers (review 1, R6): answers are read from their ANSWER line; folds are judged by
+structure, not by a number or a name that merely appears."""
+
+import pytest
+
+from evals.truth import (
+    Absent,
+    Exact,
+    Items,
+    Location,
+    Needle,
+    Number,
+    answer_items,
+    answer_line,
+    mentions,
+    promotes,
+    score_answer,
+    score_fold,
+)
+
+
+def test_the_answer_line_is_the_last_one_and_lists_split_cleanly():
+    reply = "Thinking...\nANSWER: draft\nMore.\n**ANSWER:** `a1`, `a2` and a3."
+    assert answer_line(reply) == "a1`, `a2` and a3"  # outer markup stripped
+    assert answer_items(answer_line(reply)) == ["a1", "a2", "a3"]
+    assert answer_items("none") == [] and answer_items("None.") == []
+
+
+@pytest.mark.parametrize("wrong", [2, 4, 14, 16])
+def test_a_count_or_a_line_off_by_any_amount_is_wrong(wrong):
+    assert score_answer(Number(3), "ANSWER: 3").correct
+    assert not score_answer(Number(3), f"There are 3 of the 300 ...\nANSWER: {wrong}").correct
+    assert not score_answer(Location(15, "def x"), f"ANSWER: {wrong}").correct
+
+
+def test_a_list_is_scored_on_what_it_lists_not_on_the_prose_around_it():
+    truth = Items(frozenset({"a1", "a2"}), frozenset({"a1", "a2", "b1", "b2"}))
+    assert score_answer(truth, "b1 and b2 are left out because ...\nANSWER: a1, a2").correct
+    assert not score_answer(truth, "ANSWER: a1, a2, b1").correct  # precision 2/3
+    assert not score_answer(truth, "ANSWER: a1").correct  # recall 1/2
+
+
+def test_absent_needs_an_explicit_none_and_rejects_an_invented_anomaly():
+    truth = Absent(frozenset({"web-1", "web-2"}))
+    assert score_answer(truth, "Everything looks fine.\nANSWER: none").correct
+    assert not score_answer(truth, "The payment for ORD-55555 failed.\nANSWER: ORD-55555").correct
+    assert not score_answer(truth, "ANSWER: web-1").correct
+
+
+def test_without_an_answer_line_the_prose_is_scored_and_flagged():
+    s = score_answer(Needle("web-7"), "It is web-7.")
+    assert s.correct and not s.parsed
+    assert score_answer(Exact("e512"), "ANSWER: e512").parsed
+
+
+def test_a_count_is_not_sufficient_from_a_number_that_merely_appears():
+    truth = Number(15, frozenset({"def a", "def b"}))
+    assert not score_fold(truth, "15\tdef a(self):\n\t[... lines 16-30 folded]").correct  # a line number
+    assert score_fold(truth, "3\tdef a():\n9\tdef b():").correct  # every counted item visible
+    stated = Number(3, frozenset({"x", "y", "z"}), ('"\\"CrashLoopBackOff\\"": 3',))
+    assert score_fold(
+        stated, '{"value_counts": {"phase": {"\\"Running\\"": 497, "\\"CrashLoopBackOff\\"": 3}}}'
+    ).correct
+
+
+def test_promotion_is_seen_in_trees_and_logs_not_only_in_json():
+    tree = "\n".join(
+        ["- list:", "  - item a", "  [... lines 3-40 folded (19 siblings)]", "  - item odd"]
+        + ["  [... lines 42-90 folded (24 siblings)]"]
+    )
+    assert promotes(tree)
+    assert not promotes("- list:\n  - item a\n  [... lines 3-90 folded (44 siblings)]\n  - item last")
+    log = "a\n[... lines 2-500 omitted (499 lines)]\nERROR x\n[... lines 502-990 omitted (489 lines)]\nz"
+    assert promotes(log) and not promotes("a\n[... lines 2-990 omitted (989 lines)]\nz")
+    assert not score_fold(Absent(frozenset()), tree).correct
+
+
+def test_mentions_is_a_whole_word():
+    assert mentions("version 8.1.", "8.1") and not mentions("8.1.7", "8.1") and not mentions("e1234", "e123")

@@ -5,6 +5,7 @@ Size bands, against the default budget of 2,000 tokens and Claude Code's MCP spi
 `tasks()` builds the whole registry; payloads load lazily, since some are large.
 """
 
+import json
 import random
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -13,7 +14,7 @@ from pathlib import Path
 
 from compressors.common import estimate_tokens, read_text
 from evals import real, synthetic
-from evals.truth import Absent, Exact, Items, Location, Needle, Number, Truth
+from evals.truth import ANSWER_INSTRUCTION, Absent, Exact, Items, Location, Needle, Number, Truth
 
 BUDGET = 2000
 SPILL_TOKENS = 50_000 // 4
@@ -86,7 +87,14 @@ def _payload(fmt: str, size: int, planted: frozenset[int], seed: str) -> synthet
 
 def _prompt(fmt: str, kind: str, subject: str = "") -> str:
     ask = _ASK[fmt]["spot" if kind == "absent" else kind].format(subject=subject)
-    return f"Use the {_TOOL[fmt]} tool. {ask}"
+    return f"Use the {_TOOL[fmt]} tool. {ask} {ANSWER_INSTRUCTION[kind]}."
+
+
+def _count(fmt: str, p: synthetic.Payload) -> Number:
+    """A count's truth: the planted items, and for JSON the summary entry that states the count."""
+    k = len(p.planted)
+    stated = (json.dumps({json.dumps("CrashLoopBackOff"): k})[1:-1],) if fmt == "json" else ()
+    return Number(k, frozenset(p.planted), stated)
 
 
 def _synthetic(fmt: str, band: str) -> list[Task]:
@@ -121,7 +129,7 @@ def _synthetic(fmt: str, band: str) -> list[Task]:
     add("absent", "none", frozenset(), lambda p: Absent(frozenset(p.names)))
     for k in (3, 7):
         picks = frozenset(random.Random(f"{fmt}/{band}/count/{k}").sample(range(size), min(k, size)))
-        add("count", f"k{k}", picks, lambda p: Number(len(p.planted), frozenset(p.planted)))
+        add("count", f"k{k}", picks, lambda p, fmt=fmt: _count(fmt, p))
     picks = frozenset(random.Random(f"{fmt}/{band}/enumerate").sample(range(size), min(4, size)))
     add("enumerate", "k4", picks, lambda p: Items(frozenset(p.planted), frozenset(p.names)))
     for fraction in (0.5, 0.9):
@@ -153,7 +161,7 @@ def _file_task(
         kind=kind,
         band=band_of(estimate_tokens(text)),
         path=str(path),
-        prompt=prompt.format(path=path),
+        prompt=f"{prompt.format(path=path)} {ANSWER_INSTRUCTION[kind]}.",
         truth=truth,
         query=query,
         load=lambda path=path: _read(path),
@@ -205,7 +213,7 @@ def _python() -> list[Task]:
                 "count",
                 path,
                 f"In {{path}}, how many methods does class {cls} define directly in its body?",
-                Number(n, frozenset(m.name for m in real.py_methods(src[path], cls))),
+                Number(n, frozenset(f"def {m.name}" for m in real.py_methods(src[path], cls))),
             )
         )
     for path, cls, method in (
@@ -264,7 +272,7 @@ def _rust() -> list[Task]:
                 path,
                 f"In {{path}}, how many functions does the first `impl {ty}` block (not a trait impl) "
                 "define?",
-                Number(len(fns), frozenset(n for n, _ in fns)),
+                Number(len(fns), frozenset(f"fn {n}" for n, _ in fns)),
             ),
         ]
         name, line = fns[len(fns) // 2]
@@ -330,7 +338,7 @@ def _pypi() -> list[Task]:
             "count",
             real.PYPI_CLICK,
             "{path} is PyPI's JSON for the package click. How many releases does it list?",
-            Number(len(versions), versions),
+            Number(len(versions), versions, (f"of {len(versions)} keys of $.releases",)),
         ),
         _file_task(
             "pypi-L-enumerate-2023",
