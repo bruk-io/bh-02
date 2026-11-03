@@ -64,6 +64,8 @@ def fold_text(
         folded = fold(
             {}, text, budget_tokens=budget, use_query=False, terms=terms, force=None if fmt == "auto" else fmt
         )
+        if folded is None:  # the structured fold saved too little: cut by characters instead
+            folded = fold({}, text, budget_tokens=budget, use_query=False, terms=terms, force="text")
         if folded is None:
             return Result(text, None)
         body, branch, source = folded.body, folded.branch, folded.source

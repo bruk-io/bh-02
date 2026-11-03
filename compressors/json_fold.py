@@ -39,7 +39,8 @@ _WHOLE_STRING_KEYS = frozenset(
     }
 )
 # keys whose values are identifiers or digests: cut, they are useless (sha256, md5, blake2b_256, node_id)
-_IDENTIFYING = re.compile(r"sha\d*|md5|blake|digest|hash|checksum|uuid|(^|_)id$|url$|uri$")
+_IDENTIFYING = re.compile(r"(^|_)(sha\d*|md5|blake\w*|digest|hash|checksum|uuid|id|url|uri)($|_)")
+_MAX_IDENTIFYING = 256  # a digest, an id or a URL is shown whole up to this; past it, it is text
 _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_-]*\Z")
 
 
@@ -52,15 +53,16 @@ class _Limits:
     max_keys: int = 40  # objects wider than this are folded
     keep_keys: int = 15
     max_str: int = 300
+    max_whole: int = 2000  # strings under keys like error and message: longer, but cut too
     max_depth: int = 12
 
 
 # Tried in order until the result fits the budget; the last one is used regardless.
 _LEVELS = (
     _Limits(),
-    _Limits(max_str=120, max_keys=25, keep_keys=10, max_promoted=5),
-    _Limits(max_items=4, head=1, tail=1, max_promoted=2, max_str=80, max_keys=15, keep_keys=8),
-    _Limits(max_items=2, head=1, tail=1, max_promoted=1, max_str=60, max_keys=8, keep_keys=3),
+    _Limits(max_str=120, max_whole=600, max_keys=25, keep_keys=10, max_promoted=5),
+    _Limits(max_items=4, head=1, tail=1, max_promoted=2, max_str=80, max_whole=240, max_keys=15, keep_keys=8),
+    _Limits(max_items=2, head=1, tail=1, max_promoted=1, max_str=60, max_whole=120, max_keys=8, keep_keys=3),
 )
 
 
@@ -130,6 +132,8 @@ def _rarity(flat_items: list[dict[str, Any]]) -> tuple[dict[str, frozenset[tuple
         if rare:
             rare_values[k] = rare
     rare_keys = frozenset(k for k, c in presence.items() if c <= rare_cut) if n >= 10 else frozenset()
+    if len(rare_keys) > len(presence) / 2:  # items with keys of their own (a host per item): rare is normal
+        rare_keys = frozenset()
     return rare_values, rare_keys
 
 
@@ -201,6 +205,10 @@ def _promote(arr: list[Any], terms: frozenset[str], limit: int, shown: set[int])
     return []
 
 
+_SUMMARY_KEYS = 30
+_SUMMARY_FIELDS = 10
+
+
 def _summary(arr: list[Any]) -> dict[str, Any]:
     if all(isinstance(x, Mapping) for x in arr):
         keys: dict[str, str] = {}
@@ -215,9 +223,12 @@ def _summary(arr: list[Any]) -> dict[str, Any]:
             for k, c in counts.items()
             if 1 < len(c) <= 6 and sum(c.values()) == len(arr)
         }
-        out: dict[str, Any] = {"keys": keys}
+        common = Counter(k for item in arr for k in item).most_common(_SUMMARY_KEYS)
+        out: dict[str, Any] = {"keys": {k: keys[k] for k, _ in common}}
+        if len(keys) > _SUMMARY_KEYS:
+            out["more_keys"] = len(keys) - _SUMMARY_KEYS
         if value_counts:
-            out["value_counts"] = value_counts
+            out["value_counts"] = dict(list(value_counts.items())[:_SUMMARY_FIELDS])
         return out
     numbers = [x for x in arr if isinstance(x, int | float) and not isinstance(x, bool)]
     if len(numbers) == len(arr):
@@ -286,9 +297,12 @@ def _fold(value: Any, path: str, terms: frozenset[str], lim: _Limits, depth: int
         return _fold_array(value, path, terms, lim, depth)
     if isinstance(value, str) and len(value) > lim.max_str:
         leaf = path.rsplit(".", 1)[-1].lower()
-        if leaf in _WHOLE_STRING_KEYS or _IDENTIFYING.search(leaf):
+        if _IDENTIFYING.search(leaf) and len(value) <= _MAX_IDENTIFYING:
             return value
-        return value[: lim.max_str] + f"...[+{len(value) - lim.max_str} chars]"
+        cut = lim.max_whole if leaf in _WHOLE_STRING_KEYS else lim.max_str
+        if len(value) <= cut:
+            return value
+        return value[:cut] + f"...[+{len(value) - cut} chars]"
     return value
 
 

@@ -20,8 +20,10 @@ def test_code_is_folded_by_its_extension_with_real_line_numbers():
     head, *rest = out.splitlines()
     assert head.startswith("[fold: code (python), ~")
     assert "1\tclass A:" in rest[0]
-    assert any("3\t    def big(self):" in line and "folded" in line for line in rest)
-    assert any("def small(self):" in line for line in rest)
+    assert "3\t    def big(self):" in rest
+    assert any("folded (399 lines)" in line for line in rest)  # the body, folded below its header
+    assert "405\t    def small(self):" in rest
+    assert len(out) / 4 <= 200
 
 
 def test_code_from_stdin_needs_a_language_and_folds_with_one():
