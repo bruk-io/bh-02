@@ -92,3 +92,11 @@ def test_a_listed_item_may_be_the_part_of_a_name_that_only_one_candidate_holds()
     assert not score_answer(truth, "ANSWER: Card").correct  # every card holds it: it names none
     wrong = score_answer(truth, "ANSWER: N7697, M4557, X6370")
     assert wrong.recall == 1.0 and wrong.precision == 2 / 3 and not wrong.correct
+
+
+def test_a_needle_may_be_named_by_any_of_its_names():
+    needle = Needle("ORD-5666fa", frozenset({"req-e47a37be"}))
+    assert score_answer(needle, "ANSWER: req-e47a37be").correct
+    assert score_answer(needle, "ANSWER: ORD-5666fa").correct
+    assert not score_answer(needle, "ANSWER: u-ae87d2").correct
+    assert score_fold(needle, "... req=req-e47a37be ...").correct

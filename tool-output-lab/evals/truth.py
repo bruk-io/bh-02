@@ -22,6 +22,10 @@ def mentions(text: str, token: str) -> bool:
 @dataclass(frozen=True)
 class Needle:
     token: str  # the one thing that answers "what stands out?"
+    also: frozenset[str] = frozenset()  # other names of the same item: a log line's request beside its order
+
+    def names(self) -> frozenset[str]:
+        return self.also | {self.token}
 
 
 @dataclass(frozen=True)
@@ -64,11 +68,18 @@ class Score:
     parsed: bool = True  # whether the answer had the ANSWER line the prompt asks for
 
 
+# What each kind's ANSWER line holds. "As the question asks" leaves the question to say what is
+# listed (codes, orders, versions): saying "name" here made Haiku list Andorra's parishes for their
+# codes and answer "the logs have no names" for failed orders (FINDINGS 38).
+_ONE = "End your reply with one line: ANSWER: <the item, as the question asks for it>, or ANSWER: none"
 ANSWER_INSTRUCTION = {
-    "spot": "End your reply with one line: ANSWER: <the item's name>, or ANSWER: none",
-    "absent": "End your reply with one line: ANSWER: <the item's name>, or ANSWER: none",
+    "spot": _ONE,
+    "absent": _ONE,
     "lookup": "End your reply with one line: ANSWER: <the value>",
-    "enumerate": "End your reply with one line: ANSWER: <every name, separated by commas>, or ANSWER: none",
+    "enumerate": (
+        "End your reply with one line: ANSWER: <every item, as the question asks for them, separated by "
+        "commas>, or ANSWER: none"
+    ),
     "count": "End your reply with one line: ANSWER: <the number>",
     "locate": "End your reply with one line: ANSWER: <the line number>",
 }
@@ -120,7 +131,12 @@ def score_answer(truth: Truth, answer: str) -> Score:
     if line is None:
         return _score_prose(truth, answer)
     match truth:
-        case Needle(token=t) | Exact(value=t):
+        case Needle() as needle:
+            names = needle.names()
+            return Score(
+                any(n == t or mentions(n, t) for n in answer_items(line) for t in names) or line in names
+            )
+        case Exact(value=t):
             return Score(any(n == t or mentions(n, t) for n in answer_items(line)) or line == t)
         case Absent():
             return Score(answer_items(line) == [])
@@ -140,7 +156,9 @@ def score_answer(truth: Truth, answer: str) -> Score:
 
 def _score_prose(truth: Truth, answer: str) -> Score:
     match truth:
-        case Needle(token=t) | Exact(value=t):
+        case Needle() as needle:
+            return Score(any(mentions(answer, t) for t in needle.names()), parsed=False)
+        case Exact(value=t):
             return Score(mentions(answer, t), parsed=False)
         case Absent(candidates=c):
             return Score(not any(mentions(answer, x) for x in c), parsed=False)
@@ -178,7 +196,9 @@ def score_fold(truth: Truth, fold: str) -> Score:
         AssertionError: a kind of truth with no scorer (a new kind added without one).
     """
     match truth:
-        case Needle(token=t) | Exact(value=t):
+        case Needle() as needle:
+            return Score(any(mentions(fold, t) for t in needle.names()))
+        case Exact(value=t):
             return Score(mentions(fold, t))
         case Absent():
             return Score(not promotes(fold))

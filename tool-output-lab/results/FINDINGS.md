@@ -309,8 +309,10 @@ Per-band and pooled tables: `l2-p2.md`; each repetition: `l2-p2-r1.md`, `l2-p2-r
     have no names)" in some runs and listed the orders in others. These tasks flip between runs
     whatever the condition: all four of the control's discordant pairs are among them. The quiet log
     anomaly asks to "name the order or request it concerns", and Haiku sometimes names the event.
-    The prompts stay as they were for P2, so both repetitions saw the same ones; fixing them is for
-    P3. The scorer refused `N7697` for `Card N7697`; fixed (an item may name the one candidate that
+    The prompts stay as they were for P2, so both repetitions saw the same ones. Fixed for P3: the
+    instruction says "the item, as the question asks for it" (and "every item"), the log question
+    asks for "the id of the order or request", and a planted log line counts as named by either id
+    on it. Rescoring P2's answers with that truth changes none. The scorer refused `N7697` for `Card N7697`; fixed (an item may name the one candidate that
     holds it). Rescoring the saved answers changed 2 of 712, both Figma enumerate answers under
     `fold` that native also got right: before the fix they counted as two losses for folding.
 39. **Caveats.** One model; two repetitions of the same tasks, which are not independent cases (52
@@ -331,8 +333,8 @@ Per-band and pooled tables: `l2-p2.md`; each repetition: `l2-p2-r1.md`, `l2-p2-r
 
 ## Next
 
-1. P3 (Sonnet, the no-shell channel, edit tasks), with the enumerate instruction naming what is
-   listed (38), and about 150 agreeing pairs a cell so a verdict can resolve 3 points (33).
+1. P3 (Sonnet, the no-shell channel, edit tasks), with the fixed prompts (38), and about 150
+   agreeing pairs a cell so a verdict can resolve 3 points (33).
 2. At L the fold is larger than Claude Code's preview and Haiku reads the raw anyway (34): try a
    fold no larger than the preview, or a banner that says what the fold guarantees, to see whether
    it saves the read.

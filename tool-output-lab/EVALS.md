@@ -86,8 +86,8 @@ confident is the harm, so it is reported separately from wrong and hedged.
 ## Metrics per run
 
 - **Outcome:** correct by the task's scorer; confidently wrong.
-- **Tokens:** input tokens summed over requests; output tokens; the final context's size (context
-  growth, not yet measured).
+- **Tokens:** the final context's size (the input of the last request: what the input criterion
+  judges); input tokens summed over requests, by cache class; output tokens.
 - **Effort:** cost, tool calls, time.
 - **Recovery:** reads of the saved raw file, and how much of it was read.
 - **Tool use:** whether `fold` was run, and how.
