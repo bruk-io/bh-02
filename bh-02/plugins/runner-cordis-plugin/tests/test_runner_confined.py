@@ -1414,6 +1414,111 @@ async def test_a_second_jail_s_carve_out_outlives_the_first_jail_in_the_same_pro
     assert not (claude / "settings.json").exists()
 
 
+# Runs each argv of argv[3] (a JSON list of lists) in the project, once the jail listens, and
+# reports `[[returncode, last stderr line], ...]` in argv[2]; then waits.
+_RUN_STEPS = """
+import json, os, socket, subprocess, sys, time
+server = socket.socket(socket.AF_UNIX)
+server.bind(sys.argv[1])
+server.listen(4)
+done = []
+for argv in json.loads(sys.argv[3]):
+    ran = subprocess.run(argv, capture_output=True, text=True)
+    done.append([ran.returncode, (ran.stderr.strip().splitlines() or [""])[-1]])
+open(sys.argv[2] + ".tmp", "w").write(json.dumps(done))
+os.replace(sys.argv[2] + ".tmp", sys.argv[2])
+time.sleep(60)
+"""
+
+# What a model's code does to save a file: write `argv[1]`, rename it over `argv[2]`.
+_SAVE = "import os, sys; open(sys.argv[1], 'w').write('new'); os.replace(sys.argv[1], sys.argv[2])"
+_GIT = ("git", "-c", "user.name=a", "-c", "user.email=a@example.invalid")
+
+
+async def _in_a_jail(project: Path, steps: Sequence[Sequence[str]]) -> list[tuple[int, str]]:
+    """Run `steps` one after the other in `project` inside a real jail: each one's exit status
+    and last line of stderr."""
+    said = project / "steps.json"
+
+    def argv(endpoint: str) -> list[str]:
+        return [sys.executable, "-I", "-c", _RUN_STEPS, endpoint, str(said), json.dumps(steps)]
+
+    started = await BrigJail(BrigConfig(), Host()).start(argv, cwd=str(project))
+    try:
+        return [(code, line) for code, line in json.loads(await _report(said, started))]
+    finally:
+        await started.stop()
+
+
+def _a_repository(tmp_path: Path) -> Path:
+    """A repository with one commit, as the person made it on the host."""
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "tracked.txt").write_text("base")
+    for argv in (("init", "-q", "-b", "main"), ("add", "."), ("commit", "-qm", "base")):
+        subprocess.run([*_GIT, *argv], cwd=project, check=True)
+    return project
+
+
+async def test_everyday_git_commands_work_in_a_jail_whose_dot_git_is_pinned(tmp_path: Path) -> None:
+    """brig binds `.git` over itself (it lies between the project and the write deny `.git/config`):
+    git's own lock-and-rename inside it, which is most of what git does, must stay inside the pin."""
+    _needs_bwrap()
+    project = _a_repository(tmp_path)
+    (project / "new.txt").write_text("n")
+    steps = [
+        [*_GIT, "add", "new.txt"],
+        [*_GIT, "commit", "-qm", "two"],
+        [*_GIT, "checkout", "-q", "-b", "feat"],
+        ["sh", "-c", "echo dirty >> tracked.txt"],
+        [*_GIT, "stash", "push", "-q"],
+        [*_GIT, "stash", "pop", "-q"],
+        [*_GIT, "gc", "-q"],
+    ]
+    assert [code for code, _ in await _in_a_jail(project, steps)] == [0] * len(steps)
+    assert subprocess.run(
+        [*_GIT, "log", "--format=%s"], cwd=project, capture_output=True, text=True, check=True
+    ).stdout.split() == ["two", "base"]
+
+
+async def test_an_atomic_save_over_a_file_works_beside_the_file_in_the_project_and_inside_dot_git(
+    tmp_path: Path,
+) -> None:
+    """Write a temporary name beside the file and rename it over: in the project, in a
+    subdirectory, and in the pinned `.git` (the rename stays inside one mount)."""
+    _needs_bwrap()
+    project = _a_repository(tmp_path)
+    (project / "sub").mkdir()
+    (project / "sub" / "a.txt").write_text("old")
+    (project / ".git" / "note").write_text("old")
+    steps = [
+        [sys.executable, "-I", "-c", _SAVE, "tracked.txt.new", "tracked.txt"],
+        [sys.executable, "-I", "-c", _SAVE, "sub/a.txt.new", "sub/a.txt"],
+        [sys.executable, "-I", "-c", _SAVE, ".git/note.new", ".git/note"],
+    ]
+    assert [code for code, _ in await _in_a_jail(project, steps)] == [0, 0, 0]
+    assert [(project / n).read_text() for n in ("tracked.txt", "sub/a.txt", ".git/note")] == ["new"] * 3
+
+
+@pytest.mark.xfail(
+    strict=True,
+    raises=AssertionError,
+    reason="a pin makes `.git` its own mount: renaming a file from the project into it, or out of "
+    "it, is EXDEV (measured against bruk-io/brig 0237986; TASK-0176.07)",
+)
+async def test_a_file_renamed_between_the_project_and_dot_git_moves(tmp_path: Path) -> None:
+    _needs_bwrap()
+    project = _a_repository(tmp_path)
+    (project / "out.txt").write_text("x")
+    (project / ".git" / "in.txt").write_text("y")
+    move = "import os, sys; os.rename(sys.argv[1], sys.argv[2])"
+    steps = [
+        [sys.executable, "-I", "-c", move, "out.txt", ".git/out.txt"],
+        [sys.executable, "-I", "-c", move, ".git/in.txt", "in.txt"],
+    ]
+    assert await _in_a_jail(project, steps) == [(0, ""), (0, "")]
+
+
 def test_a_policy_becomes_brig_s_policies_and_nothing_else_reaches_the_program() -> None:
     """`to_brig` is the one converter: the policy's roots, denies and masks as brig's `FsPolicy`
     (readable roots by allowlist, the whole host by denylist), an allow-list that names the policy's
