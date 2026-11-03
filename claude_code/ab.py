@@ -148,16 +148,18 @@ def parse_stream(lines: Iterable[str], needle: str) -> RunStats:
     )
 
 
-def _settings(condition: str, log: Path) -> dict[str, Any]:
+def _settings(condition: str, log: Path, hook_mode: str) -> dict[str, Any]:
     if condition == "native":
         return {}
-    command = f"cd {_LAB} && TOOL_OUTPUT_LAB_LOG={log} {_UV} -m claude_code.hook"
+    command = (
+        f"cd {_LAB} && TOOL_OUTPUT_LAB_LOG={log} TOOL_OUTPUT_LAB_MODE={hook_mode} {_UV} -m claude_code.hook"
+    )
     return {
         "hooks": {"PostToolUse": [{"matcher": "mcp__.*", "hooks": [{"type": "command", "command": command}]}]}
     }
 
 
-def run_one(case: Case, condition: str, model: str, log: Path) -> dict[str, Any]:
+def run_one(case: Case, condition: str, model: str, log: Path, hook_mode: str = "all") -> dict[str, Any]:
     with tempfile.TemporaryDirectory(prefix="ab-") as work:
         w = Path(work)
         env = {
@@ -172,7 +174,7 @@ def run_one(case: Case, condition: str, model: str, log: Path) -> dict[str, Any]
             "env": env,
         }
         (w / "mcp.json").write_text(json.dumps({"mcpServers": {"fixture": server}}))
-        (w / "settings.json").write_text(json.dumps(_settings(condition, log)))
+        (w / "settings.json").write_text(json.dumps(_settings(condition, log, hook_mode)))
         command = [
             "claude", "-p", case.prompt(),
             "--model", model,
@@ -189,7 +191,13 @@ def run_one(case: Case, condition: str, model: str, log: Path) -> dict[str, Any]
                 stats = RunStats(**{**asdict(stats), "error": f"{stats.error}; stderr: {proc.stderr[-500:]}"})
         except subprocess.TimeoutExpired:
             stats = RunStats(False, "", 0, False, 0, 0.0, 0, 0, 600_000, "timed out after 600s")
-    return {"case": asdict(case), "condition": condition, "model": model, **asdict(stats)}
+    return {
+        "case": asdict(case),
+        "condition": condition,
+        "model": model,
+        "hook_mode": hook_mode,
+        **asdict(stats),
+    }
 
 
 def _pct(xs: list[bool]) -> str:
@@ -253,14 +261,21 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--name", default="ab-1")
     parser.add_argument("--only", choices=tuple(_GRID), nargs="+")
+    parser.add_argument("--large-only", action="store_true", help="only each format's largest size")
+    parser.add_argument("--hook-mode", choices=("all", "spilled-only"), default="all")
     ns = parser.parse_args(argv)
     results = _LAB / "results"
     log = results / f"{ns.name}-hook.jsonl"
-    jobs = [(c, cond) for c in cases(ns.seeds) if ns.only is None or c.fmt in ns.only for cond in CONDITIONS]
+    jobs = [
+        (c, cond)
+        for c in cases(ns.seeds)
+        if (ns.only is None or c.fmt in ns.only) and (not ns.large_only or c.size == max(_GRID[c.fmt][1]))
+        for cond in CONDITIONS
+    ]
     rows_path = results / f"{ns.name}.jsonl"
     rows: list[dict[str, Any]] = []
     with ThreadPoolExecutor(ns.workers) as pool, rows_path.open("w", encoding="utf-8") as f:
-        for row in pool.map(lambda job: run_one(job[0], job[1], ns.model, log), jobs):
+        for row in pool.map(lambda job: run_one(job[0], job[1], ns.model, log, ns.hook_mode), jobs):
             f.write(json.dumps(row) + "\n")
             f.flush()
             rows.append(row)
