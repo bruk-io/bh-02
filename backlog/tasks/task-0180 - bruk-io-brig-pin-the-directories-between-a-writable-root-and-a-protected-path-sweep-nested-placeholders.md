@@ -3,7 +3,7 @@ id: TASK-0180
 title: >-
   bruk-io/brig: pin the directories between a writable root and a protected
   path; sweep nested placeholders
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-11-03T04:48:00Z'
 updated_date: '2026-11-03T05:33:00Z'
@@ -99,4 +99,6 @@ INFO    -  Documentation built in 4.94 seconds
 ```
 
 No repro: the failures are brig's, and their repros are recorded failing before the fix on brig's board (TASK-0001.31 #2, TASK-0001.32 #3, TASK-0001.33 #2). bh-02's side was the four xfail(strict) tests, which xfail-passed against 2132b3b (strict, so they failed as expected) and now run as plain tests and pass at 0237986.
+
+Closed by review. Full check (record-check --tier full): exit 0, 2577 passed, 6 skipped. #1 and #2: brig TASK-0001.31/.32/.33 closed by reviewers with repros recorded failing before the fix; pinned 0237986 contains them. #3: pin moved, the four xfail(strict) markers removed with test bodies unchanged; the killed-jail test was strengthened (no .git exception), not weakened. No findings.
 <!-- SECTION:NOTES:END -->
