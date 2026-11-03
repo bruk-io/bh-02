@@ -6,6 +6,7 @@
 #   ./lab needle [...]          synthetic needle-survival grid
 #   ./lab ab [...]              headless Claude Code, native against the fold hook (costs money)
 #   ./lab fold [FILE|-] [...]   fold a file or stdin into a token budget (the tool itself)
+#   ./lab evals l1 [...]        layer-1 evals: every task folded and checked, no model
 #   ./lab comprehension [...]   headless Claude Code on structural questions, fold named or not (costs money)
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -17,6 +18,7 @@ case "$cmd" in
   extract|stats|needle) run python -m "harness.$cmd" "$@" ;;
   ab) run python -m claude_code.ab "$@" ;;
   comprehension) run python -m claude_code.comprehension "$@" ;;
+  evals) layer="${1:-l1}"; shift || true; run python -m "evals.$layer" "$@" ;;
   fold) run python -m compressors.cli "$@" ;;
-  *) echo "unknown command '$cmd': use check, fold, extract, stats, needle, ab or comprehension" >&2; exit 2 ;;
+  *) echo "unknown command '$cmd': use check, fold, evals, extract, stats, needle, ab or comprehension" >&2; exit 2 ;;
 esac

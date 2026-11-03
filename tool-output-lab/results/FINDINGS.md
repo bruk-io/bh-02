@@ -187,6 +187,39 @@ conditions had `fold` on the PATH; only `fold` had a CLAUDE.md naming it.
     What is left untested is open-ended understanding (no exact answer, so a judge would be needed),
     and weaker models or harnesses with no shell, where Claude cannot write its own `ast` script.
 
+## Layer 1 evals: 131 tasks, the fold alone (`l1-*.md`, see EVALS.md)
+
+131 tasks over 8 formats (synthetic JSON, logs, accessibility snapshots and Figma XML at three
+sizes; real Python and Rust source, the ISO 3166-2 XML and PyPI JSON) and 6 kinds (spot, absent,
+look up, enumerate, count, locate), every answer computed by a program. Each is folded through the
+`fold` interface with no query and, where the tool call would name it, with the query. Free: the
+whole run takes about 15 seconds.
+
+28. **No invariant has ever failed** (0 of 160 folds in every run): every fold accounts for every
+    source line exactly once, and every JSON marker holds exactly the count it claims.
+29. **Spot and absent are sufficient everywhere:** the planted anomaly is in view in every format,
+    size and position, and no fold ever promoted something in a payload with nothing planted.
+30. **Layer 1 found eleven problems in an afternoon**, each fixed with a test, which moved
+    sufficiency from 109/160 to 128/160 at 2,000 tokens (139/160 at 6,000):
+    - the count scorer itself demanded the number written out (`l1-2-count-scorer.md`);
+    - only three stand-outs were ever promoted, so a fourth planted item was hidden (now ten);
+    - a 7%-rare shape was not rare (5%); for trees, which have no summary counts, now 10%;
+    - query terms under three characters were dropped (`NL`, `JP-13`); now matched as whole words;
+    - the log fold kept a query term every line holds (`req`), drowning the asked-for line;
+    - promotion took matches in order, not by how many query terms each matched;
+    - real XML is sloppy: the ISO file has a bare `&`; parsed leniently, lines unchanged;
+    - a 60-line XML comment and the DOCTYPE could not fold;
+    - a query match deep in a subtree (entry 13 of 47) did not count, and a header match
+      (`code="AD"`) weighed no more than `Ad` in other countries' place names;
+    - the tightest JSON level still went over budget on PyPI JSON, and cut SHA-256 digests;
+    - opening by cost, added for docstrings, left the biggest class last (`l1-9-ranks.md`).
+31. **What remains insufficient is by design or by budget:** a lookup with no query has nothing to
+    mark the asked-for item, so it needs the saved file (that is the recovery path layer 2
+    measures); and a 20k-token source file's outline does not fit 2,000 tokens. At 6,000, code is
+    13/17; a file that fits is passed through unchanged, so "on which line" cannot be read off it.
+32. One budget-edge case: the fold's own cost estimate runs about 15% above what it renders, so the
+    Netherlands' last group of 3 entries waits for 2,200 tokens instead of 2,000. To calibrate.
+
 ## Where the design stands
 
 | Piece | Evidence | Leaning |
@@ -201,6 +234,7 @@ conditions had `fold` on the PATH; only `fold` had a CLAUDE.md naming it.
 
 ## Next
 
+0. P2 of EVALS.md: layer 2 on the layer-1 tasks, Haiku, sizes M and L, paired (about $5).
 1. Measure context growth (the final context's size), not only tokens summed over requests.
 2. More seeds for A/B 3, and Opus, to tell real differences on trees from noise.
 3. Where `fold` should help most and is untested: harnesses with no shell (an MCP tool that returns

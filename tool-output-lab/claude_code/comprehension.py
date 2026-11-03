@@ -26,10 +26,11 @@ from pathlib import Path
 from typing import Any
 
 from claude_code.ab import parse_stream
+from evals import real
 from harness.needle import contains
 
 _LAB = Path(__file__).resolve().parent.parent
-_STDLIB = Path("/usr/local/lib/python3.13")
+_STDLIB = real.STDLIB
 CONDITIONS = ("native", "fold")
 _CLAUDE_MD = """# Tools
 
@@ -40,34 +41,16 @@ Read offset=A limit=B-A+1. Use it to see the structure of a large file before re
 """
 
 
-def _class(tree: ast.Module, name: str) -> ast.ClassDef:
-    return next(n for n in ast.walk(tree) if isinstance(n, ast.ClassDef) and n.name == name)
-
-
-def _defs(body: list[ast.stmt]) -> set[str]:
-    return {n.name for n in body if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)}
-
-
 def _async_methods(src: str) -> frozenset[str]:
-    return frozenset(
-        n.name for n in _class(ast.parse(src), "BaseEventLoop").body if isinstance(n, ast.AsyncFunctionDef)
-    )
+    return real.py_async_methods(src, "BaseEventLoop")
 
 
 def _both_platforms(src: str) -> frozenset[str]:
-    names: set[str] = set()
-    for n in _class(ast.parse(src), "Popen").body:
-        if isinstance(n, ast.If) and isinstance(n.test, ast.Name) and n.test.id == "_mswindows":
-            names |= _defs(n.body) & _defs(n.orelse)
-    return frozenset(names)
+    return real.py_both_platforms(src, "Popen")
 
 
 def _action_subclasses(src: str) -> frozenset[str]:
-    return frozenset(
-        c.name
-        for c in ast.walk(ast.parse(src))
-        if isinstance(c, ast.ClassDef) and any(isinstance(b, ast.Name) and b.id == "Action" for b in c.bases)
-    )
+    return real.py_subclasses(src, "Action")
 
 
 def _close_methods(src: str) -> frozenset[str]:

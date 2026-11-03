@@ -108,3 +108,27 @@ def test_a_stand_out_opens_first_even_when_its_list_opens_in_full():
         lines.append(f'    - button "Pay invoice {i}" [ref=e{i + 900}]{flag}')
     fold = fold_outline("\n".join(lines), budget_tokens=600)
     assert 'button "Pay invoice 0" [ref=e900] [disabled]' in fold.text
+
+
+def test_xml_with_a_bare_ampersand_is_read_leniently_and_shown_as_it_is():
+    entries = "".join(f'\n\t<entry code="X-{i}" name="Place {i}"/>' for i in range(300))
+    amp = '\n\t<entry code="X-AMP" name="Enewetak & Ujelang"/>'
+    raw = f'<?xml version="1.0"?>\n<entries>{entries}{amp}\n</entries>'
+    fold = fold_xml(raw, budget_tokens=300)
+    assert fold is not None and fold.source == raw
+    assert "Enewetak & Ujelang" in fold_xml(raw, budget_tokens=100_000).text
+
+
+def test_long_xml_comments_and_the_doctype_fold_like_elements():
+    from compressors.tree import xml_tree
+
+    comment = "\n".join(f"comment line {i}" for i in range(40))
+    doctype = "\n".join(f"<!ENTITY e{i} 'x'>" for i in range(20))
+    raw = (
+        f'<?xml version="1.0"?>\n<!--\n{comment}\n-->\n<!DOCTYPE root [\n{doctype}\n]>\n<root>\n<a/>\n</root>'
+    )
+    lines, roots = xml_tree(raw)
+    spans = [(n.first + 1, n.last + 1) for n in roots]
+    assert spans == [(2, 43), (44, 65), (66, 68)]
+    fold = fold_xml(raw, budget_tokens=60)
+    assert "comment line 20" not in fold.text and "<root>" in fold.text

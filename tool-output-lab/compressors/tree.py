@@ -18,7 +18,7 @@ import xml.parsers.expat
 from collections import Counter
 from dataclasses import dataclass
 
-from compressors.common import estimate_tokens, split_identifiers
+from compressors.common import discriminating, estimate_tokens, matches
 
 _VARIABLE = re.compile(r"0x[0-9a-fA-F]+|[0-9a-fA-F]{8,}|\d+")
 
@@ -63,6 +63,18 @@ def _signature(lines: list[str], n: Node, cap: int = 600) -> str:
     return "\n".join(out)
 
 
+def _subtree_text(lines: list[str], n: Node, cap: int = 20_000) -> str:
+    """A node's whole text, up to `cap` characters: what a query term is looked for in, so a match
+    deep inside (entry 13 of a country's 47) still marks the way down."""
+    out, size = [], 0
+    for i in range(n.first, n.last + 1):
+        out.append(lines[i])
+        size += len(lines[i])
+        if size >= cap:
+            break
+    return "\n".join(out)
+
+
 def _indent_of(line: str) -> str:
     return line[: len(line) - len(line.lstrip())]
 
@@ -77,7 +89,7 @@ def fold_tree(
     max_line_chars: int = 300,
     head_children: int = 3,
     tail_children: int = 1,
-    max_promoted: int = 3,
+    max_promoted: int = 10,
     terms: frozenset[str] = frozenset(),
 ) -> tuple[str, int, int]:
     """The folded text, and how many nodes it shows open and folded.
@@ -108,24 +120,30 @@ def fold_tree(
     standouts: set[tuple[int, int]] = set()
 
     def promoted(children: tuple[Node, ...]) -> tuple[int, ...]:
-        """Children that stand out among siblings that mostly share one shape, or that hold a query
-        term few siblings share. They open first, since what they hold is why they are shown."""
+        """Children that stand out among siblings that mostly share one shape, or that hold query
+        terms few siblings share, most matched terms first. They open first, since what they hold
+        is why they are shown."""
         n = len(children)
-        if n < 10:
+        texts = [_subtree_text(lines, c) for c in children]
+        if n < 10:  # too few siblings for "rare"; a query match still marks the way down
+            picks = [i for i, text in enumerate(texts) if any(matches(text, t) for t in terms)]
+            standouts.update((children[i].first, children[i].last) for i in picks)
             return ()
         patterns = [_signature(lines, c) for c in children]
         counts = Counter(patterns)
-        rare_cut = max(1, int(0.05 * n))
+        rare_cut = max(1, int(0.1 * n))  # no summary counts here, so rare reaches 10%
         dominant = counts.most_common(1)[0][1] / n >= 0.6
-        words = [
-            set(split_identifiers(" ".join(lines[c.first : min(c.last, c.first + 8) + 1]))) for c in children
-        ]
-        useful = frozenset(t for t in terms if sum(t in w for w in words) <= rare_cut)
-        picks = [
-            i
-            for i, (pat, w) in enumerate(zip(patterns, words, strict=True))
-            if (dominant and counts[pat] <= rare_cut) or (useful and w & useful)
-        ][:max_promoted]
+        heads = [lines[c.first] for c in children]
+        useful_head = discriminating(terms, heads, share=0.05)
+        useful_deep = discriminating(terms, texts, share=0.05)
+        scored = []
+        for i, (pat, head, text) in enumerate(zip(patterns, heads, texts, strict=True)):
+            # a match on the node's own header (code="AD") weighs more than one deep inside it
+            hits = 2 * sum(matches(head, t) for t in useful_head) + sum(matches(text, t) for t in useful_deep)
+            rare = dominant and counts[pat] <= rare_cut
+            if hits or rare:
+                scored.append((-(2 * hits + rare), i))
+        picks = sorted(i for _, i in sorted(scored)[:max_promoted])
         standouts.update((children[i].first, children[i].last) for i in picks)
         return tuple(picks)
 
@@ -192,10 +210,17 @@ def fold_tree(
         return own <= 0.25 * open_cost(n.first, n.last, n.children, None)
 
     def key(depth: int, n: Node) -> tuple[int, int, int, int]:
-        """Stand-outs open first, then containers, then bodies; shallower first, then the ones that
-        cost least to open, so a long docstring opens after the small bodies around it."""
-        rank = 0 if (n.first, n.last) in standouts else 1 if is_container(n) else 2
-        return (rank, depth, open_cost(n.first, n.last, n.children, None) - folded_cost(n), n.first)
+        if (n.first, n.last) in standouts:
+            rank = 0
+        elif is_container(n):
+            rank = 1
+        else:
+            rank = 2 if n.children else 3
+        # nodes with structure inside open by depth and source order, so the biggest class is not
+        # left last with room for only part of its outline; leaves (a docstring, a literal, a block
+        # with nothing foldable inside) open last, cheapest first, so a long docstring waits
+        cost = open_cost(n.first, n.last, n.children, None) - folded_cost(n) if rank == 3 else 0
+        return (rank, depth, cost, n.first)
 
     heap = [(*key(1, roots[i]), roots[i]) for i in shown_children(roots, root_k)]
     heapq.heapify(heap)
@@ -314,12 +339,16 @@ def _pretty(raw: str) -> str:
     return "\n".join(line for line in pretty.splitlines() if line.strip())
 
 
-def xml_tree(raw: str) -> tuple[list[str], tuple[Node, ...]] | None:
-    """The XML's lines (pretty-printed if it came packed) and its element tree; None if not XML."""
-    try:
-        source = _pretty(raw)
-    except Exception:  # minidom raises a handful of unrelated types on bad input  # noqa: BLE001
-        return None
+_BARE_AMP = re.compile(r"&(?!(?:[A-Za-z][\w.-]*|#\d+|#x[0-9A-Fa-f]+);)")
+
+
+def lenient_xml(raw: str) -> str:
+    """Bare ampersands escaped. Real files have them ("Enewetak & Ujelang" in the ISO 3166-2 data),
+    and escaping one moves no line, so line numbers still refer to the original."""
+    return _BARE_AMP.sub("&amp;", raw)
+
+
+def _element_tree(source: str) -> tuple[Node, ...] | None:
     parser = xml.parsers.expat.ParserCreate()
     stack: list[tuple[int, list[Node]]] = [(-1, [])]
 
@@ -330,13 +359,45 @@ def xml_tree(raw: str) -> tuple[list[str], tuple[Node, ...]] | None:
         first, kids = stack.pop()
         stack[-1][1].append(Node(first, first, parser.CurrentLineNumber - 1, tuple(kids)))
 
+    def comment(text: str) -> None:  # a long comment folds like an element; expat reports where it starts
+        first = parser.CurrentLineNumber - 1
+        last = first + text.count("\n")
+        if last > first:
+            stack[-1][1].append(Node(first, first, last))
+
+    def doctype_start(*_args: object) -> None:
+        stack.append((parser.CurrentLineNumber - 1, []))
+
+    def doctype_end() -> None:
+        first, _ = stack.pop()
+        stack[-1][1].append(Node(first, first, parser.CurrentLineNumber - 1))
+
     parser.StartElementHandler = start
     parser.EndElementHandler = end
+    parser.CommentHandler = comment
+    parser.StartDoctypeDeclHandler = doctype_start
+    parser.EndDoctypeDeclHandler = doctype_end
     try:
         parser.Parse(source, True)
     except xml.parsers.expat.ExpatError:
         return None
-    return source.splitlines(), tuple(stack[0][1])
+    return tuple(stack[0][1])
+
+
+def xml_tree(raw: str) -> tuple[list[str], tuple[Node, ...]] | None:
+    """The XML's lines (pretty-printed if it came packed) and its element tree; None if not XML.
+
+    XML that fails to parse only for bare ampersands is read leniently; its lines are shown as
+    they are in the input."""
+    for text in (raw, lenient_xml(raw)):
+        try:
+            source = _pretty(text)
+        except Exception:  # minidom raises a handful of unrelated types on bad input  # noqa: BLE001
+            continue
+        roots = _element_tree(source)
+        if roots is not None:
+            return (raw.splitlines() if source is text else source.splitlines()), roots
+    return None
 
 
 def fold_xml(raw: str, budget_tokens: int, terms: frozenset[str] = frozenset()) -> TreeFold | None:

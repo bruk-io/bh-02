@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from compressors.code import fold_code, language_for
-from compressors.common import estimate_tokens, split_identifiers
+from compressors.common import estimate_tokens, query_words
 from compressors.route import fold
 
 FORMATS = ("auto", "code", "json", "xml", "html", "outline", "lines", "text")
@@ -53,7 +53,7 @@ def fold_text(
     raw_tokens = estimate_tokens(text)
     if raw_tokens <= budget:
         return Result(text, None)
-    terms = frozenset(t for t in split_identifiers(query) if len(t) >= 3)
+    terms = query_words(query)
     language = lang or (language_for(path) if path else None)
     if fmt == "code" and language is None:
         raise ValueError("--as code needs a language: pass --lang python (or typescript, rust, go, ...)")
