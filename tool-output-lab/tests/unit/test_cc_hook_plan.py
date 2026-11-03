@@ -1,6 +1,9 @@
 """The hook's decisions, as data: which events it acts on, and which spill paths it trusts."""
 
-from claude_code.hook import Inline, Spilled, plan, trusted_spill
+import json
+
+from claude_code.hook import Inline, Spilled, plan, render, trusted_spill
+from compressors.route import fold
 
 NOTICE = (
     "Error: result (124,021 characters across 1 line) exceeds maximum allowed tokens. "
@@ -43,3 +46,12 @@ def test_a_spill_is_trusted_only_inside_the_session_folder_under_claude_codes_na
     assert not trusted_spill("/usr/local/lib/python3.13/subprocess.py", session)
     assert not trusted_spill(f"{session}/notes.txt", session)
     assert not trusted_spill(f"{session}/sub/mcp-x-y-1.txt", session)
+
+
+def test_the_banners_jq_example_reads_json_lines_as_one_array():
+    pods = [{"name": f"pod-{i:04d}", "phase": "Running"} for i in range(300)]
+    lines = fold("\n".join(json.dumps(p) for p in pods), budget_tokens=200)
+    doc = fold(json.dumps({"pods": pods}), budget_tokens=200)
+    assert lines is not None and doc is not None
+    assert "jq -s '.[2:7]' /s/out.txt" in render(lines, "/s/out.txt")
+    assert "jq '.pods[2:7]' /s/out.txt" in render(doc, "/s/out.txt")

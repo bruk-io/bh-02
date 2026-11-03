@@ -85,18 +85,34 @@ def coverage(source: str, out: str, numbered: bool) -> list[str]:
     return problems
 
 
+def _line_holds(lines: list[str], i: int, item: object) -> bool:
+    try:
+        return json.loads(lines[i]) == item
+    except IndexError, ValueError:
+        return False
+
+
 def json_markers(raw: str, out: str) -> list[str]:
     """Problems with the JSON fold's markers, each checked against the source with `resolve`."""
     parsed = parse_json_or_jsonl(raw)
     if parsed is None:
         return ["the JSON fold's source does not parse"]
-    source = parsed[0]
-    body = out.split("\n", 1)[1] if out.startswith("JSONL") else out
-    try:
-        folded = json.loads(body)
-    except ValueError as e:
-        return [f"the JSON fold does not parse: {e}"]
+    source, kind = parsed
+    note = markers.JSONL_NOTE.match(out)
     problems: list[str] = []
+    if (note is not None) != (kind == "jsonl"):
+        problems.append("the JSONL note is missing" if note is None else "a JSONL note on a JSON document")
+    if note is not None:
+        if int(note["records"]) != len(source):
+            problems.append(f"the JSONL note says {note['records']} records, the source has {len(source)}")
+        if note["where"] == "index i is line i+1":  # read each record back from its claimed line
+            lines = split_lines(raw)
+            if not all(_line_holds(lines, i, item) for i, item in enumerate(source)):
+                problems.append("the JSONL note maps index i to line i+1, and a record is not there")
+    try:
+        folded = json.loads(out[note.end() :] if note else out)
+    except ValueError as e:
+        return [*problems, f"the JSON fold does not parse: {e}"]
 
     def walk(v: object) -> None:
         if isinstance(v, dict):
@@ -165,7 +181,7 @@ def check(task: Task, budget: int, query_on: bool) -> Row:
         if out != floor:
             violations.append(f"{estimate_tokens(out)} tokens for a budget of {budget}, and not the floor")
     if not passthrough:
-        if branch == "json":
+        if branch in ("json", "jsonl"):
             violations += json_markers(raw, out)
         elif branch in ("xml", "outline", "lines") or branch.startswith("code-"):
             source = result.source if result.source is not None else raw

@@ -81,8 +81,23 @@ def test_a_value_matching_the_query_is_promoted_only_when_the_query_is_used():
 def test_jsonl_is_folded_as_one_array():
     raw = "\n".join(json.dumps(p) for p in _pods(300, at100={"phase": "Evicted"}))
     folded = fold(raw, budget_tokens=300)
-    assert folded is not None and folded.branch == "json"
-    assert "JSONL" in folded.body and "pod-0100" in folded.body
+    assert folded is not None and folded.branch == "jsonl"
+    assert folded.body.startswith("JSONL shown as one array of 300 records; index i is line i+1;")
+    assert "pod-0100" in folded.body
+
+
+def test_jsonl_with_blank_lines_does_not_claim_index_i_is_line_i_plus_1():
+    rows = [json.dumps(p) for p in _pods(300, at150={"phase": "Failed"})]
+    folded = fold("\n" + "\n\n".join(rows) + "\n", budget_tokens=300)
+    assert folded is not None and folded.branch == "jsonl"
+    assert "blank lines are skipped, so index i is not line i+1" in folded.body.splitlines()[0]
+    assert "$[150]" in folded.body  # the path still names the record, for jq -s
+
+
+def test_a_jsonl_record_may_hold_characters_that_splitlines_splits_on():
+    rows = [json.dumps({"name": f"pod-{i:04d}", "note": "a\u2028b"}, ensure_ascii=False) for i in range(300)]
+    folded = fold("\n".join(rows), budget_tokens=300)
+    assert folded is not None and folded.branch == "jsonl"
 
 
 def test_a_folded_json_path_resolves_to_what_it_names():

@@ -107,12 +107,13 @@ def render(folded: Folded, path: str, raw_path: str = "") -> str:
     size = f"~{folded.raw_tokens} tokens -> ~{estimate_tokens(folded.body)}"
     head = f"[Folded: {size}. Full output: {path}{raw_note}"
     match folded.branch:
-        case "json":
+        case "json" | "jsonl":
             m = markers.JSON_SLICE_IN_TEXT.search(folded.body)
             example = f"{_jq_path(m[1])}[{m[2]}:{min(int(m[3]), int(m[2]) + 5)}]" if m else "."
+            slurp = " -s" if folded.branch == "jsonl" else ""  # JSON Lines: jq reads the records as one array
             how = (
                 "Fold markers give the JSON path of what they hide, and say why any item shown out of order "
-                f"is shown. Read hidden parts from the file, e.g. jq '{example}' {quoted}"
+                f"is shown. Read hidden parts from the file, e.g. jq{slurp} '{example}' {quoted}"
             )
         case "lines" | "html" | "xml" | "outline":
             m = markers.ANY_RANGE.search(folded.body)
