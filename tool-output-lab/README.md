@@ -56,9 +56,11 @@ A branch, or a mode of the hook, is cut if either holds against native Claude Co
   FINDINGS 37; summed input is reported, not judged).
 
 Change these numbers only before a run, never after seeing one. Layer 2 applies the criteria to
-95% intervals. With Haiku (P2, FINDINGS 33-39): folding results under the spill threshold passes;
-folding spilled results fails the input criterion (the final context grows 800 tokens) and is cut,
-pending Sonnet in P3.
+95% intervals. Folding results under the spill threshold passes with Haiku (P2) and holds on Sonnet
+(P3: same answers, final context -8.8k, cost -20%). Folding spilled results fails the input
+criterion with Haiku (the final context grows 800 tokens) and is cut; with Sonnet it is undecided
+at 20 pairs. Fold tools offered to the model, by CLAUDE.md or as an MCP tool, were never used by
+Sonnet and once in 44 runs by Haiku (FINDINGS 33-45).
 
 ## Running
 
