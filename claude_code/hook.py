@@ -186,6 +186,11 @@ def render(folded: Folded, path: str, raw_path: str = "") -> str:
                 "Markers name the line numbers they hide. "
                 f"Read them with sed -n '{first},{last}p' {quoted} or grep -n"
             )
+        case "json-schema" | "jsonl-schema":
+            how = (
+                "This is the data's schema: its fields, their values and counts, and the rows that break the "
+                f"pattern, by jq path. FILE in the query is {quoted}"
+            )
         case _:
             how = f"Markers give the character offsets they hide; read them with python or grep on {quoted}"
     return f"{head}. {how}.]\n{folded.body}"

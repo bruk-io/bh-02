@@ -25,7 +25,7 @@ from pathlib import Path
 
 from compressors.code import fold_code, language_for
 from compressors.common import estimate_tokens, query_words, read_text
-from compressors.route import fold
+from compressors.route import VIEWS, fold
 
 FORMATS = ("auto", "code", "json", "xml", "html", "outline", "lines", "text")
 
@@ -47,6 +47,7 @@ def fold_text(
     lang: str | None = None,
     query: str = "",
     quiet: bool = False,
+    view: str = "sample",
 ) -> Result:
     """The folded view of `text`; pure, so the CLI's behaviour is testable without files.
 
@@ -70,7 +71,9 @@ def fold_text(
         tree = fold_code(text, language, budget, terms)
         body, branch, source = tree.text, "code", None
     else:
-        folded = fold(text, budget_tokens=budget, terms=terms, force=None if fmt == "auto" else fmt)
+        folded = fold(
+            text, budget_tokens=budget, terms=terms, force=None if fmt == "auto" else fmt, view=view
+        )
         if folded is None:  # the structured fold saved too little: cut by characters instead
             folded = fold(text, budget_tokens=budget, terms=terms, force="text")
         if folded is None:
@@ -79,11 +82,12 @@ def fold_text(
     result = Result(body, source, branch, language if branch == "code" else None)
     if quiet:
         return result
-    where = (
-        "line numbers refer to the pretty-printed copy"
-        if source is not None
-        else "line numbers refer to the input"
-    )
+    if branch.endswith("-schema"):
+        where = "paths are jq paths into the input, which FILE in the query stands for"
+    elif source is not None:
+        where = "line numbers refer to the pretty-printed copy"
+    else:
+        where = "line numbers refer to the input"
     kind = f"code ({language})" if branch == "code" else branch
     header = f"[fold: {kind}, ~{raw_tokens} -> ~{estimate_tokens(body)} tokens; {where}]"
     return replace(result, text=f"{header}\n{body}")
@@ -106,6 +110,13 @@ def main(argv: list[str] | None = None) -> int:
         "--save", type=Path, help="where to write the pretty-printed copy the line numbers refer to"
     )
     parser.add_argument("--quiet", action="store_true", help="no header line")
+    parser.add_argument(
+        "--view",
+        choices=VIEWS,
+        default="sample",
+        help="data (JSON) shown by samples, or by its schema: fields, values and counts, and the rows that "
+        "break the pattern",
+    )
     ns = parser.parse_args(argv)
     try:
         if ns.file == "-":  # bytes, decoded: no newline translation, so line numbers match sed's
@@ -120,6 +131,7 @@ def main(argv: list[str] | None = None) -> int:
             lang=ns.lang,
             query=ns.query,
             quiet=ns.quiet,
+            view=ns.view,
         )
         if result.source is not None and ns.save is not None:
             ns.save.write_text(result.source, encoding="utf-8")
