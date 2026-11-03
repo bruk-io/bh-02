@@ -153,3 +153,5 @@
 {"tool": "mcp__fixture__get_figma_metadata", "tool_use_id": "toolu_01EdXTwsj3RSs7ZUv8GKpfKc", "spilled": true, "raw_tokens": 36766, "branch": "xml", "out_tokens": 1880}
 {"tool": "mcp__fixture__get_figma_metadata", "tool_use_id": "toolu_01MuBTMHPja2NnSFdJ1WYihv", "spilled": true, "raw_tokens": 36730, "branch": "xml", "out_tokens": 1832}
 {"tool": "mcp__fixture__get_figma_metadata", "tool_use_id": "toolu_0122nxHpup85py2odPouM3aw", "spilled": true, "raw_tokens": 36730, "branch": "xml", "out_tokens": 1832}
+{"tool": "mcp__fixture__get_figma_metadata", "tool_use_id": "toolu_013e4uMnq1XbCvHRsJ2ek2rt", "spilled": true, "raw_tokens": 36724, "branch": "xml", "out_tokens": 1834}
+{"tool": "mcp__fixture__get_figma_metadata", "tool_use_id": "toolu_01JTaLSwZL4zj4DcxsoVboi1", "spilled": true, "raw_tokens": 36724, "branch": "xml", "out_tokens": 1834}

@@ -94,7 +94,8 @@ confident is the harm, so it is reported separately from wrong and hedged.
 ## Statistics
 
 - **Paired design:** the same case and seed in every condition, so differences are per case.
-- **Accuracy:** with a Wilson 95% interval.
+- **Accuracy:** with a Wilson 95% interval; paired accuracy with Newcombe's interval and McNemar's
+  exact p (a bootstrap is too sure with few discordant pairs; FINDINGS 33).
 - **Tokens, cost and time:** as the paired median difference with a bootstrap interval.
 - **Sample size:** about 80 paired cases per format and kind detect a 10-point accuracy drop (McNemar,
   80% power, in the best case where every discordant pair goes the same way). Smaller runs are
@@ -106,6 +107,9 @@ confident is the harm, so it is reported separately from wrong and hedged.
 ```
 ./lab evals l1 [--budget 2000] [--only json log ...] [--name l1-x]   # layer 1, free, ~15 s
 ./lab check                                                         # includes a layer-1 sample
+./lab evals l2 --dry-run [--bands M L] [--reps N]                   # layer 2: the plan and its cost
+./lab evals l2 --bands M L --name l2-x [--first-rep N]              # run it (headless Claude Code)
+./lab evals l2 --merge l2-x l2-y --name l2-xy                       # report runs together, rescored
 ```
 
 The code: `evals/truth.py` (answer kinds and scorers), `evals/synthetic.py` (planted payloads),
@@ -117,6 +121,6 @@ The code: `evals/truth.py` (answer kinds and scorers), `evals/synthetic.py` (pla
 | Phase | Builds | Model cost |
 |---|---|---|
 | P1 | A task registry (format, kind, source, prompt, ground truth, scorer); L1 invariants and sufficiency over every synthetic and real source; the absent, count, enumerate and locate kinds for JSON, logs, XML, accessibility trees and code. **Done**: `evals/`, `./lab evals l1`, results in FINDINGS.md 28-32 | none |
-| P2 | L2 on P1's tasks, sizes M and L: native against fold spilled-only and fold all, Haiku, 3 seeds, paired | about $5 |
+| P2 | L2 on P1's tasks, sizes M and L: native against fold spilled-only and fold all, Haiku, 3 seeds, paired. **Done** with 2 repetitions: `./lab evals l2`, results in FINDINGS.md 33-39, `results/l2-p2.md` | $4.93 |
 | P3 | The same on Sonnet; the no-shell channel; edit tasks with executable checks | about $15 to $25 |
 | P4 | Explain tasks with the validated judge; context growth; Opus spot checks; Markdown, CSV and diffs | about $10 |
