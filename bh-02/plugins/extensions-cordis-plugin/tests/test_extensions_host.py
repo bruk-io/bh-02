@@ -7,8 +7,6 @@ import asyncio
 import contextlib
 import json
 import os
-import shutil
-import tempfile
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -150,6 +148,19 @@ async def _running(
     async with Extensions(runner, commands, frame, system, broker, approval, approval, config) as running:
         runner.on_release(running.stopped)  # as the row does
         yield _Harness(root, runner, jail, commands, frame, system, broker, approval, running)
+
+
+async def test_the_extensions_dial_the_endpoint_the_runner_chose_for_their_worker(tmp_path: Path) -> None:
+    """TASK-0179: the worker's command is built from the endpoint the runner reserved, and the
+    host dials that one (a load that works proves the worker listens where the host dialled)."""
+    async with _running(tmp_path) as h:
+        h.write("todo", _TODO)
+        await h.extensions.look()
+        assert h.extensions.statuses["todo"].ok
+        (worker,) = h.jail.started
+        assert Path(worker.endpoint).exists() and worker.endpoint.endswith(".sock")
+        await h.runner.release()
+        assert not Path(worker.endpoint).exists()  # its stop removed the directory the runner made
 
 
 async def test_an_extension_the_model_writes_is_loaded_and_what_it_adds_reaches_bh_02(tmp_path: Path) -> None:
@@ -504,17 +515,13 @@ async def test_after_release_stops_the_worker_every_extension_loads_again_once_t
         assert "/release" in h.status()["todo"]["error"], h.status()
         await h.extensions.look()
         assert len(h.jail.started) == 1  # released: no worker starts while nothing changed
-        sockets = tempfile.mkdtemp(prefix="bh-x-", dir="/tmp")  # a socket path must be short
-        python_process = await h.runner.start(
-            worker_argv(f"{sockets}/k.sock"), cwd=sockets, endpoint=f"{sockets}/k.sock"
-        )
+        python_process = await h.runner.start(worker_argv, cwd=str(tmp_path))
         try:  # the next input started the Python process (a stand-in): the runner runs again
             await h.extensions.look()
             assert len(h.jail.started) == 3 and h.extensions.statuses["todo"].ok
             assert await h.commands.runs["todo"]("eggs") == "eggs"  # a new worker: a new list
         finally:
             await python_process.stop()
-            shutil.rmtree(sockets, ignore_errors=True)
 
 
 async def test_a_change_while_released_loads_at_once_and_ends_the_release(tmp_path: Path) -> None:

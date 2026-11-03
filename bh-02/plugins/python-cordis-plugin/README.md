@@ -72,7 +72,7 @@ calls it at most twice, at any depth: the import system's frames are told by the
 (`f_globals`, `f_back`), which raise no audit event, where a frame's `f_code` raises one.
 
 `client.py`'s `PythonProcess` is the host end: entering starts the Python process through the runner
-(its socket in a short `/tmp` directory, since a socket path must fit in ~100 bytes), leaving
+(on the socket the runner chooses for it: `start` takes `worker_argv`, which puts the endpoint in the command), leaving
 stops it. Cancelling `run` interrupts the input and waits `grace` seconds for it to end; a
 process that won't, or that died, is started again on the next input, which is told its variables are gone,
 and why when its jail ended it (`started.ended()`: a Linux `runner:confined` jail ends itself

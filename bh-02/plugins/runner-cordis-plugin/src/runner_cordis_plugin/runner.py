@@ -16,18 +16,26 @@ brig jail (`jail.BrigJail`, `runner:confined`) or none (`unconfined.Unjailed`,
   field, and an owner waiting for a release to end.
 """
 
+import shutil
+import tempfile
 from collections.abc import Awaitable, Callable, Mapping, Sequence
+from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 from cordis_helpers import Hooks
 
-__all__ = ["Mechanism", "Runner", "Started"]
+__all__ = ["Mechanism", "Runner", "Started", "reserved_endpoint", "unreserve_endpoint"]
 
 
 @runtime_checkable
 class Started(Protocol):
     """A program a runner started: what its own start is (its grades, and what the person should
     know of it), and how to stop it."""
+
+    @property
+    def endpoint(self) -> str:
+        """The Unix socket the program listens on: the one the runner chose for this start."""
+        ...
 
     def report(self) -> Mapping[str, str]: ...
     def notice(self) -> str: ...
@@ -40,10 +48,11 @@ class Mechanism(Protocol):
     on the host once no program of its runs, and says what that freed."""
 
     def report(self) -> Mapping[str, str]: ...
-    async def start(self, argv: Sequence[str], *, cwd: str, endpoint: str) -> Started: ...
+    async def start(self, argv_for: ArgvFor, *, cwd: str) -> Started: ...
     async def release(self) -> str: ...
 
 
+type ArgvFor = Callable[[str], Sequence[str]]
 type Release = Callable[[], Awaitable[str]]
 type Watch = Callable[[Started], None]
 
@@ -70,11 +79,12 @@ class Runner:
         """Whether `/release` has stopped what runs and nothing has started since."""
         return self._released
 
-    async def start(self, argv: Sequence[str], *, cwd: str, endpoint: str) -> Started:
-        """Start `argv` in `cwd`, listening on `endpoint`; tell each watcher (`on_start`). A start
-        ends a release, before anything waits."""
+    async def start(self, argv_for: ArgvFor, *, cwd: str) -> Started:
+        """Start the program `argv_for(endpoint)` in `cwd`, listening on the endpoint the runner
+        chose for it (`started.endpoint`, handed to `argv_for` before anything starts); tell each
+        watcher (`on_start`). A start ends a release, before anything waits."""
         self._released = False
-        started = await self._mechanism.start(argv, cwd=cwd, endpoint=endpoint)
+        started = await self._mechanism.start(argv_for, cwd=cwd)
         self._last = started
         for watch in tuple(self._starts):
             watch(started)
@@ -97,3 +107,16 @@ class Runner:
         said = [await stop() for stop in tuple(self._releases)]
         said.append(await self._mechanism.release())
         return " ".join(part for part in said if part)
+
+
+def reserved_endpoint() -> str:
+    """A socket path for one start, in a directory of its own that only that start uses: short
+    (a Unix socket path must fit in about 100 bytes) and under `/tmp`, which a jail may be given
+    to write. A mechanism reserves it before the program's command is built, and gives the
+    directory back with `unreserve_endpoint` once the program is stopped."""
+    return str(Path(tempfile.mkdtemp(prefix="bh-s-", dir="/tmp"), "k.sock"))
+
+
+def unreserve_endpoint(endpoint: str) -> None:
+    """Remove the directory `reserved_endpoint` made for `endpoint`, with whatever is in it."""
+    shutil.rmtree(Path(endpoint).parent, ignore_errors=True)

@@ -8,8 +8,10 @@ a test drives either path with a fake rule over this. Never bind it in a running
 import asyncio
 import contextlib
 import os
+import shutil
 import signal
-from collections.abc import Mapping, Sequence
+import tempfile
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 __all__ = ["PlainJail"]
@@ -21,8 +23,9 @@ _UNENFORCED: Mapping[str, str] = {"fs_write": "unenforced", "network": "unenforc
 
 
 class _Started:
-    def __init__(self, process: asyncio.subprocess.Process) -> None:
+    def __init__(self, process: asyncio.subprocess.Process, endpoint: str) -> None:
         self.process = process
+        self.endpoint = endpoint
 
     def report(self) -> Mapping[str, str]:
         return _UNENFORCED
@@ -35,6 +38,7 @@ class _Started:
             with contextlib.suppress(ProcessLookupError):
                 os.killpg(self.process.pid, signal.SIGKILL)
         await self.process.wait()
+        shutil.rmtree(Path(self.endpoint).parent, ignore_errors=True)
 
 
 class PlainJail:
@@ -50,12 +54,18 @@ class PlainJail:
     async def release(self) -> str:
         return ""
 
-    async def start(self, argv: Sequence[str], *, cwd: str, endpoint: str) -> _Started:
+    async def start(self, argv_for: Callable[[str], Sequence[str]], *, cwd: str) -> _Started:
+        # A Unix socket path must fit in about 100 bytes, so it lives in a short directory of its own.
+        endpoint = str(Path(tempfile.mkdtemp(prefix="bh-t-", dir="/tmp"), "k.sock"))
         with Path(endpoint).with_name("stderr.log").open("wb") as stderr:
             process = await asyncio.create_subprocess_exec(
-                *argv, cwd=cwd, stdin=asyncio.subprocess.DEVNULL, stderr=stderr, start_new_session=True
+                *argv_for(endpoint),
+                cwd=cwd,
+                stdin=asyncio.subprocess.DEVNULL,
+                stderr=stderr,
+                start_new_session=True,
             )
-        started = _Started(process)
+        started = _Started(process, endpoint)
         self.started.append(started)
         async with asyncio.timeout(_READY_S):
             while True:  # until it accepts: connect, then leave without a word (a probe)

@@ -105,6 +105,7 @@ from runner_cordis_plugin.policy import (
     spec_for,
     told_reads,
 )
+from runner_cordis_plugin.runner import ArgvFor, reserved_endpoint, unreserve_endpoint
 from runner_cordis_plugin.tripwire import Tripwire
 
 __all__ = [
@@ -300,12 +301,14 @@ class _Jailed:
         process: Process,
         facts: _Facts,
         jail_dir: str,
+        endpoint: str,
         made: Sequence[tuple[str, str]],
         lock: int | None,
         record: str | None,
         tether: int | None = None,
         wire: Tripwire | None = None,
     ) -> None:
+        self.endpoint = endpoint
         self._jail = jail
         self._process = process
         self._facts = facts
@@ -386,6 +389,7 @@ class _Jailed:
             os.close(self._tether)
             self._tether = None
         shutil.rmtree(self._jail_dir, ignore_errors=True)
+        unreserve_endpoint(self.endpoint)
 
 
 async def _until_listening(endpoint: str, timeout: float) -> None:
@@ -518,13 +522,13 @@ class BrigJail:
         await asyncio.to_thread(self._swept, records_dir(os.environ, str(Path.home())))
         return released_for(running=bool(self._live))
 
-    async def start(self, argv: Sequence[str], *, cwd: str, endpoint: str) -> _Jailed:
-        """Start `argv` in `cwd`, in a jail of its own compiled from the policy, listening on
-        `endpoint`."""
+    async def start(self, argv_for: ArgvFor, *, cwd: str) -> _Jailed:
+        """Start the program `argv_for(endpoint)` in `cwd`, in a jail of its own compiled from the
+        policy, listening on the endpoint this start reserved (`started.endpoint`)."""
         starting: asyncio.Future[None] = asyncio.get_running_loop().create_future()
         self._starting.add(starting)
         try:
-            started = await self._launched(argv, cwd=cwd, endpoint=endpoint)
+            started = await self._launched(argv_for, cwd=cwd)
             self._live = [*(each for each in self._live if not each.stopped), started]
             return started
         finally:
@@ -532,7 +536,7 @@ class BrigJail:
             if not starting.done():  # a `release` cancelled as it waited cancels it
                 starting.set_result(None)
 
-    async def _launched(self, argv: Sequence[str], *, cwd: str, endpoint: str) -> _Jailed:
+    async def _launched(self, argv_for: ArgvFor, *, cwd: str) -> _Jailed:
         stack_for(self._platform)  # refuses on a platform brig has no preset for
         if self._platform == "linux" and not Path(DEFAULT_BWRAP_PATH).exists():
             raise RuntimeError(
@@ -546,6 +550,7 @@ class BrigJail:
         records = records_dir(os.environ, str(Path.home()))
         lock = await asyncio.to_thread(self._hold, records) if self._platform == "linux" else None
         jail_dir = tempfile.mkdtemp(prefix="bh-j-", dir="/tmp")
+        endpoint = reserved_endpoint()
         record: str | None = None
         placed: list[tuple[str, str]] = []
         wire: Tripwire | None = None
@@ -553,6 +558,7 @@ class BrigJail:
         # inherited, so no other child of bh-02 (the Claude Code CLI) holds the write end.
         watched, tether = os.pipe()
         try:
+            argv = argv_for(endpoint)
             author = git_author(*git_identity(cwd)) if self._platform == "linux" else ()
             policy, python = self._planned(jail_dir, endpoint, cwd, argv, author)
             jail, report = self._compiled(policy, python, jail_dir)
@@ -607,6 +613,7 @@ class BrigJail:
                 os.close(lock)
             os.close(tether)
             shutil.rmtree(jail_dir, ignore_errors=True)
+            unreserve_endpoint(endpoint)
             raise
         finally:
             os.close(watched)
@@ -615,7 +622,7 @@ class BrigJail:
                 lambda: still_running(running.destroy(grace=0.0)),
                 fallback=lambda: os.killpg(running.instance_group or process.pid, signal.SIGKILL),
             )
-        started = _Jailed(running, process, facts, jail_dir, placed, lock, record, tether, wire)
+        started = _Jailed(running, process, facts, jail_dir, endpoint, placed, lock, record, tether, wire)
         try:
             await _until_listening(endpoint, _READY_TIMEOUT_S)
         except BaseException as error:

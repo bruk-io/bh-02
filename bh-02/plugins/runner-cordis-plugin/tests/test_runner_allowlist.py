@@ -6,7 +6,6 @@ endpoint's `key = { env = ... }` reads is refused. The values here are stand-ins
 import asyncio
 import json
 import sys
-import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -198,12 +197,10 @@ def _jailable() -> None:
 
 
 async def _names_in_the_jail(runner: Runner, project: Path) -> list[str]:
-    endpoint = str(Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"), "k.sock"))
     seen = project / "env.json"
     started = await runner.start(
-        [sys.executable, "-I", "-c", _LISTEN_AND_LIST, endpoint, str(seen)],
+        lambda endpoint: [sys.executable, "-I", "-c", _LISTEN_AND_LIST, endpoint, str(seen)],
         cwd=str(project),
-        endpoint=endpoint,
     )
     try:
         for _ in range(200):

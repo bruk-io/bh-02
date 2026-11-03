@@ -9,8 +9,10 @@ import asyncio
 import contextlib
 import os
 import signal
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from pathlib import Path
+
+from runner_cordis_plugin.runner import ArgvFor, reserved_endpoint, unreserve_endpoint
 
 __all__ = ["Unjailed", "UNENFORCED"]
 
@@ -52,8 +54,9 @@ def _program_env(environ: Mapping[str, str]) -> dict[str, str]:
 class _Process:
     """The worker in a session of its own, so a terminal's Ctrl-C never reaches it directly."""
 
-    def __init__(self, process: asyncio.subprocess.Process) -> None:
+    def __init__(self, process: asyncio.subprocess.Process, endpoint: str) -> None:
         self._process = process
+        self.endpoint = endpoint
 
     def interrupt(self) -> bool:
         if self._process.returncode is not None:
@@ -88,6 +91,13 @@ class _Process:
         await self._process.wait()
 
     async def stop(self) -> None:
+        """End the process, then remove the directory its socket and log were in."""
+        try:
+            await self._ended()
+        finally:
+            unreserve_endpoint(self.endpoint)
+
+    async def _ended(self) -> None:
         if self._process.returncode is None:
             with contextlib.suppress(*_GONE):
                 os.killpg(self._process.pid, signal.SIGTERM)
@@ -110,19 +120,24 @@ class Unjailed:
         """Nothing: no jail holds anything on the host."""
         return ""
 
-    async def start(self, argv: Sequence[str], *, cwd: str, endpoint: str) -> _Process:
+    async def start(self, argv_for: ArgvFor, *, cwd: str) -> _Process:
+        endpoint = reserved_endpoint()
         log = Path(endpoint).with_name("stderr.log")
-        with log.open("wb") as stderr:
-            process = await asyncio.create_subprocess_exec(
-                *argv,
-                cwd=cwd,
-                env=_program_env(os.environ),
-                stdin=asyncio.subprocess.DEVNULL,
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=stderr,
-                start_new_session=True,
-            )
-        started = _Process(process)
+        try:
+            with log.open("wb") as stderr:
+                process = await asyncio.create_subprocess_exec(
+                    *argv_for(endpoint),
+                    cwd=cwd,
+                    env=_program_env(os.environ),
+                    stdin=asyncio.subprocess.DEVNULL,
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=stderr,
+                    start_new_session=True,
+                )
+        except BaseException:
+            unreserve_endpoint(endpoint)
+            raise
+        started = _Process(process, endpoint)
         try:
             await _until_listening(endpoint, process)
         except BaseException:

@@ -55,12 +55,16 @@ def _inside_tmux(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("XDG_STATE_HOME", tempfile.mkdtemp(prefix="bh-s-", dir="/tmp"))
 
 
-async def _environment_of(start: Callable[[list[str], str, str], Awaitable[Any]], project: Path) -> Any:
+async def _environment_of(
+    start: Callable[[Callable[[str], list[str]], str], Awaitable[Any]], project: Path
+) -> Any:
     """The environment a program the runner starts sees."""
-    endpoint = str(Path(tempfile.mkdtemp(prefix="bh-k-", dir="/tmp"), "k.sock"))
     seen = project / "env.json"
-    argv = [sys.executable, "-I", "-c", _LISTEN_AND_LIST, endpoint, str(seen)]
-    started = await start(argv, str(project), endpoint)
+
+    def argv(endpoint: str) -> list[str]:
+        return [sys.executable, "-I", "-c", _LISTEN_AND_LIST, endpoint, str(seen)]
+
+    started = await start(argv, str(project))
     try:
         for _ in range(200):
             if seen.exists() and seen.read_text().endswith("}"):
@@ -75,8 +79,8 @@ async def test_the_unconfined_runner_starts_programs_without_tmux_s_variables(tm
     project = tmp_path / "project"
     project.mkdir()
 
-    async def start(argv: list[str], cwd: str, endpoint: str) -> Any:
-        return await Unjailed().start(argv, cwd=cwd, endpoint=endpoint)
+    async def start(argv: Callable[[str], list[str]], cwd: str) -> Any:
+        return await Unjailed().start(argv, cwd=cwd)
 
     seen = await _environment_of(start, project)
     assert seen["TMUX"] is None and seen["TMUX_PANE"] is None
@@ -91,8 +95,8 @@ async def test_the_unconfined_runner_keeps_the_claude_token_out_and_passes_provi
     project = tmp_path / "project"
     project.mkdir()
 
-    async def start(argv: list[str], cwd: str, endpoint: str) -> Any:
-        return await Unjailed().start(argv, cwd=cwd, endpoint=endpoint)
+    async def start(argv: Callable[[str], list[str]], cwd: str) -> Any:
+        return await Unjailed().start(argv, cwd=cwd)
 
     seen = await _environment_of(start, project)
     assert "CLAUDE_CODE_OAUTH_TOKEN" not in seen["names"]
@@ -108,8 +112,8 @@ async def test_the_confined_runner_starts_programs_without_tmux_s_variables(tmp_
     project.mkdir()
     jail = BrigJail(BrigConfig(), _Host())
 
-    async def start(argv: list[str], cwd: str, endpoint: str) -> Any:
-        return await jail.start(argv, cwd=cwd, endpoint=endpoint)
+    async def start(argv: Callable[[str], list[str]], cwd: str) -> Any:
+        return await jail.start(argv, cwd=cwd)
 
     seen = await _environment_of(start, project)
     assert seen["TMUX"] is None and seen["TMUX_PANE"] is None
@@ -125,8 +129,8 @@ async def test_the_confined_runner_passes_neither_the_claude_token_nor_a_provide
     project.mkdir()
     jail = BrigJail(BrigConfig(), _Host())
 
-    async def start(argv: list[str], cwd: str, endpoint: str) -> Any:
-        return await jail.start(argv, cwd=cwd, endpoint=endpoint)
+    async def start(argv: Callable[[str], list[str]], cwd: str) -> Any:
+        return await jail.start(argv, cwd=cwd)
 
     seen = await _environment_of(start, project)
     assert "CLAUDE_CODE_OAUTH_TOKEN" not in seen["names"] and "OPENROUTER_API_KEY" not in seen["names"]

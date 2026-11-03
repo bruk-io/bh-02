@@ -14,8 +14,12 @@ over it; and `/release`. The only package in the workspace that imports brig (th
 
 `runner.py`'s `Runner` is the `runner` value both rows bind, over a mechanism (`BrigJail` in
 `jail.py`, `Unjailed` in `unconfined.py`): what is the same whichever starts the program.
-- `start(argv, *, cwd, endpoint) -> started`: the mechanism starts it, listening on `endpoint`,
-  and each watcher (`on_start(watch) -> remover`) is told of it after, so the status bar's jail
+- `start(argv_for, *, cwd) -> started`: the mechanism chooses the program's socket (`endpoint`: a
+  short path, since a socket path must fit in ~100 bytes, in a `/tmp` directory of its own that the
+  jail may write), builds the command with `argv_for(endpoint)`, starts it listening there and
+  waits until it accepts (`started.endpoint`, the path the owner dials; `stop` removes the
+  directory). The owner chooses nothing: a mechanism that has the jail reserve the channel (brig's
+  `reserve_channels`) changes no owner. Each watcher (`on_start(watch) -> remover`) is told of it after, so the status bar's jail
   field (`tui:grades`) follows a Python process started again in place. What one start is stays
   with it (`started.report()`, `notice()`, `reads()`, `writes()`): the Python process and the
   extensions process each start from a command of their own. `report()` and `notice()` are the
@@ -184,7 +188,7 @@ The modules, so the swap to a new brig replaces two of them:
   A third, of a run with another `XDG_STATE_HOME`, is not known to this one and is not hidden;
 - **network**: none; the program's own LISTEN socket is the one way in or out. brig's Spec
   names the channel (`program`, whichever program it is), not its path (brig's decision-186), so
-  the directory the owner chose for the socket is a write root of the policy's own, as brig
+  the directory the mechanism chose for the socket is a write root of the policy's own, as brig
   granted it per channel until then,
   and the runner waits for it to accept a connection itself (TASK-0079.31 moves the owners to a
   socket brig reserves and dials with its check). The runner
@@ -337,7 +341,7 @@ decisions 194 to 196 a program the runner starts is PID 1 of user, pid, mount, n
 namespaces of its own, with a `/proc` for them: it sees no other program and the supervisor not at
 all, can't signal one, and `$TMPDIR` is a directory of its own, not the one every program of the jail
 shares. Ending a program ends its pid namespace, a `setsid()` child included. What this does not
-reach yet is bh-02's own sockets: each owner's socket directory is a write grant of the Spec like any
+reach yet is bh-02's own sockets: each start's socket directory is a write grant of the Spec like any
 other and stays shared by the jail's programs, so one can reach another owner's socket there until
 TASK-0079.31 moves the owners to brig's channel directory (where each program sees only its own).
 Run as uid 0, or on a host that blocks nested user namespaces, the programs share the jail's

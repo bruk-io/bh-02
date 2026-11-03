@@ -11,7 +11,6 @@ import shutil
 import stat
 import subprocess
 import sys
-import tempfile
 import time
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
@@ -584,23 +583,19 @@ async def test_on_linux_the_python_process_tells_the_model_its_own_worker_s_tree
     elsewhere.mkdir()
     (elsewhere / "worker.py").write_text(_LISTENS)
     jail = BrigJail(BrigConfig(), _Host())
-    sockets = Path(tempfile.mkdtemp(prefix="bh-x-", dir="/tmp"))  # a socket path must be short
-    endpoint = str(sockets / "x.sock")
-    try:
-        async with _python(jail, PythonProcessConfig(root=str(project))) as process:
-            told = process.instructions()
-            own = str(Path(worker_argv(endpoint)[2]).parent)  # the Python process's worker's directory
-            assert own in process.reads() and own in told, process.reads()
-            argv = [sys.executable, "-I", str(elsewhere / "worker.py"), endpoint]
-            other = await jail.start(argv, cwd=str(project), endpoint=endpoint)
-            try:
-                assert str(elsewhere) not in process.reads(), process.reads()
-                assert process.instructions() == told
-                assert str(elsewhere) in other.reads()  # the other program's own
-            finally:
-                await other.stop()
-    finally:
-        shutil.rmtree(sockets, ignore_errors=True)
+    async with _python(jail, PythonProcessConfig(root=str(project))) as process:
+        told = process.instructions()
+        own = str(Path(worker_argv("x.sock")[2]).parent)  # the Python process's worker's directory
+        assert own in process.reads() and own in told, process.reads()
+        other = await jail.start(
+            lambda endpoint: [sys.executable, "-I", str(elsewhere / "worker.py"), endpoint], cwd=str(project)
+        )
+        try:
+            assert str(elsewhere) not in process.reads(), process.reads()
+            assert process.instructions() == told
+            assert str(elsewhere) in other.reads()  # the other program's own
+        finally:
+            await other.stop()
 
 
 async def test_on_linux_release_frees_the_placeholder_while_the_extensions_worker_runs(
@@ -623,37 +618,33 @@ async def test_on_linux_release_frees_the_placeholder_while_the_extensions_worke
     (elsewhere / "worker.py").write_text(_LISTENS)
     placeholder = project / ".envrc"
     jail = BrigJail(BrigConfig(), _Host(), lock=str(tmp_path / "jails.lock"))
-    sockets = Path(tempfile.mkdtemp(prefix="bh-x-", dir="/tmp"))  # a socket path must be short
-    endpoint = str(sockets / "x.sock")
-    try:
-        runner = Runner(jail)
-        async with _python(runner, PythonProcessConfig(root=str(project))) as process:
-            runner.on_release(process.stopped)
-            argv = [sys.executable, "-I", str(elsewhere / "worker.py"), endpoint]
-            extensions = await runner.start(argv, cwd=str(project), endpoint=endpoint)
+    runner = Runner(jail)
+    async with _python(runner, PythonProcessConfig(root=str(project))) as process:
+        runner.on_release(process.stopped)
+        extensions = await runner.start(
+            lambda endpoint: [sys.executable, "-I", str(elsewhere / "worker.py"), endpoint], cwd=str(project)
+        )
 
-            async def stop() -> str:
-                await extensions.stop()
-                return ""
+        async def stop() -> str:
+            await extensions.stop()
+            return ""
 
-            runner.on_release(stop)
-            try:
-                records = sorted((tmp_path / "state" / "bh-02" / "jails").iterdir())
-                groups = [recorded_group(record.read_text()) for record in records]
-                assert len(groups) == 2 and placeholder.is_dir()
-                said = await runner.release()
-                assert "stays held" not in said and "still runs" not in said, said
-                assert not placeholder.exists()
-                for group in groups:
-                    assert group is not None
-                    assert not group_alive(group)  # both jails are gone, the extensions process's too
-                assert runner.released()
-                await process.run("1")  # the next input
-                assert not runner.released() and placeholder.is_dir()
-            finally:
-                await extensions.stop()
-    finally:
-        shutil.rmtree(sockets, ignore_errors=True)
+        runner.on_release(stop)
+        try:
+            records = sorted((tmp_path / "state" / "bh-02" / "jails").iterdir())
+            groups = [recorded_group(record.read_text()) for record in records]
+            assert len(groups) == 2 and placeholder.is_dir()
+            said = await runner.release()
+            assert "stays held" not in said and "still runs" not in said, said
+            assert not placeholder.exists()
+            for group in groups:
+                assert group is not None
+                assert not group_alive(group)  # both jails are gone, the extensions process's too
+            assert runner.released()
+            await process.run("1")  # the next input
+            assert not runner.released() and placeholder.is_dir()
+        finally:
+            await extensions.stop()
 
 
 def _code() -> tuple[str, ...]:

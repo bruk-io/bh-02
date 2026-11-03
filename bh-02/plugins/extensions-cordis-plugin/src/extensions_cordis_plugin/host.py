@@ -44,9 +44,7 @@ import importlib.util
 import itertools
 import json
 import os
-import shutil
 import stat
-import tempfile
 import uuid
 from collections.abc import Awaitable, Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
@@ -102,8 +100,10 @@ _RELEASED = (
 
 @runtime_checkable
 class _Jailed(Protocol):
-    """A program a jail started."""
+    """A program a jail started: the socket the runner chose for it, and how to stop it."""
 
+    @property
+    def endpoint(self) -> str: ...
     async def stop(self) -> None: ...
 
 
@@ -113,7 +113,7 @@ class Runner(Protocol):
     started, and whether `/release` has stopped what runs until the next start (`released`),
     when it waits rather than start again only to come back."""
 
-    async def start(self, argv: Sequence[str], *, cwd: str, endpoint: str) -> _Jailed: ...
+    async def start(self, argv_for: Callable[[str], Sequence[str]], *, cwd: str) -> _Jailed: ...
     def released(self) -> bool: ...
 
 
@@ -251,7 +251,6 @@ class Extensions:
         self._process: _Jailed | None = None
         self._writer: asyncio.StreamWriter | None = None
         self._listener: asyncio.Task[None] | None = None
-        self._socket_dir: str | None = None
         self._watcher: asyncio.Task[None] | None = None
         self._field: Callable[[], None] | None = None
         self._refused = ""  # why nothing loads from the extensions directory: a link on the way
@@ -631,13 +630,12 @@ class Extensions:
             return
         if self._process is not None:  # what is left of a worker that ended: its jail's teardown
             await self._stop()
-        # A Unix socket path must fit in about 100 bytes, so it lives in a short directory of its own.
-        self._socket_dir = tempfile.mkdtemp(prefix="bh-x-", dir="/tmp")
-        endpoint = str(Path(self._socket_dir) / "x.sock")
         root = str(Path(self._config.root).resolve())
         try:
-            self._process = await self._runner.start(worker_argv(endpoint), cwd=root, endpoint=endpoint)
-            reader, self._writer = await asyncio.open_unix_connection(endpoint, limit=_LINE_LIMIT)
+            self._process = await self._runner.start(worker_argv, cwd=root)
+            reader, self._writer = await asyncio.open_unix_connection(
+                self._process.endpoint, limit=_LINE_LIMIT
+            )
         except Exception as error:
             await self._stop()
             raise _Gone(f"the extensions' jailed worker could not be started: {error}") from None
@@ -681,6 +679,3 @@ class Extensions:
         if self._process is not None:
             await self._process.stop()
             self._process = None
-        if self._socket_dir is not None:
-            shutil.rmtree(self._socket_dir, ignore_errors=True)
-            self._socket_dir = None
