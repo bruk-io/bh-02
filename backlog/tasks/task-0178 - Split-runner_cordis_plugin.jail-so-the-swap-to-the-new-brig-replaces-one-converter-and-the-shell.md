@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-02T17:24:00Z'
-updated_date: '2026-11-03T02:51:00Z'
+updated_date: '2026-11-03T02:59:00Z'
 labels:
   - runner
   - size-5
@@ -27,7 +27,7 @@ Proposed, as a no-behaviour change against the old brig (like TASK-0176.06): pol
 <!-- AC:BEGIN -->
 - [x] #1 spec_for returns bh-02's own Policy type, and exactly one function turns it into the old brig's Spec
 - [x] #2 No module but the shell and that converter imports brig
-- [ ] #3 No behaviour changes: the runner's tests pass unchanged but for imports, and scripts/check passes
+- [x] #3 No behaviour changes: the runner's tests pass unchanged but for imports, and scripts/check passes
 <!-- AC:END -->
 
 ## Implementation Plan
