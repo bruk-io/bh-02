@@ -536,6 +536,11 @@ def main(argv: list[str] | None = None) -> int:
         "--first-rep", type=int, default=0, help="number the repetitions from here, to add to an earlier run"
     )
     parser.add_argument("--workers", type=int, default=4)
+    parser.add_argument(
+        "--max-cost",
+        type=float,
+        help="USD: once the runs so far cost this much, start no more (those running finish)",
+    )
     parser.add_argument("--name", default="l2-1")
     parser.add_argument(
         "--dry-run", action="store_true", help="list the runs and an estimated cost; run nothing"
@@ -578,7 +583,7 @@ def main(argv: list[str] | None = None) -> int:
         (results / f"{ns.name}.jsonl").open("w", encoding="utf-8") as f,
     ):
         pending = [pool.submit(run_one, t, c, ns.model, rep, log) for t, c, rep in jobs]
-        failed_in_a_row = 0
+        failed_in_a_row, spent, capped = 0, 0.0, False
         for future in as_completed(pending):
             row = future.result()
             f.write(json.dumps(row) + "\n")
@@ -590,6 +595,12 @@ def main(argv: list[str] | None = None) -> int:
                 flush=True,
             )
             failed_in_a_row = failed_in_a_row + 1 if row["error"] else 0
+            spent += row["cost_usd"]
+            if ns.max_cost is not None and spent >= ns.max_cost and not capped:
+                capped = True
+                print(f"stopping: ${spent:.2f} spent, the --max-cost of ${ns.max_cost:.2f}", flush=True)
+                for p in pending:
+                    p.cancel()
             if failed_in_a_row == _STOP_AFTER_FAILURES:  # a usage limit or an outage: stop spending
                 print(f"stopping: {failed_in_a_row} runs in a row failed; last: {row['error']}", flush=True)
                 for p in pending:
