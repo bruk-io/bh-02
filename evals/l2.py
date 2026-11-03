@@ -259,7 +259,8 @@ def report(rows: list[dict[str, Any]], model: str) -> str:
             f"| ${statistics.median(r['cost_usd'] for r in rs):.4f} "
             f"| {int(statistics.median(r['final_context'] for r in rs))} "
             f"| {statistics.median(r['tool_calls'] for r in rs)} "
-            f"| {sum(r['read_saved_file'] for r in rs)}/{len(rs)} | {sum(r['ran_fold'] for r in rs)}/{len(rs)} |"
+            f"| {sum(r['read_saved_file'] for r in rs)}/{len(rs)} "
+            f"| {sum(r['ran_fold'] for r in rs)}/{len(rs)} |"
         )
     out += ["", "## Each condition against native, paired by task and repetition, per size band", ""]
     out += [
