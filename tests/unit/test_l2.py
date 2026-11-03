@@ -191,3 +191,10 @@ def test_an_edit_is_checked_again_on_its_file_rebuilt_from_the_saved_diff():
     assert rescored(row, truth, original)["correct"]
     assert rescored(row | {"edit_diff_cut": True}, truth, original) == row | {"edit_diff_cut": True}
     assert rescored(row, truth) is row  # no original to rebuild from
+
+
+def test_runs_folded_with_different_settings_are_not_merged():
+    first = [r | {"model": "m", "view": "schema", "config": "defaults"} for r in _rows(2)]
+    later = [r | {"model": "m", "rep": 1, "view": "schema", "config": "schema.rare=0.2"} for r in _rows(2)]
+    with pytest.raises(ValueError, match="folded with different settings"):
+        merged({"a": first, "b": later})

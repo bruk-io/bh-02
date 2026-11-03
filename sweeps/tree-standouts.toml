@@ -1,0 +1,7 @@
+# How many stand-outs a tree list shows, and how rare a sibling's shape must be to stand out.
+name = "tree-standouts"
+only = ["a11y", "figma", "xml"]
+
+[grid]
+"tree.max_promoted" = [3, 10, 25]
+"tree.rare_share" = [0.05, 0.1, 0.2]

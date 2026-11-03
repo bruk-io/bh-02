@@ -1,0 +1,7 @@
+# The sample fold against the schema view, at three budgets, on the JSON tasks.
+name = "views-budgets"
+only = ["json", "pypi"]
+
+[grid]
+view = ["sample", "schema"]
+budget = [500, 1000, 2000]

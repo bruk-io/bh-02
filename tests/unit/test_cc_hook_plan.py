@@ -6,7 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from claude_code.hook import Inline, Mode, Spilled, decide, mode_of, plan, render, trusted_spill
+from claude_code.hook import Inline, Mode, Spilled, config_from, decide, mode_of, plan, render, trusted_spill
+from compressors.config import DEFAULT
 from compressors.route import fold
 
 NOTICE = (
@@ -158,3 +159,20 @@ def test_folded_bash_output_keeps_bashs_shape_and_stderr_and_drops_the_saved_out
     )
     updated = decide(spilled, Spilled(str(_SESSION / "by0t1jzcz.txt"), True), raw, 300, _SESSION).reply
     assert "persistedOutputPath" not in updated["hookSpecificOutput"]["updatedToolOutput"]
+
+
+def test_the_hook_takes_its_knobs_and_view_from_the_environment():
+    config, view = config_from(
+        {"TOOL_OUTPUT_LAB_SET": "schema.rare=0.2; tree.max_promoted=25", "TOOL_OUTPUT_LAB_VIEW": "schema"}
+    )
+    assert (config.schema.rare, config.tree.max_promoted, view) == (0.2, 25, "schema")
+    assert config_from({}) == (DEFAULT, "sample")
+
+
+def test_a_bash_json_output_folds_as_its_schema_when_the_view_is_schema():
+    pods = [{"name": f"web-{i:04d}x", "phase": "Failed" if i == 7 else "Running"} for i in range(500)]
+    raw = json.dumps({"items": pods})
+    out = decide(_bash(raw), Inline(raw), raw, 300, _SESSION, view="schema").reply
+    stdout = out["hookSpecificOutput"]["updatedToolOutput"]["stdout"]
+    assert "This is the data's schema" in stdout.splitlines()[0]
+    assert ".items: array[500] of object" in stdout and '.items[7] web-0007x: .phase "Failed"' in stdout

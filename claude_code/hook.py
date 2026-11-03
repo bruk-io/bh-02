@@ -25,8 +25,11 @@ that imitates the notice is treated as ordinary output. Files are read without f
 only when regular and under a size cap, and written privately (0600) and atomically.
 
 Environment: TOOL_OUTPUT_LAB_BUDGET (tokens, default 2000), TOOL_OUTPUT_LAB_MODE (`inline`, the
-default, `spilled` or `all`), TOOL_OUTPUT_LAB_LOG (a JSONL file to append one line per decision to). A
-failure inside the hook leaves the tool result untouched: it must never be why a tool call fails.
+default, `spilled` or `all`), TOOL_OUTPUT_LAB_VIEW (`sample`, the default, or `schema`),
+TOOL_OUTPUT_LAB_CONFIG (a TOML file of knobs, `compressors/config.py`), TOOL_OUTPUT_LAB_SET (knobs,
+`schema.rare=0.15;tree.max_promoted=25`, over the file's), TOOL_OUTPUT_LAB_LOG (a JSONL file to
+append one line per decision to). A failure inside the hook leaves the tool result untouched: it
+must never be why a tool call fails.
 """
 
 import json
@@ -35,6 +38,7 @@ import re
 import shlex
 import stat
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -42,6 +46,7 @@ from typing import Any
 
 from compressors import markers
 from compressors.common import estimate_tokens, query_terms
+from compressors.config import DEFAULT, FoldConfig, load, with_sets
 from compressors.route import Folded, fold
 
 MAX_SPILL_BYTES = 32 * 1024 * 1024
@@ -258,10 +263,19 @@ class Outcome:
     reply: dict[str, Any] | None
 
 
-def decide(event: dict[str, Any], action: Inline | Spilled, raw: str, budget: int, session: Path) -> Outcome:
+def decide(
+    event: dict[str, Any],
+    action: Inline | Spilled,
+    raw: str,
+    budget: int,
+    session: Path,
+    view: str = "sample",
+    config: FoldConfig = DEFAULT,
+) -> Outcome:
     """The fold, and where its banner points: Claude Code's own file for a spill, a saved copy of
     the raw for an inline result, and a saved view when the line numbers refer to one."""
-    folded = fold(raw, budget_tokens=budget, terms=query_terms(event.get("tool_input") or {}))
+    terms = query_terms(event.get("tool_input") or {})
+    folded = fold(raw, budget_tokens=budget, terms=terms, view=view, config=config)
     log = {
         "tool": event.get("tool_name"),
         "tool_use_id": event.get("tool_use_id"),
@@ -283,9 +297,9 @@ def decide(event: dict[str, Any], action: Inline | Spilled, raw: str, budget: in
             raw_path = str(saved)
     path = raw_path
     if folded.source is not None:  # the line numbers refer to a copy (pretty XML, page text): save it too
-        view = session / f"folded-{call}.view.txt"
-        saves.append((view, folded.source))
-        path = str(view)
+        copy = session / f"folded-{call}.view.txt"
+        saves.append((copy, folded.source))
+        path = str(copy)
     text = render(folded, path, raw_path)
     reply = {
         "hookSpecificOutput": {"hookEventName": "PostToolUse", "updatedToolOutput": _in_shape(event, text)}
@@ -303,7 +317,13 @@ def _in_shape(event: dict[str, Any], text: str) -> str | dict[str, Any]:
     return response | {"stdout": text}
 
 
-def handle(event: dict[str, Any], budget: int, mode: Mode = Mode.INLINE) -> dict[str, Any] | None:
+def handle(
+    event: dict[str, Any],
+    budget: int,
+    mode: Mode = Mode.INLINE,
+    view: str = "sample",
+    config: FoldConfig = DEFAULT,
+) -> dict[str, Any] | None:
     """The hook's JSON reply for one event, or None to leave the result alone: `plan` and `decide`
     choose, this reads the spill and writes what they say. A copy that cannot be saved raises
     OSError from `_write_private`; main reports it and leaves the result alone."""
@@ -319,18 +339,28 @@ def handle(event: dict[str, Any], budget: int, mode: Mode = Mode.INLINE) -> dict
                 return None
         case Inline(raw=raw):
             pass
-    outcome = decide(event, action, raw, budget, session)
+    outcome = decide(event, action, raw, budget, session, view, config)
     _log(outcome.log)
     for target, text in outcome.saves:
         _write_private(target, text)
     return outcome.reply
 
 
+def config_from(env: Mapping[str, str]) -> tuple[FoldConfig, str]:
+    """The knobs and view an environment sets: TOOL_OUTPUT_LAB_CONFIG (a TOML file), then
+    TOOL_OUTPUT_LAB_SET (`;`-separated NAME=VALUE) over it, and TOOL_OUTPUT_LAB_VIEW. A file that
+    cannot be read raises OSError, and a bad knob ValueError, from `compressors.config`."""
+    base = load(path) if (path := env.get("TOOL_OUTPUT_LAB_CONFIG")) else DEFAULT
+    knobs = [s for s in env.get("TOOL_OUTPUT_LAB_SET", "").split(";") if s.strip()]
+    return with_sets(base, knobs), env.get("TOOL_OUTPUT_LAB_VIEW", "sample")
+
+
 def main() -> int:
     try:
         event = json.load(sys.stdin)
         budget = int(os.environ.get("TOOL_OUTPUT_LAB_BUDGET", "2000"))
-        reply = handle(event, budget, mode_of(os.environ.get("TOOL_OUTPUT_LAB_MODE")))
+        config, view = config_from(os.environ)
+        reply = handle(event, budget, mode_of(os.environ.get("TOOL_OUTPUT_LAB_MODE")), view, config)
     except Exception as e:  # the hook must never break the tool call; say why on stderr  # noqa: BLE001
         print(f"tool-output-lab hook left the result untouched: {type(e).__name__}: {e}", file=sys.stderr)
         return 0
