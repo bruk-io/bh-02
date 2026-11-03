@@ -1,8 +1,10 @@
 """What a task's right answer is, and how an answer or a fold is scored against it.
 
-Every truth is computed by a program from the payload. Each kind has two scorers: `score_answer`
-judges a model's answer (layer 2), `score_fold` judges whether the answer can be read off the fold
-alone (layer 1, an upper bound on what a model can find without fetching more).
+Every truth is computed by a program from the payload. Each kind has two scorers. `score_answer`
+judges a model's answer (layer 2): prompts ask it to end with one line `ANSWER: ...`, and that line
+is what is scored, so prose that mentions excluded items or hedges is not misread. `score_fold`
+judges whether the answer can be read off the fold alone (layer 1, an upper bound on what a model
+can find without fetching more).
 """
 
 import re
@@ -33,13 +35,14 @@ class Exact:
 @dataclass(frozen=True)
 class Items:
     expected: frozenset[str]
-    universe: frozenset[str]  # every name that could be listed; naming one outside `expected` is wrong
+    universe: frozenset[str]  # every name that could be listed (for the fold's sufficiency only)
 
 
 @dataclass(frozen=True)
 class Number:
     value: int
-    items: frozenset[str] = frozenset()  # the things counted, when known: seeing them all is enough to count
+    items: frozenset[str] = frozenset()  # the things counted, as they show in the payload
+    stated: tuple[str, ...] = ()  # texts that state the count itself (a summary entry, a marker)
 
 
 @dataclass(frozen=True)
@@ -56,55 +59,119 @@ class Score:
     correct: bool
     recall: float | None = None
     precision: float | None = None
+    parsed: bool = True  # whether the answer had the ANSWER line the prompt asks for
 
 
-_PROMOTION = '"_next_item_shown_because"'
+ANSWER_INSTRUCTION = {
+    "spot": "End your reply with one line: ANSWER: <the item's name>, or ANSWER: none",
+    "absent": "End your reply with one line: ANSWER: <the item's name>, or ANSWER: none",
+    "lookup": "End your reply with one line: ANSWER: <the value>",
+    "enumerate": "End your reply with one line: ANSWER: <every name, separated by commas>, or ANSWER: none",
+    "count": "End your reply with one line: ANSWER: <the number>",
+    "locate": "End your reply with one line: ANSWER: <the line number>",
+}
+_ANSWER = re.compile(r"(?im)^\W{0,3}ANSWER:\s*(.*?)\s*$")
+_NONE = {"none", "nothing", "no", "n/a", "-", ""}
 
 
-def _named(text: str, names: frozenset[str]) -> frozenset[str]:
-    return frozenset(n for n in names if mentions(text, n))
+def answer_line(answer: str) -> str | None:
+    """The last `ANSWER:` line's content, or None when the answer has none."""
+    found = _ANSWER.findall(answer)
+    return found[-1].strip(" .`*") if found else None
+
+
+def answer_items(line: str) -> list[str]:
+    """The names an ANSWER line lists: split on commas, semicolons or `and`; quotes and markup
+    stripped; an answer of none is no names."""
+    if line.strip(" .`*").lower() in _NONE:
+        return []
+    parts = re.split(r"\s*(?:,|;|\band\b)\s*", line)
+    return [p.strip(" .`*'\"()[]") for p in parts if p.strip(" .`*'\"()[]")]
+
+
+def _first_number(line: str) -> int | None:
+    m = re.search(r"-?\d[\d,]*", line)
+    return int(m[0].replace(",", "")) if m else None
 
 
 def score_answer(truth: Truth, answer: str) -> Score:
-    """A model's answer against the truth. Items need 90% recall and 90% precision."""
+    """A model's answer against the truth, read from its ANSWER line.
+
+    Without one, the answer is scored leniently on its prose and marked `parsed=False`, so a run
+    report can show how often the instruction was not followed."""
+    line = answer_line(answer)
+    if line is None:
+        return _score_prose(truth, answer)
     match truth:
         case Needle(token=t) | Exact(value=t):
-            return Score(mentions(answer, t))
-        case Absent(candidates=c):
-            return Score(not _named(answer, c))
-        case Items(expected=e, universe=u):
-            recall = len(_named(answer, e)) / len(e)
-            named = _named(answer, u | e)
-            precision = len(named & e) / len(named) if named else 1.0
+            return Score(any(n == t or mentions(n, t) for n in answer_items(line)) or line == t)
+        case Absent():
+            return Score(answer_items(line) == [])
+        case Items(expected=e):
+            listed = set(answer_items(line))
+            hit = {x for x in e if any(n == x or mentions(n, x) for n in listed)}
+            recall = len(hit) / len(e) if e else float(not listed)
+            right = {n for n in listed if any(n == x or mentions(n, x) for x in e)}
+            precision = len(right) / len(listed) if listed else float(not e)
             return Score(recall >= 0.9 and precision >= 0.9, recall, precision)
-        case Number(value=v):
-            return Score(mentions(answer, str(v)))
-        case Location(line=n):
-            return Score(mentions(answer, str(n)))
+        case Number(value=v) | Location(line=v):
+            return Score(_first_number(line) == v)
         case _ as unreachable:
             raise AssertionError(f"no scorer for {unreachable!r}")
+
+
+def _score_prose(truth: Truth, answer: str) -> Score:
+    match truth:
+        case Needle(token=t) | Exact(value=t):
+            return Score(mentions(answer, t), parsed=False)
+        case Absent(candidates=c):
+            return Score(not any(mentions(answer, x) for x in c), parsed=False)
+        case Items(expected=e):
+            recall = sum(mentions(answer, x) for x in e) / len(e) if e else 1.0
+            return Score(recall >= 0.9, recall, None, parsed=False)
+        case Number(value=v) | Location(line=v):
+            return Score(mentions(answer, str(v)), parsed=False)
+        case _ as unreachable:
+            raise AssertionError(f"no scorer for {unreachable!r}")
+
+
+_PROMOTION = '"_next_item_shown_because"'
+_SIBLING_RUN = re.compile(r"(?m)^\t?(\s*)\[\.\.\. lines \d+-\d+ folded \(\d+ siblings\)\]")
+_LINE_GAP = re.compile(r"(?m)^\[\.\.\. lines \d+-\d+ omitted")
+
+
+def promotes(fold: str) -> bool:
+    """Whether the fold shows something as standing out: JSON's promotion marker; a list of siblings
+    with something shown between two hidden runs (a tree stand-out); or a log with lines shown
+    between two gaps (a window around a signal)."""
+    if _PROMOTION in fold:
+        return True
+    runs_per_indent: dict[str, int] = {}
+    for indent in _SIBLING_RUN.findall(fold):
+        runs_per_indent[indent] = runs_per_indent.get(indent, 0) + 1
+    if any(n >= 2 for n in runs_per_indent.values()):
+        return True
+    return len(_LINE_GAP.findall(fold)) >= 2
 
 
 def score_fold(truth: Truth, fold: str) -> Score:
     """Whether the answer can be read off the fold text alone.
 
-    A count is sufficient if the number is shown (a summary's value counts, a marker's count) or
-    every counted item is (so it can be counted, though the fold does not say nothing else is
-    hidden); a location only if the line is shown with its number; an absent anomaly only
-    if the fold promotes nothing as standing out.
-    """
+    A count is sufficient when the fold states it (a summary's entry, a marker's count) or shows
+    every counted item; a number that merely appears (a line number, a date) is not enough. A
+    location needs the line shown with its number; an absent anomaly needs nothing promoted."""
     match truth:
         case Needle(token=t) | Exact(value=t):
             return Score(mentions(fold, t))
         case Absent():
-            return Score(_PROMOTION not in fold)
+            return Score(not promotes(fold))
         case Items(expected=e):
-            recall = len(_named(fold, e)) / len(e)
+            recall = sum(mentions(fold, x) for x in e) / len(e) if e else 1.0
             return Score(recall >= 0.9, recall)
-        case Number(value=v, items=items):
-            if mentions(fold, str(v)):
+        case Number(items=items, stated=stated):
+            if any(s in fold for s in stated):
                 return Score(True)
-            seen = len(_named(fold, items)) / len(items) if items else 0.0
+            seen = sum(mentions(fold, x) for x in items) / len(items) if items else 0.0
             return Score(bool(items) and seen == 1.0, seen)
         case Location(line=n, text=t):
             return Score(re.search(rf"(?m)^{n}\t.*{re.escape(t)}", fold) is not None)

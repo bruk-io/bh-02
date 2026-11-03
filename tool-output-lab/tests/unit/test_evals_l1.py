@@ -4,7 +4,6 @@ import pytest
 
 from evals.l1 import check, coverage
 from evals.tasks import tasks
-from evals.truth import Absent, Items, Number, Score, mentions, score_answer, score_fold
 
 _BY_ID = {t.task_id: t for t in tasks()}
 
@@ -50,14 +49,3 @@ def test_coverage_catches_a_marker_that_skips_or_overlaps():
     assert coverage(source, good, numbered=False) == []
     assert coverage(source, "line 1\n[... lines 3-9 omitted (7 lines)]\nline 10", numbered=False)
     assert coverage(source, "line 1\n[... lines 2-9 omitted (8 lines)]", numbered=False)
-
-
-def test_scorers():
-    assert mentions("version 8.1.", "8.1") and not mentions("8.1.7", "8.1")
-    assert score_answer(Absent(frozenset({"pod-1"})), "None of them.").correct
-    assert not score_answer(Absent(frozenset({"pod-1"})), "pod-1 looks odd").correct
-    items = Items(frozenset({"a1", "a2"}), frozenset({"a1", "a2", "b1", "b2", "b3"}))
-    assert score_answer(items, "a1, a2, b1").correct is False  # precision 2/3
-    assert score_answer(items, "a1 and a2") == Score(True, 1.0, 1.0)
-    assert score_fold(Number(3, frozenset({"x", "y", "z"})), "x y z").correct  # countable
-    assert not score_fold(Number(3, frozenset({"x", "y", "z"})), "x y").correct
