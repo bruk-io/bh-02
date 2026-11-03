@@ -84,11 +84,26 @@ class _TextExtractor(HTMLParser):
         self.parts.append(data)
 
 
+_DOCUMENT_START = re.compile(r"(?im)^(?:<!doctype html|<html[\s>])")  # at column 0, unlike a diff's lines
+_HTML_TAG = re.compile(r"</?(?:div|span|p|a|li|td|script|meta)\b", re.IGNORECASE)
+_TAG_LED_SHARE = 0.3
+
+
 def looks_like_html(raw: str) -> bool:
-    head = raw.lstrip()[:2000].lower()
-    if head.startswith(("<!doctype html", "<html")) or "<html" in head or "<body" in head:
+    """A page (a doctype or <html> opening a line near the top) or a fragment (it starts with a tag,
+    tags lead at least 30% of its lines, and it holds 20 common HTML tags).
+
+    Text that only contains tags is not HTML: a diff of a .jsx or .html file (its lines start with
+    +, - or a space), a README with badges, code with templates. Stripping it to text would lose the
+    code around the tags."""
+    if _DOCUMENT_START.search(raw[:2000]):
         return True
-    return len(re.findall(r"</?(?:div|span|p|a|li|td|script|meta)\b", raw[:20000], re.IGNORECASE)) >= 20
+    sample = raw[:20000]
+    if not sample.lstrip().startswith("<"):
+        return False
+    filled = [line for line in split_lines(sample) if line.strip()]
+    tag_led = sum(1 for line in filled if line.lstrip().startswith("<"))
+    return tag_led >= _TAG_LED_SHARE * len(filled) and len(_HTML_TAG.findall(sample)) >= 20
 
 
 def html_to_text(raw: str) -> str:
