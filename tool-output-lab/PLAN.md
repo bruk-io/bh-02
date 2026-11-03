@@ -10,14 +10,14 @@ Each stage leaves a script and a file in `results/`. A later stage never edits a
 
 | # | Stage | Needs a model | Status |
 |---|---|---|---|
-| 1 | Extraction: Claude Code transcripts -> `corpus/results.jsonl` (one row per tool result, with the next assistant step as replay ground truth) | no || done; run on this session's own transcript only |
-| 2 | Corpus stats: size distribution, per-tool totals, format mix of the large ones | no || done |
-| 3 | Compressors: `lines` (dedupe + head/tail + error windows), `json` (array folding + anomaly promotion), `html` (strip to text, then `lines`), `text` (head/tail by chars), router, recovery | no || done (html not yet in the needle grid) |
-| 4 | Deterministic ratio: run every compressor over the corpus; tokens in/out per branch | no || done; nothing to measure until a real corpus |
-| 5 | Needle survival: synthetic JSON and logs with one planted anomaly; does it survive compression? This is the upper bound on what a model can find | no || done; see results/FINDINGS.md |
+| 1 | Extraction: Claude Code transcripts -> `corpus/results.jsonl` (one row per tool result, with the next assistant step as replay ground truth) | no | done; corpus 1 is six sub-agents' transcripts |
+| 2 | Corpus stats: size distribution, per-tool totals, format mix of the large ones | no | done |
+| 3 | Compressors: `lines` (dedupe + head/tail + error windows), `json` (array folding + anomaly promotion), `html` (strip to text, then `lines`), `text` (head/tail by chars), router, recovery | no | done (html not yet in the needle grid) |
+| 4 | Deterministic ratio: run every compressor over the corpus; tokens in/out per branch | no | done; `results/stats-agents-1.md` |
+| 5 | Needle survival: synthetic JSON and logs with one planted anomaly; does it survive compression? This is the upper bound on what a model can find | no | done; see results/FINDINGS.md |
 | 6 | Replay: re-run the step after each large result with the compressed result; judge equivalence; count recovery calls | yes | blocked: API key and a real corpus |
 | 7 | Needle with a model: same synthetic set, ask the model to find the anomaly, raw vs compressed | yes | blocked: API key |
-| 8 | Verdict per branch against the kill criteria | - || after 6 and 7 |
+| 8 | Verdict per branch against the kill criteria | - | after 6 and 7 |
 
 ## Decisions taken while working alone
 
