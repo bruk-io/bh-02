@@ -4,13 +4,15 @@
 # dependencies = ["click"]
 # ///
 """The Linux jail, on a real Linux kernel, from a darwin laptop: the runner plugin's and the app's
-tests that start real `bwrap` jails (`runner:confined`), with the python and extensions plugins', run in a container with bubblewrap.
+tests that start real `bwrap` jails (`runner:confined`), with the python and extensions
+plugins', run in a container with bubblewrap.
 
 On darwin those tests skip, visibly and by name, because there is no `bwrap`. This is the one
 place they run here. It is not part of `scripts/check`: it needs Docker, it is slow, and green
 here is not the definition of green. Run it before trusting a claim about Linux.
 
-    scripts/linux-jail-check                 # the runner, python and extensions plugins' and the app's jail tests
+    scripts/linux-jail-check                 # the runner, python, extensions and app jail tests
+    scripts/linux-jail-check --as-root       # the same, run as root
     scripts/linux-jail-check -- PYTEST_ARGS  # pytest with these arguments instead
     scripts/linux-jail-check --shell 'LINE'  # a shell line in the prepared workspace instead
 
@@ -48,8 +50,13 @@ confinement; each only stops Docker refusing bwrap what a plain Linux host gives
                                         one, a killed jail's processes stay zombies of PID 1
                                         (a shell that never reaps them), their group reads as
                                         alive, and brig's teardown verification reports FAILED.
-The suite runs as that unprivileged user, not root: root ignores permission bits, so a denial
-the tests expect would pass for the wrong reason, and bh-02 is not run as root.
+The suite runs as that unprivileged user by default. `--as-root` runs it as root instead, to show
+the jail holds for a person who starts bh-02 as root (a container's default user): bwrap's
+read-only binds and masks hold for root too, though root ignores permission bits, so a test whose
+denial rests on a mode, not a mount, is not evidence of the jail there. The image installs Python
+under `/opt/uv-python`, not a home directory, because brig drops every capability, root's power to
+pass another user's permission bits among them, so root could not reach `bh`'s home; a root run
+makes root own `/work` for the same reason.
 """
 
 import os
@@ -69,9 +76,10 @@ DOCKER = "docker"
 
 BASE_STEPS = "FROM ubuntu:24.04\nENV DEBIAN_FRONTEND=noninteractive\n"
 USER_STEPS = """\
-RUN useradd --create-home --shell /bin/bash bh && mkdir /work && chown bh:bh /work
+RUN useradd --create-home --shell /bin/bash bh && mkdir /work /opt/uv-python \\
+ && chown bh:bh /work /opt/uv-python
 USER bh
-ENV PATH=/home/bh/.local/bin:$PATH UV_LINK_MODE=copy
+ENV PATH=/home/bh/.local/bin:$PATH UV_LINK_MODE=copy UV_PYTHON_INSTALL_DIR=/opt/uv-python
 """
 WORKDIR_STEP = "WORKDIR /work\n"
 
@@ -223,8 +231,9 @@ def source_tar() -> bytes:
     type=click.Path(path_type=Path),
     help="The CA bundle behind a TLS-intercepting proxy (default: SSL_CERT_FILE); needs HTTPS_PROXY.",
 )
+@click.option("--as-root", is_flag=True, help="Run the suite as root instead of the unprivileged user.")
 @click.argument("pytest_args", nargs=-1, type=click.UNPROCESSED)
-def main(line: str | None, ca_option: Path | None, pytest_args: tuple[str, ...]) -> None:
+def main(line: str | None, ca_option: Path | None, as_root: bool, pytest_args: tuple[str, ...]) -> None:
     """Run the runner plugin's and the app's jail tests in a container with bubblewrap."""
     if subprocess.run([DOCKER, "info"], capture_output=True).returncode != 0:
         raise click.ClickException("docker is not answering: this check needs a running Docker daemon")
@@ -235,8 +244,9 @@ def main(line: str | None, ca_option: Path | None, pytest_args: tuple[str, ...])
     )
     if line is None:
         line = f"uv run --locked pytest {shlex.join(pytest_args)}" if pytest_args else DEFAULT
+    owner = "chown root:root /work; " if as_root else ""
     script = (
-        "set -euo pipefail; tar -xf - -C /work; /usr/bin/bwrap --version; uv --version;"
+        f"set -euo pipefail; {owner}tar -xf - -C /work; /usr/bin/bwrap --version; uv --version;"
         f" uv sync --locked --all-packages --quiet; uv run python -VV; {line}"
     )
     click.echo(click.style(f"== {line}", bold=True))
@@ -247,6 +257,7 @@ def main(line: str | None, ca_option: Path | None, pytest_args: tuple[str, ...])
             "--rm",
             "-i",
             "--init",
+            *(["--user", "root", "--env", "HOME=/root"] if as_root else []),
             *run_options(proxy),
             "--security-opt",
             "seccomp=unconfined",
