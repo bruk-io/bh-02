@@ -3,7 +3,7 @@ id: TASK-0179
 title: >-
   The runner hands its owners the program's endpoint, instead of each owner
   choosing one
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-11-02T17:24:00Z'
@@ -140,4 +140,6 @@ INFO    -  Documentation built in 5.73 seconds
 ```
 
 Worker, 2026-11-03, on the review's failing run: not reproduced. With the failing assertion made to print the app's last screen, the whole workspace suite under -n auto --dist loadgroup passed it (3964 passed); its one failure there was a different test, libs/brig/tests/unit/test_subset.py::test_ec1_narrowed_to_is_greatest_lower_bound, the old brig's own property test (removed with libs/brig in TASK-0176.08). test_real_launch.py alone under -n auto passed 3 runs in 3 (37 each). The full scripts/check recorded above exited 0 (3965 passed). The keyed-model launch's exit 1 on quit is a flake under full load that this evidence does not tie to the Unjailed stop path; if it recurs, the assertion should carry app.text() to show why.
+
+Closed by the reviewer. AC #1 met on reading (no old start form, adapter or fallback anywhere; the runner owns the socket directory from before argv_for to stop or a failed start, nothing on a refused start; ~26-byte path; the jail still writes only the socket's directory). AC #2 met: the full scripts/check recorded after the review exited 0 (3965 passed), on the same code as 1e0b11b (no non-backlog change since). The reviewer's one failing run (keyed-model --no-jail launch exiting 1 on quit) was not reproduced and is not tied to this change; it is filed as a draft (make the assertion show the app's screen, find the cause if it recurs). Minor, not filed: PlainJail leaves its bh-t- dir on a failed readiness wait; BrigJail reserves the endpoint before os.pipe outside the try (as jail_dir already was). Brig-verified connection left to TASK-0079.31, noted honestly.
 <!-- SECTION:NOTES:END -->
