@@ -1,26 +1,32 @@
 """A Claude Code PostToolUse hook that folds large MCP tool results.
 
-    "PostToolUse": [{"matcher": "mcp__.*", "hooks": [{"type": "command",
-        "command": "uv run -q --no-project --python 3.15 python -m claude_code.hook"}]}]
+    "PostToolUse": [{"matcher": "mcp__.*", "hooks": [{"type": "command", "timeout": 30,
+        "command": "cd /ABSOLUTE/PATH/TO/tool-output-lab && uv run -q --no-project --python 3.15
+                    --with ast-grep-py python -m claude_code.hook"}]}]   (the command on one line)
 
-Run it with the lab as the working directory. The hook sees one of two things in `tool_response`:
-the result itself, when it is under Claude Code's own limits, or Claude Code's notice that the
-result was saved to a file. In the first case it saves the raw result beside Claude Code's own
-spilled results; in the second it reads the file Claude Code saved. Either way Claude gets the
-folded view and the file's path, and reads the rest from the file with jq, grep or python, the way
-it already does with Claude Code's spilled results.
+The `cd` is required: Claude Code runs hooks in the session's directory. The hook sees one of two
+things in `tool_response`: the result itself, when it is under Claude Code's own limits, or Claude
+Code's notice that it saved the result to a file. By default it acts only on the second (the A/Bs
+found folding inline results costs more than it saves): it reads the file Claude Code saved and
+gives Claude the folded view and that path. With TOOL_OUTPUT_LAB_MODE=all it also folds inline
+results, saving the raw beside Claude Code's own spills first.
 
-Environment: TOOL_OUTPUT_LAB_BUDGET (tokens, default 2000), TOOL_OUTPUT_LAB_MODE (`spilled-only`
-folds only what Claude Code itself saved to a file), TOOL_OUTPUT_LAB_LOG (a JSONL file to append
-one line per decision to, for experiments). A failure inside the hook leaves the tool
-result untouched: the hook must never be the reason a tool call fails.
+A spill notice is trusted only when it is the plain-string notice Claude Code writes and its path
+resolves inside this session's tool-results folder under Claude Code's naming; a tool's own output
+that imitates the notice is treated as ordinary output. Files are read without following links,
+only when regular and under a size cap, and written privately (0600) and atomically.
+
+Environment: TOOL_OUTPUT_LAB_BUDGET (tokens, default 2000), TOOL_OUTPUT_LAB_MODE (`spilled-only`,
+the default, or `all`), TOOL_OUTPUT_LAB_LOG (a JSONL file to append one line per decision to). A
+failure inside the hook leaves the tool result untouched: it must never be why a tool call fails.
 """
 
 import json
 import os
 import re
+import shlex
+import stat
 import sys
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -28,9 +34,14 @@ from typing import Any
 from compressors.common import estimate_tokens
 from compressors.route import Folded, fold
 
-_SPILL_NOTICE = re.compile(r"Output has been saved to (/\S+?)\.?\s*$", re.MULTILINE)
+MAX_SPILL_BYTES = 32 * 1024 * 1024
+_NOTICE = re.compile(
+    r"\AError: result \([^)\n]*\) exceeds maximum allowed tokens\. "
+    r"Output has been saved to (?P<path>[^\n]+?)\.\n"
+)
+_SPILL_NAME = re.compile(r"\Amcp-.+-\d+\.txt\Z")
 _JSON_SLICE = re.compile(r'"_folded": "(\$[^"\s]*)\[(\d+):(\d+)\] omitted')
-_LINE_GAP = re.compile(r"\[\.\.\. lines (\d+)-(\d+) omitted")
+_LINE_GAP = re.compile(r"\[\.\.\. lines (\d+)-(\d+) (?:omitted|folded)")
 
 
 @dataclass(frozen=True)
@@ -40,7 +51,7 @@ class Inline:
 
 @dataclass(frozen=True)
 class Spilled:
-    path: str  # Claude Code already saved the result here
+    path: str  # where the notice says Claude Code saved the result (checked before it is read)
 
 
 type Action = Inline | Spilled | None
@@ -59,21 +70,28 @@ def _text_of(response: Any) -> str | None:
     return None
 
 
-def plan(event: dict[str, Any], spilled_only: bool = False) -> Action:
+def plan(event: dict[str, Any], fold_inline: bool = False) -> Action:
     """What to do with one PostToolUse event; None leaves the result alone.
 
-    With `spilled_only`, a result Claude Code passed inline is left alone too: only results it
-    saved to a file (and showed a head-only preview of) are folded.
+    A spill is only Claude Code's own notice: a plain string that starts with it. A content-block
+    result is the tool's own output, whatever it says. Inline results are folded only with
+    `fold_inline`.
     """
-    if not str(event.get("tool_name", "")).startswith("mcp__"):
+    if not str(event.get("tool_name", "")).startswith("mcp__") or not event.get("transcript_path"):
         return None
-    text = _text_of(event.get("tool_response"))
-    if text is None:
+    response = event.get("tool_response")
+    if isinstance(response, str) and (m := _NOTICE.match(response)):
+        return Spilled(m["path"])
+    text = _text_of(response)
+    if text is None or not fold_inline:
         return None
-    m = _SPILL_NOTICE.search(text)
-    if m and len(text) < 4000 and "exceeds maximum allowed tokens" in text:
-        return Spilled(m[1])
-    return None if spilled_only else Inline(text)
+    return Inline(text)
+
+
+def trusted_spill(resolved: str, session_resolved: str) -> bool:
+    """Whether a spill path, with links resolved, is one of Claude Code's files for this session."""
+    parent, name = os.path.split(resolved)
+    return parent == session_resolved and _SPILL_NAME.match(name) is not None
 
 
 def _jq_path(path: str) -> str:
@@ -81,51 +99,94 @@ def _jq_path(path: str) -> str:
     return rest if rest.startswith(".") else "." + rest
 
 
-def render(folded: Folded, path: str) -> str:
-    """The folded view, under a banner that says where the full output is and how to read it."""
-    head = f"[Folded: ~{folded.raw_tokens} tokens -> ~{estimate_tokens(folded.body)}. Full output: {path}"
+def render(folded: Folded, path: str, raw_path: str = "") -> str:
+    """The folded view, under a banner that says where the full output is and how to read it.
+
+    `path` is the file the markers' line numbers refer to; `raw_path`, when different, the raw."""
+    quoted = shlex.quote(path)
+    raw_note = f" (the raw output: {raw_path})" if raw_path and raw_path != path else ""
+    size = f"~{folded.raw_tokens} tokens -> ~{estimate_tokens(folded.body)}"
+    head = f"[Folded: {size}. Full output: {path}{raw_note}"
     match folded.branch:
         case "json":
             m = _JSON_SLICE.search(folded.body)
             example = f"{_jq_path(m[1])}[{m[2]}:{min(int(m[3]), int(m[2]) + 5)}]" if m else "."
             how = (
                 "Fold markers give the JSON path of what they hide, and say why any item shown out of order "
-                f"is shown. Read hidden parts from the file, e.g. jq '{example}' {path}"
+                f"is shown. Read hidden parts from the file, e.g. jq '{example}' {quoted}"
             )
         case "lines" | "html" | "xml" | "outline":
             m = _LINE_GAP.search(folded.body)
             first, last = (int(m[1]), min(int(m[2]), int(m[1]) + 20)) if m else (1, 20)
             how = (
                 "Markers name the line numbers they hide. "
-                f"Read them with sed -n '{first},{last}p' {path} or grep -n"
+                f"Read them with sed -n '{first},{last}p' {quoted} or grep -n"
             )
         case _:
-            how = f"Markers give the character offsets they hide; read them with python or grep on {path}"
+            how = f"Markers give the character offsets they hide; read them with python or grep on {quoted}"
     return f"{head}. {how}.]\n{folded.body}"
 
 
 def session_dir(event: dict[str, Any]) -> Path:
-    transcript = event.get("transcript_path")
-    if transcript:
-        return Path(transcript).with_suffix("") / "tool-results"
-    return Path(tempfile.gettempdir()) / "tool-output-lab"
+    """Where Claude Code saves this session's large results (`<transcript without .jsonl>/tool-results`)."""
+    return Path(str(event["transcript_path"])).with_suffix("") / "tool-results"
+
+
+def _read_spill(path: str, session: Path, cap: int = MAX_SPILL_BYTES) -> str | None:
+    """The spilled file's text, or None when it is not a regular file of this session's, or too big."""
+    try:
+        resolved, session_resolved = os.path.realpath(path), os.path.realpath(session)
+    except OSError:
+        return None
+    if not trusted_spill(resolved, session_resolved):
+        return None
+    try:
+        fd = os.open(resolved, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)  # a FIFO must not block the open
+    except OSError:
+        return None
+    with os.fdopen(fd, "rb") as f:
+        info = os.fstat(f.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_size > cap:
+            return None
+        return f.read(cap + 1).decode("utf-8", errors="replace")
+
+
+def _write_private(target: Path, text: str) -> None:
+    """Write `text` to `target` at 0600, atomically, never through a link."""
+    target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if target.parent.is_symlink():
+        raise OSError(f"refusing to write into a linked folder: {target.parent}")
+    temp = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+    fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(text)
+    os.replace(temp, target)
 
 
 def _log(entry: dict[str, Any]) -> None:
+    """Append to TOOL_OUTPUT_LAB_LOG; a failing log never changes what the hook does."""
     target = os.environ.get("TOOL_OUTPUT_LAB_LOG")
-    if target:
+    if not target:
+        return
+    try:
         with open(target, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry) + "\n")
+    except OSError as e:
+        print(f"tool-output-lab hook could not log to {target}: {e}", file=sys.stderr)
 
 
-def handle(event: dict[str, Any], budget: int, spilled_only: bool = False) -> dict[str, Any] | None:
+def handle(event: dict[str, Any], budget: int, fold_inline: bool = False) -> dict[str, Any] | None:
     """The hook's JSON reply for one event, or None to leave the result alone."""
-    action = plan(event, spilled_only)
+    action = plan(event, fold_inline)
     if action is None:
         return None
+    session = session_dir(event)
     match action:
         case Spilled(path=path):
-            raw = Path(path).read_text(encoding="utf-8")
+            raw = _read_spill(path, session)
+            if raw is None:
+                _log({"tool": event.get("tool_name"), "event": "untrusted-spill", "path": path})
+                return None
         case Inline(raw=raw):
             path = ""
     folded = fold(event.get("tool_input") or {}, raw, budget_tokens=budget)
@@ -141,20 +202,26 @@ def handle(event: dict[str, Any], budget: int, spilled_only: bool = False) -> di
     )
     if folded is None:
         return None
-    if isinstance(action, Inline) or folded.source is not None:
-        target = session_dir(event) / f"folded-{event.get('tool_use_id', 'call')}.txt"
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(folded.source if folded.source is not None else raw, encoding="utf-8")
-        path = str(target)
-    return {"hookSpecificOutput": {"hookEventName": "PostToolUse", "updatedToolOutput": render(folded, path)}}
+    call = re.sub(r"[^A-Za-z0-9_-]", "_", str(event.get("tool_use_id", "call")))
+    if isinstance(action, Inline):  # keep the raw, always
+        raw_path = session / f"folded-{call}.txt"
+        _write_private(raw_path, raw)
+        path = str(raw_path)
+    raw_path = path
+    if folded.source is not None:  # the line numbers refer to a copy (pretty XML, page text): save it too
+        view = session / f"folded-{call}.view.txt"
+        _write_private(view, folded.source)
+        path = str(view)
+    text = render(folded, path, raw_path)
+    return {"hookSpecificOutput": {"hookEventName": "PostToolUse", "updatedToolOutput": text}}
 
 
 def main() -> int:
     try:
         event = json.load(sys.stdin)
         budget = int(os.environ.get("TOOL_OUTPUT_LAB_BUDGET", "2000"))
-        reply = handle(event, budget, os.environ.get("TOOL_OUTPUT_LAB_MODE") == "spilled-only")
-    except Exception as e:  # the hook must never break the tool call; say why on stderr
+        reply = handle(event, budget, fold_inline=os.environ.get("TOOL_OUTPUT_LAB_MODE") == "all")
+    except Exception as e:  # the hook must never break the tool call; say why on stderr  # noqa: BLE001
         print(f"tool-output-lab hook left the result untouched: {type(e).__name__}: {e}", file=sys.stderr)
         return 0
     if reply is not None:

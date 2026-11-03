@@ -34,7 +34,8 @@ def test_fold_is_seen_alone_and_in_a_pipeline_but_not_in_a_word():
             )
         ]
 
-    assert ran_fold(call("fold x.py --budget 6000 | grep def"))
-    assert ran_fold(call("cd /lib && fold subprocess.py"))
+    assert ran_fold(call("lab-fold x.py --budget 6000 | grep def"))
+    assert ran_fold(call("cd /lib && lab-fold subprocess.py"))
+    assert not ran_fold(call("cat x | fold -w 80"))  # coreutils fold is not the tool
     assert not ran_fold(call("python3 -c 'print(unfold)'"))
     assert not ran_fold(call("grep -n scaffold x.py"))

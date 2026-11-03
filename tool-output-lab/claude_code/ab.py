@@ -262,7 +262,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--name", default="ab-1")
     parser.add_argument("--only", choices=tuple(_GRID), nargs="+")
     parser.add_argument("--large-only", action="store_true", help="only each format's largest size")
-    parser.add_argument("--hook-mode", choices=("all", "spilled-only"), default="all")
+    parser.add_argument("--hook-mode", choices=("all", "spilled-only"), default="spilled-only")
     ns = parser.parse_args(argv)
     results = _LAB / "results"
     log = results / f"{ns.name}-hook.jsonl"
