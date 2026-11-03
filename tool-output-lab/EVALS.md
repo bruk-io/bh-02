@@ -67,14 +67,15 @@ confident is the harm, so it is reported separately from wrong and hedged.
 
 | Channel | Fold through | Status |
 |---|---|---|
-| MCP tool result | `PostToolUse` hook, spilled-only or all | built, A/B 1 to 3 |
+| MCP tool result | `PostToolUse` hook: `inline` (the default), `spilled` or `all` | built; P2 |
 | Bash output | the same hook on `Bash` (`stdout` in the tool's output shape) | not built |
 | File read | `lab-fold FILE` as a command Claude may run (named in CLAUDE.md) | built; `evals/l2.py` condition `fold-tool` |
 | No shell | an MCP tool that returns `fold`'s output, with Bash disabled | not built; where `fold` should matter most |
 
 ## Conditions, sizes, models
 
-- **Conditions:** native; fold, spilled-only; fold, all results; `fold` named in CLAUDE.md; no shell.
+- **Conditions:** native; the hook in each mode (`fold` spilled, `fold-inline`, `fold-all`); `lab-fold`
+  named in CLAUDE.md; no shell.
 - **Sizes:**
   - S: under the budget;
   - M: between the budget and Claude Code's spill threshold (MCP 50k characters, Bash 30k);

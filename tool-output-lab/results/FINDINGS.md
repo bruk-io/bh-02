@@ -300,8 +300,9 @@ Per-band and pooled tables: `l2-p2.md`; each repetition: `l2-p2-r1.md`, `l2-p2-r
     the cached ~45k base) disagree in both directions: at L folding cuts requests and so summed
     input while the final context grows; at M, the reverse. The verdict column uses the final
     context, chosen in R9 before any P2 run, and both are reported. Cost, which prices cached input,
-    falls slightly in both. Which one matters (headroom in a long session, or spend and latency) is
-    the owner's call, not the data's.
+    falls slightly in both. **The owner's reading (2026-11-03): the final context.** So, with Haiku,
+    folding spilled results is cut and folding results under the threshold is kept; the hook's
+    default is now `inline`, which does the second only.
 38. **The runs found task flaws.** Every enumerate prompt ends `ANSWER: <every name, separated by
     commas>`, even when it asks for codes or orders. For Andorra's subdivision codes Haiku listed
     the parishes' names under both conditions; for failed orders in logs it answered "none (the logs
@@ -320,8 +321,8 @@ Per-band and pooled tables: `l2-p2.md`; each repetition: `l2-p2-r1.md`, `l2-p2-r
 
 | Piece | Evidence | Leaning |
 |---|---|---|
-| Fold MCP results Claude Code spilled | P2 (Haiku, 104 pairs): accuracy +7% [+1%, +14%], 1.2 fewer requests, -9% cost, -1.8 s, but the final context +800 tokens (34); A/B 1-3 indicative (K1) | keep; the default. Fails the final-context reading of the input criterion, passes the summed one |
-| Fold MCP results under the spill threshold | P2: answers kept, final context -7.1k, but 1.4 more requests, +42k summed input, +3.6 s (35) | depends on which input reading the criterion means (37) |
+| Fold MCP results Claude Code spilled | P2 (Haiku, 104 pairs): accuracy +7% [+1%, +14%], 1.2 fewer requests, -9% cost, -1.8 s, but the final context +800 tokens (34); A/B 1-3 indicative (K1) | cut by the input criterion (37); `TOOL_OUTPUT_LAB_MODE=spilled` keeps it for P3 on Sonnet |
+| Fold MCP results under the spill threshold | P2: answers kept, final context -7.1k, but 1.4 more requests, +42k summed input, +3.6 s (35) | keep; the hook's default (`inline`) |
 | JSON folding with promotion | real MCP JSON to 13%; built anomaly kinds survive | keep |
 | Line folding for logs | error words survive; quiet anomalies lost, and the loss costs answers | keep, with the gap stated |
 | Tree folding for XML and accessibility trees | A/B 2 (Haiku): -37% tokens on spilled results; A/B 3 (Sonnet): no gain | keep for weaker models; Sonnet does as well alone |
@@ -330,8 +331,6 @@ Per-band and pooled tables: `l2-p2.md`; each repetition: `l2-p2-r1.md`, `l2-p2-r
 
 ## Next
 
-0. A decision for the owner: which reading of "input tokens" the kill criterion means, the final
-   context, summed input or cost (37). It decides both fold modes.
 1. P3 (Sonnet, the no-shell channel, edit tasks), with the enumerate instruction naming what is
    listed (38), and about 150 agreeing pairs a cell so a verdict can resolve 3 points (33).
 2. At L the fold is larger than Claude Code's preview and Haiku reads the raw anyway (34): try a

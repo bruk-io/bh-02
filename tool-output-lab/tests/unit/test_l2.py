@@ -2,7 +2,8 @@ import json
 
 import pytest
 
-from evals.l2 import merged, parse_stream, report, rescored
+from claude_code.hook import Mode, mode_of
+from evals.l2 import HOOK_MODE, MCP_CONDITIONS, merged, parse_stream, report, rescored
 from evals.truth import Items
 
 
@@ -142,3 +143,8 @@ def test_a_saved_run_is_rescored_from_its_answer_line_and_a_failed_one_is_left_a
     assert rescored(row, truth)["correct"]
     failed = row | {"error": "no result event"}
     assert rescored(failed, truth) is failed
+
+
+def test_every_hook_condition_names_a_mode_the_hook_accepts():
+    assert set(HOOK_MODE) == set(MCP_CONDITIONS) - {"native"}
+    assert {mode_of(m) for m in HOOK_MODE.values()} == set(Mode)

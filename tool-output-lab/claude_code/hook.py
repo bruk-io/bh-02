@@ -6,18 +6,20 @@
 
 The `cd` is required: Claude Code runs hooks in the session's directory. The hook sees one of two
 things in `tool_response`: the result itself, when it is under Claude Code's own limits, or Claude
-Code's notice that it saved the result to a file. By default it acts only on the second (the A/Bs
-found folding inline results costs more than it saves): it reads the file Claude Code saved and
-gives Claude the folded view and that path. With TOOL_OUTPUT_LAB_MODE=all it also folds inline
-results, saving the raw beside Claude Code's own spills first.
+Code's notice that it saved the result to a file. By default (`inline`) it folds only the first,
+saving the raw beside Claude Code's own spills, and leaves spills to Claude Code: in P2 (FINDINGS
+34-35) folding results under the spill threshold kept answers and shrank the final context by 7k
+tokens, while folding spills grew it, since Claude reads the saved raw anyway. `spilled` folds
+only spills (it reads the file Claude Code saved and gives Claude the folded view and that path);
+`all` folds both.
 
 A spill notice is trusted only when it is the plain-string notice Claude Code writes and its path
 resolves inside this session's tool-results folder under Claude Code's naming; a tool's own output
 that imitates the notice is treated as ordinary output. Files are read without following links,
 only when regular and under a size cap, and written privately (0600) and atomically.
 
-Environment: TOOL_OUTPUT_LAB_BUDGET (tokens, default 2000), TOOL_OUTPUT_LAB_MODE (`spilled-only`,
-the default, or `all`), TOOL_OUTPUT_LAB_LOG (a JSONL file to append one line per decision to). A
+Environment: TOOL_OUTPUT_LAB_BUDGET (tokens, default 2000), TOOL_OUTPUT_LAB_MODE (`inline`, the
+default, `spilled` or `all`), TOOL_OUTPUT_LAB_LOG (a JSONL file to append one line per decision to). A
 failure inside the hook leaves the tool result untouched: it must never be why a tool call fails.
 """
 
@@ -28,6 +30,7 @@ import shlex
 import stat
 import sys
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -56,6 +59,28 @@ class Spilled:
 type Action = Inline | Spilled | None
 
 
+class Mode(StrEnum):
+    """Which results the hook folds."""
+
+    INLINE = "inline"  # results under Claude Code's limits; spills are left to Claude Code
+    SPILLED = "spilled"  # only results Claude Code saved to a file
+    ALL = "all"
+
+
+def mode_of(value: str | None) -> Mode:
+    """TOOL_OUTPUT_LAB_MODE as a Mode; unset is the default, inline.
+
+    Raises:
+        ValueError: the value names no mode.
+    """
+    try:
+        return Mode(value or Mode.INLINE)
+    except ValueError:
+        raise ValueError(
+            f"TOOL_OUTPUT_LAB_MODE={value!r}: use inline (the default), spilled or all"
+        ) from None
+
+
 def _text_of(response: Any) -> str | None:
     """The text of an MCP result: a string, or text-only content blocks. None for anything else."""
     if isinstance(response, str):
@@ -69,22 +94,21 @@ def _text_of(response: Any) -> str | None:
     return None
 
 
-def plan(event: dict[str, Any], fold_inline: bool = False) -> Action:
+def plan(event: dict[str, Any], mode: Mode = Mode.INLINE) -> Action:
     """What to do with one PostToolUse event; None leaves the result alone.
 
     A spill is only Claude Code's own notice: a plain string that starts with it. A content-block
-    result is the tool's own output, whatever it says. Inline results are folded only with
-    `fold_inline`.
+    result is the tool's own output, whatever it says. `mode` says which of the two to fold.
     """
     if not str(event.get("tool_name", "")).startswith("mcp__") or not event.get("transcript_path"):
         return None
     response = event.get("tool_response")
     if isinstance(response, str) and (m := _NOTICE.match(response)):
-        return Spilled(m["path"])
-    text = _text_of(response)
-    if text is None or not fold_inline:
+        return Spilled(m["path"]) if mode in (Mode.SPILLED, Mode.ALL) else None
+    if mode is Mode.SPILLED:
         return None
-    return Inline(text)
+    text = _text_of(response)
+    return None if text is None else Inline(text)
 
 
 def trusted_spill(resolved: str, session_resolved: str) -> bool:
@@ -222,11 +246,11 @@ def decide(event: dict[str, Any], action: Inline | Spilled, raw: str, budget: in
     return Outcome(tuple(saves), log, reply)
 
 
-def handle(event: dict[str, Any], budget: int, fold_inline: bool = False) -> dict[str, Any] | None:
+def handle(event: dict[str, Any], budget: int, mode: Mode = Mode.INLINE) -> dict[str, Any] | None:
     """The hook's JSON reply for one event, or None to leave the result alone: `plan` and `decide`
     choose, this reads the spill and writes what they say. A copy that cannot be saved raises
     OSError from `_write_private`; main reports it and leaves the result alone."""
-    action = plan(event, fold_inline)
+    action = plan(event, mode)
     if action is None:
         return None
     session = session_dir(event)
@@ -249,7 +273,7 @@ def main() -> int:
     try:
         event = json.load(sys.stdin)
         budget = int(os.environ.get("TOOL_OUTPUT_LAB_BUDGET", "2000"))
-        reply = handle(event, budget, fold_inline=os.environ.get("TOOL_OUTPUT_LAB_MODE") == "all")
+        reply = handle(event, budget, mode_of(os.environ.get("TOOL_OUTPUT_LAB_MODE")))
     except Exception as e:  # the hook must never break the tool call; say why on stderr  # noqa: BLE001
         print(f"tool-output-lab hook left the result untouched: {type(e).__name__}: {e}", file=sys.stderr)
         return 0

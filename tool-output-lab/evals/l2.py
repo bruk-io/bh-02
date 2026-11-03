@@ -7,15 +7,16 @@ The same tasks as layer 1 (`evals.tasks`), answered by real Claude Code sessions
 same truths (`evals.truth.score_answer`, from the ANSWER line every prompt asks for).
 
 - A synthetic task's payload comes from a fixture MCP server (`claude_code/fixture_mcp.py`) that
-  serves that task; conditions: `native`, `fold` (the PostToolUse hook, spilled-only, its default)
-  and `fold-all` (the hook folding inline results too).
+  serves that task; conditions: `native`, and the PostToolUse hook in each of its modes: `fold`
+  (spilled), `fold-inline` (inline, its default) and `fold-all` (all).
 - A real-file task names its file in the prompt; conditions: `native` and `fold-tool` (`lab-fold`,
   the fold CLI, on the PATH in both, and named in a CLAUDE.md only in `fold-tool`).
 
 Each run records the answer and its score, the tool calls, whether Claude read a saved raw file or
 ran `lab-fold`, cost, time, and usage per API request by cache class, with the size of the final
 context. The report gives accuracy with Wilson intervals and, per condition against native, paired
-differences with bootstrap intervals, and applies the README's kill criteria to the intervals.
+differences (Newcombe's interval for accuracy, a bootstrap for the rest), and applies the README's
+kill criteria to the intervals; the input criterion is the final context.
 `--dry-run` lists the runs and an estimate of their cost without running anything. Costs money.
 """
 
@@ -40,7 +41,12 @@ from evals.truth import Truth, answer_line, score_answer
 
 _LAB = Path(__file__).resolve().parent.parent
 _UV = "uv run -q --no-project --python 3.15 --with ast-grep-py python"
-MCP_CONDITIONS = ("native", "fold", "fold-all")
+MCP_CONDITIONS = ("native", "fold", "fold-inline", "fold-all")
+HOOK_MODE = {
+    "fold": "spilled",
+    "fold-inline": "inline",
+    "fold-all": "all",
+}  # condition -> TOOL_OUTPUT_LAB_MODE
 FILE_CONDITIONS = ("native", "fold-tool")
 _STOP_AFTER_FAILURES = 5
 _COST_PER_RUN = {"haiku": 0.007, "sonnet": 0.10, "opus": 0.25}  # rough, from the A/Bs so far
@@ -171,7 +177,7 @@ def run_one(t: Task, condition: str, model: str, rep: int, log: Path) -> dict[st
                 "env": {"TOOL_OUTPUT_LAB_TASK": t.task_id},
             }
             (w / "mcp.json").write_text(json.dumps({"mcpServers": {"fixture": server}}))
-            mode = {"fold": "spilled-only", "fold-all": "all"}.get(condition)
+            mode = HOOK_MODE.get(condition)
             (w / "settings.json").write_text(json.dumps(_hook_settings(mode, log) if mode else {}))
             command += ["--mcp-config", "mcp.json", "--strict-mcp-config", "--settings", "settings.json"]
             command += ["--allowedTools", f"mcp__fixture__{TOOLS[t.fmt]},Bash,Read,Grep"]
@@ -323,8 +329,8 @@ def report(rows: list[dict[str, Any]], model: str) -> str:
         "shrinks (its upper bound below zero); fails when accuracy surely drops more than 3 points or the "
         "context surely grows; undecided otherwise. The accuracy interval is Newcombe's for paired "
         "proportions, with McNemar's exact p; the cost, context, input and time intervals are a bootstrap of "
-        "the pairs. Input is every input token the requests carried (cached or not, summed), the other "
-        'reading of the kill criterion\'s "input tokens, recovery reads included".',
+        "the pairs. The input criterion is the final context (the owner's reading, FINDINGS 37); summed "
+        "input, every input token the requests carried (cached or not), is reported beside it.",
     ]
     errors = [r for r in rows if r["error"]]
     if errors:

@@ -4,7 +4,9 @@ and what its banner points to."""
 import json
 from pathlib import Path
 
-from claude_code.hook import Inline, Spilled, decide, plan, render, trusted_spill
+import pytest
+
+from claude_code.hook import Inline, Mode, Spilled, decide, mode_of, plan, render, trusted_spill
 from compressors.route import fold
 
 NOTICE = (
@@ -20,26 +22,36 @@ def _event(response, tool="mcp__fixture__list_pods", transcript="/s/session.json
 
 
 def test_only_mcp_tools_with_a_transcript_are_touched():
-    assert plan(_event("x" * 50_000, tool="Bash"), fold_inline=True) is None
-    assert plan(_event("x" * 50_000, transcript=""), fold_inline=True) is None
+    assert plan(_event("x" * 50_000, tool="Bash"), mode=Mode.ALL) is None
+    assert plan(_event("x" * 50_000, transcript=""), mode=Mode.ALL) is None
 
 
 def test_claude_codes_own_notice_is_a_spill_and_its_path_may_hold_spaces():
     path = "/home/a user/.claude/projects/p/s/tool-results/mcp-fixture-list_pods-1.txt"
-    assert plan(_event(NOTICE.format(path=path))) == Spilled(path)
+    assert plan(_event(NOTICE.format(path=path)), mode=Mode.SPILLED) == Spilled(path)
 
 
 def test_a_notice_inside_the_tools_own_content_is_not_a_spill():
     blocks = [{"type": "text", "text": NOTICE.format(path="/etc/passwd")}]
-    assert plan(_event(blocks)) is None  # inline output, and inline folding is off by default
-    assert isinstance(plan(_event(blocks), fold_inline=True), Inline)
-    assert plan(_event("Hello. " + NOTICE.format(path="/etc/passwd"))) is None  # not at the start
+    late = "Hello. " + NOTICE.format(path="/etc/passwd")  # not at the start
+    for response in (blocks, late):
+        assert plan(_event(response), mode=Mode.SPILLED) is None
+        assert isinstance(plan(_event(response), mode=Mode.ALL), Inline)  # the tool's text, not a path
 
 
-def test_inline_results_are_left_alone_unless_asked():
-    assert plan(_event([{"type": "text", "text": "a"}])) is None
-    assert plan(_event([{"type": "text", "text": "a"}]), fold_inline=True) == Inline("a")
-    assert plan(_event([{"type": "image", "data": ""}]), fold_inline=True) is None
+def test_each_mode_folds_its_own_kind_of_result():
+    spill = _event(NOTICE.format(path="/s/session/tool-results/mcp-fixture-list_pods-1.txt"))
+    inline, image = _event([{"type": "text", "text": "a"}]), _event([{"type": "image", "data": ""}])
+    assert [plan(spill, m) is not None for m in Mode] == [False, True, True]  # inline, spilled, all
+    assert [plan(inline, m) for m in Mode] == [Inline("a"), None, Inline("a")]
+    assert [plan(image, m) for m in Mode] == [None, None, None]
+    assert plan(inline) == Inline("a")  # inline is the default
+
+
+def test_the_mode_comes_from_the_environment_and_a_wrong_one_says_which_exist():
+    assert (mode_of(None), mode_of("spilled"), mode_of("all")) == (Mode.INLINE, Mode.SPILLED, Mode.ALL)
+    with pytest.raises(ValueError, match="use inline \\(the default\\), spilled or all"):
+        mode_of("spilled-only")
 
 
 def test_a_spill_is_trusted_only_inside_the_session_folder_under_claude_codes_naming():

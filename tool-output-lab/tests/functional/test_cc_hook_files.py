@@ -4,7 +4,7 @@ import json
 import os
 import stat
 
-from claude_code.hook import handle
+from claude_code.hook import Mode, handle
 from evals.synthetic import pods
 
 
@@ -41,7 +41,7 @@ def test_a_real_spill_is_folded_from_claude_codes_file(tmp_path):
     case = _payload(500)
     spill = results / "mcp-fixture-list_pods-1793711514016.txt"
     spill.write_text(case.raw)
-    reply = handle(_event(_notice(spill), transcript), budget=2000)
+    reply = handle(_event(_notice(spill), transcript), budget=2000, mode=Mode.SPILLED)
     text = reply["hookSpecificOutput"]["updatedToolOutput"]
     assert str(spill) in text.splitlines()[0]
     assert case.planted[0] in text
@@ -52,7 +52,7 @@ def test_a_notice_naming_a_file_outside_the_session_is_not_read(tmp_path):
     transcript, _ = _session(tmp_path)
     secret = tmp_path / "secrets.json"
     secret.write_text(json.dumps({f"k{i}": "s3cret" * 100 for i in range(200)}))
-    assert handle(_event(_notice(secret), transcript), budget=2000) is None
+    assert handle(_event(_notice(secret), transcript), budget=2000, mode=Mode.SPILLED) is None
 
 
 def test_a_link_in_the_session_folder_pointing_out_is_not_followed(tmp_path):
@@ -61,22 +61,22 @@ def test_a_link_in_the_session_folder_pointing_out_is_not_followed(tmp_path):
     secret.write_text(json.dumps({f"k{i}": "s3cret" * 100 for i in range(200)}))
     link = results / "mcp-evil-fetch-1.txt"
     link.symlink_to(secret)
-    assert handle(_event(_notice(link), transcript), budget=2000) is None
+    assert handle(_event(_notice(link), transcript), budget=2000, mode=Mode.SPILLED) is None
 
 
 def test_a_device_or_a_huge_file_is_not_read(tmp_path):
     transcript, results = _session(tmp_path)
     fifo = results / "mcp-evil-fetch-2.txt"
     os.mkfifo(fifo)
-    assert handle(_event(_notice(fifo), transcript), budget=2000) is None
+    assert handle(_event(_notice(fifo), transcript), budget=2000, mode=Mode.SPILLED) is None
 
 
-def test_inline_folding_keeps_the_raw_privately_when_asked(tmp_path):
+def test_inline_folding_the_default_keeps_the_raw_privately(tmp_path):
     transcript, results = _session(tmp_path)
     case = _payload(50)
     blocks = [{"type": "text", "text": case.raw}]
-    assert handle(_event(blocks, transcript), budget=500) is None  # off by default
-    reply = handle(_event(blocks, transcript), budget=500, fold_inline=True)
+    assert handle(_event(blocks, transcript), budget=500, mode=Mode.SPILLED) is None
+    reply = handle(_event(blocks, transcript), budget=500)
     saved = results / "folded-toolu_1.txt"
     assert saved.read_text() == case.raw
     assert stat.S_IMODE(saved.stat().st_mode) == 0o600
@@ -88,4 +88,4 @@ def test_a_failing_log_does_not_stop_the_fold(tmp_path, monkeypatch):
     monkeypatch.setenv("TOOL_OUTPUT_LAB_LOG", str(tmp_path / "no-such-dir" / "log.jsonl"))
     spill = results / "mcp-fixture-list_pods-3.txt"
     spill.write_text(_payload(500).raw)
-    assert handle(_event(_notice(spill), transcript), budget=2000) is not None
+    assert handle(_event(_notice(spill), transcript), budget=2000, mode=Mode.SPILLED) is not None
