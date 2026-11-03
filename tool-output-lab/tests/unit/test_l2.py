@@ -76,6 +76,9 @@ def _rows(n: int = 5) -> list[dict]:
                     "error": None,
                     "read_saved_file": False,
                     "ran_fold": False,
+                    "input_tokens": 10,
+                    "cache_read": ctx,
+                    "cache_write": 0,
                 }
             )
     return rows
@@ -84,6 +87,8 @@ def _rows(n: int = 5) -> list[dict]:
 def test_the_report_pairs_conditions_and_labels_small_samples():
     text = report(_rows(), "test")
     assert "| json | M | fold | 5 | +0%" in text and "passes (indicative: under 30 pairs)" in text
+    assert "| M | fold | 5 | +0%" in text  # every format together
+    assert "| -20000 [-20000, -20000] | -20000 [-20000, -20000] |" in text  # final context and input
 
 
 def test_a_run_that_failed_to_answer_is_listed_not_scored_or_paired():

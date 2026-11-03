@@ -230,10 +230,40 @@ def _diffs(
     )
 
 
+def _paired(base: dict[str, dict[str, Any]], runs: dict[str, dict[str, Any]]) -> str:
+    """The table cells for one condition against native: each change with its 95% interval, and the
+    verdict the kill criteria give."""
+    diffs = partial(_diffs, base, runs)  # (field, scale=1.0): this condition minus native, per pair
+    acc = bootstrap(diffs("correct"), statistics.mean)
+    cost, ctx, inp, secs = (
+        bootstrap(diffs("cost_usd")),
+        bootstrap(diffs("final_context")),
+        bootstrap(diffs("all_input")),
+        bootstrap(diffs("duration_ms", 1e-3)),
+    )
+    n = len(diffs("correct"))
+    keeps_answers, saves = acc[1] > -0.03, ctx[2] < 0
+    verdict = (
+        "passes" if keeps_answers and saves else "fails" if acc[2] < -0.03 or ctx[1] > 0 else "undecided"
+    )
+    verdict += " (indicative: under 30 pairs)" if n < 30 else ""
+    return (
+        f"| {n} | {acc[0]:+.0%} [{acc[1]:+.0%}, {acc[2]:+.0%}] "
+        f"| ${cost[0]:+.4f} [{cost[1]:+.4f}, {cost[2]:+.4f}] "
+        f"| {ctx[0]:+.0f} [{ctx[1]:+.0f}, {ctx[2]:+.0f}] "
+        f"| {inp[0]:+.0f} [{inp[1]:+.0f}, {inp[2]:+.0f}] "
+        f"| {secs[0]:+.1f}s [{secs[1]:+.1f}, {secs[2]:+.1f}] | {verdict} |"
+    )
+
+
 def report(rows: list[dict[str, Any]], model: str) -> str:
     """The run as tables. Runs that failed to produce an answer (see `_run_error`) are listed, not
     scored: counted as wrong at no cost, they would make a condition look both worse and cheaper."""
-    scored = [r for r in rows if not r["error"]]
+    scored = [
+        r | {"all_input": r["input_tokens"] + r["cache_read"] + r["cache_write"]}
+        for r in rows
+        if not r["error"]
+    ]
     out = [
         f"# Layer 2: Claude Code on the eval tasks ({model})",
         "",
@@ -262,46 +292,33 @@ def report(rows: list[dict[str, Any]], model: str) -> str:
             f"| {sum(r['read_saved_file'] for r in rs)}/{len(rs)} "
             f"| {sum(r['ran_fold'] for r in rs)}/{len(rs)} |"
         )
+    columns = (
+        "| pairs | accuracy change | cost change | final context change | input change | time change "
+        "| verdict |"
+    )
     out += ["", "## Each condition against native, paired by task and repetition, per size band", ""]
-    out += [
-        "| format | band | condition | pairs | accuracy change | cost change | final context change "
-        "| time change | verdict |"
-    ]
-    out.append("|---|---|---|---|---|---|---|---|---|")
+    out += [f"| format | band | condition {columns}", "|---|---|---|---|---|---|---|---|---|---|"]
     by_cell: dict[tuple[str, str, str], dict[str, dict[str, Any]]] = defaultdict(dict)
     for r in scored:  # a pair needs both runs scored
         by_cell[(r["fmt"], r["band"], r["condition"])][f"{r['task_id']}#{r['rep']}"] = r
     for (fmt, band, cond), runs in sorted(by_cell.items()):
-        if cond == "native" or (fmt, band, "native") not in by_cell:
-            continue
-        base = by_cell[(fmt, band, "native")]
-
-        diffs = partial(_diffs, base, runs)  # (field, scale=1.0): this condition minus native, per run
-
-        acc = bootstrap(diffs("correct"), statistics.mean)
-        cost, ctx, secs = (
-            bootstrap(diffs("cost_usd")),
-            bootstrap(diffs("final_context")),
-            bootstrap(diffs("duration_ms", 1e-3)),
-        )
-        n = len(diffs("correct"))
-        keeps_answers = acc[1] > -0.03
-        saves = ctx[2] < 0
-        verdict = (
-            "passes" if keeps_answers and saves else "fails" if acc[2] < -0.03 or ctx[1] > 0 else "undecided"
-        )
-        verdict += " (indicative: under 30 pairs)" if n < 30 else ""
-        out.append(
-            f"| {fmt} | {band} | {cond} | {n} | {acc[0]:+.0%} [{acc[1]:+.0%}, {acc[2]:+.0%}] "
-            f"| ${cost[0]:+.4f} [{cost[1]:+.4f}, {cost[2]:+.4f}] "
-            f"| {ctx[0]:+.0f} [{ctx[1]:+.0f}, {ctx[2]:+.0f}] "
-            f"| {secs[0]:+.1f}s [{secs[1]:+.1f}, {secs[2]:+.1f}] | {verdict} |"
-        )
+        if cond != "native" and (fmt, band, "native") in by_cell:
+            out.append(f"| {fmt} | {band} | {cond} {_paired(by_cell[(fmt, band, 'native')], runs)}")
+    out += ["", "## Every format together, per size band", ""]
+    out += [f"| band | condition {columns}", "|---|---|---|---|---|---|---|---|---|"]
+    by_band: dict[tuple[str, str], dict[str, dict[str, Any]]] = defaultdict(dict)
+    for r in scored:
+        by_band[(r["band"], r["condition"])][f"{r['task_id']}#{r['rep']}"] = r
+    for (band, cond), runs in sorted(by_band.items()):
+        if cond != "native" and (band, "native") in by_band:  # pairs: the tasks both conditions ran
+            out.append(f"| {band} | {cond} {_paired(by_band[(band, 'native')], runs)}")
     out += [
         "",
         "Verdict: passes when the accuracy change's lower bound is above -3 points and the final context "
         "shrinks (its upper bound below zero); fails when accuracy surely drops more than 3 points or the "
-        "context surely grows; undecided otherwise.",
+        "context surely grows; undecided otherwise. Input is every input token the requests carried (cached "
+        "or not, summed), the other reading of the kill criterion's "
+        '"input tokens, recovery reads included".',
     ]
     errors = [r for r in rows if r["error"]]
     if errors:
