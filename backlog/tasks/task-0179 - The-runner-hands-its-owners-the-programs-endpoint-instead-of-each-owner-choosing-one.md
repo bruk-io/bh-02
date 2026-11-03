@@ -138,4 +138,6 @@ INFO    -  Documentation built in 5.73 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+Worker, 2026-11-03, on the review's failing run: not reproduced. With the failing assertion made to print the app's last screen, the whole workspace suite under -n auto --dist loadgroup passed it (3964 passed); its one failure there was a different test, libs/brig/tests/unit/test_subset.py::test_ec1_narrowed_to_is_greatest_lower_bound, the old brig's own property test (removed with libs/brig in TASK-0176.08). test_real_launch.py alone under -n auto passed 3 runs in 3 (37 each). The full scripts/check recorded above exited 0 (3965 passed). The keyed-model launch's exit 1 on quit is a flake under full load that this evidence does not tie to the Unjailed stop path; if it recurs, the assertion should carry app.text() to show why.
 <!-- SECTION:NOTES:END -->
