@@ -36,7 +36,7 @@ from typing import Any
 
 from evals.stats import bootstrap, paired, wilson
 from evals.tasks import FORMATS, KINDS, TOOLS, Task, skipped, tasks
-from evals.truth import answer_line, score_answer
+from evals.truth import Truth, answer_line, score_answer
 
 _LAB = Path(__file__).resolve().parent.parent
 _UV = "uv run -q --no-project --python 3.15 --with ast-grep-py python"
@@ -212,7 +212,7 @@ def run_one(t: Task, condition: str, model: str, rep: int, log: Path) -> dict[st
         "precision": score.precision,
         "answer_line": answer_line(session.answer),
         **{k: v for k, v in asdict(session).items() if k != "answer"},
-        "answer": session.answer[:2000],
+        "answer": session.answer[-2000:],  # the end: the ANSWER line and what led to it
     }
 
 
@@ -355,6 +355,21 @@ def merged(runs: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
     return out
 
 
+def rescored(row: dict[str, Any], truth: Truth) -> dict[str, Any]:
+    """The row scored again with the current scorer, from its saved ANSWER line (or, when it had
+    none, its saved prose), so a scorer fix reaches runs already made at no cost."""
+    if row["error"]:
+        return row
+    text = f"ANSWER: {row['answer_line']}" if row["answer_line"] is not None else row["answer"]
+    score = score_answer(truth, text)
+    return row | {
+        "correct": score.correct,
+        "recall": score.recall,
+        "precision": score.precision,
+        "parsed": score.parsed,
+    }
+
+
 def _merge(names: list[str], name: str) -> int:
     results = _LAB / "results"
     runs = {
@@ -366,6 +381,8 @@ def _merge(names: list[str], name: str) -> int:
     except ValueError as e:
         print(f"l2 --merge: {e}", file=sys.stderr)
         return 1
+    truths = {t.task_id: t.truth for t in tasks()}
+    rows = [rescored(r, truths[r["task_id"]]) for r in rows]
     text = report(rows, rows[0]["model"] if rows else "?")
     (results / f"{name}.md").write_text(text, encoding="utf-8")
     print(text, end="")
@@ -392,7 +409,10 @@ def main(argv: list[str] | None = None) -> int:
         "--dry-run", action="store_true", help="list the runs and an estimated cost; run nothing"
     )
     parser.add_argument(
-        "--merge", nargs="+", metavar="NAME", help="report results/NAME.jsonl together as --name; run nothing"
+        "--merge",
+        nargs="+",
+        metavar="NAME",
+        help="report results/NAME.jsonl together as --name, rescored with the current scorer; run nothing",
     )
     ns = parser.parse_args(argv)
     if ns.merge:

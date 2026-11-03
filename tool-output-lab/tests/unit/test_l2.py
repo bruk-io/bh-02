@@ -2,7 +2,8 @@ import json
 
 import pytest
 
-from evals.l2 import merged, parse_stream, report
+from evals.l2 import merged, parse_stream, report, rescored
+from evals.truth import Items
 
 
 def _stream() -> list[str]:
@@ -122,3 +123,11 @@ def test_runs_merge_into_one_report_and_a_repeated_repetition_is_refused():
         merged({"a": first, "b": first})
     with pytest.raises(ValueError, match="different models"):
         merged({"a": first, "b": [r | {"rep": 1, "model": "n"} for r in first]})
+
+
+def test_a_saved_run_is_rescored_from_its_answer_line_and_a_failed_one_is_left_alone():
+    truth = Items(frozenset({"Card N7697"}), frozenset({"Card N7697", "Card M4557"}))
+    row = {"error": None, "answer_line": "N7697", "answer": "...", "correct": False}
+    assert rescored(row, truth)["correct"]
+    failed = row | {"error": "no result event"}
+    assert rescored(failed, truth) is failed
