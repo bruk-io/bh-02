@@ -162,7 +162,9 @@ detection, `--save` writes the pretty-printed copy when the line numbers refer t
     full, so stand-outs were never computed (only partial openings did that), and the stand-out's
     longer line made it the last item "cheapest first" would open. Fixed: stand-outs are found
     whenever a node opens and open first (`test_a_stand_out_opens_first_even_when_its_list_opens_in_full`);
-    21/21 cells now survive at both sizes. Rerun: `needle-5-standouts-open.md`.
+    21/21 cells now survive at both sizes. Rerun (`needle-5-standouts-open.md`): disabled button
+    and alert 50% -> 100%, lookup with the query 79% -> 100% (43% without it, which needs the file);
+    every JSON, log and Figma row unchanged.
 
 ## Comprehension A/B: `fold` named in CLAUDE.md, Sonnet (`comp-1-sonnet.md`, 20 runs, $1.61)
 
