@@ -8,6 +8,7 @@ from compressors.common import estimate_tokens, split_lines
 from compressors.html import html_to_text, looks_like_html
 from compressors.json_fold import fold_json, parse_json_or_jsonl
 from compressors.lines import fold_lines
+from compressors.schema import schema_view
 from compressors.tree import (
     XmlTree,
     fold_outline,
@@ -29,6 +30,8 @@ _WORTH_IT = 0.9  # a result that keeps more than this share of the raw tokens is
 type _Parsed = tuple[Any, str] | XmlTree | None
 
 _BRANCHES = ("json", "xml", "html", "outline", "lines", "text")
+# How a data branch shows its data: samples (head, tail, stand-outs) or its schema (PLAN.md, S1).
+VIEWS = ("sample", "schema")
 
 
 def _detect(raw: str) -> tuple[str, _Parsed]:
@@ -103,9 +106,14 @@ def _body(
             )
         case "json", (value, "json"):
             return fold_json(value, terms, budget_tokens), None
+        case "json-schema", (value, "json"):
+            return schema_view(value, terms, budget_tokens), None
         case "jsonl", (list() as records, "jsonl"):
             note = markers.jsonl_note(len(records), _records_by_line(raw))
             return f"{note}\n{fold_json(records, terms, budget_tokens)}", None
+        case "jsonl-schema", (list() as records, "jsonl"):
+            note = markers.jsonl_note(len(records), _records_by_line(raw))
+            return f"{note}\n{schema_view(records, terms, budget_tokens, slurp=True)}", None
         case "outline", None:
             return fold_outline(raw, budget_tokens, terms).text, None
         case "html", None:
@@ -137,19 +145,29 @@ def fold(
     budget_tokens: int = 2000,
     terms: frozenset[str] = frozenset(),
     force: str | None = None,
+    view: str = "sample",
 ) -> Folded | None:
     """The folded body of a large result, or None when it should pass through untouched.
 
     None when the result fits the budget, or when folding would keep more than 90% of it. `terms`
     are the query (`common.query_words` of a query, `common.query_terms` of a tool call's
-    arguments); `force` names the branch instead of detecting it. A `force` the text cannot take
-    (JSON that does not parse, XML that is not well formed) or that is no branch at all raises
-    ValueError, from `_parse_as`."""
+    arguments); `force` names the branch instead of detecting it; `view` says how a data branch
+    shows its data, by samples or by its schema (`compressors.schema`). A `force` the text cannot
+    take (JSON that does not parse, XML that is not well formed) or that is no branch at all raises
+    ValueError, from `_parse_as`.
+
+    Raises:
+        ValueError: `view` is neither sample nor schema.
+    """
     raw_tokens = estimate_tokens(raw)
     if raw_tokens <= budget_tokens:
         return None
     raw = raw.removeprefix(_BOM)  # it defeats JSON and XML detection, and dropping it moves no line
+    if view not in VIEWS:
+        raise ValueError(f"unknown view {view!r}: use {' or '.join(VIEWS)}")
     branch, parsed = _parse_as(force, raw) if force else _detect(raw)
+    if view == "schema" and branch in ("json", "jsonl"):  # data: its schema instead of samples
+        branch += "-schema"
     body, source = _body(branch, parsed, raw, terms, budget_tokens)
     if estimate_tokens(body) > raw_tokens * _WORTH_IT:
         return None
