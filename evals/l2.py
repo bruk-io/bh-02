@@ -24,6 +24,7 @@ import json
 import os
 import statistics
 import subprocess
+import sys
 import tempfile
 from collections import defaultdict
 from collections.abc import Iterable
@@ -326,6 +327,48 @@ def select(
     return jobs
 
 
+def merged(runs: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
+    """The rows of several runs as one, for one report.
+
+    Raises:
+        ValueError: two runs hold the same task, condition and repetition (pass --first-rep so
+            repetitions added later are numbered after the earlier ones), or used different models.
+    """
+    seen: dict[tuple[str, str, int], str] = {}
+    models = {r["model"] for rows in runs.values() for r in rows}
+    if len(models) > 1:
+        raise ValueError(f"the runs used different models ({', '.join(sorted(models))}); report them apart")
+    out = []
+    for name, rows in runs.items():
+        for r in rows:
+            key = (r["task_id"], r["condition"], r["rep"])
+            if key in seen:
+                raise ValueError(
+                    f"{name} and {seen[key]} both hold {key[0]} {key[1]} rep {key[2]}: "
+                    "run later repetitions with --first-rep"
+                )
+            seen[key] = name
+            out.append(r)
+    return out
+
+
+def _merge(names: list[str], name: str) -> int:
+    results = _LAB / "results"
+    runs = {
+        n: [json.loads(line) for line in (results / f"{n}.jsonl").read_text(encoding="utf-8").splitlines()]
+        for n in names
+    }
+    try:
+        rows = merged(runs)
+    except ValueError as e:
+        print(f"l2 --merge: {e}", file=sys.stderr)
+        return 1
+    text = report(rows, rows[0]["model"] if rows else "?")
+    (results / f"{name}.md").write_text(text, encoding="utf-8")
+    print(text, end="")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -337,12 +380,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--conditions", nargs="+", choices=sorted({*MCP_CONDITIONS, *FILE_CONDITIONS}))
     parser.add_argument("--ids", nargs="+", default=(), help="exact task ids (overrides the other filters)")
     parser.add_argument("--reps", type=int, default=1)
+    parser.add_argument(
+        "--first-rep", type=int, default=0, help="number the repetitions from here, to add to an earlier run"
+    )
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--name", default="l2-1")
     parser.add_argument(
         "--dry-run", action="store_true", help="list the runs and an estimated cost; run nothing"
     )
+    parser.add_argument(
+        "--merge", nargs="+", metavar="NAME", help="report results/NAME.jsonl together as --name; run nothing"
+    )
     ns = parser.parse_args(argv)
+    if ns.merge:
+        return _merge(ns.merge, ns.name)
     if unknown := set(ns.ids) - {t.task_id for t in tasks()}:
         parser.error(
             f"no eval task {', '.join(sorted(unknown))}: ids look like json-M-spot-at50 or "
@@ -350,7 +401,7 @@ def main(argv: list[str] | None = None) -> int:
         )
     jobs = [
         (t, c, rep)
-        for rep in range(ns.reps)
+        for rep in range(ns.first_rep, ns.first_rep + ns.reps)
         for t, c in select(ns.formats, ns.kinds, ns.bands, ns.conditions, ns.ids)
     ]
     per_run = next((v for k, v in _COST_PER_RUN.items() if k in ns.model), _COST_PER_RUN["sonnet"])
