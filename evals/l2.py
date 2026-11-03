@@ -26,6 +26,7 @@ import argparse
 import difflib
 import json
 import os
+import re
 import statistics
 import subprocess
 import sys
@@ -245,7 +246,11 @@ def run_one(t: Task, condition: str, model: str, rep: int, log: Path) -> dict[st
     if isinstance(t.truth, Edited):
         score, problem = score_edit(t.truth, t.payload(), edited)
         diff = "".join(difflib.unified_diff(t.payload().splitlines(True), edited.splitlines(True), n=1))
-        extra = {"edit_problem": problem, "edit_diff": diff[:4000]}
+        extra = {
+            "edit_problem": problem,
+            "edit_diff": diff[:_MAX_DIFF],
+            "edit_diff_cut": len(diff) > _MAX_DIFF,
+        }
     else:
         score = score_answer(t.truth, session.answer)
     head = {"task_id": t.task_id, "fmt": t.fmt, "kind": t.kind, "band": t.band, "condition": condition}
@@ -438,12 +443,52 @@ def merged(runs: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
     return out
 
 
-def rescored(row: dict[str, Any], truth: Truth) -> dict[str, Any]:
+_HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+\d+(?:,\d+)? @@")
+_MAX_DIFF = 50_000
+
+
+def patched(original: str, diff: str) -> str | None:
+    """`original` with a unified diff (difflib's, as an edit row stores it) applied, or None when the
+    diff does not apply: what lets an edit be checked again after the session's folder is gone."""
+    old, out, at = original.splitlines(True), [], 0
+    lines = diff.splitlines(True)
+    i = 0
+    while i < len(lines):
+        m = _HUNK.match(lines[i])
+        i += 1
+        if m is None:
+            continue
+        start = int(m[1]) - (0 if m[2] == "0" else 1)
+        out += old[at:start]
+        at = start
+        while i < len(lines) and not lines[i].startswith("@@"):
+            kind, text = lines[i][:1], lines[i][1:]
+            if kind in " -":
+                if at >= len(old) or old[at] != text:
+                    return None
+                at += 1
+                if kind == " ":
+                    out.append(text)
+            elif kind == "+":
+                out.append(text)
+            i += 1
+    return "".join(out + old[at:])
+
+
+def rescored(row: dict[str, Any], truth: Truth, original: str | None = None) -> dict[str, Any]:
     """The row scored again with the current scorer, from its saved ANSWER line (or, when it had
-    none, its saved prose), so a scorer fix reaches runs already made at no cost. An edit's score
-    came from the edited file, which is gone, so it stays as it was."""
-    if row["error"] or row.get("kind") == "edit":
+    none, its saved prose), so a scorer fix reaches runs already made at no cost. An edit is checked
+    again on its file rebuilt from the saved diff; when the diff was too long to keep, its score stays."""
+    if row["error"]:
         return row
+    if isinstance(truth, Edited):  # `original`: the file the edit was made to
+        if original is None or row.get("edit_diff_cut"):
+            return row
+        edited = patched(original, row.get("edit_diff", ""))
+        if edited is None:
+            return row
+        score, problem = score_edit(truth, original, edited)
+        return row | {"correct": score.correct, "edit_problem": problem}
     text = f"ANSWER: {row['answer_line']}" if row["answer_line"] is not None else row["answer"]
     score = score_answer(truth, text)
     return row | {
@@ -465,8 +510,11 @@ def _merge(names: list[str], name: str) -> int:
     except ValueError as e:
         print(f"l2 --merge: {e}", file=sys.stderr)
         return 1
-    truths = {t.task_id: t.truth for t in tasks()}
-    rows = [rescored(r, truths[r["task_id"]]) for r in rows]
+    by_id = {t.task_id: t for t in tasks()}
+    rows = [
+        rescored(r, (t := by_id[r["task_id"]]).truth, t.payload() if isinstance(t.truth, Edited) else None)
+        for r in rows
+    ]
     text = report(rows, rows[0]["model"] if rows else "?")
     (results / f"{name}.md").write_text(text, encoding="utf-8")
     print(text, end="")

@@ -40,11 +40,12 @@ def test_a_keyword_only_parameter_that_is_positional_defaults_wrongly_or_brings_
 _RENAME = renamed("_check_closed", "_ensure_open")
 
 
-def test_a_rename_of_every_use_passes_and_a_docstring_may_keep_the_old_name():
+def test_a_rename_of_every_use_passes_and_a_docstring_may_keep_the_old_name_or_take_the_new():
     edited = _SRC.replace("def _check_closed", "def _ensure_open").replace(
         "._check_closed()", "._ensure_open()"
     )
     assert "_check_closed is the old name" in edited and _RENAME(_SRC, edited) is None
+    assert _RENAME(_SRC, _SRC.replace("_check_closed", "_ensure_open")) is None  # what P3's smoke runs did
 
 
 def test_a_rename_that_misses_a_use_or_changes_more_fails_and_says_where():

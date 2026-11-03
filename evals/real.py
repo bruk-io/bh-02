@@ -8,6 +8,7 @@ way: by `ast`, against the original, so formatting never matters and any other c
 
 import ast
 import json
+import re
 import xml.etree.ElementTree as ET
 from collections.abc import Callable
 from pathlib import Path
@@ -197,8 +198,8 @@ def added_keyword_only(cls: str, method: str, param: str, default: str) -> Calla
 
 def renamed(old: str, new: str) -> Callable[[str, str], str | None]:
     """A check that every use of the name `old` (a definition, an attribute, a name) became `new`, and
-    that renaming back gives the original exactly. Strings and comments are not code: a docstring may
-    keep the old name."""
+    that renaming back gives the original exactly. Strings are renamed back too, so a docstring that
+    mentions the method may keep the old name or take the new one."""
 
     def check(original: str, edited: str) -> str | None:
         tree = _parse(edited)
@@ -214,6 +215,8 @@ def renamed(old: str, new: str) -> Callable[[str, str], str | None]:
         for n in ast.walk(tree):
             if _named(n) == new:
                 _rename(n, old)
+            elif isinstance(n, ast.Constant) and isinstance(n.value, str):
+                n.value = re.sub(rf"\b{re.escape(new)}\b", old, n.value)
         if ast.dump(tree) != ast.dump(ast.parse(original)):
             return f"something besides the rename changed (or {new} now names something that was not {old})"
         return None

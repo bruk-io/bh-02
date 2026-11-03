@@ -1,10 +1,12 @@
+import difflib
 import json
 
 import pytest
 
 from claude_code.hook import Mode, mode_of
-from evals.l2 import HOOK_MODE, MCP_CONDITIONS, merged, parse_stream, report, rescored
-from evals.truth import Items
+from evals.l2 import HOOK_MODE, MCP_CONDITIONS, merged, parse_stream, patched, report, rescored
+from evals.real import renamed
+from evals.truth import Edited, Items
 
 
 def _stream() -> list[str]:
@@ -161,6 +163,22 @@ def test_noshell_fold_is_paired_against_noshell_and_noshell_against_native():
     assert "| python | M | noshell | 3 |" in text and "| -2000 [" in text
 
 
-def test_an_edit_keeps_the_score_its_file_gave_it():
-    row = {"error": None, "kind": "edit", "answer_line": "done", "answer": "", "correct": True}
-    assert rescored(row, Items(frozenset({"x"}), frozenset({"x"}))) is row
+def test_an_edit_is_checked_again_on_its_file_rebuilt_from_the_saved_diff():
+    original = "class A:\n    def m(self):\n        return self.m()\n" + "x = 1\n" * 50
+    edited = original.replace("m(", "n(")
+    diff = "".join(difflib.unified_diff(original.splitlines(True), edited.splitlines(True), n=1))
+    assert patched(original, diff) == edited and patched(original, "") == original
+    assert patched(original.replace("x = 1", "y = 2", 1), diff) is None  # its context line changed
+    assert patched("something else\n", diff) is None
+    truth = Edited("def m", renamed("m", "n"))
+    row = {
+        "error": None,
+        "kind": "edit",
+        "answer_line": "done",
+        "answer": "",
+        "correct": False,
+        "edit_diff": diff,
+    }
+    assert rescored(row, truth, original)["correct"]
+    assert rescored(row | {"edit_diff_cut": True}, truth, original) == row | {"edit_diff_cut": True}
+    assert rescored(row, truth) is row  # no original to rebuild from
