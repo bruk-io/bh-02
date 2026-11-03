@@ -54,25 +54,28 @@ _MAKE = {"json": synthetic.pods, "log": synthetic.logs, "a11y": synthetic.snapsh
 _TOOL = {"json": "list_pods", "log": "get_logs", "a11y": "browser_snapshot", "figma": "get_figma_metadata"}
 _ASK = {
     "json": {
-        "spot": "Is any pod unhealthy or different from the rest? Name it. If none is, say so.",
+        "spot": "Does any pod look wrong or unusual? Name it, or say none.",
         "count": "How many pods are not Running?",
         "enumerate": "List every pod that is not Running.",
         "lookup": "What is the IP address of pod {subject}?",
     },
     "log": {
-        "spot": "Did any payment fail? Name the order. If none did, say so.",
+        "spot": (
+            "Does anything in the log look wrong or unusual? Name the order or request it concerns, or say "
+            "none."
+        ),
         "count": "How many payments failed?",
         "enumerate": "List every order whose payment failed.",
         "lookup": "Which user made request {subject}?",
     },
     "a11y": {
-        "spot": "Is any invoice's Pay button disabled? Name the invoice. If none is, say so.",
+        "spot": "Does anything on the page look wrong or unusual? Name the invoice, or say none.",
         "count": "How many invoices have a disabled Pay button?",
         "enumerate": "List every invoice whose Pay button is disabled.",
         "lookup": "What is the ref of the Pay button for invoice {subject}?",
     },
     "figma": {
-        "spot": "Is any product card hidden? Name it. If none is, say so.",
+        "spot": "Does any product card look wrong or unusual? Name it, or say none.",
         "count": "How many product cards are hidden?",
         "enumerate": "List every hidden product card.",
         "lookup": "What is the node id of the product card named {subject}?",
@@ -81,8 +84,10 @@ _ASK = {
 
 
 @cache
-def _payload(fmt: str, size: int, planted: frozenset[int], seed: str) -> synthetic.Payload:
-    return _MAKE[fmt](size, planted, seed)
+def _payload(
+    fmt: str, size: int, planted: frozenset[int], seed: str, quiet: bool = False
+) -> synthetic.Payload:
+    return _MAKE[fmt](size, planted, seed, quiet)
 
 
 def _prompt(fmt: str, kind: str, subject: str = "") -> str:
@@ -98,12 +103,14 @@ def _count(fmt: str, p: synthetic.Payload) -> Number:
 
 
 def _synthetic(fmt: str, band: str) -> list[Task]:
+    """Spot (a rule-kind anomaly at three positions, and a quiet one the fold has no rule for),
+    absent, count and enumerate (k under and, at M and L, over the stand-out cap of 10), lookup."""
     size = _SIZES[fmt][band]
     out: list[Task] = []
 
-    def add(kind: str, tag: str, planted: frozenset[int], truth_of, subject: int | None = None) -> None:
+    def add(kind, tag, planted, truth_of, subject=None, quiet=False) -> None:
         seed = f"{fmt}/{band}/{kind}/{tag}"
-        p = _payload(fmt, size, planted, seed)
+        p = _payload(fmt, size, planted, seed, quiet)
         name, value = p.lookups[subject] if subject is not None else ("", "")
         out.append(
             Task(
@@ -113,10 +120,10 @@ def _synthetic(fmt: str, band: str) -> list[Task]:
                 band=band,
                 path="",
                 prompt=_prompt(fmt, kind, name),
-                truth=truth_of(p) if subject is None else Exact(value),
+                truth=Exact(value) if subject is not None else truth_of(p),
                 query=name,
-                load=lambda fmt=fmt, size=size, planted=planted, seed=seed: (
-                    _payload(fmt, size, planted, seed).raw
+                load=lambda size=size, planted=planted, seed=seed, quiet=quiet: (
+                    _payload(fmt, size, planted, seed, quiet).raw
                 ),
             )
         )
@@ -124,22 +131,25 @@ def _synthetic(fmt: str, band: str) -> list[Task]:
     def at(fraction: float) -> int:
         return min(size - 1, round(fraction * (size - 1)))
 
+    def pick(tag: str, k: int) -> frozenset[int]:
+        return frozenset(random.Random(f"{fmt}/{band}/{tag}").sample(range(size), min(k, size)))
+
     for fraction in (0.1, 0.5, 0.9):
         add("spot", f"at{int(fraction * 100)}", frozenset({at(fraction)}), lambda p: Needle(p.planted[0]))
+    add("spot", "quiet-at50", frozenset({at(0.5)}), lambda p: Needle(p.planted[0]), quiet=True)
     add("absent", "none", frozenset(), lambda p: Absent(frozenset(p.names)))
-    for k in (3, 7):
-        picks = frozenset(random.Random(f"{fmt}/{band}/count/{k}").sample(range(size), min(k, size)))
-        add("count", f"k{k}", picks, lambda p, fmt=fmt: _count(fmt, p))
-    picks = frozenset(random.Random(f"{fmt}/{band}/enumerate").sample(range(size), min(4, size)))
-    add("enumerate", "k4", picks, lambda p: Items(frozenset(p.planted), frozenset(p.names)))
-    for fraction in (0.5, 0.9):
+    over_cap = (12, 20) if band != "S" else ()
+    for k in (3, 7, *over_cap):
+        add("count", f"k{k}", pick(f"count/{k}", k), lambda p: _count(fmt, p))
+    for k in (4, *over_cap[:1]):
         add(
-            "lookup",
-            f"at{int(fraction * 100)}",
-            frozenset(),
-            lambda p: Absent(frozenset()),
-            subject=at(fraction),
+            "enumerate",
+            f"k{k}",
+            pick(f"enumerate/{k}", k),
+            lambda p: Items(frozenset(p.planted), frozenset(p.names)),
         )
+    for fraction in (0.5, 0.9):
+        add("lookup", f"at{int(fraction * 100)}", frozenset(), None, subject=at(fraction))
     return out
 
 

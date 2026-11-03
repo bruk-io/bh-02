@@ -20,6 +20,7 @@ from dataclasses import dataclass
 
 from compressors.common import discriminating, estimate_tokens, matches, split_lines
 
+_ID_TOKEN = re.compile(r"[A-Za-z0-9_]*\d[A-Za-z0-9_]*")
 _VARIABLE = re.compile(r"0x[0-9a-fA-F]+|[0-9a-fA-F]{8,}|\d+")
 
 _MARKER_TOKENS = 12
@@ -40,15 +41,6 @@ class TreeFold:
     source: str  # the text the markers' line numbers refer to (raw, or raw pretty-printed)
     expanded: int  # nodes shown open
     folded: int  # nodes shown as a header and a marker
-
-
-def _prune(nodes: tuple[Node, ...], min_hidden: int) -> tuple[Node, ...]:
-    """Drop nodes too small to be worth a marker; their lines then show as plain lines."""
-    return tuple(
-        Node(n.first, n.head_end, n.last, _prune(n.children, min_hidden), n.run)
-        for n in nodes
-        if n.last - n.head_end >= min_hidden
-    )
 
 
 def _with_gaps(
@@ -75,11 +67,12 @@ def _with_gaps(
 
 
 def _signature(lines: list[str], n: Node, cap: int = 600) -> str:
-    """A sibling's shape: its lines with numbers blanked out, up to `cap` characters, so a list
-    item whose button is disabled differs from its siblings even though their headers match."""
+    """A sibling's shape: its lines with every token that holds a digit blanked (numbers, and ids
+    such as INV-a3f09bc, e12345 or 12:345), up to `cap` characters, so a list item whose button is
+    disabled differs from its siblings even though their headers match."""
     out, size = [], 0
     for i in range(n.first, n.last + 1):
-        line = _VARIABLE.sub("#", lines[i].strip())
+        line = _ID_TOKEN.sub("#", lines[i].strip())
         out.append(line)
         size += len(line)
         if size >= cap:
@@ -134,15 +127,23 @@ def fold_tree(
         return f"{i + 1}\t{line}" if numbered else line
 
     line_cost = [estimate_tokens(shown(i)) + 1 for i in range(len(lines))]
-    roots = _prune(_with_gaps(lines, roots, 0, len(lines) - 1, min_gap), min_hidden)
+    roots = _with_gaps(lines, roots, 0, len(lines) - 1, min_gap)
+
+    def small(n: Node) -> bool:
+        """Too small to fold on its own (a marker would cost as much as it hides): shown whole when
+        shown, but still a child, so a list of small items can open partly."""
+        return n.last - n.head_end < min_hidden
 
     def span_cost(a: int, b: int) -> int:
         return sum(line_cost[a : b + 1])
 
     def folded_cost(n: Node) -> int:
+        if small(n):
+            return span_cost(n.first, n.last)
         return span_cost(n.first, n.head_end) + _MARKER_TOKENS
 
     standouts: set[int] = set()  # ids of nodes: a parent and its only child can share their lines
+    unshown_standouts: dict[int, frozenset[int]] = {}  # id(children) -> stand-outs past the cap
 
     def promoted(children: tuple[Node, ...]) -> tuple[int, ...]:
         """Children that stand out among siblings that mostly share one shape, or that hold query
@@ -168,7 +169,9 @@ def fold_tree(
             rare = dominant and counts[pat] <= rare_cut
             if hits or rare:
                 scored.append((-(2 * hits + rare), i))
-        picks = sorted(i for _, i in sorted(scored)[:max_promoted])
+        ranked = [i for _, i in sorted(scored)]
+        picks = sorted(ranked[:max_promoted])
+        unshown_standouts[id(children)] = frozenset(ranked[max_promoted:])
         standouts.update(id(children[i]) for i in picks)
         return tuple(picks)
 
@@ -246,7 +249,7 @@ def fold_tree(
         cost = open_cost(n.first, n.last, n.children, None) - folded_cost(n) if rank == 3 else 0
         return (rank, depth, cost, n.first)
 
-    heap = [(*key(1, roots[i]), roots[i]) for i in shown_children(roots, root_k)]
+    heap = [(*key(1, roots[i]), roots[i]) for i in shown_children(roots, root_k) if not small(roots[i])]
     heapq.heapify(heap)
     while heap:
         _, depth, _, _, n = heapq.heappop(heap)
@@ -258,7 +261,8 @@ def fold_tree(
         total += cost - folded_cost(n)
         for i in shown_children(n.children, k):
             c = n.children[i]
-            heapq.heappush(heap, (*key(depth + 1, c), c))
+            if not small(c):
+                heapq.heappush(heap, (*key(depth + 1, c), c))
 
     out: list[str] = []
     counts = [0, 0]
@@ -271,6 +275,9 @@ def fold_tree(
         return f"[... lines {a + 1}-{b + 1} folded ({what})]"
 
     def render_child(c: Node) -> None:
+        if small(c):
+            emit(c.first, c.last)
+            return
         if id(c) in opened:
             counts[0] += 1
             render(c.first, c.last, c.children, opened[id(c)])
@@ -298,7 +305,9 @@ def fold_tree(
                 j += 1
             a, b = c.first, children[j].last
             counts[1] += j - i + 1
-            out.append(f"{prefix}{_indent_of(lines[a])}{marker(a, b, f'{j - i + 1} siblings')}")
+            more = sum(1 for x in unshown_standouts.get(id(children), ()) if i <= x <= j)
+            what = f"{j - i + 1} siblings" + (f"; {more} of them stand out too" if more else "")
+            out.append(f"{prefix}{_indent_of(lines[a])}{marker(a, b, what)}")
             cursor, i = b + 1, j + 1
         emit(cursor, last)
 

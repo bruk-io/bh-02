@@ -132,3 +132,32 @@ def test_long_xml_comments_and_the_doctype_fold_like_elements():
     assert spans == [(2, 43), (44, 65), (66, 68)]
     fold = fold_xml(raw, budget_tokens=60)
     assert "comment line 20" not in fold.text and "<root>" in fold.text
+
+
+def test_a_stand_out_is_found_among_siblings_with_alphanumeric_ids():
+    import random
+
+    rng = random.Random(3)
+    lines = ["- list [ref=e1]:"]
+    for i in range(150):
+        inv = f"INV-{rng.getrandbits(28):07x}"
+        flag = " [disabled]" if i == 75 else ""
+        lines += [f"  - listitem [ref=e{rng.randint(10, 99999)}]:", f"    - text: Invoice {inv}"]
+        lines.append(f'    - button "Pay {inv}" [ref=e{rng.randint(10, 99999)}]{flag}')
+    assert "[disabled]" in fold_outline("\n".join(lines), budget_tokens=500).text
+
+
+def test_stand_outs_past_the_cap_are_counted_in_the_marker_that_hides_them():
+    lines = ["- list:"]
+    for i in range(300):
+        flag = " [disabled]" if i % 20 == 7 else ""  # 15 stand-outs, the cap is 10
+        lines += [
+            f"  - item {i}:",
+            f"    - text: row {i}",
+            f'    - button "Pay {i}"{flag}',
+            "    - text: due",
+        ]
+    text = fold_outline("\n".join(lines), budget_tokens=900).text
+    shown = text.count("[disabled]")
+    more = sum(int(n) for n in __import__("re").findall(r"; (\d+) of them stand out too", text))
+    assert shown + more == 15 and more > 0

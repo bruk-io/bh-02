@@ -136,7 +136,7 @@ def _score_prose(truth: Truth, answer: str) -> Score:
 
 
 _PROMOTION = '"_next_item_shown_because"'
-_SIBLING_RUN = re.compile(r"(?m)^\t?(\s*)\[\.\.\. lines \d+-\d+ folded \(\d+ siblings\)\]")
+_SIBLING_RUN = re.compile(r"(?m)^\t?(\s*)\[\.\.\. lines \d+-\d+ folded \(\d+ siblings[^)]*\)\]")
 _LINE_GAP = re.compile(r"(?m)^\[\.\.\. lines \d+-\d+ omitted")
 
 
