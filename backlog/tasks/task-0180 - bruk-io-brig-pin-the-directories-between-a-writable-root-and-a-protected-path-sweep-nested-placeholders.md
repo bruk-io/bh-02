@@ -6,7 +6,7 @@ title: >-
 status: In Progress
 assignee: []
 created_date: '2026-11-03T04:48:00Z'
-updated_date: '2026-11-03T05:32:00Z'
+updated_date: '2026-11-03T05:33:00Z'
 labels:
   - brig
   - size-3
@@ -97,4 +97,6 @@ INFO    -  Documentation built in 4.94 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+No repro: the failures are brig's, and their repros are recorded failing before the fix on brig's board (TASK-0001.31 #2, TASK-0001.32 #3, TASK-0001.33 #2). bh-02's side was the four xfail(strict) tests, which xfail-passed against 2132b3b (strict, so they failed as expected) and now run as plain tests and pass at 0237986.
 <!-- SECTION:NOTES:END -->
