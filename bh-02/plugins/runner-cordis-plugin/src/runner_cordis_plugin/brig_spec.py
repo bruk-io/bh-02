@@ -8,6 +8,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from brig import Claim, EnvPolicy, FsPolicy, Grade, Stdio
+
 from runner_cordis_plugin.policy import Policy, ReadModel
 
 __all__ = ["Brigged", "report_of", "to_brig"]

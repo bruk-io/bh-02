@@ -36,7 +36,7 @@ As [cordis's README](../libs/cordis/README.md) defines them (its "Concepts").
 - **harness** (the project): a separate project of the repository's owner whose `ARCHITECTURE.MD` gave bh-02 CodeAct and its step table: "harness's rule", never read a truncated or silent step as the answer (`stops.classify`).
 - **DeepSeek Harness**: the agent harness built on the paper cordis realises (cordis's README); its account of tool registries, tool changes and model-written plugins informed bh-02's designs.
 - **the harness's** (a line): bh-02's rather than the model's: a slash command, or a line with a prefix a row claimed, as `commands` decides (`claims`).
-- **harness** (in brig's docs and tests): the program that starts the jails, such as bh-02; in brig's tests, the test run itself (`harness_pid`).
+- **harness** (brig's word for the embedder): the program that starts the jails, such as bh-02.
 - **the shell**: `bh_02` (`app/`): the `bh-02` command, which reads the layers, boots them and waits for the chat to end.
 - **layer files**: `bh-02.toml` (the whole harness), a session's `session.toml`, and your `--patch` files, applied in that order.
 - **stack** (a session's): the model a session started on, kept in its `meta.json` and listed by `bh-02 sessions`; not always the model that answered.

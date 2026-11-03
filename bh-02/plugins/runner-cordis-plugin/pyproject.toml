@@ -17,8 +17,7 @@ runner = "runner_cordis_plugin"
 cordis = { workspace = true }
 cordis-helpers = { workspace = true }
 host-paths = { workspace = true }
-# the new brig (bruk-io/brig), pinned to one commit; libs/brig (also the distribution `brig`) is no
-# workspace member (TASK-0176.07), and goes with TASK-0176.08
+# brig (bruk-io/brig), pinned to one commit
 brig = { git = "https://github.com/bruk-io/brig", rev = "0237986b60ed97b4f16441f4b32fa1f2d3adc018" }
 
 [build-system]

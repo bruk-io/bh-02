@@ -518,7 +518,7 @@ async def test_on_linux_a_module_an_input_plants_in_the_project_runs_nowhere_out
     its own program there, on the host: the supervisor
     supervisor. An input plants `subprocess.py`, `signal.py` and a `brig/` package in the root;
     the Python process starts again (`/restart python`) and runs the next input, and none of them
-    ran outside the jail (brig's decision-169: each of its interpreters runs `-I`). THE CONTROL:
+    ran outside the jail (brig runs each of its interpreters with `-I`). THE CONTROL:
     an interpreter started in the root without `-I` runs every one."""
     if sys.platform != "linux" or not Path(_BWRAP).exists():
         pytest.skip("the project-root start is bubblewrap's: Linux with /usr/bin/bwrap only")

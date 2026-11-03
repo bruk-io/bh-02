@@ -1,9 +1,9 @@
 # runner-cordis-plugin
 
 What runs the model's code: the `runner`, which starts each program (the Python process, the
-extensions process) in a jail from [brig](../../../libs/brig), or in none; the `approval` rule
+extensions process) in a jail from [brig](https://github.com/bruk-io/brig), or in none; the `approval` rule
 over it; and `/release`. The only package in the workspace that imports brig (the gate's
-`brig-one-adapter`).
+`brig-one-adapter`), which it takes from bruk-io/brig at the commit pinned in its `pyproject.toml`.
 
 | Row | Binds | Consumes |
 |---|---|---|

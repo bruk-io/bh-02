@@ -3,14 +3,14 @@
 # requires-python = ">=3.14"
 # dependencies = ["click"]
 # ///
-"""The Linux jail, on a real Linux kernel, from a darwin laptop: brig's `bwrap` tests and
-bh-02's jailed Python process (`brig:jail` over `strict_linux()`) run in a container with bubblewrap.
+"""The Linux jail, on a real Linux kernel, from a darwin laptop: the runner plugin's and the app's
+tests that start real `bwrap` jails (`runner:confined`) run in a container with bubblewrap.
 
 On darwin those tests skip, visibly and by name, because there is no `bwrap`. This is the one
 place they run here. It is not part of `scripts/check`: it needs Docker, it is slow, and green
 here is not the definition of green. Run it before trusting a claim about Linux.
 
-    scripts/linux-jail-check                 # brig's bwrap tiers, then bh-02's Linux jail tests
+    scripts/linux-jail-check                 # the runner plugin's and the app's jail tests
     scripts/linux-jail-check -- PYTEST_ARGS  # pytest with these arguments instead
     scripts/linux-jail-check --shell 'LINE'  # a shell line in the prepared workspace instead
 
@@ -47,8 +47,7 @@ confinement; each only stops Docker refusing bwrap what a plain Linux host gives
   --init                                an init that reaps orphans, as a host's does. Without
                                         one, a killed jail's processes stay zombies of PID 1
                                         (a shell that never reaps them), their group reads as
-                                        alive, and brig's teardown verification reports FAILED
-                                        (measured: the strict_linux journey and the leak sweep).
+                                        alive, and brig's teardown verification reports FAILED.
 The suite runs as that unprivileged user, not root: root ignores permission bits, so a denial
 the tests expect would pass for the wrong reason, and bh-02 is not run as root.
 """
@@ -77,7 +76,7 @@ ENV PATH=/home/bh/.local/bin:$PATH UV_LINK_MODE=copy
 WORKDIR_STEP = "WORKDIR /work\n"
 
 # bubblewrap is what is under test; procps is `ps`, which brig's leak sweep runs; python3 is the
-# SYSTEM interpreter brig's own journey names (`/usr/bin/python3`), not the workspace's (uv
+# SYSTEM interpreter the jails mount (`/usr/bin/python3`), not the workspace's (uv
 # installs that); git because uv resolves the git-pinned dev dependencies, and a C compiler
 # because pypeeker's tree-sitter has no 3.15 wheel to install.
 APT_STEP = """\
@@ -113,27 +112,10 @@ def dockerfile(proxy: Proxy | None) -> str:
     return BASE_STEPS + APT_STEP_BEHIND_PROXY + USER_STEPS + UV_STEP_BEHIND_PROXY + WORKDIR_STEP
 
 
-# The default run: brig's bwrap tests (the mechanism, then the preset end to end, then its
-# supervisor, PID 1 of the jail, and the namespaces of each process it starts) and its tether
-# (a jail ends with the process that launched it), then bh-02's
-# Linux jail tests (the policy compiled for Linux, and real inputs in the real jail).
+# The default run: the tests that start real bubblewrap jails, the runner plugin's (the policy
+# compiled for Linux, the confined runner, the tripwire) and the app's (real inputs in the real jail).
 DEFAULT = (
     "uv run --locked pytest -q -p no:cacheprovider"
-    " libs/brig/tests/unit/test_bwrap_compile.py"
-    " libs/brig/tests/unit/test_stack_strict_linux_preset.py"
-    " libs/brig/tests/integration/test_bwrap_fs.py"
-    " libs/brig/tests/integration/test_bwrap_jail_dir_sealed.py"
-    " libs/brig/tests/integration/test_bwrap_records_refused.py"
-    " libs/brig/tests/integration/test_bwrap_channel_dir.py"
-    " libs/brig/tests/integration/test_channel_reservation_starts.py"
-    " libs/brig/tests/integration/test_channel_planted_link.py"
-    " libs/brig/tests/integration/test_bwrap_network.py"
-    " libs/brig/tests/e2e/test_strict_linux_journey.py"
-    " libs/brig/tests/e2e/test_supervised_jail.py"
-    " libs/brig/tests/e2e/test_process_namespaces.py"
-    " libs/brig/tests/integration/test_supervisor_requests.py"
-    " libs/brig/tests/unit/test_bwrap_supervisor_compile.py"
-    " libs/brig/tests/integration/test_tether.py"
     " bh-02/plugins/runner-cordis-plugin"
     " bh-02/app/tests/test_python_repl.py"
 )
@@ -240,7 +222,7 @@ def source_tar() -> bytes:
 )
 @click.argument("pytest_args", nargs=-1, type=click.UNPROCESSED)
 def main(line: str | None, ca_option: Path | None, pytest_args: tuple[str, ...]) -> None:
-    """Run brig's Linux jail and bh-02's jailed Python process in a container with bubblewrap."""
+    """Run the runner plugin's and the app's jail tests in a container with bubblewrap."""
     if subprocess.run([DOCKER, "info"], capture_output=True).returncode != 0:
         raise click.ClickException("docker is not answering: this check needs a running Docker daemon")
     proxy = resolve_proxy(os.environ, ca_option)

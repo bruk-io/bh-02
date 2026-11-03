@@ -57,7 +57,6 @@ These guarantees are asserted as the paper's theorems over random histories of o
 | [`libs/cordis`](libs/cordis) | the pattern: components, effects, keys, fibers, rows, layers, the loader |
 | [`libs/cordis-helpers`](libs/cordis-helpers) | small building blocks on cordis: a broker's registry, a set of hooks |
 | [`libs/host-paths`](libs/host-paths) | where the person's directories are, and every place reading a file goes through: the one definition for every package that trusts a file by where it is |
-| [`libs/brig`](libs/brig) | a sandbox library, independent of cordis: a spec compiled into honestly graded enforcement |
 | [`bh-02`](bh-02) | a coding agent built as cordis rows: its app in `app/`, its plugins in `plugins/` |
 | [`examples/warden`](examples/warden) | a process supervisor built the same way, with no model in it |
 
@@ -183,22 +182,17 @@ The techniques above, and where to read them in real code:
 
 ## brig: sandboxes that say what they enforce
 
-[`libs/brig`](libs/brig) runs untrusted processes in a jail. A `Spec` describes the jail
-(filesystem, network, limits, environment, channels), and mechanisms compile parts of it and
-compose into a stack: Seatbelt on macOS, bubblewrap and cgroups on Linux, an egress proxy,
-rlimits, environment scrubbing, containers.
+[brig](https://github.com/bruk-io/brig) runs untrusted processes in a jail and grades how well
+each part of it is enforced: every axis is reported as `enforced`, `best_effort`, `cooperative`
+or `unenforced`, according to what the jail can actually deliver. A sandbox that quietly
+enforces less than you asked for is worse than none; brig says exactly what you got.
 
-Its central idea is **honest grading**. Every axis of enforcement is reported as `enforced`,
-`best_effort`, `cooperative` or `unenforced`, according to what the stack can actually deliver,
-and `probe()` proves the grades by attempting violations from inside the jail. A sandbox that
-quietly enforces less than you asked for is worse than none; brig says exactly what you got.
-
-brig stands alone: it imports only the standard library, knows nothing of cordis or bh-02, and
-has its own architecture gate. bh-02 reaches it through one plugin, the runner's `runner:confined`, which turns
-bh-02's rules into a `Spec`: the project writable, bh-02's own files and the sessions' state not, no
+brig is a separate repository, which bh-02 depends on at a pinned commit (the runner plugin's
+`pyproject.toml`). bh-02 reaches it through one plugin, the runner's `runner:confined`, which turns
+bh-02's rules into a jail: the project writable, bh-02's own files and the sessions' state not, no
 network. bh-02's status bar shows the grades it got (`jail: jailed fs_write ✓ network ✓ ...`).
-bh-02 wires brig's macOS stack (seatbelt) and its Linux one (bubblewrap).
-[`libs/brig/SPEC.md`](libs/brig/SPEC.md) is its contract.
+brig's jail is bubblewrap, on Linux only for now; its contract is in its own repository
+(`docs/spec/index.md`).
 
 ## Development
 

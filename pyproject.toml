@@ -3,7 +3,7 @@
 # member: adding one is creating its directory (bh-02/plugins/<name>, libs/<name>, ...).
 #
 #   bh-02/            the app (bh-02/app, the TUI harness) and bh-02/plugins/, its plugin family
-#   libs/             cordis, cordis-helpers, brig: libraries with no first-party dependencies
+#   libs/             cordis, cordis-helpers, host-paths: libraries with no first-party dependencies
 #   examples/warden/  a second app on cordis: examples/warden/app and examples/warden/plugins/
 #
 # An app's folder is not itself a project: its package is <app>/app and its plugins sit beside
@@ -11,9 +11,6 @@
 
 [tool.uv.workspace]
 members = ["bh-02/app", "bh-02/plugins/*", "libs/*", "examples/*/app", "examples/*/plugins/*"]
-# libs/brig is the in-repo brig: the distribution `brig` is bruk-io/brig now (the runner plugin's git
-# source), so it is no member. Its files stay until TASK-0176.08.
-exclude = ["libs/brig"]
 
 [dependency-groups]
 dev = [
@@ -24,7 +21,7 @@ dev = [
     "mypy @ git+https://github.com/python/mypy@539f6e67b6743d39ce1c643f4cea08fa60602093",
     # pypeeker is pre-1.0 and past its breaking DSL rewrite; pin a commit, never track main.
     "pypeeker @ git+https://github.com/brukhabtu/pypeeker@cd78c2c",
-    # brig's property tests
+    # property tests
     "hypothesis>=6.112",
     # the documentation site (mkdocs.yml, docs/): MkDocs, the plugin that includes the READMEs,
     # the API reference from cordis's docstrings, and the Markdown extensions mkdocs.yml names
@@ -37,7 +34,6 @@ dev = [
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-# libs/brig/tests is left out by name: `brig` is bruk-io/brig now (TASK-0176.08 removes the directory)
 testpaths = ["bh-02/app/tests", "bh-02/plugins/*/tests", "libs/cordis/tests", "libs/cordis-helpers/tests", "libs/host-paths/tests", "examples/*/app/tests", "examples/*/plugins/*/tests"]
 # importlib mode names test modules from the repo root (libs.cordis.tests.test_runtime), so test
 # file names need not be unique across members. consider_namespace_packages is what keeps that
@@ -45,10 +41,6 @@ testpaths = ["bh-02/app/tests", "bh-02/plugins/*/tests", "libs/cordis/tests", "l
 # is registered as that package and shadows the installed one.
 addopts = ["--import-mode=importlib"]
 consider_namespace_packages = true
-# brig's suite imports its own helpers as `tests.conftest` / `tests.unit.strategies`, the way it
-# did in its own repository; `libs/brig/` on the path is what resolves them. brig's conftest
-# makes a tier marker mandatory for its own tests, and only those.
-pythonpath = ["libs/brig"]
 markers = [
     "unit: single module, all dependencies mocked, no I/O",
     "integration: multiple in-repo components, external deps mocked",
@@ -75,7 +67,6 @@ strict = true
 python_version = "3.15"
 # docs/hooks: the documentation site's MkDocs hook
 files = ["bh-02/app/src", "bh-02/plugins/*/src", "libs/cordis/src", "libs/cordis-helpers/src", "libs/host-paths/src", "examples/*/app/src", "examples/*/plugins/*/src", "docs/hooks"]
-# (libs/brig/src is left out by name: `brig` is bruk-io/brig now, TASK-0176.08 removes the directory)
 
 # bruk-io/brig ships no py.typed marker (at the commit the runner plugin pins), so mypy would skip
 # it as untyped; the runner plugin's jail and brig_spec are the only modules that import it.

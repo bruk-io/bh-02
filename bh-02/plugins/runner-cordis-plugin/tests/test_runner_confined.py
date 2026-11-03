@@ -863,7 +863,7 @@ async def test_a_linux_jail_refuses_a_rename_of_a_directory_on_the_way_to_the_in
     input can rename no directory between the project and the interpreter file or a link on the way to
     it, `uv` and `venv` included. rename(2) refuses only a mount point, and `uv` is not one: renamed, it
     would carry its mounts with it, the read-only deny on `uv/python` among them, so a Python planted at
-    its old name is the one the next `uv run` on the host would run. brig's pins (decision-168) hold it:
+    its old name is the one the next `uv run` on the host would run. brig's pins (its TASK-0001.31) hold it:
     each existing directory between a write root and a deny is bound over itself, so `uv` and `venv` are
     mount points, which rename refuses as busy; the directories inside a read-only deny refuse as
     read-only. The directories are tried deepest first, so each is tried at its own name; on the host
@@ -1232,7 +1232,7 @@ async def test_the_tripwire_ends_the_whole_jail_a_program_in_a_session_of_its_ow
     then the host removes a placeholder the jail holds: the tripwire ends the jail, and the
     program that left the group goes with it. The control: until the host does, both run.
 
-    A jail's processes are brig's supervisor's children (brig's decision-190), so the program's
+    A jail's processes are brig's supervisor's children, so the program's
     group is no longer the jail's: killing it would leave the other program running, with the
     mount lifted, until the owner stopped the jail. The tripwire ends the jail, not the group."""
     _needs_bwrap()
@@ -1264,7 +1264,7 @@ async def test_a_jail_whose_hold_the_host_lifted_ends_at_once_whatever_its_progr
     """The host removes a placeholder the jail holds, so the mount inside is gone and an input
     may create the secret's file on the host. Programs that ignore SIGTERM (one of them in a
     session of its own) keep trying every 10 ms. The tripwire ends the jail with SIGKILL and no
-    SIGTERM first (brig's `destroy(grace=0)`, decision-193), so how long the jail survives it is
+    SIGTERM first (brig's `destroy(grace=0)`), so how long the jail survives it is
     the kernel's, milliseconds, and not the 2 s grace a teardown that sent SIGTERM first gives
     a program that ignores it: measured 2.01 to 2.06 s, the secret planted on the host 3 times
     in 3. The control: the same programs run, and both are writing, until the host lifts it.
