@@ -162,3 +162,10 @@ def test_matching_many_items_against_many_terms_is_quick():
     start = time.perf_counter()
     fold_text(json.dumps(items), budget=2000, query=" ".join(f"term{j}" for j in range(40)), quiet=True)
     assert time.perf_counter() - start < 8
+
+
+def test_a_language_ast_grep_has_no_grammar_for_is_an_error_that_names_the_known_ones():
+    with pytest.raises(
+        ValueError, match="--lang cobol: ast-grep has no grammar by that name; use one of c, cpp"
+    ):
+        fold_text(_src(), budget=200, lang="cobol")
