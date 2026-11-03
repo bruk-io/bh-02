@@ -358,12 +358,50 @@ indicative. No run failed to answer. Stage reports: `l2-p3-a.md` to `l2-p3-d.md`
 45. **The prompt fixes worked.** Andorra's subdivision codes, missed under every condition in P2
     because the instruction asked for names, were right in all three of P3's conditions.
 
+## Forcing the fold on Bash (`l2-bash.md`, 312 Haiku runs, $2.01)
+
+Offered as a tool, the fold went unused (36, 42); applied by the hook, it acted on every result.
+So: apply it to the shell too. Eight headless runs (about 4 cents) tested the ways to do that in
+Claude Code 2.1.317 before anything was built; the scripts are in this session's scratchpad.
+
+46. **Only folding after the command runs works.** `CLAUDE_CODE_SHELL_PREFIX` receives each command
+    as one string and also wraps every hook's command, so folding there would corrupt the JSON
+    hooks return. A `PreToolUse` hook that rewrites the command (`cmd | lab-fold`) does change what
+    Claude sees, but permission rules are checked against the rewritten command, and Claude Code's
+    checker refuses its brace group: under an allowlist of `Bash(seq:*)` both attempts were denied,
+    and a pipe runs the command in a subshell, so `cd` would no longer carry over. A `PostToolUse`
+    hook that answers in Bash's own shape (`{stdout, stderr, interrupted, isImage, ...}`) replaces
+    what Claude sees after the real command ran under the real checks; a plain string is ignored.
+    Up to 30,000 characters the hook gets the whole stdout; above that, Claude Code saves the output
+    and gives the first 30,000 characters and `persistedOutputPath`. The hook now folds Bash: its
+    stdout in `inline` mode, the saved output too in `all`.
+47. **On the bash channel** (the same 52 synthetic tasks a band, printed by `./<tool>`, paired against
+    `bash-native`):
+    - M, `fold-bash` (inline): final context -8.1k [-8.9k, -7.2k] (58.1k to 50.0k), cost -10%,
+      but 1.5 more tool calls and +6 s (7.7 s to 13.6 s), as on the MCP channel (35). Accuracy
+      49/52 against 52/52: -6% [-16%, +2%], 0 won and 3 lost (p = 0.25), undecided. The losses: two
+      Figma spot tasks answered "none", and a JSON absent task where Haiku named "the 28 web pods
+      with 3 restarts" as an anomaly. `fold-bash-all` at M: -7.8k, 51/52.
+    - L, `fold-bash` is a control: the payload is saved and inline mode leaves it alone. The context
+      is unchanged (+18 tokens), yet 5 pairs disagree (2 won, 3 lost), all spot tasks on trees:
+      at L these flip from run to run by themselves (native 49/52). That is the noise floor the M
+      losses have to be read against.
+    - L, `fold-bash-all`: 51/52 against 49/52, but the final context grows 1.5k [+1.0k, +2.0k]:
+      it fails, as folding spills did with Haiku on MCP (34).
+48. **Forcing has a regress: it folds the model's own second look.** Besides the payloads, the hook
+    folded 91 of the model's follow-up outputs, most within a few tokens of a payload's size: Haiku
+    re-ran the command, with a pipe added, to see it whole, and got the fold again. The exemption
+    covered only reads of the saved copy. This may be why the M losses happened, and this run cannot
+    tell it from noise. Before a verdict on forcing: fold a command's output once per session (run
+    it again and it comes whole), then re-run M (104 runs, about $0.70).
+
 ## Where the design stands
 
 | Piece | Evidence | Leaning |
 |---|---|---|
 | Fold MCP results Claude Code spilled | P2 (Haiku, 104 pairs): accuracy +7% [+1%, +14%], 1.2 fewer requests, -9% cost, but the final context +800 tokens (34). P3 (Sonnet, 20 pairs): 20/20 against 18/20, cost -21%, final context -910 [-4.1k, +1.4k] (41) | cut for Haiku by the input criterion (37); open for Sonnet (undecided at 20 pairs); `TOOL_OUTPUT_LAB_MODE=spilled` |
 | Fold MCP results under the spill threshold | P2 (Haiku): answers kept, final context -7.1k (35). P3 (Sonnet): 52/52 both, final context -8.8k, cost -20% (40) | keep; the hook's default (`inline`) |
+| Force the fold on Bash (the hook on `Bash`) | 46-48: inline at M: final context -8.1k, cost -10%, +6 s, but 49/52 against 52/52 (undecided) and a regress (91 second looks folded); saved outputs at L: context +1.5k | inline: fix the regress, then decide; saved outputs: cut |
 | JSON folding with promotion | real MCP JSON to 13%; built anomaly kinds survive | keep |
 | Line folding for logs | error words survive; quiet anomalies lost, and the loss costs answers | keep, with the gap stated |
 | Tree folding for XML and accessibility trees | A/B 2 (Haiku): -37% tokens on spilled results; A/B 3 (Sonnet): no gain | keep for weaker models; Sonnet does as well alone |
@@ -372,6 +410,8 @@ indicative. No run failed to answer. Stage reports: `l2-p3-a.md` to `l2-p3-d.md`
 
 ## Next
 
+0. Fix the regress in forced Bash folding (48): a command's output folded once per session, a
+   second run whole; then re-run M on the bash channel, `bash-native` against `fold-bash`.
 1. Sample size before more conditions: one repetition of 52 tasks cannot resolve 3 points of
    accuracy (33). About 150 independent tasks a cell, not repetitions, is what a verdict needs:
    more generated tasks per format and band, on Haiku, where a run costs $0.007.
