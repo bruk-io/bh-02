@@ -62,7 +62,9 @@ Baseline: `needle-1-baseline.md` (3 seeds). After the CamelCase error fix:
     open; more head and tail would not help a needle in the middle.
 15. The second run predates fix 7, and shows the same noise: with the query on, the argument
     `namespace: "default"` matched every item and promoted the earliest ones, which is why the
-    numeric outlier reads 33% (query on) against 29% (off).
+    numeric outlier reads 33% (query on) against 29% (off). The third run
+    (`needle-3-discriminating-terms.md`), after fix 7, reads 29% both ways, and JSON output falls
+    from ~2% to ~1.4% of the raw tokens because the noise promotions are gone. Logs unchanged.
 
 ## Where the design stands (provisional: no model stage has run)
 
