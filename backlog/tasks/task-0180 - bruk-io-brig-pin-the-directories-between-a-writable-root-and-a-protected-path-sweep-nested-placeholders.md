@@ -3,9 +3,10 @@ id: TASK-0180
 title: >-
   bruk-io/brig: pin the directories between a writable root and a protected
   path; sweep nested placeholders
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-03T04:48:00Z'
+updated_date: '2026-11-03T05:29:00Z'
 labels:
   - brig
   - size-3
@@ -21,7 +22,13 @@ Found by the Linux half of TASK-0176.07 (branch claude/swap-linux). Against the 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 brig pins the directories between a writable root and a write deny or mask, with a test that renames each and fails if one succeeds
-- [ ] #2 brig's placeholder sweep keeps a directory it could not remove in the record, with a test that sweeps a dead record made before a live one's nested ones
-- [ ] #3 bh-02's pin to brig moves to the commit that closes both and the four xfail tests are plain tests
+- [x] #1 brig pins the directories between a writable root and a write deny or mask, with a test that renames each and fails if one succeeds
+- [x] #2 brig's placeholder sweep keeps a directory it could not remove in the record, with a test that sweeps a dead record made before a live one's nested ones
+- [x] #3 bh-02's pin to brig moves to the commit that closes both and the four xfail tests are plain tests
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Fixed in bruk-io/brig and closed there by reviewers: the pins are brig TASK-0001.31 (deny or mask) and TASK-0001.33 (a readable root nested in a writable one, found while fixing .31); the sweep is TASK-0001.32. brig is pinned to 0237986 (claude/embedder-gaps), which also gives ChannelDirectoryCreateFailed a message that says what to check. The four xfail(strict) tests are plain tests and pass; the killed-bh-02 test no longer tolerates a left .git (6/6 runs clean); the runner README's known gaps are down to darwin. scripts/check at this commit: exit 0, 2577 passed, 6 skipped.
+<!-- SECTION:NOTES:END -->
