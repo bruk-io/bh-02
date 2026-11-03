@@ -1,9 +1,9 @@
 ---
-id: DRAFT-0026
+id: TASK-0181
 title: >-
   Plugins and inputs ask for what they need, and the person approves once or
   always
-status: Draft
+status: To Do
 assignee:
   - '@bruk'
 created_date: '2026-11-03T18:22:00Z'
