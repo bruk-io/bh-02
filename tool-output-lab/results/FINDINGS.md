@@ -47,7 +47,11 @@ Baseline: `needle-1-baseline.md` (3 seeds). After the CamelCase error fix:
 10. **Logs: error words survive everywhere.** A quiet anomalous line (no error word) is lost unless
     at the head or tail; expected.
 11. **The last line of a stack trace was lost in the baseline** (33%): `\berror\b` does not match
-    inside `ValueError`. Fixed by matching `...Error` and `...Exception` words; see the second run.
+    inside `ValueError`. Fixed by matching `...Error` and `...Exception` words: 100% in the second
+    run, with no other cell changed.
 12. **The lines branch leaves most of the budget unused:** ~750 tokens out against a 2,000 budget,
     because head, tail and windows are fixed counts. Whether to spend the rest (and on what) is
     open; more head and tail would not help a needle in the middle.
+13. The second run predates fix 5, and shows the same noise: with the query on, the argument
+    `namespace: "default"` matched every item and promoted the earliest ones, which is why the
+    numeric outlier reads 33% (query on) against 29% (off).
