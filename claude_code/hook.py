@@ -1,6 +1,6 @@
-"""A Claude Code PostToolUse hook that folds large MCP tool results.
+"""A Claude Code PostToolUse hook that folds large MCP tool results and Bash output.
 
-    "PostToolUse": [{"matcher": "mcp__.*", "hooks": [{"type": "command", "timeout": 30,
+    "PostToolUse": [{"matcher": "mcp__.*|Bash", "hooks": [{"type": "command", "timeout": 30,
         "command": "cd /ABSOLUTE/PATH/TO/tool-output-lab && uv run -q --no-project --python 3.15
                     --with ast-grep-py python -m claude_code.hook"}]}]   (the command on one line)
 
@@ -12,6 +12,12 @@ saving the raw beside Claude Code's own spills, and leaves spills to Claude Code
 tokens, while folding spills grew it, since Claude reads the saved raw anyway. `spilled` folds
 only spills (it reads the file Claude Code saved and gives Claude the folded view and that path);
 `all` folds both.
+
+Bash is folded the same way, after the command has run: permission rules were checked on the real
+command, and `cd` and exit codes are untouched (rewriting the command before it runs breaks both;
+FINDINGS 46). Its stdout is the inline result; above 30,000 characters Claude Code saves the output
+and gives `persistedOutputPath`, which is the spill. Read is never folded: it is how Claude gets a
+file exactly, and what Edit relies on.
 
 A spill notice is trusted only when it is the plain-string notice Claude Code writes and its path
 resolves inside this session's tool-results folder under Claude Code's naming; a tool's own output
@@ -43,7 +49,12 @@ _NOTICE = re.compile(
     r"\AError: result \([^)\n]*\) exceeds maximum allowed tokens\. "
     r"Output has been saved to (?P<path>[^\n]+?)\.\n"
 )
+# Claude Code's name for a saved MCP result. Its path is read from text the tool returned, which the
+# tool could forge, so the name must match too. Bash's comes from a field Claude Code fills in.
 _SPILL_NAME = re.compile(r"\Amcp-.+-\d+\.txt\Z")
+# A command that reads a saved output is recovering a range the fold named: folding it would fold it again.
+_RECOVERY = re.compile(r"/tool-results/|\bfolded-[\w.-]+\.txt")
+_BASH_SPILL_FIELDS = ("persistedOutputPath", "persistedOutputSize")
 
 
 @dataclass(frozen=True)
@@ -53,7 +64,8 @@ class Inline:
 
 @dataclass(frozen=True)
 class Spilled:
-    path: str  # where the notice says Claude Code saved the result (checked before it is read)
+    path: str  # where Claude Code saved the result (checked before it is read)
+    from_field: bool = False  # the path came from a field Claude Code fills in (Bash), not from a notice
 
 
 type Action = Inline | Spilled | None
@@ -97,12 +109,18 @@ def _text_of(response: Any) -> str | None:
 def plan(event: dict[str, Any], mode: Mode = Mode.INLINE) -> Action:
     """What to do with one PostToolUse event; None leaves the result alone.
 
-    A spill is only Claude Code's own notice: a plain string that starts with it. A content-block
-    result is the tool's own output, whatever it says. `mode` says which of the two to fold.
+    For an MCP tool, a spill is only Claude Code's own notice: a plain string that starts with it; a
+    content-block result is the tool's own output, whatever it says. For Bash, see `_plan_bash`.
+    `mode` says which of the two to fold.
     """
-    if not str(event.get("tool_name", "")).startswith("mcp__") or not event.get("transcript_path"):
+    tool = str(event.get("tool_name", ""))
+    if not event.get("transcript_path"):
         return None
     response = event.get("tool_response")
+    if tool == "Bash":
+        return _plan_bash(event.get("tool_input") or {}, response, mode)
+    if not tool.startswith("mcp__"):
+        return None
     if isinstance(response, str) and (m := _NOTICE.match(response)):
         return Spilled(m["path"]) if mode in (Mode.SPILLED, Mode.ALL) else None
     if mode is Mode.SPILLED:
@@ -111,10 +129,32 @@ def plan(event: dict[str, Any], mode: Mode = Mode.INLINE) -> Action:
     return None if text is None else Inline(text)
 
 
-def trusted_spill(resolved: str, session_resolved: str) -> bool:
-    """Whether a spill path, with links resolved, is one of Claude Code's files for this session."""
+def _plan_bash(tool_input: dict[str, Any], response: Any, mode: Mode) -> Action:
+    """Bash answers `{stdout, stderr, interrupted, isImage, ...}`: its stdout is folded inline, or, when
+    Claude Code saved a large output (`persistedOutputPath`), that file is the spill. Never an image,
+    and never a command that reads a saved output (`_RECOVERY`)."""
+    if (
+        not isinstance(response, dict)
+        or response.get("isImage")
+        or not isinstance(response.get("stdout"), str)
+    ):
+        return None
+    if _RECOVERY.search(str(tool_input.get("command", ""))):
+        return None
+    persisted = response.get("persistedOutputPath")
+    if isinstance(persisted, str):
+        return Spilled(persisted, from_field=True) if mode in (Mode.SPILLED, Mode.ALL) else None
+    return Inline(response["stdout"]) if mode in (Mode.INLINE, Mode.ALL) else None
+
+
+def trusted_spill(resolved: str, session_resolved: str, from_field: bool = False) -> bool:
+    """Whether a spill path, with links resolved, is one of Claude Code's files for this session: in
+    its tool-results folder, under Claude Code's MCP naming unless the path came from a field Claude
+    Code fills in, and never one of the hook's own copies."""
     parent, name = os.path.split(resolved)
-    return parent == session_resolved and _SPILL_NAME.match(name) is not None
+    if parent != session_resolved or name.startswith("folded-"):
+        return False
+    return from_field or _SPILL_NAME.match(name) is not None
 
 
 def _jq_path(path: str) -> str:
@@ -156,13 +196,13 @@ def session_dir(event: dict[str, Any]) -> Path:
     return Path(str(event["transcript_path"])).with_suffix("") / "tool-results"
 
 
-def _read_spill(path: str, session: Path, cap: int = MAX_SPILL_BYTES) -> str | None:
+def _read_spill(path: str, session: Path, cap: int = MAX_SPILL_BYTES, from_field: bool = False) -> str | None:
     """The spilled file's text, or None when it is not a regular file of this session's, or too big."""
     try:
         resolved, session_resolved = os.path.realpath(path), os.path.realpath(session)
     except OSError:
         return None
-    if not trusted_spill(resolved, session_resolved):
+    if not trusted_spill(resolved, session_resolved, from_field):
         return None
     try:
         fd = os.open(resolved, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)  # a FIFO must not block the open
@@ -242,8 +282,20 @@ def decide(event: dict[str, Any], action: Inline | Spilled, raw: str, budget: in
         saves.append((view, folded.source))
         path = str(view)
     text = render(folded, path, raw_path)
-    reply = {"hookSpecificOutput": {"hookEventName": "PostToolUse", "updatedToolOutput": text}}
+    reply = {
+        "hookSpecificOutput": {"hookEventName": "PostToolUse", "updatedToolOutput": _in_shape(event, text)}
+    }
     return Outcome(tuple(saves), log, reply)
+
+
+def _in_shape(event: dict[str, Any], text: str) -> str | dict[str, Any]:
+    """The folded view as the tool's own result: a string for an MCP tool; for Bash, its response with
+    stdout replaced (stderr and the exit fields kept) and the saved-output fields dropped, so Claude
+    Code shows the fold and not its own notice."""
+    if event.get("tool_name") != "Bash":
+        return text
+    response = {k: v for k, v in event["tool_response"].items() if k not in _BASH_SPILL_FIELDS}
+    return response | {"stdout": text}
 
 
 def handle(event: dict[str, Any], budget: int, mode: Mode = Mode.INLINE) -> dict[str, Any] | None:
@@ -255,8 +307,8 @@ def handle(event: dict[str, Any], budget: int, mode: Mode = Mode.INLINE) -> dict
         return None
     session = session_dir(event)
     match action:
-        case Spilled(path=path):
-            raw = _read_spill(path, session)
+        case Spilled(path=path, from_field=from_field):
+            raw = _read_spill(path, session, from_field=from_field)
             if raw is None:
                 _log({"tool": event.get("tool_name"), "event": "untrusted-spill", "path": path})
                 return None
