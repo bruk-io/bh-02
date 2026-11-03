@@ -6,50 +6,42 @@ uv workspace member and no gate sees it). Move it to its own repo when it has re
 
 Source idea: `Filtering_Large_Tool_Outputs.pdf` (a Gemini chat export). Take the ideas, not the code.
 
+## Target: Claude Code
+
+The lab now tests the idea inside Claude Code, through two hooks and a headless A/B:
+
+- `claude_code/hook.py`, a `PostToolUse` hook on `mcp__.*`: folds large MCP results (JSON, XML,
+  accessibility outlines, logs), including the ones Claude Code itself spilled to a file, and
+  points Claude at the saved raw output. `TOOL_OUTPUT_LAB_MODE=spilled-only` folds only what Claude
+  Code spilled, which is what the A/Bs recommend.
+- `claude_code/read_gate.py`, a `PreToolUse` hook on `Read`: answers the first whole-file read of a
+  large source file with its ast-grep outline. The probes show current models rarely need it.
+- `claude_code/ab.py` with `claude_code/fixture_mcp.py`: headless `claude -p` runs on synthetic
+  needle payloads, native against the hook, scored on the answer, tokens, cost and tool calls.
+
+Results and what they mean: `results/FINDINGS.md`.
+
 ## Design under test
 
-Tool-result middleware between any tool and any model:
+Deterministic folding by format, with the raw output kept and named, so nothing is lost:
 
-1. Under a size threshold: pass through untouched.
-2. Otherwise route by format and compress deterministically.
-3. Cache the raw output under a call id; the compressed text names the id and says how to recover.
-4. A recovery tool returns a slice of the cached raw output.
+- JSON: long arrays keep head, tail and the items that stand out, in place; wide objects keep
+  their first keys and the ones the query names.
+- Trees (`compressors/tree.py`): code through ast-grep, XML, indentation outlines. Outline first,
+  stand-outs and containers before bodies, each hidden range one line-numbered marker.
+- Logs: runs of repeated lines collapse; head, tail and windows around error words stay.
 
-Compression happens once, at insertion. Never rewrite an older result (it breaks prompt caching).
-The query signal is the tool-call arguments only.
-
-## Branches, in build order
-
-| Order | Branch | Expected value |
-|---|---|---|
-| 1 | log dedupe + error windows | high |
-| 2 | JSON array folding + anomaly promotion | high |
-| 3 | HTML to markdown strip | high for web tools |
-| 4 | recovery tool | required by 1-3 |
-| later | markdown section skeleton, BM25 unfolding, code skeleton, small-LLM extractor | experiments, expected to lose |
-
-## Validation
-
-- **Corpus.** Real tool results over ~2,000 tokens from Claude Code transcripts
-  (`~/.claude/projects/*.jsonl`) and bh-02 sessions, bucketed by format. Lives in `corpus/`
-  (gitignored: transcripts are private). First output is the size and format distribution, with no
-  compression at all. This tests the "70-80% structured" claim.
-- **Replay test.** For each large result, the assistant's next step is the ground truth. Re-run that
-  step with the compressed result and judge whether the next action or answer is equivalent. A judge
-  model scores it; spot-check a sample by hand.
-- **Needle test.** Generate JSON arrays and logs with one anomaly at a random index. Measure how often
-  the model finds it with and without promotion.
-- **Metrics per branch.** Token ratio, replay equivalence, recovery-call rate, net tokens including
-  the recovery calls.
+The query signal is the tool call's own arguments, ignoring terms most items share.
 
 ## Kill criteria (set before measuring)
 
-A branch is cut if either holds:
+A branch, or a mode of the hook, is cut if either holds against native Claude Code:
 
-- replay equivalence drops more than 3 points against the raw result;
-- net tokens, recovery calls included, are not lower than raw.
+- answers drop more than 3 points;
+- input tokens, recovery reads included, are not lower.
 
-Change these numbers only before a run, never after seeing one.
+Change these numbers only before a run, never after seeing one. So far: folding results Claude Code
+spilled passes both; folding inline results fails the second (A/B 1 and 2).
 
 ## Running
 
@@ -58,6 +50,7 @@ Change these numbers only before a run, never after seeing one.
 ./lab extract ~/.claude/projects              # transcripts -> corpus/results.jsonl
 ./lab stats [--budget 2000] [-o results/x.md] # corpus sizes, formats, deterministic compression
 ./lab needle [--seeds 5] [-o results/x.md]    # synthetic needle survival grid
+./lab ab [--model M] [--seeds N] [--only json log a11y figma] [--name x]  # headless Claude Code A/B (costs money)
 ```
 
 ## Layout
@@ -65,7 +58,8 @@ Change these numbers only before a run, never after seeing one.
 ```
 lab            the one entry point
 corpus/        private transcripts and extracted results (gitignored)
-compressors/   route.compress (the middleware), json_fold, lines, html, recovery.recover
+compressors/   route.fold/compress (the router), json_fold, tree, code, lines, html, recovery
+claude_code/   hook (PostToolUse), read_gate (PreToolUse), fixture_mcp, ab
 harness/       extract, stats, needle
 tests/unit/    pure-function tests
 results/       one file per run, never edited after; FINDINGS.md is the running summary

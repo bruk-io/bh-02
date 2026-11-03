@@ -40,3 +40,18 @@ Each stage leaves a script and a file in `results/`. A later stage never edits a
 Claude Code already caps what reaches the model (Bash output is cut, Read pages long files), so a
 Claude Code corpus understates how large raw tool outputs get. Stats report that the sizes are
 post-harness.
+
+## Claude Code stages (from 2026-11-03)
+
+| # | Stage | Status |
+|---|---|---|
+| C1 | Map what Claude Code already does with large outputs, from its docs | done |
+| C2 | Probe the hook points (PostToolUse output shapes, spills, Read numbering, PreToolUse deny) | done |
+| C3 | PostToolUse fold hook for MCP results, inline and spilled | done |
+| C4 | Fixture MCP server and headless A/B harness | done |
+| C5 | A/B 1: JSON and logs, Haiku | done: fold wins on spilled, loses inline |
+| C6 | Tree folding: code (ast-grep), XML, outlines | done |
+| C7 | A/B 2: accessibility snapshots and Figma XML, Haiku | done: same split |
+| C8 | Read gate (PreToolUse) with ast-grep outlines | built; probes show Haiku and Sonnet page on their own |
+| C9 | A/B with Sonnet, spilled-only mode, large cases | next |
+| C10 | The outline as a tool Claude calls, against its own grep outlines | next |
