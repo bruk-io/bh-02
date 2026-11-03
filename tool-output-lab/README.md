@@ -52,8 +52,10 @@ A branch, or a mode of the hook, is cut if either holds against native Claude Co
 - answers drop more than 3 points;
 - input tokens, recovery reads included, are not lower.
 
-Change these numbers only before a run, never after seeing one. So far: folding results Claude Code
-spilled passes both; folding inline results fails the second (A/B 1 and 2).
+Change these numbers only before a run, never after seeing one. So far, indicatively (13-14 runs a
+cell, no intervals; see FINDINGS K1): folding results Claude Code spilled kept answers and cut round
+trips with Haiku; folding inline results failed both criteria. Layer 2 applies the criteria to
+confidence intervals.
 
 ## Running
 
