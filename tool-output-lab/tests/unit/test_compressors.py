@@ -176,3 +176,33 @@ def test_a_query_term_most_items_share_promotes_nothing():
 def test_forcing_a_branch_that_does_not_exist_names_the_ones_that_do():
     with pytest.raises(ValueError, match="json, xml, html, outline, lines, text"):
         fold("x" * 50_000, budget_tokens=100, force="yaml")
+
+
+def _jsx_diff() -> str:
+    hunks = "".join(
+        f' export function Row{i}() {{\n-  return <div className="row"><span>{i}</span></div>;\n'
+        f'+  return <div className="row"><span>{i + 1}</span></div>;\n }}\n'
+        for i in range(60)
+    )
+    head = "diff --git a/src/App.jsx b/src/App.jsx\n--- a/src/App.jsx\n+++ b/src/App.jsx\n"
+    return f"{head}@@ -1,40 +1,40 @@\n{hunks}"
+
+
+def test_text_that_only_contains_tags_is_not_html():
+    badges = "".join(f'<a href="https://ci/{i}"><img src="https://badge/{i}.svg"></a>\n' for i in range(25))
+    readme = "# Project\n\n" + badges + "".join(f"Paragraph {i} of prose.\n" for i in range(200))
+    html_diff = (
+        "diff --git a/index.html b/index.html\n@@ -1,5 +1,5 @@\n <!doctype html>\n <html>\n"
+        + "".join(f"-<p>old {i}</p>\n+<p>new {i}</p>\n" for i in range(100))
+    )
+    assert [detect(t) for t in (_jsx_diff(), readme, html_diff)] == ["lines"] * 3
+    assert "<span>59</span>" in _text(_jsx_diff(), 300)  # the code around the tags is kept
+
+
+def test_pages_and_fragments_are_still_html():
+    page = "<!DOCTYPE html>\n<html><body>" + "".join(f"<div><p>para {i}</p></div>\n" for i in range(100))
+    cards = "".join(
+        f'<div class="card">\n  <span>item {i}</span>\n  Text for item {i}\n</div>\n' for i in range(100)
+    )
+    packed = "<div>" + "".join(f"<p>para <b>{i}</b> text<br></p>" for i in range(300)) + "</div>"
+    assert [detect(t) for t in (page, cards, packed)] == ["html"] * 3
