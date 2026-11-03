@@ -30,3 +30,10 @@ def test_each_file_condition_gets_its_tools_and_only_noshell_fold_gets_the_fold_
     ).exists()
     server = json.loads((tmp_path / "noshell-fold" / "mcp.json").read_text())["mcpServers"]["fold"]
     assert "claude_code.fold_mcp" in server["args"][-1]
+
+
+def test_only_an_edit_task_may_edit(tmp_path):
+    for c in ("native", "noshell-fold"):
+        (tmp_path / c).mkdir()
+        flags = file_tools(c, tmp_path / c, edit=True)
+        assert "Edit" in flags[flags.index("--allowedTools") + 1].split(",")

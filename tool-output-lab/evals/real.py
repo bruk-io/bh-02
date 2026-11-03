@@ -2,12 +2,14 @@
 
 Python by `ast`; Rust by ast-grep pattern queries (a separate code path from the fold's own tree
 building); XML by ElementTree; JSON by `json`. Each function takes the file's text and returns
-plain data, so the truth for a task is computed the same way every time.
+plain data, so the truth for a task is computed the same way every time. Edits are checked the same
+way: by `ast`, against the original, so formatting never matters and any other change does.
 """
 
 import ast
 import json
 import xml.etree.ElementTree as ET
+from collections.abc import Callable
 from pathlib import Path
 
 from ast_grep_py import SgNode, SgRoot
@@ -143,3 +145,97 @@ def pypi_sha256(src: str, version: str) -> str:
     files = json.loads(src)["releases"][version]
     wheel = next((f for f in files if f["packagetype"] == "bdist_wheel"), files[0])
     return str(wheel["digests"]["sha256"])
+
+
+# --- edits (Python) ---------------------------------------------------------------------------------
+
+
+def _parse(edited: str) -> ast.Module | str:
+    try:
+        return ast.parse(edited)
+    except SyntaxError as e:
+        return f"the edited file does not parse: {e.msg} on line {e.lineno}"
+
+
+def _method(tree: ast.Module, cls: str, name: str) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
+    found = [
+        d
+        for c in ast.walk(tree)
+        if isinstance(c, ast.ClassDef) and c.name == cls
+        for d in c.body
+        if isinstance(d, ast.FunctionDef | ast.AsyncFunctionDef) and d.name == name
+    ]
+    return found[0] if len(found) == 1 else None
+
+
+def added_keyword_only(cls: str, method: str, param: str, default: str) -> Callable[[str, str], str | None]:
+    """A check that `cls.method` gained the keyword-only parameter `param=default`, and that taking it
+    away again gives the original exactly."""
+
+    def check(original: str, edited: str) -> str | None:
+        tree = _parse(edited)
+        if isinstance(tree, str):
+            return tree
+        target = _method(tree, cls, method)
+        if target is None:
+            return f"{cls}.{method} is missing, or defined more than once"
+        names = [a.arg for a in target.args.kwonlyargs]
+        if param not in names:
+            where = "a positional parameter" if param in [a.arg for a in target.args.args] else "absent"
+            return f"{param} is not keyword-only in {cls}.{method} (it is {where})"
+        i = names.index(param)
+        given = target.args.kw_defaults[i]
+        if given is None or ast.unparse(given) != default:
+            return f"{param} defaults to {ast.unparse(given) if given else 'nothing'}, not {default}"
+        del target.args.kwonlyargs[i], target.args.kw_defaults[i]
+        if ast.dump(tree) != ast.dump(ast.parse(original)):
+            return f"something besides {param} changed"
+        return None
+
+    return check
+
+
+def renamed(old: str, new: str) -> Callable[[str, str], str | None]:
+    """A check that every use of the name `old` (a definition, an attribute, a name) became `new`, and
+    that renaming back gives the original exactly. Strings and comments are not code: a docstring may
+    keep the old name."""
+
+    def check(original: str, edited: str) -> str | None:
+        tree = _parse(edited)
+        if isinstance(tree, str):
+            return tree
+        left = sorted(
+            {n.lineno for n in ast.walk(tree) if isinstance(n, ast.stmt | ast.expr) and _named(n) == old}
+        )
+        if left:
+            return (
+                f"{old} is still used on line{'s' if len(left) > 1 else ''} {', '.join(map(str, left[:5]))}"
+            )
+        for n in ast.walk(tree):
+            if _named(n) == new:
+                _rename(n, old)
+        if ast.dump(tree) != ast.dump(ast.parse(original)):
+            return f"something besides the rename changed (or {new} now names something that was not {old})"
+        return None
+
+    return check
+
+
+def _named(node: ast.AST) -> str | None:
+    match node:
+        case ast.FunctionDef(name=n) | ast.AsyncFunctionDef(name=n) | ast.ClassDef(name=n):
+            return n
+        case ast.Attribute(attr=n) | ast.Name(id=n):
+            return n
+        case _:
+            return None
+
+
+def _rename(node: ast.AST, to: str) -> None:
+    match node:
+        case ast.FunctionDef() | ast.AsyncFunctionDef() | ast.ClassDef():
+            node.name = to
+        case ast.Attribute():
+            node.attr = to
+        case ast.Name():
+            node.id = to
