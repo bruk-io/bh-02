@@ -10,6 +10,7 @@ saved PyPI JSON in the untracked corpus/) is left out, and `skipped()` says whic
 
 import json
 import random
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from functools import cache, partial
@@ -64,8 +65,8 @@ _ASK = {
     },
     "log": {
         "spot": (
-            "Does anything in the log look wrong or unusual? Name the order or request it concerns, or say "
-            "none."
+            "Does anything in the log look wrong or unusual? If so, give the id of the order or request it "
+            "concerns; if not, say none."
         ),
         "count": "How many payments failed?",
         "enumerate": "List every order whose payment failed.",
@@ -107,6 +108,20 @@ def _count(fmt: str, p: synthetic.Payload) -> Number:
     k = len(p.planted)
     stated = (json.dumps({json.dumps("CrashLoopBackOff"): k})[1:-1],) if fmt == "json" else ()
     return Number(k, frozenset(p.planted), stated)
+
+
+_LOG_IDS = re.compile(r"\b(?:ORD|req)-[0-9a-f]+\b")
+
+
+def _needle(p: synthetic.Payload, *, fmt: str) -> Needle:
+    """The planted item. On a log line it may also be named by the line's other id: the question
+    asks for "the order or request it concerns", and a payment failure names both (never the user,
+    who may have made other requests)."""
+    token = p.planted[0]
+    if fmt != "log":
+        return Needle(token)
+    line = next(x for x in p.raw.splitlines() if token in x)
+    return Needle(token, frozenset(_LOG_IDS.findall(line)) - {token})
 
 
 def _synthetic(fmt: str, band: str) -> list[Task]:
@@ -152,8 +167,8 @@ def _synthetic(fmt: str, band: str) -> list[Task]:
         return frozenset(random.Random(f"{fmt}/{band}/{tag}").sample(range(size), min(k, size)))
 
     for fraction in (0.1, 0.5, 0.9):
-        add("spot", f"at{int(fraction * 100)}", frozenset({at(fraction)}), lambda p: Needle(p.planted[0]))
-    add("spot", "quiet-at50", frozenset({at(0.5)}), lambda p: Needle(p.planted[0]), quiet=True)
+        add("spot", f"at{int(fraction * 100)}", frozenset({at(fraction)}), partial(_needle, fmt=fmt))
+    add("spot", "quiet-at50", frozenset({at(0.5)}), partial(_needle, fmt=fmt), quiet=True)
     add("absent", "none", frozenset(), lambda p: Absent(frozenset(p.names)))
     over_cap = (12, 20) if band != "S" else ()
     for k in (3, 7, *over_cap):
