@@ -70,7 +70,7 @@ confident is the harm, so it is reported separately from wrong and hedged.
 | MCP tool result | `PostToolUse` hook: `inline` (the default), `spilled` or `all` | built; P2 |
 | Bash output | the same hook on `Bash` (`stdout` in the tool's output shape) | not built |
 | File read | `lab-fold FILE` as a command Claude may run (named in CLAUDE.md) | built; `evals/l2.py` condition `fold-tool` |
-| No shell | an MCP tool that returns `fold`'s output, with Bash disabled | not built; where `fold` should matter most |
+| No shell | the `fold` MCP tool (`claude_code/fold_mcp.py`), Bash disallowed; `evals/l2.py` conditions `noshell`, `noshell-fold` | built; P3 |
 
 ## Conditions, sizes, models
 
@@ -123,5 +123,5 @@ The code: `evals/truth.py` (answer kinds and scorers), `evals/synthetic.py` (pla
 |---|---|---|
 | P1 | A task registry (format, kind, source, prompt, ground truth, scorer); L1 invariants and sufficiency over every synthetic and real source; the absent, count, enumerate and locate kinds for JSON, logs, XML, accessibility trees and code. **Done**: `evals/`, `./lab evals l1`, results in FINDINGS.md 28-32 | none |
 | P2 | L2 on P1's tasks, sizes M and L: native against fold spilled-only and fold all, Haiku, 3 seeds, paired. **Done** with 2 repetitions: `./lab evals l2`, results in FINDINGS.md 33-39, `results/l2-p2.md` | $4.93 |
-| P3 | The same on Sonnet; the no-shell channel; edit tasks with executable checks | about $15 to $25 |
+| P3 | The same on Sonnet; the no-shell channel; edit tasks with executable checks. As run, one repetition on Sonnet under a $25 ceiling (`--max-cost`): (a) M, native against `fold-inline`, the default, all 52 MCP tasks; (b) L, native against `fold`, spot and absent; (c) the 22 file tasks under native, `noshell` and `noshell-fold` (the `fold` MCP tool, `claude_code/fold_mcp.py`); (d) 5 edit tasks, checked by `ast`, under native, `fold-tool`, `noshell` and `noshell-fold` | about $15 to $25 |
 | P4 | Explain tasks with the validated judge; context growth; Opus spot checks; Markdown, CSV and diffs | about $10 |
