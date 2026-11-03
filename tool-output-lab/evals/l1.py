@@ -28,6 +28,7 @@ from pathlib import Path
 from compressors import markers
 from compressors.cli import fold_text
 from compressors.common import estimate_tokens, split_lines
+from compressors.config import DEFAULT, FoldConfig, load, with_sets
 from compressors.json_fold import parse_json_or_jsonl
 from compressors.recovery import RecoveryError, resolve
 from compressors.route import VIEWS
@@ -161,13 +162,15 @@ class Row:
     recall: float | None
     over_budget: bool
     violations: list[str]
+    view: str = "sample"
+    config: str = "defaults"  # what the knobs changed (`compressors.config.label`)
 
 
-def check(task: Task, budget: int, query_on: bool, view: str = "sample") -> Row:
+def check(task: Task, budget: int, query_on: bool, view: str = "sample", config: FoldConfig = DEFAULT) -> Row:
     raw = task.payload()
     query = task.query if query_on else ""
-    result = fold_text(raw, budget=budget, path=task.path, query=query, quiet=True, view=view)
-    again = fold_text(raw, budget=budget, path=task.path, query=query, quiet=True, view=view)
+    result = fold_text(raw, budget=budget, path=task.path, query=query, quiet=True, view=view, config=config)
+    again = fold_text(raw, budget=budget, path=task.path, query=query, quiet=True, view=view, config=config)
     out = result.text
     passthrough = result.branch is None
     branch = f"code-{result.language}" if result.language else (result.branch or "passthrough")
@@ -177,7 +180,9 @@ def check(task: Task, budget: int, query_on: bool, view: str = "sample") -> Row:
     if estimate_tokens(out) > estimate_tokens(raw):
         violations.append("the fold is larger than the input")
     if estimate_tokens(out) > budget * 1.1:  # over the budget is a bug unless nothing smaller exists
-        floor = fold_text(raw, budget=1, path=task.path, query=query, quiet=True, view=view).text
+        floor = fold_text(
+            raw, budget=1, path=task.path, query=query, quiet=True, view=view, config=config
+        ).text
         if out != floor:
             violations.append(f"{estimate_tokens(out)} tokens for a budget of {budget}, and not the floor")
     if not passthrough:
@@ -187,7 +192,8 @@ def check(task: Task, budget: int, query_on: bool, view: str = "sample") -> Row:
             parsed = parse_json_or_jsonl(raw)
             assert parsed is not None
             body = out[note.end() :] if (note := markers.JSONL_NOTE.match(out)) else out
-            violations += schema_check.claims(parsed[0], body) + schema_check.query_runs(raw, parsed[0], body)
+            violations += schema_check.claims(parsed[0], body, config.schema)
+            violations += schema_check.query_runs(raw, parsed[0], body, config.schema)
         elif branch in ("xml", "outline", "lines") or branch.startswith("code-"):
             source = result.source if result.source is not None else raw
             violations += coverage(source, out, numbered=branch.startswith("code-"))
@@ -208,14 +214,16 @@ def check(task: Task, budget: int, query_on: bool, view: str = "sample") -> Row:
     )
 
 
-def run(budget: int, only: tuple[str, ...] = (), view: str = "sample") -> list[Row]:
+def run(
+    budget: int, only: tuple[str, ...] = (), view: str = "sample", config: FoldConfig = DEFAULT
+) -> list[Row]:
     rows = []
     for t in tasks():
         if only and t.fmt not in only:
             continue
-        rows.append(check(t, budget, query_on=False, view=view))
+        rows.append(check(t, budget, query_on=False, view=view, config=config))
         if t.query:
-            rows.append(check(t, budget, query_on=True, view=view))
+            rows.append(check(t, budget, query_on=True, view=view, config=config))
     return rows
 
 
@@ -224,6 +232,8 @@ def report(rows: list[Row], budget: int) -> str:
     folded = [r for r in rows if r.branch != "passthrough"]
     out = [
         f"# Layer 1: the fold alone, budget {budget} tokens",
+        "",
+        f"View: {rows[0].view if rows else 'sample'}. Knobs: {rows[0].config if rows else 'defaults'}.",
         "",
         f"{len(rows)} folds of {len({r.task_id for r in rows})} tasks. Sufficient = the task's scorer finds",
         "the answer in the fold text (an upper bound on what a model can answer without fetching more).",
@@ -288,8 +298,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--only", nargs="+", choices=FORMATS, default=())
     parser.add_argument("--name", default="l1-1")
     parser.add_argument("--view", choices=VIEWS, default="sample", help="how data (JSON) is shown")
+    parser.add_argument("--config", type=Path, help="a TOML file of knobs (compressors/config.py)")
+    parser.add_argument("--set", dest="sets", action="append", default=[], metavar="NAME=VALUE")
     ns = parser.parse_args(argv)
-    rows = run(ns.budget, tuple(ns.only), ns.view)
+    config = with_sets(load(ns.config) if ns.config else DEFAULT, ns.sets)
+    rows = run(ns.budget, tuple(ns.only), ns.view, config)
     results = _LAB / "results"
     with (results / f"{ns.name}.jsonl").open("w", encoding="utf-8") as f:
         for r in rows:

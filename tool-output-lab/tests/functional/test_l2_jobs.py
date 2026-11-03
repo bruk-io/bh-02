@@ -69,3 +69,21 @@ def test_the_bash_channel_prints_the_payload_from_a_command_that_names_no_task(t
         "Run `./get_logs` in the current directory; it prints the recent log lines"
     )
     assert bash_prompt(t).endswith(t.question) and "get_logs tool" not in bash_prompt(t)
+
+
+def test_the_view_and_knobs_reach_the_hook_the_shim_and_the_fold_server(tmp_path):
+    from compressors.config import DEFAULT, with_sets
+
+    config = with_sets(DEFAULT, ["schema.rare=0.15"])
+    t = next(x for x in tasks() if x.task_id == "log-M-spot-at50")
+    bash_channel(t, "fold-bash", tmp_path, tmp_path / "hook.jsonl", "schema", config)
+    command = json.loads((tmp_path / "settings.json").read_text())["hooks"]["PostToolUse"][0]["hooks"][0][
+        "command"
+    ]
+    assert "TOOL_OUTPUT_LAB_VIEW=schema" in command and "TOOL_OUTPUT_LAB_SET=schema.rare=0.15" in command
+    for c in ("fold-tool", "noshell-fold"):
+        (tmp_path / c).mkdir()
+        file_tools(c, tmp_path / c, view="schema", config=config)
+    assert "--view schema --set schema.rare=0.15" in (tmp_path / "fold-tool" / "bin" / "lab-fold").read_text()
+    server = json.loads((tmp_path / "noshell-fold" / "mcp.json").read_text())["mcpServers"]["fold"]
+    assert server["env"] == {"TOOL_OUTPUT_LAB_VIEW": "schema", "TOOL_OUTPUT_LAB_SET": "schema.rare=0.15"}

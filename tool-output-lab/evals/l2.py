@@ -29,6 +29,7 @@ import difflib
 import json
 import os
 import re
+import shlex
 import statistics
 import subprocess
 import sys
@@ -42,6 +43,8 @@ from pathlib import Path
 from typing import Any
 
 from compressors.common import read_text
+from compressors.config import DEFAULT, FoldConfig, label, load, sets, with_sets
+from compressors.route import VIEWS
 from evals.stats import bootstrap, paired, paired_accuracy, wilson
 from evals.tasks import FORMATS, KINDS, TOOLS, Task, bash_prompt, skipped, tasks
 from evals.truth import Edited, Truth, answer_line, score_answer, score_edit
@@ -160,13 +163,20 @@ def conditions_for(t: Task) -> tuple[str, ...]:
     return FILE_CONDITIONS if t.path else MCP_CONDITIONS + BASH_CONDITIONS
 
 
-def _hook_settings(mode: str, log: Path, matcher: str = "mcp__.*") -> dict[str, Any]:
-    command = f"cd {_LAB} && TOOL_OUTPUT_LAB_LOG={log} TOOL_OUTPUT_LAB_MODE={mode} {_UV} -m claude_code.hook"
+def _hook_settings(
+    mode: str, log: Path, matcher: str = "mcp__.*", view: str = "sample", config: FoldConfig = DEFAULT
+) -> dict[str, Any]:
+    knobs = shlex.quote(";".join(sets(config)))
+    env = f"TOOL_OUTPUT_LAB_LOG={log} TOOL_OUTPUT_LAB_MODE={mode} TOOL_OUTPUT_LAB_VIEW={view}"
+    env += f" TOOL_OUTPUT_LAB_SET={knobs}"
+    command = f"cd {_LAB} && {env} {_UV} -m claude_code.hook"
     hook = {"type": "command", "timeout": 30, "command": command}
     return {"hooks": {"PostToolUse": [{"matcher": matcher, "hooks": [hook]}]}}
 
 
-def bash_channel(t: Task, condition: str, w: Path, log: Path) -> list[str]:
+def bash_channel(
+    t: Task, condition: str, w: Path, log: Path, view: str = "sample", config: FoldConfig = DEFAULT
+) -> list[str]:
     """The flags (and files in the run's folder) for a synthetic task on the bash channel: `./<tool>`
     prints the payload (the task id reaches it through the environment, not the script), and the
     hook, when the condition has one, folds Bash."""
@@ -174,18 +184,25 @@ def bash_channel(t: Task, condition: str, w: Path, log: Path) -> list[str]:
     script.write_text(f'#!/bin/sh\ncd "{_LAB}" && exec {_UV} -m claude_code.fixture_cmd\n')
     script.chmod(0o755)
     mode = HOOK_MODE.get(condition)
-    (w / "settings.json").write_text(json.dumps(_hook_settings(mode, log, "Bash") if mode else {}))
+    (w / "settings.json").write_text(
+        json.dumps(_hook_settings(mode, log, "Bash", view, config) if mode else {})
+    )
     return ["--strict-mcp-config", "--settings", "settings.json", "--allowedTools", "Bash,Read,Grep"]
 
 
-def _fold_shim(bin_dir: Path) -> None:
+def _fold_shim(bin_dir: Path, view: str = "sample", config: FoldConfig = DEFAULT) -> None:
     bin_dir.mkdir()
     shim = bin_dir / "lab-fold"  # not `fold`, which would shadow coreutils fold
-    shim.write_text(f'#!/bin/sh\nexec env PYTHONPATH="{_LAB}" {_UV} -m compressors.cli "$@"\n')
+    knobs = " ".join(f"--set {shlex.quote(s)}" for s in sets(config))
+    shim.write_text(
+        f'#!/bin/sh\nexec env PYTHONPATH="{_LAB}" {_UV} -m compressors.cli --view {view} {knobs} "$@"\n'
+    )
     shim.chmod(0o755)
 
 
-def file_tools(condition: str, w: Path, edit: bool = False) -> list[str]:
+def file_tools(
+    condition: str, w: Path, edit: bool = False, view: str = "sample", config: FoldConfig = DEFAULT
+) -> list[str]:
     """The flags (and files in the run's folder) that set up a file task's condition. Edit is allowed
     only for an edit task, whose file is a copy in the run's folder: read tasks name real files."""
     edits = ",Edit" if edit else ""
@@ -193,18 +210,31 @@ def file_tools(condition: str, w: Path, edit: bool = False) -> list[str]:
         tools = f"Read,Grep,Glob{edits}"
         flags = ["--strict-mcp-config", "--disallowedTools", "Bash"]
         if condition == "noshell-fold":
-            server = {"command": "sh", "args": ["-c", f"cd {_LAB} && exec {_UV} -m claude_code.fold_mcp"]}
+            env = {"TOOL_OUTPUT_LAB_VIEW": view, "TOOL_OUTPUT_LAB_SET": ";".join(sets(config))}
+            server = {
+                "command": "sh",
+                "args": ["-c", f"cd {_LAB} && exec {_UV} -m claude_code.fold_mcp"],
+                "env": env,
+            }
             (w / "mcp.json").write_text(json.dumps({"mcpServers": {"fold": server}}))
             flags += ["--mcp-config", "mcp.json"]
             tools += f",{_FOLD_TOOL}"
         return [*flags, "--allowedTools", tools]
-    _fold_shim(w / "bin")
+    _fold_shim(w / "bin", view, config)
     if condition == "fold-tool":
         (w / "CLAUDE.md").write_text(_CLAUDE_MD)
     return ["--strict-mcp-config", "--allowedTools", f"Read,Grep,Glob,Bash{edits}"]
 
 
-def run_one(t: Task, condition: str, model: str, rep: int, log: Path) -> dict[str, Any]:
+def run_one(
+    t: Task,
+    condition: str,
+    model: str,
+    rep: int,
+    log: Path,
+    view: str = "sample",
+    config: FoldConfig = DEFAULT,
+) -> dict[str, Any]:
     """One Claude Code session for one task under one condition, scored."""
     with tempfile.TemporaryDirectory(prefix="l2-") as work:
         w = Path(work)
@@ -216,10 +246,10 @@ def run_one(t: Task, condition: str, model: str, rep: int, log: Path) -> dict[st
         command += ["--output-format", "stream-json", "--verbose"]
         edit = isinstance(t.truth, Edited)
         if bash:
-            command += bash_channel(t, condition, w, log)
+            command += bash_channel(t, condition, w, log, view, config)
             env["TOOL_OUTPUT_LAB_TASK"] = t.task_id
         elif t.path:
-            command += file_tools(condition, w, edit)
+            command += file_tools(condition, w, edit, view, config)
             copy, original = w / Path(t.path).name, Path(t.path)
             if edit:
                 copy.write_text(t.payload(), encoding="utf-8")
@@ -232,7 +262,9 @@ def run_one(t: Task, condition: str, model: str, rep: int, log: Path) -> dict[st
             }
             (w / "mcp.json").write_text(json.dumps({"mcpServers": {"fixture": server}}))
             mode = HOOK_MODE.get(condition)
-            (w / "settings.json").write_text(json.dumps(_hook_settings(mode, log) if mode else {}))
+            (w / "settings.json").write_text(
+                json.dumps(_hook_settings(mode, log, view=view, config=config) if mode else {})
+            )
             command += ["--mcp-config", "mcp.json", "--strict-mcp-config", "--settings", "settings.json"]
             command += ["--allowedTools", f"mcp__fixture__{TOOLS[t.fmt]},Bash,Read,Grep"]
         try:
@@ -281,6 +313,8 @@ def run_one(t: Task, condition: str, model: str, rep: int, log: Path) -> dict[st
         **head,
         "rep": rep,
         "model": model,
+        "view": view,
+        "config": label(config),
         "correct": score.correct,
         "parsed": score.parsed,
         "recall": score.recall,
@@ -452,6 +486,12 @@ def merged(runs: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
     models = {r["model"] for rows in runs.values() for r in rows}
     if len(models) > 1:
         raise ValueError(f"the runs used different models ({', '.join(sorted(models))}); report them apart")
+    settings = {
+        (r.get("view", "sample"), r.get("config", "defaults")) for rows in runs.values() for r in rows
+    }
+    if len(settings) > 1:
+        said = "; ".join(f"view {v}, knobs {c}" for v, c in sorted(settings))
+        raise ValueError(f"the runs folded with different settings ({said}); report them apart")
     out = []
     for name, rows in runs.items():
         for r in rows:
@@ -561,6 +601,9 @@ def main(argv: list[str] | None = None) -> int:
         "--first-rep", type=int, default=0, help="number the repetitions from here, to add to an earlier run"
     )
     parser.add_argument("--workers", type=int, default=4)
+    parser.add_argument("--view", choices=VIEWS, default="sample", help="how the fold shows data (JSON)")
+    parser.add_argument("--config", type=Path, help="a TOML file of knobs (compressors/config.py)")
+    parser.add_argument("--set", dest="sets", action="append", default=[], metavar="NAME=VALUE")
     parser.add_argument(
         "--max-cost",
         type=float,
@@ -607,7 +650,8 @@ def main(argv: list[str] | None = None) -> int:
         ThreadPoolExecutor(ns.workers) as pool,
         (results / f"{ns.name}.jsonl").open("w", encoding="utf-8") as f,
     ):
-        pending = [pool.submit(run_one, t, c, ns.model, rep, log) for t, c, rep in jobs]
+        config = with_sets(load(ns.config) if ns.config else DEFAULT, ns.sets)
+        pending = [pool.submit(run_one, t, c, ns.model, rep, log, ns.view, config) for t, c, rep in jobs]
         failed_in_a_row, spent, capped = 0, 0.0, False
         for future in as_completed(pending):
             row = future.result()

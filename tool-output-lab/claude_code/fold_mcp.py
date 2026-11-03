@@ -11,10 +11,12 @@ and the lab only; speaks newline-delimited JSON-RPC 2.0 on stdin and stdout.
 """
 
 import json
+import os
 import sys
 from collections.abc import Callable
 from typing import Any
 
+from claude_code.hook import config_from
 from compressors.cli import fold_text
 from compressors.common import read_text
 
@@ -81,10 +83,11 @@ def respond(request: dict[str, Any], fold: Fold) -> dict[str, Any] | None:
     return {"jsonrpc": "2.0", "id": rid, "result": result}
 
 
-def _fold_file(path: str, budget: int, query: str) -> str:
+def _fold_file(path: str, budget: int, query: str) -> str:  # the view and knobs come from the environment
     """The file's folded view. A file that cannot be read raises OSError, and a language with no
     ast-grep grammar ValueError, from the reader and the fold."""
-    return fold_text(read_text(path), budget=budget, path=path, query=query).text
+    config, view = config_from(os.environ)
+    return fold_text(read_text(path), budget=budget, path=path, query=query, view=view, config=config).text
 
 
 def main() -> int:

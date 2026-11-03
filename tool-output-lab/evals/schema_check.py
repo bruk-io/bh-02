@@ -24,6 +24,7 @@ from collections import Counter
 from typing import Any
 
 from compressors import markers
+from compressors.config import DEFAULT, SchemaKnobs
 
 _MISSING = object()
 _SEGMENT = re.compile(r'\.([A-Za-z_][A-Za-z0-9_]*)|\[("(?:[^"\\]|\\.)*")\]|\[(\d+)\]|(\[\])')
@@ -201,8 +202,8 @@ def _notes(text: str) -> list[str]:
     return out
 
 
-def claims(raw_value: Any, view: str) -> list[str]:
-    """Every claim of the view that the data does not bear out."""
+def claims(raw_value: Any, view: str, knobs: SchemaKnobs = DEFAULT.schema) -> list[str]:
+    """Every claim of the view that the data does not bear out (judged by the knobs it was made with)."""
     problems: list[str] = []
     rows: list[Any] = []
     path = ""
@@ -215,9 +216,9 @@ def claims(raw_value: Any, view: str) -> list[str]:
             return
         for rel, desc in fields.items():
             counts = _values_then_counts(desc.split("; ")[-1])
-            if not counts or counts[0][1] / max(1, len(rows)) < 0.75:
+            if not counts or counts[0][1] / max(1, len(rows)) < knobs.dominant:
                 continue
-            rare = {json.dumps(v) for v, n in counts[1:] if n / len(rows) <= 0.1}
+            rare = {json.dumps(v) for v, n in counts[1:] if n / len(rows) <= knobs.rare}
             for i, r in enumerate(rows):
                 v = _get(r, rel)
                 if (
@@ -265,7 +266,7 @@ def claims(raw_value: Any, view: str) -> list[str]:
     return problems
 
 
-def query_runs(raw: str, raw_value: Any, view: str) -> list[str]:
+def query_runs(raw: str, raw_value: Any, view: str, knobs: SchemaKnobs = DEFAULT.schema) -> list[str]:
     """The view's query, run with jq on the input, against what its select names."""
     line = next((x for x in view.splitlines() if x.startswith("query: ")), None)
     if line is None or shutil.which("jq") is None:
@@ -285,7 +286,7 @@ def query_runs(raw: str, raw_value: Any, view: str) -> list[str]:
     value = json.loads(sel["value"])
     rows = walk(raw_value, sel["base"] + "[]") if sel["base"] not in ("", ".") else walk(raw_value, "[]")
     held = sum(1 for r in rows if _get(r, sel["field"]) == value)
-    if not rows or held / len(rows) < 0.75:  # it must select the rows that break the dominant value
+    if not rows or held / len(rows) < knobs.dominant:  # it must select the rows that break the dominant value
         said = f"the query selects against {sel['value']}, which {held} of {len(rows)} rows hold"
         return [f"{said}: not the dominant value"]
     want = [_get(r, sel["pick"]) if sel["pick"] else r for r in rows if _get(r, sel["field"]) != value]
