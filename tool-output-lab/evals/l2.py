@@ -246,8 +246,9 @@ def report(rows: list[dict[str, Any]], model: str) -> str:
         "",
         "## By task group",
         "",
-        "| format | kind | band | condition | correct | median cost | median final context | median calls |",
-        "|---|---|---|---|---|---|---|---|",
+        "| format | kind | band | condition | correct | median cost | median final context | median calls "
+        "| read the saved file | ran lab-fold |",
+        "|---|---|---|---|---|---|---|---|---|---|",
     ]
     groups: dict[tuple[str, str, str, str], list[dict[str, Any]]] = defaultdict(list)
     for r in scored:
@@ -257,21 +258,22 @@ def report(rows: list[dict[str, Any]], model: str) -> str:
             f"| {fmt} | {kind} | {band} | {cond} | {_ci(sum(r['correct'] for r in rs), len(rs))} "
             f"| ${statistics.median(r['cost_usd'] for r in rs):.4f} "
             f"| {int(statistics.median(r['final_context'] for r in rs))} "
-            f"| {statistics.median(r['tool_calls'] for r in rs)} |"
+            f"| {statistics.median(r['tool_calls'] for r in rs)} "
+            f"| {sum(r['read_saved_file'] for r in rs)}/{len(rs)} | {sum(r['ran_fold'] for r in rs)}/{len(rs)} |"
         )
-    out += ["", "## Each condition against native, paired by task and repetition", ""]
+    out += ["", "## Each condition against native, paired by task and repetition, per size band", ""]
     out += [
-        "| format | condition | pairs | accuracy change | cost change | final context change | time change "
-        "| verdict |"
+        "| format | band | condition | pairs | accuracy change | cost change | final context change "
+        "| time change | verdict |"
     ]
-    out.append("|---|---|---|---|---|---|---|---|")
-    by_fmt_cond: dict[tuple[str, str], dict[str, dict[str, Any]]] = defaultdict(dict)
+    out.append("|---|---|---|---|---|---|---|---|---|")
+    by_cell: dict[tuple[str, str, str], dict[str, dict[str, Any]]] = defaultdict(dict)
     for r in scored:  # a pair needs both runs scored
-        by_fmt_cond[(r["fmt"], r["condition"])][f"{r['task_id']}#{r['rep']}"] = r
-    for (fmt, cond), runs in sorted(by_fmt_cond.items()):
-        if cond == "native" or (fmt, "native") not in by_fmt_cond:
+        by_cell[(r["fmt"], r["band"], r["condition"])][f"{r['task_id']}#{r['rep']}"] = r
+    for (fmt, band, cond), runs in sorted(by_cell.items()):
+        if cond == "native" or (fmt, band, "native") not in by_cell:
             continue
-        base = by_fmt_cond[(fmt, "native")]
+        base = by_cell[(fmt, band, "native")]
 
         diffs = partial(_diffs, base, runs)  # (field, scale=1.0): this condition minus native, per run
 
@@ -289,7 +291,7 @@ def report(rows: list[dict[str, Any]], model: str) -> str:
         )
         verdict += " (indicative: under 30 pairs)" if n < 30 else ""
         out.append(
-            f"| {fmt} | {cond} | {n} | {acc[0]:+.0%} [{acc[1]:+.0%}, {acc[2]:+.0%}] "
+            f"| {fmt} | {band} | {cond} | {n} | {acc[0]:+.0%} [{acc[1]:+.0%}, {acc[2]:+.0%}] "
             f"| ${cost[0]:+.4f} [{cost[1]:+.4f}, {cost[2]:+.4f}] "
             f"| {ctx[0]:+.0f} [{ctx[1]:+.0f}, {ctx[2]:+.0f}] "
             f"| {secs[0]:+.1f}s [{secs[1]:+.1f}, {secs[2]:+.1f}] | {verdict} |"

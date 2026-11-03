@@ -67,13 +67,22 @@ def _rows(n: int = 5) -> list[dict]:
                 "condition": cond,
             }
             row |= {"rep": 0, "correct": correct, "parsed": True, "cost_usd": 0.01, "final_context": ctx}
-            rows.append(row | {"tool_calls": 2, "duration_ms": 9000, "error": None})
+            rows.append(
+                row
+                | {
+                    "tool_calls": 2,
+                    "duration_ms": 9000,
+                    "error": None,
+                    "read_saved_file": False,
+                    "ran_fold": False,
+                }
+            )
     return rows
 
 
 def test_the_report_pairs_conditions_and_labels_small_samples():
     text = report(_rows(), "test")
-    assert "| json | fold | 5 | +0%" in text and "passes (indicative: under 30 pairs)" in text
+    assert "| json | M | fold | 5 | +0%" in text and "passes (indicative: under 30 pairs)" in text
 
 
 def test_a_run_that_failed_to_answer_is_listed_not_scored_or_paired():
@@ -86,7 +95,7 @@ def test_a_run_that_failed_to_answer_is_listed_not_scored_or_paired():
     }  # a fold run
     text = report(rows, "test")
     assert "9 scored, 1 failed to answer" in text
-    assert "| json | spot | M | fold | 4/4" in text and "| json | fold | 4 | +0%" in text
+    assert "| json | spot | M | fold | 4/4" in text and "| json | M | fold | 4 | +0%" in text
     assert "- json-M-spot-0 fold: no result event" in text
 
 
