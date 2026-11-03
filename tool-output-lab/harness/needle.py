@@ -251,10 +251,6 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-if __name__ == "__main__":
-    raise SystemExit(main())
-
-
 # --- tree-shaped payloads: accessibility snapshots and Figma node metadata ---------------------------
 
 A11Y_KINDS = ("disabled_button", "error_alert", "lookup")
@@ -344,3 +340,7 @@ def figma_case(kind: str, size: int, position: float, rng: random.Random) -> Cas
         raise ValueError(f"unknown Figma kind {kind!r}: use one of {', '.join(FIGMA_KINDS)}")
     args: dict[str, Any] = {"name": lookup_name} if kind == "lookup" else {}
     return Case("figma", kind, size, position, "".join(parts), args, needle)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
