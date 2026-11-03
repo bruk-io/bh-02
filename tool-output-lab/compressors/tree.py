@@ -445,7 +445,9 @@ def _pretty(raw: str) -> str:
     if len(lines) >= raw.count("<") / 4 and max((len(line) for line in lines), default=0) <= 1000:
         return raw
     try:
-        pretty = xml.dom.minidom.parseString(raw.encode("utf-8")).toprettyxml(indent="  ")
+        # the text, not bytes: it is already decoded, so a declared encoding (ISO-8859-1, UTF-16)
+        # must not decode it again, as our own expat parse does not
+        pretty = xml.dom.minidom.parseString(raw).toprettyxml(indent="  ")
     except RecursionError:  # nested deeper than minidom's writer recurses: one tag per line, unindented
         pretty = _BETWEEN_TAGS.sub(">\n<", raw)
     return "\n".join(line for line in split_lines(pretty) if line.strip())
