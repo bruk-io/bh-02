@@ -8,7 +8,9 @@ same truths (`evals.truth.score_answer`, from the ANSWER line every prompt asks 
 
 - A synthetic task's payload comes from a fixture MCP server (`claude_code/fixture_mcp.py`) that
   serves that task; conditions: `native`, and the PostToolUse hook in each of its modes: `fold`
-  (spilled), `fold-inline` (inline, its default) and `fold-all` (all).
+  (spilled), `fold-inline` (inline, its default) and `fold-all` (all). On the bash channel the same
+  payload is printed by `./<tool>` in the session's folder: `bash-native`, and the hook on Bash,
+  `fold-bash` (inline) and `fold-bash-all` (all), both paired against `bash-native`.
 - A real-file task names its file in the prompt; conditions: `native` and `fold-tool` (`lab-fold`,
   the fold CLI, on the PATH in both, and named in a CLAUDE.md only in `fold-tool`), and, with Bash
   disallowed, `noshell` (Read, Grep, Glob) and `noshell-fold` (the same and the `fold` MCP tool,
@@ -41,20 +43,24 @@ from typing import Any
 
 from compressors.common import read_text
 from evals.stats import bootstrap, paired, paired_accuracy, wilson
-from evals.tasks import FORMATS, KINDS, TOOLS, Task, skipped, tasks
+from evals.tasks import FORMATS, KINDS, TOOLS, Task, bash_prompt, skipped, tasks
 from evals.truth import Edited, Truth, answer_line, score_answer, score_edit
 
 _LAB = Path(__file__).resolve().parent.parent
 _UV = "uv run -q --no-project --python 3.15 --with ast-grep-py python"
 MCP_CONDITIONS = ("native", "fold", "fold-inline", "fold-all")
+# The bash channel: the same synthetic payloads, printed by `./<tool>` in the session's folder.
+BASH_CONDITIONS = ("bash-native", "fold-bash", "fold-bash-all")
 HOOK_MODE = {
     "fold": "spilled",
     "fold-inline": "inline",
     "fold-all": "all",
+    "fold-bash": "inline",
+    "fold-bash-all": "all",
 }  # condition -> TOOL_OUTPUT_LAB_MODE
 FILE_CONDITIONS = ("native", "fold-tool", "noshell", "noshell-fold")
 # What each condition is paired against: a fold condition against the same session without it.
-BASELINE = {"noshell-fold": "noshell"}
+BASELINE = {"noshell-fold": "noshell", "fold-bash": "bash-native", "fold-bash-all": "bash-native"}
 _FOLD_TOOL = "mcp__fold__fold"
 _STOP_AFTER_FAILURES = 5
 _COST_PER_RUN = {"haiku": 0.007, "sonnet": 0.10, "opus": 0.25}  # rough, from the A/Bs so far
@@ -151,13 +157,25 @@ def _run_error(result: dict[str, Any]) -> str | None:
 
 
 def conditions_for(t: Task) -> tuple[str, ...]:
-    return FILE_CONDITIONS if t.path else MCP_CONDITIONS
+    return FILE_CONDITIONS if t.path else MCP_CONDITIONS + BASH_CONDITIONS
 
 
-def _hook_settings(mode: str, log: Path) -> dict[str, Any]:
+def _hook_settings(mode: str, log: Path, matcher: str = "mcp__.*") -> dict[str, Any]:
     command = f"cd {_LAB} && TOOL_OUTPUT_LAB_LOG={log} TOOL_OUTPUT_LAB_MODE={mode} {_UV} -m claude_code.hook"
     hook = {"type": "command", "timeout": 30, "command": command}
-    return {"hooks": {"PostToolUse": [{"matcher": "mcp__.*", "hooks": [hook]}]}}
+    return {"hooks": {"PostToolUse": [{"matcher": matcher, "hooks": [hook]}]}}
+
+
+def bash_channel(t: Task, condition: str, w: Path, log: Path) -> list[str]:
+    """The flags (and files in the run's folder) for a synthetic task on the bash channel: `./<tool>`
+    prints the payload (the task id reaches it through the environment, not the script), and the
+    hook, when the condition has one, folds Bash."""
+    script = w / TOOLS[t.fmt]
+    script.write_text(f'#!/bin/sh\ncd "{_LAB}" && exec {_UV} -m claude_code.fixture_cmd\n')
+    script.chmod(0o755)
+    mode = HOOK_MODE.get(condition)
+    (w / "settings.json").write_text(json.dumps(_hook_settings(mode, log, "Bash") if mode else {}))
+    return ["--strict-mcp-config", "--settings", "settings.json", "--allowedTools", "Bash,Read,Grep"]
 
 
 def _fold_shim(bin_dir: Path) -> None:
@@ -192,10 +210,15 @@ def run_one(t: Task, condition: str, model: str, rep: int, log: Path) -> dict[st
         w = Path(work)
         env = dict(os.environ)
         env["PATH"] = f"{w / 'bin'}:{env.get('PATH', '')}"  # lab-fold, where the condition puts it there
-        command = ["claude", "-p", t.prompt, "--model", model, "--max-turns", "25"]
+        bash = condition in BASH_CONDITIONS
+        prompt = bash_prompt(t) if bash else t.prompt
+        command = ["claude", "-p", prompt, "--model", model, "--max-turns", "25"]
         command += ["--output-format", "stream-json", "--verbose"]
         edit = isinstance(t.truth, Edited)
-        if t.path:
+        if bash:
+            command += bash_channel(t, condition, w, log)
+            env["TOOL_OUTPUT_LAB_TASK"] = t.task_id
+        elif t.path:
             command += file_tools(condition, w, edit)
             copy, original = w / Path(t.path).name, Path(t.path)
             if edit:

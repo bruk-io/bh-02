@@ -1,13 +1,24 @@
 """Layer 2's job list: building it reads the task registry, which reads real files on this host."""
 
 import json
+import os
+import subprocess
 
-from evals.l2 import file_tools, select
+from evals.l2 import bash_channel, file_tools, select
+from evals.tasks import bash_prompt, tasks
 
 
 def test_jobs_pair_every_task_with_its_channels_conditions():
     jobs = select(["json"], ["spot"], ["M"], None)
-    assert {c for _, c in jobs} == {"native", "fold", "fold-inline", "fold-all"}
+    assert {c for _, c in jobs} == {
+        "native",
+        "fold",
+        "fold-inline",
+        "fold-all",
+        "bash-native",
+        "fold-bash",
+        "fold-bash-all",
+    }
     jobs = select(["python"], ["locate"], ["L"], None)
     assert {c for _, c in jobs} == {"native", "fold-tool", "noshell", "noshell-fold"} and all(
         t.path for t, _ in jobs
@@ -37,3 +48,24 @@ def test_only_an_edit_task_may_edit(tmp_path):
         (tmp_path / c).mkdir()
         flags = file_tools(c, tmp_path / c, edit=True)
         assert "Edit" in flags[flags.index("--allowedTools") + 1].split(",")
+
+
+def test_the_bash_channel_prints_the_payload_from_a_command_that_names_no_task(tmp_path):
+    t = next(x for x in tasks() if x.task_id == "log-M-spot-at50")
+    flags = bash_channel(t, "fold-bash", tmp_path, tmp_path / "hook.jsonl")
+    script = (tmp_path / "get_logs").read_text()
+    assert "claude_code.fixture_cmd" in script and t.task_id not in script
+    hook = json.loads((tmp_path / "settings.json").read_text())["hooks"]["PostToolUse"][0]
+    assert hook["matcher"] == "Bash" and "TOOL_OUTPUT_LAB_MODE=inline" in hook["hooks"][0]["command"]
+    assert flags[flags.index("--allowedTools") + 1] == "Bash,Read,Grep"
+    bash_channel(t, "bash-native", tmp_path, tmp_path / "hook.jsonl")
+    assert json.loads((tmp_path / "settings.json").read_text()) == {}
+    env = {**os.environ, "TOOL_OUTPUT_LAB_TASK": t.task_id}
+    out = subprocess.run(
+        ["./get_logs"], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=120, check=True
+    )
+    assert out.stdout == t.payload()
+    assert bash_prompt(t).startswith(
+        "Run `./get_logs` in the current directory; it prints the recent log lines"
+    )
+    assert bash_prompt(t).endswith(t.question) and "get_logs tool" not in bash_prompt(t)
