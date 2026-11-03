@@ -52,6 +52,6 @@ post-harness.
 | C5 | A/B 1: JSON and logs, Haiku | done: fold wins on spilled, loses inline |
 | C6 | Tree folding: code (ast-grep), XML, outlines | done |
 | C7 | A/B 2: accessibility snapshots and Figma XML, Haiku | done: same split |
-| C8 | Read gate (PreToolUse) with ast-grep outlines | built; probes show Haiku and Sonnet page on their own |
+| C8 | Read gate (PreToolUse) with ast-grep outlines | removed (review 1, R2): it showed file content before Claude Code's permission check, and models page on their own |
 | C9 | A/B with Sonnet, spilled-only mode, large cases | next |
 | C10 | The outline as a tool Claude calls, against its own grep outlines | next |

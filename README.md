@@ -25,10 +25,8 @@ The lab now tests the idea inside Claude Code, through two hooks and a headless 
 
 - `claude_code/hook.py`, a `PostToolUse` hook on `mcp__.*`: folds large MCP results (JSON, XML,
   accessibility outlines, logs), including the ones Claude Code itself spilled to a file, and
-  points Claude at the saved raw output. `TOOL_OUTPUT_LAB_MODE=spilled-only` folds only what Claude
-  Code spilled, which is what the A/Bs recommend.
-- `claude_code/read_gate.py`, a `PreToolUse` hook on `Read`: answers the first whole-file read of a
-  large source file with its ast-grep outline. The probes show current models rarely need it.
+  points Claude at the saved raw output. By default it folds only what Claude Code spilled, which
+  is what the A/Bs recommend; `TOOL_OUTPUT_LAB_MODE=all` folds inline results too.
 - `claude_code/ab.py` with `claude_code/fixture_mcp.py`: headless `claude -p` runs on synthetic
   needle payloads, native against the hook, scored on the answer, tokens, cost and tool calls.
 
@@ -72,7 +70,7 @@ spilled passes both; folding inline results fails the second (A/B 1 and 2).
 lab            the one entry point
 corpus/        private transcripts and extracted results (gitignored)
 compressors/   route.fold/compress (the router), json_fold, tree, code, lines, html, recovery
-claude_code/   hook (PostToolUse), read_gate (PreToolUse), fixture_mcp, ab
+claude_code/   hook (PostToolUse), fixture_mcp, ab, comprehension
 harness/       extract, stats, needle
 tests/unit/    pure-function tests
 results/       one file per run, never edited after; FINDINGS.md is the running summary

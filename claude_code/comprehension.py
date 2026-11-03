@@ -34,7 +34,7 @@ _STDLIB = real.STDLIB
 CONDITIONS = ("native", "fold")
 _CLAUDE_MD = """# Tools
 
-`fold FILE` prints a file's outline with its real line numbers: every class, function and method
+`lab-fold FILE` prints a file's outline with its real line numbers: every class, function and method
 header, and the blocks inside them, opened as far as a token budget allows (`--budget N`, default
 2000; 6000 or more suits a large file). A folded part shows as `[... lines A-B folded]`; read it with
 Read offset=A limit=B-A+1. Use it to see the structure of a large file before reading parts of it.
@@ -128,11 +128,11 @@ QUESTIONS = (
 )
 
 
-_FOLD_COMMAND = re.compile(r"(^|[;&|(]\s*)fold\s")
+_FOLD_COMMAND = re.compile(r"(^|[;&|(]\s*)lab-fold\s")
 
 
 def ran_fold(stream: list[str]) -> bool:
-    """Whether any Bash call in a stream-json session ran `fold` (alone, or in a pipeline)."""
+    """Whether any Bash call in a stream-json session ran `lab-fold` (alone, or in a pipeline)."""
     for line in stream:
         try:
             event = json.loads(line)
@@ -159,7 +159,7 @@ def score(answer: str, expected: frozenset[str]) -> float:
 def _fold_bin(work: Path) -> Path:
     bin_dir = work / "bin"
     bin_dir.mkdir()
-    script = bin_dir / "fold"
+    script = bin_dir / "lab-fold"  # not `fold`, which would shadow coreutils fold
     script.write_text(
         "#!/bin/sh\n"
         f'exec env PYTHONPATH="{_LAB}" uv run -q --no-project --python 3.15 --with ast-grep-py '
