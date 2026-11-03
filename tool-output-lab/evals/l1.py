@@ -155,6 +155,10 @@ def check(task: Task, budget: int, query_on: bool) -> Row:
         violations.append("folding twice gave different text")
     if estimate_tokens(out) > estimate_tokens(raw):
         violations.append("the fold is larger than the input")
+    if estimate_tokens(out) > budget * 1.1:  # over the budget is a bug unless nothing smaller exists
+        floor = fold_text(raw, budget=1, path=task.path, query=query, quiet=True).text
+        if out != floor:
+            violations.append(f"{estimate_tokens(out)} tokens for a budget of {budget}, and not the floor")
     if not passthrough:
         if branch == "json":
             violations += json_markers(raw, out)
@@ -173,7 +177,7 @@ def check(task: Task, budget: int, query_on: bool) -> Row:
         estimate_tokens(out),
         score.correct,
         score.recall,
-        estimate_tokens(out) > budget * 1.25,
+        estimate_tokens(out) > budget * 1.1,
         violations,
     )
 
@@ -191,11 +195,15 @@ def run(budget: int, only: tuple[str, ...] = ()) -> list[Row]:
 
 def report(rows: list[Row], budget: int) -> str:
     bad = [r for r in rows if r.violations]
+    folded = [r for r in rows if r.branch != "passthrough"]
     out = [
         f"# Layer 1: the fold alone, budget {budget} tokens",
         "",
         f"{len(rows)} folds of {len({r.task_id for r in rows})} tasks. Sufficient = the task's scorer finds",
         "the answer in the fold text (an upper bound on what a model can answer without fetching more).",
+        "",
+        f"Sufficient overall: {sum(r.sufficient for r in rows)}/{len(rows)}; over the folds that folded "
+        f"(not passed through): {sum(r.sufficient for r in folded)}/{len(folded)}.",
         "",
         f"## Invariants: {len(bad)} folds with violations",
         "",

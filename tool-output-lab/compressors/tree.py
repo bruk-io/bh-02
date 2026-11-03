@@ -31,6 +31,7 @@ class Node:
     head_end: int  # last line of the header, shown when folded (>= first)
     last: int  # last line of the node (>= head_end)
     children: tuple[Node, ...] = ()
+    run: bool = False  # a run of plain lines no other node covers, not structure
 
 
 @dataclass(frozen=True)
@@ -44,10 +45,33 @@ class TreeFold:
 def _prune(nodes: tuple[Node, ...], min_hidden: int) -> tuple[Node, ...]:
     """Drop nodes too small to be worth a marker; their lines then show as plain lines."""
     return tuple(
-        Node(n.first, n.head_end, n.last, _prune(n.children, min_hidden))
+        Node(n.first, n.head_end, n.last, _prune(n.children, min_hidden), n.run)
         for n in nodes
         if n.last - n.head_end >= min_hidden
     )
+
+
+def _with_gaps(
+    lines: list[str], nodes: tuple[Node, ...], first: int, last: int, min_gap: int
+) -> tuple[Node, ...]:
+    """The nodes, plus a leaf for every run of at least `min_gap` lines between them that no node
+    covers (3,000 assignments, a module's imports, code the parser gave up on), so plain lines fold
+    too and a fold has a floor. A run starts at its first non-blank line, so its header shows."""
+    out: list[Node] = []
+    cursor = first
+    for n in (*nodes, None):
+        end = (n.first - 1) if n is not None else last
+        start = cursor
+        while start <= end and not lines[start].strip():
+            start += 1
+        if end - start + 1 >= min_gap:
+            out.append(Node(start, start, end, run=True))
+        if n is None:
+            break
+        kids = _with_gaps(lines, n.children, n.head_end + 1, n.last, min_gap)
+        out.append(Node(n.first, n.head_end, n.last, kids, n.run))
+        cursor = n.last + 1
+    return tuple(out)
 
 
 def _signature(lines: list[str], n: Node, cap: int = 600) -> str:
@@ -89,6 +113,7 @@ def fold_tree(
     max_line_chars: int = 300,
     head_children: int = 3,
     tail_children: int = 1,
+    min_gap: int = 6,
     max_promoted: int = 10,
     terms: frozenset[str] = frozenset(),
 ) -> tuple[str, int, int]:
@@ -109,7 +134,7 @@ def fold_tree(
         return f"{i + 1}\t{line}" if numbered else line
 
     line_cost = [estimate_tokens(shown(i)) + 1 for i in range(len(lines))]
-    roots = _prune(roots, min_hidden)
+    roots = _prune(_with_gaps(lines, roots, 0, len(lines) - 1, min_gap), min_hidden)
 
     def span_cost(a: int, b: int) -> int:
         return sum(line_cost[a : b + 1])
@@ -117,7 +142,7 @@ def fold_tree(
     def folded_cost(n: Node) -> int:
         return span_cost(n.first, n.head_end) + _MARKER_TOKENS
 
-    standouts: set[tuple[int, int]] = set()
+    standouts: set[int] = set()  # ids of nodes: a parent and its only child can share their lines
 
     def promoted(children: tuple[Node, ...]) -> tuple[int, ...]:
         """Children that stand out among siblings that mostly share one shape, or that hold query
@@ -127,7 +152,7 @@ def fold_tree(
         texts = [_subtree_text(lines, c) for c in children]
         if n < 10:  # too few siblings for "rare"; a query match still marks the way down
             picks = [i for i, text in enumerate(texts) if any(matches(text, t) for t in terms)]
-            standouts.update((children[i].first, children[i].last) for i in picks)
+            standouts.update(id(children[i]) for i in picks)
             return ()
         patterns = [_signature(lines, c) for c in children]
         counts = Counter(patterns)
@@ -144,7 +169,7 @@ def fold_tree(
             if hits or rare:
                 scored.append((-(2 * hits + rare), i))
         picks = sorted(i for _, i in sorted(scored)[:max_promoted])
-        standouts.update((children[i].first, children[i].last) for i in picks)
+        standouts.update(id(children[i]) for i in picks)
         return tuple(picks)
 
     promoted_of: dict[int, tuple[int, ...]] = {}
@@ -165,10 +190,8 @@ def fold_tree(
         shown_set = set(shown_children(children, k))
         cost, cursor, hidden_run = 0, first, False
         for i, c in enumerate(children):
-            if i in shown_set:
-                if not hidden_run:
-                    cost += span_cost(cursor, c.first - 1)
-                cost += folded_cost(c)
+            if i in shown_set:  # the lines before a shown child are shown, after a hidden run too
+                cost += span_cost(cursor, c.first - 1) + folded_cost(c)
                 hidden_run = False
             elif not hidden_run:
                 cost += span_cost(cursor, c.first - 1) + _MARKER_TOKENS
@@ -200,22 +223,23 @@ def fold_tree(
     if total == 0:  # not even the minimal outline fits: show it anyway, it is the floor
         root_k = head_children if len(roots) > head_children + tail_children + 1 else None
         total = open_cost(0, len(lines) - 1, roots, root_k)
-    opened: dict[tuple[int, int], int | None] = {}  # (first, last) -> k, None when open in full
+    opened: dict[int, int | None] = {}  # id(node) -> k, None when open in full
 
     def is_container(n: Node) -> bool:
-        """Opening it mostly shows its children's headers (a class, an element), not its own lines."""
-        if not n.children:
+        """Opening it mostly shows its children's headers (a class, an element), not its own lines.
+        Runs of plain lines are not structure: a function whose body is one run is a body."""
+        if not any(not c.run for c in n.children):
             return False
         own = open_cost(n.first, n.last, n.children, None) - sum(folded_cost(c) for c in n.children)
         return own <= 0.25 * open_cost(n.first, n.last, n.children, None)
 
     def key(depth: int, n: Node) -> tuple[int, int, int, int]:
-        if (n.first, n.last) in standouts:
+        if id(n) in standouts:
             rank = 0
         elif is_container(n):
             rank = 1
         else:
-            rank = 2 if n.children else 3
+            rank = 2 if any(not c.run for c in n.children) else 3
         # nodes with structure inside open by depth and source order, so the biggest class is not
         # left last with room for only part of its outline; leaves (a docstring, a literal, a block
         # with nothing foldable inside) open last, cheapest first, so a long docstring waits
@@ -230,7 +254,7 @@ def fold_tree(
         fits, k, cost = choose(n.first, n.last, n.children, room)
         if not fits:
             continue
-        opened[(n.first, n.last)] = k
+        opened[id(n)] = k
         total += cost - folded_cost(n)
         for i in shown_children(n.children, k):
             c = n.children[i]
@@ -247,9 +271,9 @@ def fold_tree(
         return f"[... lines {a + 1}-{b + 1} folded ({what})]"
 
     def render_child(c: Node) -> None:
-        if (c.first, c.last) in opened:
+        if id(c) in opened:
             counts[0] += 1
-            render(c.first, c.last, c.children, opened[(c.first, c.last)])
+            render(c.first, c.last, c.children, opened[id(c)])
             return
         counts[1] += 1
         note = marker(c.head_end + 1, c.last, f"{c.last - c.head_end} lines")

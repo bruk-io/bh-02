@@ -10,7 +10,7 @@ import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 
-from compressors.common import ANOMALY_RE, discriminating, matches, split_lines
+from compressors.common import ANOMALY_RE, discriminating, estimate_tokens, matches, split_lines
 
 _VARIABLE = re.compile(r"0x[0-9a-fA-F]+|[0-9a-fA-F]{8,}|\d+")
 
@@ -48,22 +48,27 @@ def _is_signal(line: str, terms: Iterable[str]) -> bool:
 def _choose_runs(
     runs: list[_Run], terms: frozenset[str], *, head: int, tail: int, window: int, max_window_runs: int
 ) -> tuple[list[int], int]:
-    """Indices of the runs to keep, and how many signal runs did not fit."""
+    """Indices of the runs to keep, and how many signal lines are hidden.
+
+    A signal's window is kept when it fits; otherwise the signal's own line, when that fits."""
     n = len(runs)
     terms = discriminating(terms, [r.line for r in runs])
     keep = set(range(min(head, n))) | set(range(max(0, n - tail), n))
     added = 0
-    dropped_signals = 0
+    hidden_signals = 0
     for i, run in enumerate(runs):
         if not _is_signal(run.line, terms):
             continue
         span = set(range(max(0, i - window), min(n, i + window + 1))) - keep
         if added + len(span) > max_window_runs:
-            dropped_signals += 1
+            span = {i} - keep
+        if added + len(span) > max_window_runs:
+            if i not in keep:
+                hidden_signals += run.last - run.first + 1
             continue
         keep |= span
         added += len(span)
-    return sorted(keep), dropped_signals
+    return sorted(keep), hidden_signals
 
 
 def _clip(line: str, max_chars: int) -> str:
@@ -82,20 +87,28 @@ def _render_run(run: _Run, max_chars: int) -> list[str]:
     return out
 
 
-def fold_lines(
-    raw: str,
-    terms: frozenset[str] = frozenset(),
-    *,
-    head: int = 15,
-    tail: int = 25,
-    window: int = 3,
-    max_window_runs: int = 60,
-    max_line_chars: int = 400,
-) -> str:
-    lines = split_lines(raw)
-    runs = _runs_of(lines)
-    kept, dropped_signals = _choose_runs(
-        runs, terms, head=head, tail=tail, window=window, max_window_runs=max_window_runs
+@dataclass(frozen=True)
+class _Limits:
+    head: int
+    tail: int
+    window: int
+    max_window_runs: int
+    max_line_chars: int
+
+
+# tried in order until the fold fits the budget; the last is the floor
+_LEVELS = (
+    _Limits(15, 25, 3, 60, 400),
+    _Limits(10, 15, 2, 40, 240),
+    _Limits(6, 8, 1, 24, 160),
+    _Limits(3, 4, 0, 12, 120),
+    _Limits(2, 2, 0, 6, 80),
+)
+
+
+def _fold_once(runs: list[_Run], terms: frozenset[str], lim: _Limits) -> str:
+    kept, hidden_signals = _choose_runs(
+        runs, terms, head=lim.head, tail=lim.tail, window=lim.window, max_window_runs=lim.max_window_runs
     )
     out: list[str] = []
     prev: int | None = None
@@ -106,8 +119,19 @@ def fold_lines(
             out.append(
                 f"[... lines {gap_first + 1}-{gap_last + 1} omitted ({gap_last - gap_first + 1} lines)]"
             )
-        out.extend(_render_run(runs[idx], max_line_chars))
+        out.extend(_render_run(runs[idx], lim.max_line_chars))
         prev = idx
-    if dropped_signals:
-        out.append(f"[{dropped_signals} more lines matching error words or the query were omitted; use grep]")
+    if hidden_signals:
+        out.append(f"[{hidden_signals} more lines matching error words or the query were omitted; use grep]")
     return "\n".join(out)
+
+
+def fold_lines(raw: str, terms: frozenset[str] = frozenset(), budget_tokens: int | None = None) -> str:
+    """The folded lines, at the loosest level of limits that fits the budget (no budget: the first)."""
+    runs = _runs_of(split_lines(raw))
+    text = ""
+    for lim in _LEVELS:
+        text = _fold_once(runs, terms, lim)
+        if budget_tokens is None or estimate_tokens(text) <= budget_tokens:
+            break
+    return text

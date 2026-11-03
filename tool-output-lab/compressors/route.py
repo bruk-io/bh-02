@@ -74,9 +74,11 @@ def _body(branch: str, raw: str, terms: frozenset[str], budget_tokens: int) -> t
             return note + fold_json(value, terms, budget_tokens), None
         case "html":
             text = html_to_text(raw)
-            return (text if estimate_tokens(text) <= budget_tokens else fold_lines(text, terms)), text
+            return (
+                text if estimate_tokens(text) <= budget_tokens else fold_lines(text, terms, budget_tokens)
+            ), text
         case "lines":
-            return fold_lines(raw, terms), None
+            return fold_lines(raw, terms, budget_tokens), None
         case "text":
             return _cut_chars(raw, budget_tokens), None
         case _:

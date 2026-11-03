@@ -114,9 +114,10 @@ def test_a_repeated_line_pattern_collapses_to_one_line_and_a_count():
 def test_an_error_line_in_the_middle_is_kept_with_its_window():
     lines = _log(2000)
     lines[1000] = "2026-11-03T10:16:40Z ERROR payment failed order=needle-42"
-    c = compress("Bash", {}, "\n".join(lines), budget_tokens=500)
-    assert "needle-42" in c.text
-    assert lines[997] in c.text and lines[1003] in c.text
+    tight = compress("Bash", {}, "\n".join(lines), budget_tokens=500)
+    assert "needle-42" in tight.text and tight.out_tokens <= 500  # the line survives inside the budget
+    roomy = compress("Bash", {}, "\n".join(lines), budget_tokens=2000)
+    assert lines[997] in roomy.text and lines[1003] in roomy.text  # with room, its window too
 
 
 def test_gap_markers_name_the_lines_recovery_returns():
