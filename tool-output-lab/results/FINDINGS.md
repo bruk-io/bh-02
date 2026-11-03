@@ -119,24 +119,57 @@ by invoice; a hidden layer, a different button variant and a lookup by card name
     the fold guarantees (for example, that every sibling that differs is shown) cuts it, without
     inviting misplaced trust, is untested.
 
+## A/B 3: Sonnet, spilled-only mode, large cases (`ab-3-sonnet-spilled.md`, 26 runs, $2.66)
+
+One seed per cell, so each cell is a single run: read the totals, not the cells.
+
+| | runs | correct | cost | median input tokens | median time |
+|---|---|---|---|---|---|
+| native | 13 | 12 | $1.35 | 227k | 20.6s |
+| fold | 13 | 12 | $1.31 | 183k | 18.3s |
+
+17. **JSON and logs: the same clear win as with Haiku**, 4 calls down to 2 and about a third fewer
+    input tokens in most cells.
+18. **Trees: no win with Sonnet.** It explores a spilled snapshot or Figma file efficiently on its
+    own (2 to 4 calls), and in two cells the fold used more tokens than native.
+19. **20% fewer input tokens bought 3% of the cost.** Most input tokens are cache reads, which are
+    cheap; Sonnet's cost is mostly cache writes and output. In Claude Code the fold's value is fewer
+    calls, less time and slower context growth, more than money. Context growth itself is not yet
+    measured (the harness sums tokens over requests; the size of the final context would show it).
+20. Both conditions missed the quiet log line: with Sonnet that miss is not the fold's doing.
+
+## The tool: `fold` (`compressors/cli.py`, `./lab fold`)
+
+Since 2026-11-03 the deliverable is a general CLI; the Claude Code hooks are one consumer of it.
+`fold FILE` or `COMMAND | fold` prints the shape of a text in a token budget, with markers that say
+what they hide (a JSON path, or a line or character range) so `jq`, `sed -n` or Read with offset and
+limit fetch exactly that. Code is detected by extension (or `--lang`) and folded through ast-grep;
+everything else by content. `--query` keeps in view what holds the given words, `--as` overrides the
+detection, `--save` writes the pretty-printed copy when the line numbers refer to one.
+
+21. Examples from the stdlib and synthetic inputs: `json/decoder.py` ~3.2k -> ~0.7k tokens with every
+    class and function header at its real line; 500 users ~6.9k -> ~150 tokens with the one
+    suspended user in place and the status counts; a 5,000-line log ~40k -> ~60 tokens with its one
+    error line; `subprocess.py` (3,300 lines) to ~5.4k tokens with every method signature.
+
 ## Where the design stands
 
 | Piece | Evidence | Leaning |
 |---|---|---|
-| Fold MCP results Claude Code spilled | A/B 1: -33% tokens, -34% time, same accuracy | keep; the default |
+| Fold MCP results Claude Code spilled | A/B 1 and 2 (Haiku): about -35% tokens, -25% to -35% time, same accuracy; A/B 3 (Sonnet): -20% tokens, -11% time, -3% cost | keep; the default |
 | Fold MCP results under the spill threshold | A/B 1: more tokens, more time, two misses | drop |
 | JSON folding with promotion | real MCP JSON to 13%; built anomaly kinds survive | keep |
 | Line folding for logs | error words survive; quiet anomalies lost, and the loss costs answers | keep, with the gap stated |
-| Tree folding for XML and accessibility trees | A/B 2: on spilled results -37% tokens, same accuracy; lookups recovered from the file | keep, spilled-only |
+| Tree folding for XML and accessibility trees | A/B 2 (Haiku): -37% tokens on spilled results; A/B 3 (Sonnet): no gain | keep for weaker models; Sonnet does as well alone |
 | Read gate with ast-grep outlines | works, but Haiku and Sonnet page and grep on their own, even for overviews | drop the gate; offer the outline as a tool |
 
 ## Next
 
-1. A/B 1 and 2 with Sonnet, spilled-only mode, on the large cases; and a banner variant that says
-   what the fold guarantees, to see whether it saves the checking call.
-2. The outline as a tool Claude can call (`outline FILE`, through Bash or MCP), and an A/B of it
-   against Claude's own grep outlines on comprehension tasks.
-3. A second corpus of real Claude Code sessions, to see how often results land in the spilled band.
+1. Measure context growth (the final context's size), not only tokens summed over requests.
+2. More seeds for A/B 3, and Opus, to tell real differences on trees from noise.
+3. `fold` as a tool Claude calls (through Bash, named in CLAUDE.md) against its own grep outlines,
+   on comprehension tasks over large code files.
+4. A banner variant that says what the fold guarantees, to see whether it saves the checking call.
 
 ## Earlier results (bh-02 corpus and synthetic grid, kept as recorded)
 

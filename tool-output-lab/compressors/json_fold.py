@@ -196,7 +196,10 @@ def _promote(arr: list[Any], terms: frozenset[str], limit: int, shown: set[int])
             reasons = _reasons(flat, rare_values, rare_keys, terms)
             if reasons:
                 score = sum(w for w, _ in reasons)
-                why = "; ".join(r for _, r in sorted(reasons, reverse=True)[:2])
+                by_field: dict[str, str] = {}
+                for _, r in sorted(reasons, key=lambda wr: -wr[0]):  # strongest reason per field
+                    by_field.setdefault(r.split("=")[0].split(" ")[0], r)
+                why = "; ".join(list(by_field.values())[:2])
                 scored.append((-score, i, why))
         scored.sort()
         return [(i, why) for _, i, why in scored[:limit]]
