@@ -82,3 +82,13 @@ def test_promotion_is_seen_in_trees_and_logs_not_only_in_json():
 
 def test_mentions_is_a_whole_word():
     assert mentions("version 8.1.", "8.1") and not mentions("8.1.7", "8.1") and not mentions("e1234", "e123")
+
+
+def test_a_listed_item_may_be_the_part_of_a_name_that_only_one_candidate_holds():
+    cards = frozenset(f"Card {c}" for c in ("N7697", "M4557", "X6370", "K1203"))
+    truth = Items(frozenset({"Card N7697", "Card M4557"}), cards)
+    assert score_answer(truth, "ANSWER: N7697, M4557").correct
+    assert score_answer(truth, "ANSWER: Card N7697 (hidden), Card M4557").correct
+    assert not score_answer(truth, "ANSWER: Card").correct  # every card holds it: it names none
+    wrong = score_answer(truth, "ANSWER: N7697, M4557, X6370")
+    assert wrong.recall == 1.0 and wrong.precision == 2 / 3 and not wrong.correct

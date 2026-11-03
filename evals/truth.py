@@ -37,7 +37,7 @@ class Exact:
 @dataclass(frozen=True)
 class Items:
     expected: frozenset[str]
-    universe: frozenset[str]  # every name that could be listed (for the fold's sufficiency only)
+    universe: frozenset[str]  # every name that could be listed: precision, and resolving a short name
 
 
 @dataclass(frozen=True)
@@ -91,6 +91,17 @@ def answer_items(line: str) -> list[str]:
     return [p.strip(" .`*'\"()[]") for p in parts if p.strip(" .`*'\"()[]")]
 
 
+def _named_by(listed: str, candidates: frozenset[str]) -> frozenset[str]:
+    """The candidates a listed item names: those it is or holds as a whole word ("Card N7697
+    (hidden)" names Card N7697), or else the one candidate that holds it as a whole word ("N7697"
+    names Card N7697; "Card", which every card holds, names none)."""
+    holds = frozenset(x for x in candidates if listed == x or mentions(listed, x))
+    if holds:
+        return holds
+    held_by = [x for x in candidates if mentions(x, listed)]
+    return frozenset(held_by) if len(held_by) == 1 else frozenset()
+
+
 def _first_number(line: str) -> int | None:
     m = re.search(r"-?\d[\d,]*", line)
     return int(m[0].replace(",", "")) if m else None
@@ -113,11 +124,12 @@ def score_answer(truth: Truth, answer: str) -> Score:
             return Score(any(n == t or mentions(n, t) for n in answer_items(line)) or line == t)
         case Absent():
             return Score(answer_items(line) == [])
-        case Items(expected=e):
+        case Items(expected=e, universe=u):
             listed = set(answer_items(line))
-            hit = {x for x in e if any(n == x or mentions(n, x) for n in listed)}
+            named = {n: _named_by(n, e | u) for n in listed}
+            hit = {x for x in e if any(x in xs for xs in named.values())}
             recall = len(hit) / len(e) if e else float(not listed)
-            right = {n for n in listed if any(n == x or mentions(n, x) for x in e)}
+            right = {n for n, xs in named.items() if xs & e}
             precision = len(right) / len(listed) if listed else float(not e)
             return Score(recall >= 0.9 and precision >= 0.9, recall, precision)
         case Number(value=v) | Location(line=v):
