@@ -1,5 +1,6 @@
 """Real eval sources are read from this host; a missing one is left out, not a crash (review R23)."""
 
+import ast
 from pathlib import Path
 
 from evals import real
@@ -26,3 +27,43 @@ def test_a_planted_log_line_is_named_by_its_order_or_its_request_not_its_user():
     assert next(iter(payment.also)).startswith("req-")
     assert quiet.token.startswith("req-") and quiet.also == frozenset()  # the pool line names no order
     assert by_id["json-M-spot-at50"].truth.also == frozenset()
+
+
+def _scripted(task, original: str) -> str:
+    """A correct edit made through ast (then unparsed, so every line is reformatted: the check must
+    not care), standing in for a model's."""
+    tree = ast.parse(original)
+    if "rename" in task.task_id:
+        old, new = {
+            "check_closed": ("_check_closed", "_ensure_open"),
+            "communicate": ("_communicate", "_exchange"),
+        }[task.task_id.rsplit("-", 1)[1]]
+        for n in ast.walk(tree):
+            for field in ("name", "attr", "id"):
+                if getattr(n, field, None) == old and not isinstance(n, ast.alias):
+                    setattr(n, field, new)
+        return ast.unparse(tree)
+    cls, method, param, default = {
+        "timeout": ("BaseEventLoop", "create_server", "timeout", None),
+        "nice": ("Popen", "__init__", "nice", None),
+        "color": ("HelpFormatter", "__init__", "color", False),
+    }[task.task_id.rsplit("-", 1)[1]]
+    target = next(
+        d
+        for c in ast.walk(tree)
+        if isinstance(c, ast.ClassDef) and c.name == cls
+        for d in c.body
+        if isinstance(d, ast.FunctionDef | ast.AsyncFunctionDef) and d.name == method
+    )
+    target.args.kwonlyargs.append(ast.arg(param))
+    target.args.kw_defaults.append(ast.Constant(default))
+    return ast.unparse(tree)
+
+
+def test_every_edit_task_fails_unedited_and_passes_a_correct_edit_of_the_real_file():
+    edits = [t for t in tasks() if t.kind == "edit"]
+    assert len(edits) == 5 or "python-edit" in skipped()
+    for t in edits:
+        original = t.payload()
+        assert t.truth.check(original, original) is not None, t.task_id
+        assert t.truth.check(original, _scripted(t, original)) is None, t.task_id

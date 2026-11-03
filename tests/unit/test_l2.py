@@ -159,3 +159,8 @@ def test_noshell_fold_is_paired_against_noshell_and_noshell_against_native():
     text = report(rows, "test")
     assert "| python | M | noshell-fold (against noshell) | 3 |" in text and "| -8000 [" in text
     assert "| python | M | noshell | 3 |" in text and "| -2000 [" in text
+
+
+def test_an_edit_keeps_the_score_its_file_gave_it():
+    row = {"error": None, "kind": "edit", "answer_line": "done", "answer": "", "correct": True}
+    assert rescored(row, Items(frozenset({"x"}), frozenset({"x"}))) is row

@@ -8,6 +8,7 @@ can find without fetching more).
 """
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from compressors import markers
@@ -57,7 +58,17 @@ class Location:
     text: str  # what is on that line, e.g. "def create_server"
 
 
-type Truth = Needle | Absent | Exact | Items | Number | Location
+@dataclass(frozen=True)
+class Edited:
+    """An edit to make in a copy of the file. `check(original, edited)` is None when the asked change
+    is made and nothing else changed, or else what is wrong; it needs the edited file, so layer 2
+    scores it with `score_edit`, not from the answer."""
+
+    target: str  # the definition the edit starts from ("def create_server"): what a fold must show
+    check: Callable[[str, str], str | None]
+
+
+type Truth = Needle | Absent | Exact | Items | Number | Location | Edited
 
 
 @dataclass(frozen=True)
@@ -82,6 +93,7 @@ ANSWER_INSTRUCTION = {
     ),
     "count": "End your reply with one line: ANSWER: <the number>",
     "locate": "End your reply with one line: ANSWER: <the line number>",
+    "edit": "End your reply with one line: ANSWER: done, or ANSWER: not done",
 }
 _ANSWER = re.compile(r"(?im)^\W{0,3}ANSWER:\s*(.*?)\s*$")
 _NONE = {"none", "nothing", "no", "n/a", "-", ""}
@@ -125,8 +137,11 @@ def score_answer(truth: Truth, answer: str) -> Score:
     report can show how often the instruction was not followed.
 
     Raises:
+        ValueError: the truth is an edit, which is scored from the edited file (`score_edit`).
         AssertionError: a kind of truth with no scorer (a new kind added without one).
     """
+    if isinstance(truth, Edited):
+        raise ValueError("an edit is scored from the edited file: use score_edit(truth, original, edited)")
     line = answer_line(answer)
     if line is None:
         return _score_prose(truth, answer)
@@ -212,5 +227,13 @@ def score_fold(truth: Truth, fold: str) -> Score:
             return Score(bool(items) and seen == 1.0, seen)
         case Location(line=n, text=t):
             return Score(re.search(rf"(?m)^{n}\t.*{re.escape(t)}", fold) is not None)
+        case Edited(target=t):  # where to start: the definition shown with its line number
+            return Score(re.search(rf"(?m)^\d+\t.*{re.escape(t)}\b", fold) is not None)
         case _ as unreachable:
             raise AssertionError(f"no scorer for {unreachable!r}")
+
+
+def score_edit(truth: Edited, original: str, edited: str) -> tuple[Score, str | None]:
+    """An edit's score, and what is wrong with it when it is wrong."""
+    problem = truth.check(original, edited)
+    return Score(problem is None), problem

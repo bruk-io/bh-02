@@ -23,6 +23,7 @@ kill criteria to the intervals; the input criterion is the final context.
 """
 
 import argparse
+import difflib
 import json
 import os
 import statistics
@@ -32,14 +33,15 @@ import tempfile
 from collections import Counter, defaultdict
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from functools import partial
 from pathlib import Path
 from typing import Any
 
+from compressors.common import read_text
 from evals.stats import bootstrap, paired, paired_accuracy, wilson
 from evals.tasks import FORMATS, KINDS, TOOLS, Task, skipped, tasks
-from evals.truth import Truth, answer_line, score_answer
+from evals.truth import Edited, Truth, answer_line, score_answer, score_edit
 
 _LAB = Path(__file__).resolve().parent.parent
 _UV = "uv run -q --no-project --python 3.15 --with ast-grep-py python"
@@ -164,10 +166,12 @@ def _fold_shim(bin_dir: Path) -> None:
     shim.chmod(0o755)
 
 
-def file_tools(condition: str, w: Path) -> list[str]:
-    """The flags (and files in the run's folder) that set up a file task's condition."""
+def file_tools(condition: str, w: Path, edit: bool = False) -> list[str]:
+    """The flags (and files in the run's folder) that set up a file task's condition. Edit is allowed
+    only for an edit task, whose file is a copy in the run's folder: read tasks name real files."""
+    edits = ",Edit" if edit else ""
     if condition in ("noshell", "noshell-fold"):
-        tools = "Read,Grep,Glob"
+        tools = f"Read,Grep,Glob{edits}"
         flags = ["--strict-mcp-config", "--disallowedTools", "Bash"]
         if condition == "noshell-fold":
             server = {"command": "sh", "args": ["-c", f"cd {_LAB} && exec {_UV} -m claude_code.fold_mcp"]}
@@ -178,7 +182,7 @@ def file_tools(condition: str, w: Path) -> list[str]:
     _fold_shim(w / "bin")
     if condition == "fold-tool":
         (w / "CLAUDE.md").write_text(_CLAUDE_MD)
-    return ["--strict-mcp-config", "--allowedTools", "Read,Grep,Glob,Bash"]
+    return ["--strict-mcp-config", "--allowedTools", f"Read,Grep,Glob,Bash{edits}"]
 
 
 def run_one(t: Task, condition: str, model: str, rep: int, log: Path) -> dict[str, Any]:
@@ -189,8 +193,13 @@ def run_one(t: Task, condition: str, model: str, rep: int, log: Path) -> dict[st
         env["PATH"] = f"{w / 'bin'}:{env.get('PATH', '')}"  # lab-fold, where the condition puts it there
         command = ["claude", "-p", t.prompt, "--model", model, "--max-turns", "25"]
         command += ["--output-format", "stream-json", "--verbose"]
+        edit = isinstance(t.truth, Edited)
         if t.path:
-            command += file_tools(condition, w)
+            command += file_tools(condition, w, edit)
+            copy, original = w / Path(t.path).name, Path(t.path)
+            if edit:
+                copy.write_text(t.payload(), encoding="utf-8")
+                guarded = original.read_bytes()
         else:
             server = {
                 "command": "sh",
@@ -227,7 +236,18 @@ def run_one(t: Task, condition: str, model: str, rep: int, log: Path) -> dict[st
                 final_context=0,
                 error="timed out after 900s",
             )
-    score = score_answer(t.truth, session.answer)
+        if edit:
+            edited = read_text(str(copy))
+            if original.read_bytes() != guarded:  # the copy was the one to edit: put the original back
+                original.write_bytes(guarded)
+                session = replace(session, error=f"edited the original {original}, not the copy (restored)")
+    extra: dict[str, Any] = {}
+    if isinstance(t.truth, Edited):
+        score, problem = score_edit(t.truth, t.payload(), edited)
+        diff = "".join(difflib.unified_diff(t.payload().splitlines(True), edited.splitlines(True), n=1))
+        extra = {"edit_problem": problem, "edit_diff": diff[:4000]}
+    else:
+        score = score_answer(t.truth, session.answer)
     head = {"task_id": t.task_id, "fmt": t.fmt, "kind": t.kind, "band": t.band, "condition": condition}
     return {
         **head,
@@ -240,6 +260,7 @@ def run_one(t: Task, condition: str, model: str, rep: int, log: Path) -> dict[st
         "answer_line": answer_line(session.answer),
         **{k: v for k, v in asdict(session).items() if k != "answer"},
         "answer": session.answer[-2000:],  # the end: the ANSWER line and what led to it
+        **extra,
     }
 
 
@@ -419,8 +440,9 @@ def merged(runs: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
 
 def rescored(row: dict[str, Any], truth: Truth) -> dict[str, Any]:
     """The row scored again with the current scorer, from its saved ANSWER line (or, when it had
-    none, its saved prose), so a scorer fix reaches runs already made at no cost."""
-    if row["error"]:
+    none, its saved prose), so a scorer fix reaches runs already made at no cost. An edit's score
+    came from the edited file, which is gone, so it stays as it was."""
+    if row["error"] or row.get("kind") == "edit":
         return row
     text = f"ANSWER: {row['answer_line']}" if row["answer_line"] is not None else row["answer"]
     score = score_answer(truth, text)

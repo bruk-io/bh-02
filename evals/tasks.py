@@ -18,12 +18,12 @@ from pathlib import Path
 
 from compressors.common import estimate_tokens, read_text
 from evals import real, synthetic
-from evals.truth import ANSWER_INSTRUCTION, Absent, Exact, Items, Location, Needle, Number, Truth
+from evals.truth import ANSWER_INSTRUCTION, Absent, Edited, Exact, Items, Location, Needle, Number, Truth
 
 BUDGET = 2000
 SPILL_TOKENS = 50_000 // 4
 FORMATS = ("json", "log", "a11y", "figma", "python", "rust", "xml", "pypi")
-KINDS = ("spot", "absent", "lookup", "enumerate", "count", "locate")
+KINDS = ("spot", "absent", "lookup", "enumerate", "count", "locate", "edit")
 
 
 @dataclass(frozen=True)
@@ -418,9 +418,71 @@ def task(task_id: str) -> Task:
     return found[task_id]
 
 
+def _edit_task(task_id: str, path: Path, instruction: str, truth: Edited) -> Task:
+    """An edit of a copy of `path` (layer 2 puts the copy in the session's folder; the prompt names
+    it by its bare name, so the original is never the one edited)."""
+    text = _read(path)
+    return Task(
+        task_id=task_id,
+        fmt="python",
+        kind="edit",
+        band=band_of(estimate_tokens(text)),
+        path=str(path),
+        prompt=(
+            f"./{path.name} is a copy of the standard library's {path.name}. In it, {instruction} "
+            f"Change nothing else. {ANSWER_INSTRUCTION['edit']}."
+        ),
+        truth=truth,
+        query="",
+        load=partial(_read, path),
+    )
+
+
+def _edits() -> list[Task]:
+    be, sp, ap, _, _ = _PYTHON_FILES
+    return [
+        _edit_task(
+            "python-L-edit-create_server-timeout",
+            be,
+            "add a keyword-only parameter `timeout` to BaseEventLoop.create_server, defaulting to None.",
+            Edited(
+                "def create_server",
+                real.added_keyword_only("BaseEventLoop", "create_server", "timeout", "None"),
+            ),
+        ),
+        _edit_task(
+            "python-L-edit-Popen-nice",
+            sp,
+            "add a keyword-only parameter `nice` to Popen.__init__, defaulting to None.",
+            Edited("def __init__(self, args", real.added_keyword_only("Popen", "__init__", "nice", "None")),
+        ),
+        _edit_task(
+            "python-L-edit-HelpFormatter-color",
+            ap,
+            "add a keyword-only parameter `color` to HelpFormatter.__init__, defaulting to False.",
+            Edited(
+                "class HelpFormatter", real.added_keyword_only("HelpFormatter", "__init__", "color", "False")
+            ),
+        ),
+        _edit_task(
+            "python-L-edit-rename-check_closed",
+            be,
+            "rename BaseEventLoop's method `_check_closed` to `_ensure_open`, and update every use of it.",
+            Edited("def _check_closed", real.renamed("_check_closed", "_ensure_open")),
+        ),
+        _edit_task(
+            "python-L-edit-rename-communicate",
+            sp,
+            "rename Popen's method `_communicate` to `_exchange`, and update every use of it.",
+            Edited("def _communicate", real.renamed("_communicate", "_exchange")),
+        ),
+    ]
+
+
 # Each real source: the files its tasks are built from, and the function that builds them.
 _REAL: dict[str, tuple[tuple[Path, ...], Callable[[], list[Task]]]] = {
     "python": (_PYTHON_FILES, _python),
+    "python-edit": (_PYTHON_FILES, _edits),
     "rust": (_RUST_FILES, _rust),
     "xml": ((real.ISO_3166_2,), _xml),
     "pypi": ((real.PYPI_CLICK,), _pypi),
