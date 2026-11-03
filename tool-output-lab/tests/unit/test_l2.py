@@ -4,7 +4,16 @@ import json
 import pytest
 
 from claude_code.hook import Mode, mode_of
-from evals.l2 import HOOK_MODE, MCP_CONDITIONS, merged, parse_stream, patched, report, rescored
+from evals.l2 import (
+    BASH_CONDITIONS,
+    HOOK_MODE,
+    MCP_CONDITIONS,
+    merged,
+    parse_stream,
+    patched,
+    report,
+    rescored,
+)
 from evals.real import renamed
 from evals.truth import Edited, Items
 
@@ -148,7 +157,7 @@ def test_a_saved_run_is_rescored_from_its_answer_line_and_a_failed_one_is_left_a
 
 
 def test_every_hook_condition_names_a_mode_the_hook_accepts():
-    assert set(HOOK_MODE) == set(MCP_CONDITIONS) - {"native"}
+    assert set(HOOK_MODE) == (set(MCP_CONDITIONS) | set(BASH_CONDITIONS)) - {"native", "bash-native"}
     assert {mode_of(m) for m in HOOK_MODE.values()} == set(Mode)
 
 

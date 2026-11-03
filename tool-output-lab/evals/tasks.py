@@ -37,6 +37,7 @@ class Task:
     truth: Truth
     query: str  # the words a tool call would carry, if any; layer 1 folds with and without
     load: Callable[[], str]
+    question: str = ""  # a synthetic task's question without the tool, for another channel's prompt
 
     def payload(self) -> str:
         return self.load()
@@ -98,9 +99,28 @@ def _payload(
     return _MAKE[fmt](size, planted, seed, quiet)
 
 
-def _prompt(fmt: str, kind: str, subject: str = "") -> str:
+def _question(fmt: str, kind: str, subject: str = "") -> str:
     ask = _ASK[fmt]["spot" if kind == "absent" else kind].format(subject=subject)
-    return f"Use the {TOOLS[fmt]} tool. {ask} {ANSWER_INSTRUCTION[kind]}."
+    return f"{ask} {ANSWER_INSTRUCTION[kind]}."
+
+
+def _prompt(fmt: str, kind: str, subject: str = "") -> str:
+    return f"Use the {TOOLS[fmt]} tool. {_question(fmt, kind, subject)}"
+
+
+# What each synthetic format's command prints, for the bash channel (the MCP tools' descriptions).
+_COMMAND_SAYS = {
+    "json": "it lists the pods in a Kubernetes namespace, with their status",
+    "log": "it prints the recent log lines of a service",
+    "a11y": "it prints an accessibility snapshot of the current browser page",
+    "figma": "it prints the layer tree of a Figma node as XML: ids, names, types, positions and sizes",
+}
+
+
+def bash_prompt(t: Task) -> str:
+    """A synthetic task asked on the bash channel: its payload comes from `./<tool>` in the session's
+    folder instead of an MCP tool, and the question is the same."""
+    return f"Run `./{TOOLS[t.fmt]}` in the current directory; {_COMMAND_SAYS[t.fmt]}. {t.question}"
 
 
 def _count(fmt: str, p: synthetic.Payload) -> Number:
@@ -157,6 +177,7 @@ def _synthetic(fmt: str, band: str) -> list[Task]:
                 truth=truth,
                 query=name,
                 load=partial(_raw, fmt, size, planted, seed, quiet),
+                question=_question(fmt, kind, name),
             )
         )
 
