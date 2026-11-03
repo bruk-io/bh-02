@@ -35,6 +35,7 @@ import contextlib
 import os
 import shutil
 import signal
+import socket
 import tempfile
 import threading
 from collections.abc import Mapping, Sequence
@@ -156,12 +157,18 @@ class _Jailed:
 
     `wire` watches the paths the jail holds with a mount and ends the jail when the host undoes
     one (`Tripwire`); `ended` says so. `stop` stops it first: brig removing the directories it
-    made would read as the host undoing them."""
+    made would read as the host undoing them.
+
+    `connection` is brig's verified connection to the program (`ChannelReady.connection`), set once
+    the program is ready: the owner's only way to it. It is never dialled again, since the jail can
+    swap its socket for a link to a host socket. `stop` closes it (a no-op once the owner's streams
+    did)."""
 
     def __init__(
         self, jail: Jail, endpoint: str, facts: _Facts, directories: Sequence[str], wire: Tripwire
     ) -> None:
         self.endpoint = endpoint
+        self._connection: socket.socket | None = None
         self.group = jail.process.pid
         self._jail = jail
         self._facts = facts
@@ -170,6 +177,17 @@ class _Jailed:
         self._stopping: asyncio.Future[None] | None = None
         self._destroyed = False
         self._destroying = threading.Lock()
+
+    @property
+    def connection(self) -> socket.socket:
+        """The connected socket to the program: brig's verified connect, blocking, not inheritable."""
+        if self._connection is None:
+            raise RuntimeError("the program is not ready: it has no connection yet")
+        return self._connection
+
+    def ready(self, connection: socket.socket) -> None:
+        """Keep the connection brig verified, which this start now owns until its owner takes it."""
+        self._connection = connection
 
     def interrupt(self) -> bool:
         return bool(interrupt_jail(self._jail))
@@ -227,6 +245,8 @@ class _Jailed:
 
     async def _teardown(self) -> None:
         try:
+            if self._connection is not None:
+                self._connection.close()
             await asyncio.to_thread(self._wire.stop)
             await asyncio.to_thread(self.end)
         finally:
@@ -323,7 +343,8 @@ class BrigJail:
 
     async def start(self, argv_for: ArgvFor, *, cwd: str) -> _Jailed:
         """Start the program `argv_for(endpoint)` in `cwd`, in a jail of its own made from the
-        policy, listening on the endpoint brig reserved for this start (`started.endpoint`).
+        policy, listening on the endpoint brig reserved for this start (`started.endpoint`, for argv
+        alone) and connected to it by brig's verified connect (`started.connection`).
 
         Raises:
             RuntimeError: this is not Linux, or there is no bubblewrap, or the program never
@@ -418,6 +439,7 @@ class BrigJail:
                 raise RuntimeError(
                     f"the jailed program never listened: {_not_ready_message(outcome)}\n{detail}"
                 )
+            started.ready(outcome.connection)
         except BaseException:
             with contextlib.suppress(Exception):
                 await started.stop()

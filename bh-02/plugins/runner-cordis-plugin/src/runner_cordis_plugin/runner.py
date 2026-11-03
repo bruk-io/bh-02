@@ -17,6 +17,7 @@ brig jail (`jail.BrigJail`, `runner:confined`) or none (`unconfined.Unjailed`,
 """
 
 import shutil
+import socket
 import tempfile
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from pathlib import Path
@@ -34,7 +35,16 @@ class Started(Protocol):
 
     @property
     def endpoint(self) -> str:
-        """The Unix socket the program listens on: the one the runner chose for this start."""
+        """The Unix socket the program listens on: the one the runner chose for this start. It is
+        for the program's argv alone; an owner never dials it (`connection` is the way in)."""
+        ...
+
+    @property
+    def connection(self) -> socket.socket:
+        """The runner's own connected, blocking stream socket to the program, made when it was
+        ready. The owner takes it (`asyncio.open_unix_connection(sock=...)`) and closes it; `stop`
+        closes it too. Never dial `endpoint`: a jailed program can swap its socket for a link to
+        another one. A second connection means a new start."""
         ...
 
     def report(self) -> Mapping[str, str]: ...

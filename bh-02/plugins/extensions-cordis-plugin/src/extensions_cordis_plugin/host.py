@@ -44,6 +44,7 @@ import importlib.util
 import itertools
 import json
 import os
+import socket
 import stat
 import uuid
 from collections.abc import Awaitable, Callable, Iterator, Mapping, Sequence
@@ -100,10 +101,13 @@ _RELEASED = (
 
 @runtime_checkable
 class _Jailed(Protocol):
-    """A program a jail started: the socket the runner chose for it, and how to stop it."""
+    """A program a jail started: the socket the runner chose for it (`endpoint`, for its argv alone),
+    the runner's connection to it (`connection`, the only way in), and how to stop it."""
 
     @property
     def endpoint(self) -> str: ...
+    @property
+    def connection(self) -> socket.socket: ...
     async def stop(self) -> None: ...
 
 
@@ -634,7 +638,7 @@ class Extensions:
         try:
             self._process = await self._runner.start(worker_argv, cwd=root)
             reader, self._writer = await asyncio.open_unix_connection(
-                self._process.endpoint, limit=_LINE_LIMIT
+                sock=self._process.connection, limit=_LINE_LIMIT
             )
         except Exception as error:
             await self._stop()

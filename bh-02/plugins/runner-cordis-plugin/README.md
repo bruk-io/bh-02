@@ -17,8 +17,10 @@ over it; and `/release`. The only package in the workspace that imports brig (th
 - `start(argv_for, *, cwd) -> started`: the mechanism chooses the program's socket (`endpoint`: a
   short path, since a socket path must fit in ~100 bytes, in a `/tmp` directory of its own that the
   jail may write), builds the command with `argv_for(endpoint)`, starts it listening there and
-  waits until it accepts (`started.endpoint`, the path the owner dials; `stop` removes the
-  directory). The owner chooses nothing: a mechanism that has the jail reserve the channel (brig's
+  waits until it accepts, and hands the owner the connection it made then
+  (`started.connection`, a connected socket: brig's verified one for a jail; the owner opens its
+  streams over it and never dials `started.endpoint`, which is for argv alone, because a jailed
+  program can swap its socket for a link; `stop` closes it and removes the directory). The owner chooses nothing: a mechanism that has the jail reserve the channel (brig's
   `reserve_channels`) changes no owner. Each watcher (`on_start(watch) -> remover`) is told of it after, so the status bar's jail
   field (`tui:grades`) follows a Python process started again in place. What one start is stays
   with it (`started.report()`, `notice()`, `reads()`, `writes()`): the Python process and the

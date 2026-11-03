@@ -4,13 +4,13 @@
 # dependencies = ["click"]
 # ///
 """The Linux jail, on a real Linux kernel, from a darwin laptop: the runner plugin's and the app's
-tests that start real `bwrap` jails (`runner:confined`) run in a container with bubblewrap.
+tests that start real `bwrap` jails (`runner:confined`), with the python and extensions plugins', run in a container with bubblewrap.
 
 On darwin those tests skip, visibly and by name, because there is no `bwrap`. This is the one
 place they run here. It is not part of `scripts/check`: it needs Docker, it is slow, and green
 here is not the definition of green. Run it before trusting a claim about Linux.
 
-    scripts/linux-jail-check                 # the runner plugin's and the app's jail tests
+    scripts/linux-jail-check                 # the runner, python and extensions plugins' and the app's jail tests
     scripts/linux-jail-check -- PYTEST_ARGS  # pytest with these arguments instead
     scripts/linux-jail-check --shell 'LINE'  # a shell line in the prepared workspace instead
 
@@ -113,10 +113,13 @@ def dockerfile(proxy: Proxy | None) -> str:
 
 
 # The default run: the tests that start real bubblewrap jails, the runner plugin's (the policy
-# compiled for Linux, the confined runner, the tripwire) and the app's (real inputs in the real jail).
+# compiled for Linux, the confined runner, the tripwire), the python and extensions plugins' (their
+# owners over a real start, under the container's init) and the app's (real inputs in the real jail).
 DEFAULT = (
     "uv run --locked pytest -q -p no:cacheprovider"
     " bh-02/plugins/runner-cordis-plugin"
+    " bh-02/plugins/python-cordis-plugin"
+    " bh-02/plugins/extensions-cordis-plugin"
     " bh-02/app/tests/test_python_repl.py"
 )
 

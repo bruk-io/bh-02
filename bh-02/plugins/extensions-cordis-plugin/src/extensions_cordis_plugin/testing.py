@@ -10,6 +10,7 @@ import contextlib
 import os
 import shutil
 import signal
+import socket
 import tempfile
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
@@ -26,6 +27,13 @@ class _Started:
     def __init__(self, process: asyncio.subprocess.Process, endpoint: str) -> None:
         self.process = process
         self.endpoint = endpoint
+        self._connection: socket.socket | None = None  # the runner's connection, set once it listens
+
+    @property
+    def connection(self) -> socket.socket:
+        if self._connection is None:
+            raise RuntimeError("the worker is not ready: it has no connection yet")
+        return self._connection
 
     def report(self) -> Mapping[str, str]:
         return _UNENFORCED
@@ -34,6 +42,8 @@ class _Started:
         return ""
 
     async def stop(self) -> None:
+        if self._connection is not None:
+            self._connection.close()
         if self.process.returncode is None:
             with contextlib.suppress(ProcessLookupError):
                 os.killpg(self.process.pid, signal.SIGKILL)
@@ -68,11 +78,15 @@ class PlainJail:
         started = _Started(process, endpoint)
         self.started.append(started)
         async with asyncio.timeout(_READY_S):
-            while True:  # until it accepts: connect, then leave without a word (a probe)
+            while True:  # until it accepts: that connection is the owner's, who never dials again
                 if process.returncode is not None:
                     raise RuntimeError(f"the worker exited before it listened ({process.returncode})")
-                with contextlib.suppress(OSError):
-                    _, writer = await asyncio.open_unix_connection(endpoint)
-                    writer.close()
+                connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                try:
+                    connection.connect(endpoint)
+                except OSError:
+                    connection.close()
+                else:
+                    started._connection = connection  # noqa: SLF001
                     return started
                 await asyncio.sleep(0.02)

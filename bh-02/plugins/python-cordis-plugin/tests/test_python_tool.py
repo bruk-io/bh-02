@@ -6,6 +6,7 @@ import dataclasses
 import os
 import re
 import shutil
+import socket
 import sys
 import tempfile
 import time
@@ -1279,6 +1280,7 @@ class Told:
     ) -> None:
         self._started = started
         self.endpoint: str = started.endpoint
+        self.connection: socket.socket = started.connection
         self._report, self._notice, self._reads, self._writes = report, notice, tuple(reads), tuple(writes)
 
     def interrupt(self) -> bool:
@@ -1354,6 +1356,7 @@ class _Tripped:
     def __init__(self, process: Any) -> None:
         self.process = process
         self.endpoint: str = process.endpoint
+        self.connection: socket.socket = process.connection
         self.why = ""
 
     def interrupt(self) -> bool:
@@ -1501,6 +1504,34 @@ async def test_the_python_process_builds_its_command_from_the_endpoint_the_runne
     assert not Path(started.endpoint).exists()  # its stop removed the directory the runner made
 
 
+async def test_the_python_process_uses_the_runners_connection_and_never_dials_the_endpoint() -> None:
+    """TASK-0079.31: a jailed program can swap its socket for a link to another one once it is
+    ready. The runner hands over the connection it made, and the Python process speaks over that."""
+    decoys: list[int] = []
+
+    async def decoy_connected(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        decoys.append(1)
+        writer.close()
+
+    short = Path(_short_dir())
+    server = await asyncio.start_unix_server(decoy_connected, path=str(short / "decoy.sock"))
+
+    class Swapping(Unjailed):
+        async def start(self, argv_for: Callable[[str], Sequence[str]], *, cwd: str) -> Any:
+            started = await super().start(argv_for, cwd=cwd)
+            Path(started.endpoint).unlink()
+            Path(started.endpoint).symlink_to(short / "decoy.sock")
+            return started
+
+    try:
+        async with _process(Swapping(), PythonProcessConfig()) as k:
+            assert await k.run("6 * 7") == "42"
+            assert decoys == []
+    finally:
+        server.close()
+        shutil.rmtree(short, ignore_errors=True)
+
+
 async def test_a_python_process_that_cannot_start_again_says_so_as_the_input_and_tries_again_next_time() -> (
     None
 ):
@@ -1582,6 +1613,7 @@ class Ending(Unjailed):
 
         class Said:
             endpoint: str = started.endpoint
+            connection: socket.socket = started.connection
 
             def interrupt(self) -> bool:
                 return started.interrupt()
@@ -1709,7 +1741,7 @@ async def test_a_worker_whose_host_goes_away_ends_even_mid_input() -> None:
     """If bh-02 dies while an input spins, the worker must not outlive it."""
     short = tempfile.mkdtemp(prefix="bh-t-", dir="/tmp")  # a socket path must fit in ~100 bytes
     started = await Unjailed().start(worker_argv, cwd=short)
-    reader, writer = await asyncio.open_unix_connection(started.endpoint)
+    reader, writer = await asyncio.open_unix_connection(sock=started.connection)
     writer.write(b'{"op": "hello"}\n{"op": "exec", "code": "while True: pass"}\n')
     await writer.drain()
     await asyncio.sleep(0.2)

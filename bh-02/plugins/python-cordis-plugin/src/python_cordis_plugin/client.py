@@ -66,6 +66,7 @@ import asyncio
 import contextlib
 import json
 import os
+import socket
 import unicodedata
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -104,13 +105,16 @@ _STRIPPED = frozenset({"Cc", "Cf"})
 
 @runtime_checkable
 class Jailed(Protocol):
-    """A program a jail started, listening on the socket the runner chose for it (`endpoint`): it can
-    be interrupted and stopped, and says why, when the jail ended it itself (`ended`: a Linux
+    """A program a jail started, listening on the socket the runner chose for it (`endpoint`, for its
+    argv alone) and connected to it by the runner (`connection`, the only way in: never dial `endpoint`):
+    it can be interrupted and stopped, and says why, when the jail ended it itself (`ended`: a Linux
     `runner:confined` whose hold on a path the host undid; "" when it did not), and what its start is
     (`report`, `notice`, `reads`, `writes`: this program's jail's, whatever else the jail starts)."""
 
     @property
     def endpoint(self) -> str: ...
+    @property
+    def connection(self) -> socket.socket: ...
     def interrupt(self) -> bool: ...
     def ended(self) -> str: ...
     async def stop(self) -> None: ...
@@ -934,7 +938,7 @@ class PythonProcess:
         root = str(Path(self._config.root).resolve())
         self._process = self._worker = await self._runner.start(worker_argv, cwd=root)
         self._reader, self._writer = await asyncio.open_unix_connection(
-            self._process.endpoint, limit=_LINE_LIMIT
+            sock=self._process.connection, limit=_LINE_LIMIT
         )
         self._send({"op": "hello"})
         self._fresh, self._pending = True, ""  # a new worker runs its startup files afresh

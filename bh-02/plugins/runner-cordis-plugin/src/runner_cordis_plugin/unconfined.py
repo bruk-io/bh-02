@@ -9,6 +9,7 @@ import asyncio
 import contextlib
 import os
 import signal
+import socket
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -57,6 +58,18 @@ class _Process:
     def __init__(self, process: asyncio.subprocess.Process, endpoint: str) -> None:
         self._process = process
         self.endpoint = endpoint
+        self._connection: socket.socket | None = None
+
+    @property
+    def connection(self) -> socket.socket:
+        """The connected socket to the program, made when it was ready (see `runner.Started`)."""
+        if self._connection is None:
+            raise RuntimeError("the program is not ready: it has no connection yet")
+        return self._connection
+
+    def ready(self, connection: socket.socket) -> None:
+        """Keep the connection made once the program listened: this start owns it until its owner takes it."""
+        self._connection = connection
 
     def interrupt(self) -> bool:
         if self._process.returncode is not None:
@@ -91,10 +104,13 @@ class _Process:
         await self._process.wait()
 
     async def stop(self) -> None:
-        """End the process, then remove the directory its socket and log were in."""
+        """End the process, then close the connection and remove the directory its socket and log
+        were in."""
         try:
             await self._ended()
         finally:
+            if self._connection is not None:
+                self._connection.close()
             unreserve_endpoint(self.endpoint)
 
     async def _ended(self) -> None:
@@ -139,22 +155,26 @@ class Unjailed:
             raise
         started = _Process(process, endpoint)
         try:
-            await _until_listening(endpoint, process)
+            started.ready(await _until_listening(endpoint, process))
         except BaseException:
             await started.stop()
             raise
         return started
 
 
-async def _until_listening(endpoint: str, process: asyncio.subprocess.Process) -> None:
-    """Wait until something accepts on `endpoint` (connect, then leave without a word)."""
+async def _until_listening(endpoint: str, process: asyncio.subprocess.Process) -> socket.socket:
+    """Wait until something accepts on `endpoint`, and return that connection, the one the owner
+    uses (it never dials `endpoint` again: the contract is the same as a jail's)."""
     async with asyncio.timeout(_READY_TIMEOUT_S):
         while True:
             if process.returncode is not None:
                 log = Path(endpoint).with_name("stderr.log").read_text(errors="replace")[-2000:]
                 raise RuntimeError(f"the program exited before it was ready ({process.returncode}):\n{log}")
-            with contextlib.suppress(OSError):
-                _, writer = await asyncio.open_unix_connection(endpoint)
-                writer.close()
-                return
+            connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            try:
+                connection.connect(endpoint)
+            except OSError:
+                connection.close()
+            else:
+                return connection
             await asyncio.sleep(0.05)

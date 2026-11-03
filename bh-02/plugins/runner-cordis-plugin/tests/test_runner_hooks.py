@@ -119,8 +119,11 @@ async def test_an_unconfined_start_chooses_a_short_socket_in_a_directory_of_its_
     try:
         assert given == [started.endpoint] and len(os.fsencode(started.endpoint)) < 108
         assert Path(started.endpoint).exists()
+        connection = started.connection  # the runner's own connect: the owner's way in, never a dial
+        assert connection.getpeername() == started.endpoint and connection.fileno() != -1
     finally:
         await started.stop()
+    assert connection.fileno() == -1  # stop closed it
     assert not Path(started.endpoint).parent.exists()
 
 

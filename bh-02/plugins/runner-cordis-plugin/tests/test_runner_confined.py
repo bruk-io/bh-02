@@ -11,6 +11,7 @@ import socket
 import struct
 import subprocess
 import sys
+import tempfile
 import time
 import uuid
 from collections import namedtuple
@@ -2118,3 +2119,60 @@ def test_what_a_teardown_could_not_end_is_named_and_nothing_added_when_it_ended_
     assert unended_for("") == ""
     note = unended_for("JailTeardownFailed: x")
     assert "JailTeardownFailed: x" in note and "end them yourself" in note
+
+
+# Listens; takes the connection the host's readiness made; swaps its socket for a link to the host
+# listener argv[2], as a jailed program may (it writes its channel directory); then says so over the
+# connection it accepted.
+_LISTEN_THEN_SWAP_ITS_SOCKET = """
+import os, socket, sys
+server = socket.socket(socket.AF_UNIX)
+server.bind(sys.argv[1])
+server.listen(4)
+connection, _ = server.accept()
+os.unlink(sys.argv[1])
+os.symlink(sys.argv[2], sys.argv[1])
+connection.sendall(b"jailed\\n")
+connection.recv(1)
+"""
+
+
+async def test_the_owners_connection_still_reaches_the_jail_after_the_program_swaps_its_socket_for_a_link(
+    tmp_path: Path,
+) -> None:
+    """TASK-0079.31: once readiness has passed, the program puts a link to a host socket where its
+    own was. The connection the start hands over is the one brig verified, so the owner still talks
+    to the jail; a dial of the path (CONTROL) reaches the host's listener instead, and the
+    listener hears nothing from the owner."""
+    _needs_bwrap()
+    project = tmp_path / "project"
+    project.mkdir()
+    heard: list[bytes] = []
+
+    async def host_listener(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        heard.append(await reader.read(100))
+        writer.close()
+
+    short = Path(tempfile.mkdtemp(prefix="bh-sw-", dir="/tmp"))  # a Unix socket path must be short
+    victim = short / "victim.sock"
+    server = await asyncio.start_unix_server(host_listener, path=str(victim))
+    started = await BrigJail(BrigConfig(), Host()).start(
+        lambda endpoint: [sys.executable, "-I", "-c", _LISTEN_THEN_SWAP_ITS_SOCKET, endpoint, str(victim)],
+        cwd=str(project),
+    )
+    try:
+        reader, writer = await asyncio.open_unix_connection(sock=started.connection)
+        assert await asyncio.wait_for(reader.readline(), 10) == b"jailed\n"
+        writer.write(b"for the jail")
+        await writer.drain()
+        assert await _until(lambda: Path(started.endpoint).is_symlink(), 5.0), "CONTROL failed: no swap"
+        _, dialled = await asyncio.open_unix_connection(started.endpoint)  # what the old owners did
+        dialled.write(b"for the victim")
+        await dialled.drain()
+        dialled.close()
+        assert await _until(lambda: heard == [b"for the victim"], 5.0), f"CONTROL failed: {heard}"
+        writer.close()
+    finally:
+        await started.stop()
+        server.close()
+        shutil.rmtree(short, ignore_errors=True)
