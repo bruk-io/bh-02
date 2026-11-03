@@ -23,9 +23,11 @@ plain text. Text that fits the budget comes back unchanged.
 
 The lab tests the idea inside Claude Code, through a hook and headless runs:
 
-- `claude_code/hook.py`, a `PostToolUse` hook on `mcp__.*`: folds large MCP results (JSON, XML,
-  accessibility outlines, logs), including the ones Claude Code itself spilled to a file, and
-  points Claude at the saved raw output. By default (`inline`) it folds only results under Claude
+- `claude_code/hook.py`, a `PostToolUse` hook on `mcp__.*|Bash`: folds large MCP results and Bash
+  output (JSON, XML, accessibility outlines, logs), including what Claude Code itself saved to a
+  file, and points Claude at the saved raw output. It acts after a command has run, so permission
+  rules are checked on the real command; rewriting the command first, or wrapping the shell with
+  `CLAUDE_CODE_SHELL_PREFIX`, breaks permission checks or hooks (FINDINGS 46). Read is never folded. By default (`inline`) it folds only results under Claude
   Code's spill threshold and leaves spills to Claude Code, the one mode P2 kept (FINDINGS 34-35);
   `TOOL_OUTPUT_LAB_MODE=spilled` folds only spills, `all` both.
 - `evals/l2.py` with `claude_code/fixture_mcp.py`: headless `claude -p` runs on the eval tasks,
