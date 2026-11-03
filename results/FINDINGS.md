@@ -319,26 +319,67 @@ Per-band and pooled tables: `l2-p2.md`; each repetition: `l2-p2-r1.md`, `l2-p2-r
     MCP tasks a band); synthetic payloads on the MCP channel; a file channel of 22 tasks. Per-format
     cells (26 pairs) are indicative.
 
+## P3: Sonnet, the no-shell channel, edits (`l2-p3.md`, 230 runs, $24.69)
+
+One repetition on Sonnet 5.5 under a $25 ceiling (`--max-cost`), with the fixed prompts (38), in four
+stages: (a) M, native against `fold-inline`, the hook's default, all 52 MCP tasks; (b) L, native
+against `fold`, spot and absent (20 tasks); (c) the 22 file tasks under native, `noshell` (Bash
+disallowed) and `noshell-fold` (the same with the `fold` MCP tool, paired against `noshell`); (d)
+five edit tasks, checked by `ast`, under native, `fold-tool`, `noshell` and `noshell-fold`. Sonnet
+cost $0.08 to $0.13 a run, about 15 times Haiku, so cells are small and every verdict below is
+indicative. No run failed to answer. Stage reports: `l2-p3-a.md` to `l2-p3-d.md`.
+
+40. **Folding inline results (M) holds up on Sonnet, and saves more money than on Haiku.**
+    `fold-inline`: 52 of 52 right under both conditions, final context -8.8k [-10.7k, -7.5k] (JSON
+    and logs -11k, trees -7k to -7.5k), cost -20% ($0.129 to $0.103 a run), time +6 s. As with
+    Haiku, Sonnet reads the saved raw in most runs (44 of 52) and needs 1.5 more tool calls. The
+    verdict reads undecided only because 52 agreeing pairs leave the accuracy interval at +-7
+    points (33); on the input criterion it passes clearly. With P2, the default holds on both models.
+41. **Folding spills (L) does not grow Sonnet's context, and wins the same answers as Haiku's.**
+    `fold`: 20 of 20 right against native's 18; both of native's misses are Figma spot tasks
+    answered "none", as with Haiku (34). Final context -910 [-4.1k, +1.4k] (accessibility trees
+    -11k, Figma +1.9k, JSON -1k, logs +0.9k), cost -21% ($0.127 to $0.100), 1.8 fewer tool calls,
+    -3.8 s. 20 pairs: undecided, so the cut from P2 stands for Haiku and is open for Sonnet.
+42. **Sonnet never used a fold tool.** Offered `lab-fold` through CLAUDE.md (5 edit runs) or the
+    `fold` MCP tool with no shell (27 runs), it called neither once: 0 of 32. With nothing used,
+    `noshell-fold` is `noshell` plus a tool description (+8 tokens of context), and `fold-tool` is
+    native plus 280 tokens of CLAUDE.md. Both fail. Haiku did the same (36): as an offered tool,
+    folding is not taken up by either model on these tasks; as a hook, it applies itself.
+43. **Taking the shell away costs, and a fold tool does not buy it back.** File reads: 22 of 22 right
+    natively, 21 of 22 with no shell (the one miss, the methods Popen defines in both platform
+    branches, is missed with and without the fold tool), cost +26%. Edits: 20 of 20 right in every
+    condition, but the two renames took 2 tool calls each with a shell against 6 to 14 without, and
+    edits cost 16% to 21% more without a shell.
+44. **The edit check needed one fix before it could be trusted.** In the Haiku smoke, all four renames
+    were right and updated the docstring that names the method; the check counted that as a second
+    change and failed them. Strings are now renamed back too, and edit rows keep their diff, so a
+    fixed check rescored them (4 of 4). Haiku and Sonnet made every edit correctly: these five are
+    too easy to show whether a fold helps or misleads an edit, only what each condition costs.
+45. **The prompt fixes worked.** Andorra's subdivision codes, missed under every condition in P2
+    because the instruction asked for names, were right in all three of P3's conditions.
+
 ## Where the design stands
 
 | Piece | Evidence | Leaning |
 |---|---|---|
-| Fold MCP results Claude Code spilled | P2 (Haiku, 104 pairs): accuracy +7% [+1%, +14%], 1.2 fewer requests, -9% cost, -1.8 s, but the final context +800 tokens (34); A/B 1-3 indicative (K1) | cut by the input criterion (37); `TOOL_OUTPUT_LAB_MODE=spilled` keeps it for P3 on Sonnet |
-| Fold MCP results under the spill threshold | P2: answers kept, final context -7.1k, but 1.4 more requests, +42k summed input, +3.6 s (35) | keep; the hook's default (`inline`) |
+| Fold MCP results Claude Code spilled | P2 (Haiku, 104 pairs): accuracy +7% [+1%, +14%], 1.2 fewer requests, -9% cost, but the final context +800 tokens (34). P3 (Sonnet, 20 pairs): 20/20 against 18/20, cost -21%, final context -910 [-4.1k, +1.4k] (41) | cut for Haiku by the input criterion (37); open for Sonnet (undecided at 20 pairs); `TOOL_OUTPUT_LAB_MODE=spilled` |
+| Fold MCP results under the spill threshold | P2 (Haiku): answers kept, final context -7.1k (35). P3 (Sonnet): 52/52 both, final context -8.8k, cost -20% (40) | keep; the hook's default (`inline`) |
 | JSON folding with promotion | real MCP JSON to 13%; built anomaly kinds survive | keep |
 | Line folding for logs | error words survive; quiet anomalies lost, and the loss costs answers | keep, with the gap stated |
 | Tree folding for XML and accessibility trees | A/B 2 (Haiku): -37% tokens on spilled results; A/B 3 (Sonnet): no gain | keep for weaker models; Sonnet does as well alone |
 | Read gate with ast-grep outlines | works, but Haiku and Sonnet page and grep on their own, even for overviews | drop |
-| `fold` as a tool for code | comprehension A/B: Sonnet writes its own `ast` scripts; told about `fold`, it used it twice, at a cost. P2: Haiku ran it once in 44 runs (36) | no gain with Haiku or Sonnet on exact questions; untested on open-ended ones |
+| `fold` as a tool (CLI in CLAUDE.md, or an MCP tool with no shell) | P2: Haiku ran it once in 44 runs (36). P3: Sonnet 0 of 32, with a shell or without (42); the comprehension A/B: twice, at a cost | drop as an offered tool; folding works when it is applied (the hook), not when it is offered |
 
 ## Next
 
-1. P3 (Sonnet, the no-shell channel, edit tasks), with the fixed prompts (38), and about 150
-   agreeing pairs a cell so a verdict can resolve 3 points (33).
-2. At L the fold is larger than Claude Code's preview and Haiku reads the raw anyway (34): try a
-   fold no larger than the preview, or a banner that says what the fold guarantees, to see whether
-   it saves the read.
-3. More than one task per cell: two repetitions of 52 tasks are not 104 independent cases.
+1. Sample size before more conditions: one repetition of 52 tasks cannot resolve 3 points of
+   accuracy (33). About 150 independent tasks a cell, not repetitions, is what a verdict needs:
+   more generated tasks per format and band, on Haiku, where a run costs $0.007.
+2. At L the fold is larger than Claude Code's preview and both models read the raw anyway (34, 41):
+   try a fold no larger than the preview, or a banner that says what the fold guarantees.
+3. Harder edits, where the outline matters: an edit in a method whose name recurs in several
+   classes, or in a folded branch; these five were made right everywhere (44).
+4. P4 of EVALS.md: explain tasks with a validated judge; Markdown, CSV and diffs.
 
 ## Earlier results (bh-02 corpus and synthetic grid, kept as recorded)
 
