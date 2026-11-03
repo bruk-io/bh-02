@@ -1,0 +1,9 @@
+{"tool": "Bash", "tool_use_id": "toolu_01LRUmmaG5e43e482Z1AHR3V", "spilled": true, "raw_tokens": 41216, "branch": "lines", "out_tokens": 939}
+{"tool": "Bash", "tool_use_id": "toolu_01QepMbK6C27pkonD22dngpm", "spilled": false, "raw_tokens": 6235, "branch": "lines", "out_tokens": 939}
+{"tool": "Bash", "tool_use_id": "toolu_01JRUQKCDqT1ei6HzEorVdMr", "spilled": false, "raw_tokens": 6184, "branch": "lines", "out_tokens": 992}
+{"tool": "Bash", "tool_use_id": "toolu_018XpuP5Wp9CzJJEhXkhkrJh", "spilled": false, "raw_tokens": 139, "branch": "passthrough", "out_tokens": null}
+{"tool": "Bash", "tool_use_id": "toolu_01E1WB1FZVAePepGvmsRpC55", "spilled": false, "raw_tokens": 33, "branch": "passthrough", "out_tokens": null}
+{"tool": "Bash", "tool_use_id": "toolu_01SkJG7fhPsrsWtxHh7CC9te", "spilled": false, "raw_tokens": 34, "branch": "passthrough", "out_tokens": null}
+{"tool": "Bash", "tool_use_id": "toolu_01YScWXGfpPAaXr6tyE378xV", "spilled": false, "raw_tokens": 6, "branch": "passthrough", "out_tokens": null}
+{"tool": "Bash", "tool_use_id": "toolu_011PDqwXzgzBtRVznvQzQ6BW", "spilled": false, "raw_tokens": 255, "branch": "passthrough", "out_tokens": null}
+{"tool": "Bash", "tool_use_id": "toolu_01TjmtSefjftrw1b9HwtVT8y", "spilled": false, "raw_tokens": 51, "branch": "passthrough", "out_tokens": null}
