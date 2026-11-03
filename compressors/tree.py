@@ -17,6 +17,7 @@ import re
 import xml.dom.minidom
 import xml.parsers.expat
 from collections import Counter
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 
 from compressors import markers
@@ -50,22 +51,36 @@ def _with_gaps(
 ) -> tuple[Node, ...]:
     """The nodes, plus a leaf for every run of at least `min_gap` lines between them that no node
     covers (3,000 assignments, a module's imports, code the parser gave up on), so plain lines fold
-    too and a fold has a floor. A run starts at its first non-blank line, so its header shows."""
-    out: list[Node] = []
-    cursor = first
-    for n in (*nodes, None):
-        end = (n.first - 1) if n is not None else last
-        start = cursor
+    too and a fold has a floor. A run starts at its first non-blank line, so its header shows.
+    Iterative, since trees nest as deep as their input."""
+
+    def gap(start: int, end: int) -> Node | None:
         while start <= end and not lines[start].strip():
             start += 1
-        if end - start + 1 >= min_gap:
-            out.append(Node(start, start, end, run=True))
+        return Node(start, start, end, run=True) if end - start + 1 >= min_gap else None
+
+    top: list[Node] = []
+    # a frame: the nodes left in one list, the list rebuilt so far, the first line not yet covered,
+    # the list's last line, and the node it is the children of (None at the top) with its own list
+    stack: list[tuple[Iterator[Node], list[Node], int, int, tuple[Node, list[Node]] | None]] = [
+        (iter(nodes), top, first, last, None)
+    ]
+    while stack:
+        pending, out, cursor, end, parent = stack[-1]
+        n = next(pending, None)
         if n is None:
-            break
-        kids = _with_gaps(lines, n.children, n.head_end + 1, n.last, min_gap)
-        out.append(Node(n.first, n.head_end, n.last, kids, n.run))
-        cursor = n.last + 1
-    return tuple(out)
+            if (g := gap(cursor, end)) is not None:
+                out.append(g)
+            stack.pop()
+            if parent is not None:
+                node, dest = parent
+                dest.append(Node(node.first, node.head_end, node.last, tuple(out), node.run))
+            continue
+        if (g := gap(cursor, n.first - 1)) is not None:
+            out.append(g)
+        stack[-1] = (pending, out, n.last + 1, end, parent)
+        stack.append((iter(n.children), [], n.head_end + 1, n.last, (n, out)))
+    return tuple(top)
 
 
 def _signature(lines: list[str], n: Node, cap: int = 600) -> str:
@@ -289,52 +304,66 @@ def _plan(f: _Fold, roots: tuple[Node, ...], budget_tokens: int) -> _Plan:
     return _Plan(root_k, opened)
 
 
+@dataclass(frozen=True)
+class _Open:
+    """A list of children rendered in place: the top level, or the children of a node shown open."""
+
+    first: int
+    last: int
+    kids: tuple[Node, ...]
+    k: int | None
+
+
 def _render(f: _Fold, roots: tuple[Node, ...], plan: _Plan) -> tuple[str, int, int]:
-    out: list[str] = []
+    """The plan as text, and how many nodes it shows open and folded. Each list renders as a
+    generator of chunks of lines, and of the open children to render in their place: a stack of
+    them, not recursion, since open nodes can nest as deep as the input does."""
     folded = 0
     prefix = "\t" if f.numbered else ""
 
-    def lines(a: int, b: int) -> None:
-        out.extend(f.shown[a : b + 1])
-
-    def child(c: Node) -> None:
+    def walk(o: _Open) -> Iterator[tuple[str, ...] | _Open]:
         nonlocal folded
-        if _small(c):
-            lines(c.first, c.last)
-        elif id(c) in plan.opened:
-            children(c.first, c.last, c.children, plan.opened[id(c)])
-        else:
-            folded += 1
-            note = markers.lines_folded(c.head_end + 2, c.last + 1, f"{c.last - c.head_end} lines")
-            if c.head_end == c.first:
-                out.append(f"{f.shown[c.first]}  {note}")
-            else:
-                lines(c.first, c.head_end)
-                out.append(f"{prefix}{_indent_of(f.lines[c.head_end])}    {note}")
-
-    def children(first: int, last: int, kids: tuple[Node, ...], k: int | None) -> None:
-        nonlocal folded
-        shown = set(_shown_children(f, kids, k))
-        cursor, i = first, 0
-        while i < len(kids):
-            c = kids[i]
-            lines(cursor, c.first - 1)
+        shown = set(_shown_children(f, o.kids, o.k))
+        cursor, i = o.first, 0
+        while i < len(o.kids):
+            c = o.kids[i]
+            yield f.shown[cursor : c.first]
             if i in shown:
-                child(c)
+                if _small(c):
+                    yield f.shown[c.first : c.last + 1]
+                elif id(c) in plan.opened:
+                    yield _Open(c.first, c.last, c.children, plan.opened[id(c)])
+                else:
+                    folded += 1
+                    note = markers.lines_folded(c.head_end + 2, c.last + 1, f"{c.last - c.head_end} lines")
+                    if c.head_end == c.first:
+                        yield (f"{f.shown[c.first]}  {note}",)
+                    else:
+                        under = f"{prefix}{_indent_of(f.lines[c.head_end])}    {note}"
+                        yield (*f.shown[c.first : c.head_end + 1], under)
                 cursor, i = c.last + 1, i + 1
                 continue
             j = i
-            while j + 1 < len(kids) and j + 1 not in shown:
+            while j + 1 < len(o.kids) and j + 1 not in shown:
                 j += 1
-            a, b = c.first, kids[j].last
+            a, b = c.first, o.kids[j].last
             folded += j - i + 1
-            more = sum(1 for x in _promotion(f, kids).unshown if i <= x <= j)
+            more = sum(1 for x in _promotion(f, o.kids).unshown if i <= x <= j)
             what = markers.siblings(j - i + 1, more)
-            out.append(f"{prefix}{_indent_of(f.lines[a])}{markers.lines_folded(a + 1, b + 1, what)}")
+            yield (f"{prefix}{_indent_of(f.lines[a])}{markers.lines_folded(a + 1, b + 1, what)}",)
             cursor, i = b + 1, j + 1
-        lines(cursor, last)
+        yield f.shown[cursor : o.last + 1]
 
-    children(0, len(f.lines) - 1, roots, plan.root_k)
+    out: list[str] = []
+    stack = [walk(_Open(0, len(f.lines) - 1, roots, plan.root_k))]
+    while stack:
+        match next(stack[-1], None):
+            case None:
+                stack.pop()
+            case _Open() as o:
+                stack.append(walk(o))
+            case tuple() as chunk:
+                out.extend(chunk)
     return "\n".join(out), len(plan.opened), folded
 
 
@@ -407,12 +436,18 @@ def looks_like_xml(raw: str) -> bool:
     return bool(_XML_START.match(raw)) and raw.rstrip().endswith(">")
 
 
+_BETWEEN_TAGS = re.compile(r">\s*<")
+
+
 def _pretty(raw: str) -> str:
     """One element per line, when the XML came packed onto few lines."""
     lines = split_lines(raw)
     if len(lines) >= raw.count("<") / 4 and max((len(line) for line in lines), default=0) <= 1000:
         return raw
-    pretty = xml.dom.minidom.parseString(raw.encode("utf-8")).toprettyxml(indent="  ")
+    try:
+        pretty = xml.dom.minidom.parseString(raw.encode("utf-8")).toprettyxml(indent="  ")
+    except RecursionError:  # nested deeper than minidom's writer recurses: one tag per line, unindented
+        pretty = _BETWEEN_TAGS.sub(">\n<", raw)
     return "\n".join(line for line in split_lines(pretty) if line.strip())
 
 

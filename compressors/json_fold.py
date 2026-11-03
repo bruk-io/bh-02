@@ -76,13 +76,15 @@ def parse_json_or_jsonl(raw: str) -> tuple[Any, str] | None:
         return json.loads(stripped), "json"
     except ValueError:
         pass
+    except RecursionError:  # nested deeper than the parser's stack allows: not foldable as JSON
+        return None
     items = []
     for line in split_lines(stripped):  # newline only: a record may hold a raw U+2028 or form feed
         if not line.strip():
             continue
         try:
             items.append(json.loads(line))
-        except ValueError:
+        except ValueError, RecursionError:
             return None
     return (items, "jsonl") if len(items) > 1 else None
 

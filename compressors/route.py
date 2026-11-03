@@ -60,7 +60,10 @@ def _parse_as(branch: str, raw: str) -> tuple[str, _Parsed]:
     match branch:
         case "json":
             if (doc := parse_json_or_jsonl(raw)) is None:
-                raise ValueError("--as json: the text does not parse as JSON or JSON Lines")
+                raise ValueError(
+                    "--as json: the text does not parse as JSON or JSON Lines, "
+                    "or nests deeper than the parser allows"
+                )
             return doc[1], doc
         case "xml":
             if (tree := xml_tree(raw)) is None:
