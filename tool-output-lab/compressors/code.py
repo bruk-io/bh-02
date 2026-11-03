@@ -134,16 +134,43 @@ def _nodes(root: SgNode, lines: list[str]) -> list[Node]:
     return top
 
 
+def _parse(source: str, language: str) -> SgRoot:
+    """ast-grep's syntax tree.
+
+    Raises:
+        ValueError: ast-grep has no grammar for `language` (it panics, and a pyo3 panic is not an
+            Exception, so nothing upstream would catch it).
+    """
+    try:
+        return SgRoot(source, language)
+    except BaseException as e:  # noqa: BLE001  # only the one panic is translated; the rest re-raise
+        if type(e).__module__ != "pyo3_runtime" or "LanguageNotSupported" not in str(e):
+            raise
+        known = ", ".join(sorted(set(_LANGUAGES.values())))
+        raise ValueError(
+            f"--lang {language}: ast-grep has no grammar by that name; use one of {known}, "
+            "or another language ast-grep supports"
+        ) from None
+
+
 def code_tree(source: str, language: str) -> tuple[Node, ...]:
-    lines = split_lines(source)
-    return tuple(_nodes(SgRoot(source, language).root(), lines))
+    """The source's foldable nodes: definitions, blocks and multi-line literals, nested.
+
+    Raises:
+        ValueError: ast-grep has no grammar for `language`.
+    """
+    return tuple(_nodes(_parse(source, language).root(), split_lines(source)))
 
 
 def fold_code(
     source: str, language: str, budget_tokens: int, terms: frozenset[str] = frozenset()
 ) -> TreeFold:
     """The outline of a source file, opened as far as the budget allows, with real line numbers;
-    definitions that hold a query term (few others do) open first."""
+    definitions that hold a query term (few others do) open first.
+
+    Raises:
+        ValueError: ast-grep has no grammar for `language`.
+    """
     lines = split_lines(source)
     text, opened, folded = fold_tree(
         lines, code_tree(source, language), budget_tokens, numbered=True, terms=terms

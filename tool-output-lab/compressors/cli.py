@@ -18,6 +18,7 @@ that copy, and the header says so. The first line of output is a header, unless 
 """
 
 import argparse
+import os
 import sys
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -54,8 +55,9 @@ def fold_text(
     hiding a tenth would cost more to recover than it saves (`branch` is None, as for text that fits).
 
     Raises:
-        ValueError: `fmt` is "code" but no language is known from --lang or the path; `fmt` names a
-            format the text cannot take (JSON that does not parse, XML that is not well formed).
+        ValueError: `fmt` is "code" but no language is known from --lang or the path; ast-grep has no
+            grammar for the language; `fmt` names a format the text cannot take (JSON that does not
+            parse, XML that is not well formed).
     """
     raw_tokens = estimate_tokens(text)
     if raw_tokens <= budget:
@@ -122,11 +124,13 @@ def main(argv: list[str] | None = None) -> int:
         if result.source is not None and ns.save is not None:
             ns.save.write_text(result.source, encoding="utf-8")
         print(result.text)
+    except BrokenPipeError:  # `fold x | head` closed the pipe early: not an error. Before OSError,
+        # which it is a kind of; stdout goes to devnull so the flush at exit cannot fail again
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+        return 0
     except (OSError, ValueError) as e:
         print(f"fold: {e}", file=sys.stderr)
         return 1
-    except BrokenPipeError:  # `fold x | head` closed the pipe early: not an error
-        return 0
     return 0
 
 
