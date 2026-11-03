@@ -1,0 +1,165 @@
+"""The compressor's knobs, in one place, so an eval can turn them over the same tasks.
+
+The defaults are the values the findings were measured with. A knob is set in a TOML file
+(`--config knobs.toml`), one at a time (`--set schema.rare=0.15`), or both (the sets win):
+
+    worth_it = 0.9
+
+    [schema]
+    rare = 0.15
+
+    [tree]
+    max_promoted = 5
+
+The fold's budget and view are not knobs here: each call names them. `label` names a config by
+what it changes from the defaults, for reports; `sets` turns one back into `--set` arguments.
+"""
+
+import tomllib
+from dataclasses import asdict, dataclass, fields, replace
+from pathlib import Path
+from typing import Any
+
+
+@dataclass(frozen=True)
+class SchemaKnobs:
+    """The schema view of data (`compressors.schema`)."""
+
+    dominant: float = 0.75  # a value held by this share of rows makes the rows without it exceptions,
+    rare: float = 0.1  # when the value they hold instead is at most this share
+    key_rare: float = 0.1  # a key in at most this share of rows marks the rows that have it,
+    key_common: float = 0.9  # and one in at least this share (but not all) the rows that lack it
+    iqr_factor: float = 3.0  # a number beyond this many interquartile ranges of the middle half is an outlier
+    min_rows: int = 5  # fewer rows than this and a list is shown as values, not as a schema
+    map_min_keys: int = 20  # an object with this many keys of one shape is a collection keyed by them
+    values: int = (
+        8  # values shown for a field with few of them (the roomiest level; tighter levels show fewer)
+    )
+    fields: int = 40  # fields shown per collection, keys per plain object
+    rows: int = 25  # exception rows shown per collection
+    clip: int = 60  # characters of a value shown
+
+
+@dataclass(frozen=True)
+class TreeKnobs:
+    """The tree fold of code, XML and outlines (`compressors.tree`)."""
+
+    max_promoted: int = 10  # stand-outs shown per list; the rest are counted in the marker that hides them
+    head_children: int = 3  # a list opened partly shows at least its first this many children,
+    tail_children: int = 1  # and its last this many
+    min_gap: int = 6  # a run of this many plain lines no node covers folds as a leaf of its own
+    min_hidden: int = 3  # a node hiding fewer lines than this is shown whole
+    max_line_chars: int = 300  # a longer line is clipped
+    rare_share: float = 0.1  # a sibling shape held by at most this share of a list stands out,
+    dominant: float = 0.6  # when one shape holds at least this share
+
+
+@dataclass(frozen=True)
+class FoldConfig:
+    worth_it: float = 0.9  # a fold that keeps more than this share of the input passes it through instead
+    schema: SchemaKnobs = SchemaKnobs()
+    tree: TreeKnobs = TreeKnobs()
+
+
+DEFAULT = FoldConfig()
+_SECTIONS = {"schema": SchemaKnobs, "tree": TreeKnobs}
+
+
+def _knob_names() -> list[str]:
+    top = [f.name for f in fields(FoldConfig) if f.name not in _SECTIONS]
+    return top + [f"{s}.{f.name}" for s, cls in _SECTIONS.items() for f in fields(cls)]
+
+
+def _typed(name: str, default: Any, value: Any) -> Any:
+    """`value` as the type of the knob's default.
+
+    Raises:
+        ValueError: it is not a value of that type.
+    """
+    kind = type(default)
+    if isinstance(value, str):
+        try:
+            value = kind(value)
+        except ValueError:
+            raise ValueError(f"{name} takes a {kind.__name__}, not {value!r}") from None
+    if kind is float and isinstance(value, int) and not isinstance(value, bool):
+        value = float(value)
+    if type(value) is not kind:
+        raise ValueError(f"{name} takes a {kind.__name__}, not {value!r}")
+    return value
+
+
+def with_values(config: FoldConfig, values: dict[str, Any]) -> FoldConfig:
+    """`config` with knobs set by dotted name (`"schema.rare": 0.15`).
+
+    Raises:
+        ValueError: a name is no knob, or a value is not of the knob's type.
+    """
+    top: dict[str, Any] = {}
+    sections: dict[str, dict[str, Any]] = {}
+    for name, value in values.items():
+        section, _, key = name.rpartition(".")
+        if name not in _knob_names():
+            raise ValueError(f"no knob {name!r}; the knobs are: {', '.join(_knob_names())}")
+        if section:
+            default = getattr(getattr(DEFAULT, section), key)
+            sections.setdefault(section, {})[key] = _typed(name, default, value)
+        else:
+            top[key] = _typed(name, getattr(DEFAULT, key), value)
+    for section, changes in sections.items():
+        top[section] = replace(getattr(config, section), **changes)
+    return replace(config, **top)
+
+
+def with_sets(config: FoldConfig, sets: list[str]) -> FoldConfig:
+    """`config` with `--set` arguments applied (`schema.rare=0.15`).
+
+    Raises:
+        ValueError: a set is not NAME=VALUE, names no knob, or its value is of the wrong type.
+    """
+    values = {}
+    for s in sets:
+        name, eq, value = s.partition("=")
+        if not eq:
+            raise ValueError(f"--set takes NAME=VALUE, such as schema.rare=0.15; not {s!r}")
+        values[name.strip()] = value.strip()
+    return with_values(config, values)
+
+
+def load(path: str | Path) -> FoldConfig:
+    """The config a TOML file sets (the defaults for every knob it leaves out). A file that cannot be
+    read raises OSError, from reading it.
+
+    Raises:
+        ValueError: it is not TOML, or it sets something that is no knob or a value of the wrong type.
+    """
+    try:
+        data = tomllib.loads(Path(path).read_text(encoding="utf-8"))
+    except tomllib.TOMLDecodeError as e:
+        raise ValueError(f"{path}: not TOML: {e}") from None
+    flat: dict[str, Any] = {}
+    for key, value in data.items():
+        if isinstance(value, dict):
+            flat |= {f"{key}.{k}": v for k, v in value.items()}
+        else:
+            flat[key] = value
+    return with_values(DEFAULT, flat)
+
+
+def changes(config: FoldConfig) -> dict[str, Any]:
+    """The knobs `config` sets differently from the defaults, by dotted name."""
+    now, default = asdict(config), asdict(DEFAULT)
+    out = {k: v for k, v in now.items() if k not in _SECTIONS and v != default[k]}
+    for section in _SECTIONS:
+        out |= {f"{section}.{k}": v for k, v in now[section].items() if v != default[section][k]}
+    return out
+
+
+def label(config: FoldConfig) -> str:
+    """A config's name in a report: what it changes, or "defaults"."""
+    return ", ".join(f"{k}={v}" for k, v in changes(config).items()) or "defaults"
+
+
+def sets(config: FoldConfig) -> list[str]:
+    """The `--set` arguments that make `config` from the defaults."""
+    return [f"{k}={v}" for k, v in changes(config).items()]

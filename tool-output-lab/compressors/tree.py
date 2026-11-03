@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 
 from compressors import markers
 from compressors.common import discriminating, estimate_tokens, matches, split_lines
+from compressors.config import DEFAULT, TreeKnobs
 
 _ID_TOKEN = re.compile(r"[A-Za-z0-9_]*\d[A-Za-z0-9_]*")
 _VARIABLE = re.compile(r"0x[0-9a-fA-F]+|[0-9a-fA-F]{8,}|\d+")
@@ -113,14 +114,6 @@ def _indent_of(line: str) -> str:
     return line[: len(line) - len(line.lstrip())]
 
 
-_MIN_HIDDEN = 3  # a node hiding fewer lines than this is shown whole: its marker would cost as much
-_MAX_LINE_CHARS = 300
-_HEAD_CHILDREN = 3  # a list opened partly shows at least its first 3 children,
-_TAIL_CHILDREN = 1  # its last one, and its stand-outs
-_MIN_GAP = 6  # a run of this many plain lines no node covers folds as a leaf of its own
-_MAX_PROMOTED = 10  # stand-outs shown per list; the rest are counted in the marker that hides them
-
-
 @dataclass(frozen=True)
 class _Promotion:
     """A list's stand-outs: the children shown out of turn, and those past the cap."""
@@ -141,6 +134,7 @@ class _Fold:
     prefix: tuple[int, ...]  # prefix[i]: the cost of showing lines 0 to i-1
     numbered: bool
     terms: frozenset[str]
+    knobs: TreeKnobs
     promotions: dict[int, _Promotion] = field(default_factory=dict)
 
 
@@ -150,11 +144,11 @@ class _Plan:
     opened: dict[int, int | None]  # id(node) -> k, for every node shown open
 
 
-def _fold_of(lines: list[str], numbered: bool, terms: frozenset[str]) -> _Fold:
-    clipped = (markers.clipped(line, _MAX_LINE_CHARS) for line in lines)
+def _fold_of(lines: list[str], numbered: bool, terms: frozenset[str], knobs: TreeKnobs) -> _Fold:
+    clipped = (markers.clipped(line, knobs.max_line_chars) for line in lines)
     shown = tuple(f"{i + 1}\t{line}" if numbered else line for i, line in enumerate(clipped))
     prefix = (0, *itertools.accumulate(estimate_tokens(line) + 1 for line in shown))
-    return _Fold(lines, shown, prefix, numbered, terms)
+    return _Fold(lines, shown, prefix, numbered, terms, knobs)
 
 
 def _span(f: _Fold, a: int, b: int) -> int:
@@ -162,19 +156,21 @@ def _span(f: _Fold, a: int, b: int) -> int:
     return f.prefix[b + 1] - f.prefix[a] if b >= a else 0
 
 
-def _small(n: Node) -> bool:
+def _small(f: _Fold, n: Node) -> bool:
     """Too small to fold on its own (a marker would cost as much as it hides): shown whole when
     shown, but still a child, so a list of small items can open partly."""
-    return n.last - n.head_end < _MIN_HIDDEN
+    return n.last - n.head_end < f.knobs.min_hidden
 
 
 def _folded_cost(f: _Fold, n: Node) -> int:
-    if _small(n):
+    if _small(f, n):
         return _span(f, n.first, n.last)
     return _span(f, n.first, n.head_end) + _MARKER_TOKENS
 
 
-def _standouts(lines: list[str], children: tuple[Node, ...], terms: frozenset[str]) -> _Promotion:
+def _standouts(
+    lines: list[str], children: tuple[Node, ...], terms: frozenset[str], knobs: TreeKnobs
+) -> _Promotion:
     """Children that stand out among siblings that mostly share one shape, or that hold query terms
     few siblings share, most matched terms first. They open first, since what they hold is why
     they are shown."""
@@ -184,8 +180,8 @@ def _standouts(lines: list[str], children: tuple[Node, ...], terms: frozenset[st
         return _Promotion(tuple(i for i, text in enumerate(texts) if any(matches(text, t) for t in terms)))
     patterns = [_signature(lines, c) for c in children]
     counts = Counter(patterns)
-    rare_cut = max(1, int(0.1 * n))  # no summary counts here, so rare reaches 10%
-    dominant = counts.most_common(1)[0][1] / n >= 0.6
+    rare_cut = max(1, int(knobs.rare_share * n))  # no summary counts here, so rare reaches further
+    dominant = counts.most_common(1)[0][1] / n >= knobs.dominant
     heads = [lines[c.first] for c in children]
     useful_head = discriminating(terms, heads, share=0.05, floor=3)  # a few matches still pick out
     useful_deep = discriminating(terms, texts, share=0.05, floor=3)
@@ -197,12 +193,13 @@ def _standouts(lines: list[str], children: tuple[Node, ...], terms: frozenset[st
         if hits or rare:
             scored.append((-(2 * hits + rare), i))
     ranked = [i for _, i in sorted(scored)]
-    return _Promotion(tuple(sorted(ranked[:_MAX_PROMOTED])), frozenset(ranked[_MAX_PROMOTED:]))
+    cap = knobs.max_promoted
+    return _Promotion(tuple(sorted(ranked[:cap])), frozenset(ranked[cap:]))
 
 
 def _promotion(f: _Fold, children: tuple[Node, ...]) -> _Promotion:
     if id(children) not in f.promotions:
-        f.promotions[id(children)] = _standouts(f.lines, children, f.terms)
+        f.promotions[id(children)] = _standouts(f.lines, children, f.terms, f.knobs)
     return f.promotions[id(children)]
 
 
@@ -211,7 +208,7 @@ def _shown_children(f: _Fold, children: tuple[Node, ...], k: int | None) -> tupl
     n = len(children)
     if k is None:
         return tuple(range(n))
-    return tuple(sorted({*range(k), *_promotion(f, children).picks, *range(n - _TAIL_CHILDREN, n)}))
+    return tuple(sorted({*range(k), *_promotion(f, children).picks, *range(n - f.knobs.tail_children, n)}))
 
 
 def _open_cost(f: _Fold, first: int, last: int, children: tuple[Node, ...], k: int | None) -> int:
@@ -237,12 +234,12 @@ def _choose(
     full = _open_cost(f, first, last, children, None)
     if full <= room:
         return True, None, full
-    if len(children) <= _HEAD_CHILDREN + _TAIL_CHILDREN + 1:
+    if len(children) <= f.knobs.head_children + f.knobs.tail_children + 1:
         return False, None, 0
-    if _open_cost(f, first, last, children, _HEAD_CHILDREN) > room:
+    if _open_cost(f, first, last, children, f.knobs.head_children) > room:
         return False, None, 0
-    lo, hi = _HEAD_CHILDREN, len(children) - _TAIL_CHILDREN - 1
-    while lo < hi:  # the largest k whose cost fits in half the room (at least _HEAD_CHILDREN)
+    lo, hi = f.knobs.head_children, len(children) - f.knobs.tail_children - 1
+    while lo < hi:  # the largest k whose cost fits in half the room (at least f.knobs.head_children)
         mid = (lo + hi + 1) // 2
         if _open_cost(f, first, last, children, mid) <= room // 2:
             lo = mid
@@ -281,7 +278,9 @@ def _plan(f: _Fold, roots: tuple[Node, ...], budget_tokens: int) -> _Plan:
     last = len(f.lines) - 1
     _, root_k, total = _choose(f, 0, last, roots, budget_tokens)
     if total == 0:  # not even the minimal outline fits: show it anyway, it is the floor
-        root_k = _HEAD_CHILDREN if len(roots) > _HEAD_CHILDREN + _TAIL_CHILDREN + 1 else None
+        root_k = (
+            f.knobs.head_children if len(roots) > f.knobs.head_children + f.knobs.tail_children + 1 else None
+        )
         total = _open_cost(f, 0, last, roots, root_k)
     opened: dict[int, int | None] = {}
     heap: list[tuple[int, int, int, int, Node]] = []
@@ -289,7 +288,7 @@ def _plan(f: _Fold, roots: tuple[Node, ...], budget_tokens: int) -> _Plan:
     def push(depth: int, children: tuple[Node, ...], k: int | None) -> None:
         picks = _promotion(f, children).picks
         for i in _shown_children(f, children, k):
-            if not _small(children[i]):
+            if not _small(f, children[i]):
                 heapq.heappush(heap, (*_key(f, depth, children[i], i in picks), children[i]))
 
     push(1, roots, root_k)
@@ -329,7 +328,7 @@ def _render(f: _Fold, roots: tuple[Node, ...], plan: _Plan) -> tuple[str, int, i
             c = o.kids[i]
             yield f.shown[cursor : c.first]
             if i in shown:
-                if _small(c):
+                if _small(f, c):
                     yield f.shown[c.first : c.last + 1]
                 elif id(c) in plan.opened:
                     yield _Open(c.first, c.last, c.children, plan.opened[id(c)])
@@ -374,6 +373,7 @@ def fold_tree(
     *,
     numbered: bool = True,
     terms: frozenset[str] = frozenset(),
+    knobs: TreeKnobs = DEFAULT.tree,
 ) -> tuple[str, int, int]:
     """The folded text, and how many nodes it shows open and folded.
 
@@ -383,8 +383,8 @@ def fold_tree(
     as fit in half the room left (at least three), its last, and its stand-outs, with each run
     between them as one marker. A folded node with a one-line header carries its marker on that line.
     """
-    f = _fold_of(lines, numbered, terms)
-    roots = _with_gaps(lines, roots, 0, len(lines) - 1, _MIN_GAP)
+    f = _fold_of(lines, numbered, terms, knobs)
+    roots = _with_gaps(lines, roots, 0, len(lines) - 1, knobs.min_gap)
     return _render(f, roots, _plan(f, roots, budget_tokens))
 
 
@@ -522,18 +522,28 @@ def xml_tree(raw: str) -> XmlTree | None:
     return None
 
 
-def fold_xml(raw: str, budget_tokens: int, terms: frozenset[str] = frozenset()) -> TreeFold | None:
+def fold_xml(
+    raw: str, budget_tokens: int, terms: frozenset[str] = frozenset(), knobs: TreeKnobs = DEFAULT.tree
+) -> TreeFold | None:
     tree = xml_tree(raw)
-    return None if tree is None else fold_xml_tree(tree, budget_tokens, terms)
+    return None if tree is None else fold_xml_tree(tree, budget_tokens, terms, knobs)
 
 
-def fold_xml_tree(tree: XmlTree, budget_tokens: int, terms: frozenset[str] = frozenset()) -> TreeFold:
+def fold_xml_tree(
+    tree: XmlTree, budget_tokens: int, terms: frozenset[str] = frozenset(), knobs: TreeKnobs = DEFAULT.tree
+) -> TreeFold:
     """`fold_xml` for XML already parsed (the router parses once, to detect it)."""
-    text, opened, folded = fold_tree(tree.lines, tree.roots, budget_tokens, numbered=False, terms=terms)
+    text, opened, folded = fold_tree(
+        tree.lines, tree.roots, budget_tokens, numbered=False, terms=terms, knobs=knobs
+    )
     return TreeFold(text, "\n".join(tree.lines), opened, folded)
 
 
-def fold_outline(raw: str, budget_tokens: int, terms: frozenset[str] = frozenset()) -> TreeFold:
+def fold_outline(
+    raw: str, budget_tokens: int, terms: frozenset[str] = frozenset(), knobs: TreeKnobs = DEFAULT.tree
+) -> TreeFold:
     lines = split_lines(raw)
-    text, opened, folded = fold_tree(lines, indent_tree(lines), budget_tokens, numbered=False, terms=terms)
+    text, opened, folded = fold_tree(
+        lines, indent_tree(lines), budget_tokens, numbered=False, terms=terms, knobs=knobs
+    )
     return TreeFold(text, raw, opened, folded)
