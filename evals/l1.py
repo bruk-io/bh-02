@@ -30,7 +30,7 @@ from compressors.cli import fold_text
 from compressors.common import estimate_tokens, split_lines
 from compressors.json_fold import parse_json_or_jsonl
 from compressors.recovery import RecoveryError, resolve
-from evals.tasks import BUDGET, FORMATS, Task, tasks
+from evals.tasks import BUDGET, FORMATS, Task, skipped, tasks
 from evals.truth import score_fold
 
 _LAB = Path(__file__).resolve().parent.parent
@@ -226,6 +226,8 @@ def report(rows: list[Row], budget: int) -> str:
         f"Sufficient overall: {sum(r.sufficient for r in rows)}/{len(rows)}; over the folds that folded "
         f"(not passed through): {sum(r.sufficient for r in folded)}/{len(folded)}.",
         "",
+        *[f"Left out on this host: {source} ({why})." for source, why in skipped().items()],
+        *([""] if skipped() else []),
         f"## Invariants: {len(bad)} folds with violations",
         "",
     ]

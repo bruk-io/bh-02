@@ -2,7 +2,10 @@
 
 Size bands, against the default budget of 2,000 tokens and Claude Code's MCP spill threshold of
 50,000 characters (~12,500 tokens): S under the budget, M between the two, L over the threshold.
-`tasks()` builds the whole registry; payloads load lazily, since some are large.
+`tasks()` builds the whole registry. Synthetic payloads are generated when first asked for. Real
+files are read when the registry is built, since their truths are computed from them; a source
+whose files are missing on this host (the Python 3.13 stdlib, the cargo registry, iso-codes, the
+saved PyPI JSON in the untracked corpus/) is left out, and `skipped()` says which and why.
 """
 
 import json
@@ -178,13 +181,18 @@ def _file_task(
     )
 
 
+_PYTHON_FILES = tuple(
+    real.STDLIB / p
+    for p in ("asyncio/base_events.py", "subprocess.py", "argparse.py", "json/decoder.py", "bisect.py")
+)
+_RUST_FILES = tuple(
+    real.CARGO / p
+    for p in ("regex-automata-0.4.13/src/nfa/thompson/compiler.rs", "regex-automata-0.4.13/src/hybrid/dfa.rs")
+)
+
+
 def _python() -> list[Task]:
-    be, sp, ap = (
-        real.STDLIB / "asyncio/base_events.py",
-        real.STDLIB / "subprocess.py",
-        real.STDLIB / "argparse.py",
-    )
-    dec, bis = real.STDLIB / "json/decoder.py", real.STDLIB / "bisect.py"
+    be, sp, ap, dec, bis = _PYTHON_FILES
     src = {p: _read(p) for p in (be, sp, ap, dec, bis)}
     out = [
         _file_task(
@@ -258,8 +266,7 @@ def _python() -> list[Task]:
 
 
 def _rust() -> list[Task]:
-    compiler = real.CARGO / "regex-automata-0.4.13/src/nfa/thompson/compiler.rs"
-    dfa = real.CARGO / "regex-automata-0.4.13/src/hybrid/dfa.rs"
+    compiler, dfa = _RUST_FILES
     out = []
     for path, ty in ((compiler, "Compiler"), (dfa, "Lazy")):
         src = _read(path)
@@ -337,8 +344,6 @@ def _xml() -> list[Task]:
 
 
 def _pypi() -> list[Task]:
-    if not real.PYPI_CLICK.is_file():
-        return []
     src = _read(real.PYPI_CLICK)
     versions = frozenset(real.pypi_versions(src))
     return [
@@ -384,9 +389,31 @@ def task(task_id: str) -> Task:
     return found[task_id]
 
 
+# Each real source: the files its tasks are built from, and the function that builds them.
+_REAL: dict[str, tuple[tuple[Path, ...], Callable[[], list[Task]]]] = {
+    "python": (_PYTHON_FILES, _python),
+    "rust": (_RUST_FILES, _rust),
+    "xml": ((real.ISO_3166_2,), _xml),
+    "pypi": ((real.PYPI_CLICK,), _pypi),
+}
+
+
+def skipped() -> dict[str, str]:
+    """The real sources left out on this host, and why: their files are missing."""
+    out = {}
+    for source, (paths, _) in _REAL.items():
+        if missing := [str(p) for p in paths if not p.is_file()]:
+            out[source] = f"missing {', '.join(missing)}"
+    return out
+
+
 def tasks() -> list[Task]:
     out: list[Task] = []
     for fmt in _SIZES:
         for band in ("S", "M", "L"):
             out += _synthetic(fmt, band)
-    return out + _python() + _rust() + _xml() + _pypi()
+    gone = skipped()
+    for source, (_, build) in _REAL.items():
+        if source not in gone:
+            out += build()
+    return out

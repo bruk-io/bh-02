@@ -33,7 +33,7 @@ from pathlib import Path
 from typing import Any
 
 from evals.stats import bootstrap, paired, wilson
-from evals.tasks import FORMATS, KINDS, TOOLS, Task, tasks
+from evals.tasks import FORMATS, KINDS, TOOLS, Task, skipped, tasks
 from evals.truth import answer_line, score_answer
 
 _LAB = Path(__file__).resolve().parent.parent
@@ -321,6 +321,8 @@ def main(argv: list[str] | None = None) -> int:
         for key, n in sorted(counts.items()):
             print(f"{key:24} {n:4} runs")
         print(f"{len(jobs)} runs, about ${len(jobs) * per_run:.2f} on {ns.model} (a rough estimate)")
+        for source, why in skipped().items():
+            print(f"left out on this host: {source} ({why})")
         return 0
     results = _LAB / "results"
     log = results / f"{ns.name}-hook.jsonl"
