@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 
+from compressors import markers
 from compressors.common import estimate_tokens, split_lines
 from compressors.html import html_to_text, looks_like_html
 from compressors.json_fold import fold_json, parse_json_or_jsonl
@@ -32,7 +33,7 @@ def detect(raw: str) -> str:
 def _cut_chars(raw: str, budget_tokens: int) -> str:
     keep = budget_tokens * 4
     head, tail = int(keep * 0.65), int(keep * 0.3)
-    return f"{raw[:head]}\n[... chars {head}-{len(raw) - tail} omitted]\n{raw[len(raw) - tail :]}"
+    return f"{raw[:head]}\n{markers.chars_omitted(head, len(raw) - tail)}\n{raw[len(raw) - tail :]}"
 
 
 def _body(branch: str, raw: str, terms: frozenset[str], budget_tokens: int) -> tuple[str, str | None]:

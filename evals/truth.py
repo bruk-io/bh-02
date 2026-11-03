@@ -10,6 +10,8 @@ can find without fetching more).
 import re
 from dataclasses import dataclass
 
+from compressors import markers
+
 
 def mentions(text: str, token: str) -> bool:
     """The token as a whole word: `e123` is not in `e1234`, and version `8.1` is not in `8.1.7`
@@ -135,23 +137,18 @@ def _score_prose(truth: Truth, answer: str) -> Score:
             raise AssertionError(f"no scorer for {unreachable!r}")
 
 
-_PROMOTION = '"_next_item_shown_because"'
-_SIBLING_RUN = re.compile(r"(?m)^\t?(\s*)\[\.\.\. lines \d+-\d+ folded \(\d+ siblings[^)]*\)\]")
-_LINE_GAP = re.compile(r"(?m)^\[\.\.\. lines \d+-\d+ omitted")
-
-
 def promotes(fold: str) -> bool:
     """Whether the fold shows something as standing out: JSON's promotion marker; a list of siblings
     with something shown between two hidden runs (a tree stand-out); or a log with lines shown
     between two gaps (a window around a signal)."""
-    if _PROMOTION in fold:
+    if f'"{markers.PROMOTION_KEY}"' in fold:
         return True
     runs_per_indent: dict[str, int] = {}
-    for indent in _SIBLING_RUN.findall(fold):
+    for indent in markers.SIBLING_RUN.findall(fold):
         runs_per_indent[indent] = runs_per_indent.get(indent, 0) + 1
     if any(n >= 2 for n in runs_per_indent.values()):
         return True
-    return len(_LINE_GAP.findall(fold)) >= 2
+    return len(markers.LOG_GAP.findall(fold)) >= 2
 
 
 def score_fold(truth: Truth, fold: str) -> Score:

@@ -18,6 +18,7 @@ import xml.parsers.expat
 from collections import Counter
 from dataclasses import dataclass
 
+from compressors import markers
 from compressors.common import discriminating, estimate_tokens, matches, split_lines
 
 _ID_TOKEN = re.compile(r"[A-Za-z0-9_]*\d[A-Za-z0-9_]*")
@@ -121,9 +122,7 @@ def fold_tree(
     """
 
     def shown(i: int) -> str:
-        line = lines[i]
-        if len(line) > max_line_chars:
-            line = line[:max_line_chars] + f"...[+{len(line) - max_line_chars} chars]"
+        line = markers.clipped(lines[i], max_line_chars)
         return f"{i + 1}\t{line}" if numbered else line
 
     line_cost = [estimate_tokens(shown(i)) + 1 for i in range(len(lines))]
@@ -272,7 +271,7 @@ def fold_tree(
         out.extend(shown(i) for i in range(a, b + 1))
 
     def marker(a: int, b: int, what: str) -> str:
-        return f"[... lines {a + 1}-{b + 1} folded ({what})]"
+        return markers.lines_folded(a + 1, b + 1, what)
 
     def render_child(c: Node) -> None:
         if small(c):
@@ -306,7 +305,7 @@ def fold_tree(
             a, b = c.first, children[j].last
             counts[1] += j - i + 1
             more = sum(1 for x in unshown_standouts.get(id(children), ()) if i <= x <= j)
-            what = f"{j - i + 1} siblings" + (f"; {more} of them stand out too" if more else "")
+            what = markers.siblings(j - i + 1, more)
             out.append(f"{prefix}{_indent_of(lines[a])}{marker(a, b, what)}")
             cursor, i = b + 1, j + 1
         emit(cursor, last)

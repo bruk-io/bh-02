@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from compressors import markers
 from compressors.common import estimate_tokens, query_terms
 from compressors.route import Folded, fold
 
@@ -40,8 +41,6 @@ _NOTICE = re.compile(
     r"Output has been saved to (?P<path>[^\n]+?)\.\n"
 )
 _SPILL_NAME = re.compile(r"\Amcp-.+-\d+\.txt\Z")
-_JSON_SLICE = re.compile(r'"_folded": "(\$[^"\s]*)\[(\d+):(\d+)\] omitted')
-_LINE_GAP = re.compile(r"\[\.\.\. lines (\d+)-(\d+) (?:omitted|folded)")
 
 
 @dataclass(frozen=True)
@@ -109,14 +108,14 @@ def render(folded: Folded, path: str, raw_path: str = "") -> str:
     head = f"[Folded: {size}. Full output: {path}{raw_note}"
     match folded.branch:
         case "json":
-            m = _JSON_SLICE.search(folded.body)
+            m = markers.JSON_SLICE_IN_TEXT.search(folded.body)
             example = f"{_jq_path(m[1])}[{m[2]}:{min(int(m[3]), int(m[2]) + 5)}]" if m else "."
             how = (
                 "Fold markers give the JSON path of what they hide, and say why any item shown out of order "
                 f"is shown. Read hidden parts from the file, e.g. jq '{example}' {quoted}"
             )
         case "lines" | "html" | "xml" | "outline":
-            m = _LINE_GAP.search(folded.body)
+            m = markers.ANY_RANGE.search(folded.body)
             first, last = (int(m[1]), min(int(m[2]), int(m[1]) + 20)) if m else (1, 20)
             how = (
                 "Markers name the line numbers they hide. "
