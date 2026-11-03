@@ -121,8 +121,13 @@ def code_tree(source: str, language: str) -> tuple[Node, ...]:
     return tuple(_nodes(SgRoot(source, language).root(), lines))
 
 
-def fold_code(source: str, language: str, budget_tokens: int) -> TreeFold:
-    """The outline of a source file, opened as far as the budget allows, with real line numbers."""
+def fold_code(
+    source: str, language: str, budget_tokens: int, terms: frozenset[str] = frozenset()
+) -> TreeFold:
+    """The outline of a source file, opened as far as the budget allows, with real line numbers;
+    definitions that hold a query term (few others do) open first."""
     lines = split_lines(source)
-    text, opened, folded = fold_tree(lines, code_tree(source, language), budget_tokens, numbered=True)
+    text, opened, folded = fold_tree(
+        lines, code_tree(source, language), budget_tokens, numbered=True, terms=terms
+    )
     return TreeFold(text, source, opened, folded)

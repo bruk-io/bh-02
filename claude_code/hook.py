@@ -31,7 +31,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from compressors.common import estimate_tokens
+from compressors.common import estimate_tokens, query_terms
 from compressors.route import Folded, fold
 
 MAX_SPILL_BYTES = 32 * 1024 * 1024
@@ -189,7 +189,7 @@ def handle(event: dict[str, Any], budget: int, fold_inline: bool = False) -> dic
                 return None
         case Inline(raw=raw):
             path = ""
-    folded = fold(event.get("tool_input") or {}, raw, budget_tokens=budget)
+    folded = fold(raw, budget_tokens=budget, terms=query_terms(event.get("tool_input") or {}))
     _log(
         {
             "tool": event.get("tool_name"),

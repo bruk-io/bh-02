@@ -90,33 +90,44 @@ def query_words(query: str) -> frozenset[str]:
     """An explicit query's terms: its identifier words, and each whitespace-separated token as
     written (lowercased, two characters or more), so short codes such as NL or JP-13 count."""
     tokens = {t.strip(".,;:!?\"'()[]{}").lower() for t in query.split()}
-    return frozenset(t for t in tokens if len(t) >= 2) | frozenset(split_identifiers(query))
+    words = sorted(t for t in tokens if len(t) >= 2) + split_identifiers(query)
+    return frozenset(list(dict.fromkeys(words))[:MAX_TERMS])
 
 
 def matches(text: str, term: str) -> bool:
     """The term in the text as a whole word, ignoring case, or as one of its identifier words
     (`webhook` is in `verifyWebhook`; `nl` is not in `only`)."""
-    if re.search(rf"(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])", text.lower()):
+    low = text.lower()
+    if term not in low:  # both ways of matching need the term inside the text: the common case, quick
+        return False
+    if re.search(rf"(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])", low):
         return True
     return term in split_identifiers(text)
 
 
-def discriminating(terms: frozenset[str], texts: list[str], share: float = 0.2) -> frozenset[str]:
-    """The terms that pick out a few of the texts: one that most of them hold says nothing.
-    (Arguments often name the container, an owner or a namespace, and every item repeats it.)"""
+def discriminating(
+    terms: frozenset[str], texts: list[str], share: float = 0.2, floor: int = 1
+) -> frozenset[str]:
+    """The terms that pick out a few of the texts: one that more than `share` of them hold (and
+    more than `floor`) says nothing. (Arguments often name the container, an owner or a namespace,
+    and every item repeats it.)"""
     if not terms or not texts:
         return terms
-    cut = max(1, int(share * len(texts)))
+    cut = max(floor, int(share * len(texts)))
     return frozenset(t for t in terms if sum(matches(x, t) for x in texts) <= cut)
 
 
+MAX_TERMS = 20  # matching costs items x terms; a long query adds little past this
+
+
 def query_terms(args: Mapping[str, Any]) -> frozenset[str]:
-    """Words from the tool call's own arguments: the only query signal the design uses."""
-    terms: set[str] = set()
+    """The query a tool call carries: `query_words` of its string arguments (nested ones too), the
+    same rule the CLI's --query uses, so `{"code": "JP-13"}` works as `--query JP-13` does."""
+    texts: list[str] = []
 
     def walk(value: Any) -> None:
         if isinstance(value, str):
-            terms.update(split_identifiers(value))
+            texts.append(value)
         elif isinstance(value, Mapping):
             for v in value.values():
                 walk(v)
@@ -125,4 +136,4 @@ def query_terms(args: Mapping[str, Any]) -> frozenset[str]:
                 walk(v)
 
     walk(args)
-    return frozenset(t for t in terms if len(t) >= 4)
+    return query_words(" ".join(texts))

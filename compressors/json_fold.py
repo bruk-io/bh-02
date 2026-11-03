@@ -269,20 +269,21 @@ def _fold_object(obj: Mapping[str, Any], path: str, terms: frozenset[str], lim: 
         kept = keys
     else:
         rest = keys[lim.keep_keys :]
-        # a key is wanted when its name, or its value's text, holds a query term few values hold
+        # a key is wanted when its name, or its value's text, holds a query term few of them hold
         values = [json.dumps(obj[k], ensure_ascii=False)[:20_000] for k in rest]
-        useful = discriminating(terms, values)
+        by_name, by_value = discriminating(terms, rest), discriminating(terms, values)
         wanted = {
             k
             for k, v in zip(rest, values, strict=True)
             if k.lower() in _ERROR_KEYS
-            or any(matches(k, t) for t in terms)
-            or any(matches(v, t) for t in useful)
+            or any(matches(k, t) for t in by_name)
+            or any(matches(v, t) for t in by_value)
         }
         kept = [k for i, k in enumerate(keys) if i < lim.keep_keys or k in wanted]
     out: dict[str, Any] = {k: _fold(obj[k], child_path(path, k), terms, lim, depth + 1) for k in kept}
     if len(kept) < len(keys):
-        omitted = [k for k in keys if k not in set(kept)]
+        kept_set = set(kept)
+        omitted = [k for k in keys if k not in kept_set]
         names = ", ".join(omitted[:40]) + (", ..." if len(omitted) > 40 else "")
         out["_folded_keys"] = f"{len(omitted)} of {len(keys)} keys of {path} omitted: {names}"
     return out
