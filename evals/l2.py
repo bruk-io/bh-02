@@ -29,6 +29,7 @@ from collections import defaultdict
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -191,7 +192,7 @@ def _ci(k: int, n: int) -> str:
 
 
 def _diffs(
-    base: dict[str, dict[str, Any]], runs: dict[str, dict[str, Any]], field: str, scale: float
+    base: dict[str, dict[str, Any]], runs: dict[str, dict[str, Any]], field: str, scale: float = 1.0
 ) -> list[float]:
     return paired(
         {k: float(v[field]) * scale for k, v in base.items()},
@@ -236,8 +237,7 @@ def report(rows: list[dict[str, Any]], model: str) -> str:
             continue
         base = by_fmt_cond[(fmt, "native")]
 
-        def diffs(field: str, scale: float = 1.0, base=base, runs=runs) -> list[float]:
-            return _diffs(base, runs, field, scale)
+        diffs = partial(_diffs, base, runs)  # (field, scale=1.0): this condition minus native, per run
 
         acc = bootstrap(diffs("correct"), statistics.mean)
         cost, ctx, secs = (

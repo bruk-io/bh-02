@@ -264,7 +264,9 @@ def _fold_array(arr: list[Any], path: str, terms: frozenset[str], lim: _Limits, 
     return out
 
 
-def _fold_object(obj: Mapping[str, Any], path: str, terms: frozenset[str], lim: _Limits, depth: int) -> dict:
+def _fold_object(
+    obj: Mapping[str, Any], path: str, terms: frozenset[str], lim: _Limits, depth: int
+) -> dict[str, Any]:
     keys = list(obj)
     if len(keys) <= lim.max_keys:
         kept = keys

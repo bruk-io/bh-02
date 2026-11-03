@@ -399,7 +399,7 @@ def indent_tree(lines: list[str]) -> tuple[Node, ...]:
 
     def close(upto_indent: int) -> None:
         while stack and stack[-1][0] >= upto_indent:
-            indent, first, kids = stack.pop()
+            _, first, kids = stack.pop()
             node = Node(first, first, max(first, last_nonblank), tuple(kids))
             (stack[-1][2] if stack else roots).append(node)
 

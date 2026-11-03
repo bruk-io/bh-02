@@ -10,6 +10,7 @@ an answer away. The same seed always gives the same payload.
 
 import json
 import random
+from collections.abc import Callable
 from dataclasses import dataclass
 
 
@@ -21,9 +22,9 @@ class Payload:
     lookups: tuple[tuple[str, str], ...]  # (an item's name, its unique value), for every item
 
 
-def _unique(rng: random.Random, n: int, make) -> list[str]:
+def _unique(n: int, make: Callable[[], str]) -> list[str]:
     seen: set[str] = set()
-    out = []
+    out: list[str] = []
     while len(out) < n:
         v = make()
         if v not in seen:
@@ -34,8 +35,8 @@ def _unique(rng: random.Random, n: int, make) -> list[str]:
 
 def pods(size: int, planted: frozenset[int], seed: str, quiet: bool = False) -> Payload:
     rng = random.Random(seed)
-    names = _unique(rng, size, lambda: f"web-{rng.getrandbits(40):010x}")
-    ips = _unique(rng, size, lambda: f"10.{rng.randint(0, 255)}.{rng.randint(0, 255)}.{rng.randint(2, 254)}")
+    names = _unique(size, lambda: f"web-{rng.getrandbits(40):010x}")
+    ips = _unique(size, lambda: f"10.{rng.randint(0, 255)}.{rng.randint(0, 255)}.{rng.randint(2, 254)}")
     items = []
     for i in range(size):
         bad = i in planted
@@ -64,8 +65,8 @@ def logs(size: int, planted: frozenset[int], seed: str, quiet: bool = False) -> 
     """Request logs. The planted line names its request; a rule-kind line is a failed payment (its
     order id is what count and enumerate tasks name), a quiet one an exhausted connection pool."""
     rng = random.Random(seed)
-    reqs = _unique(rng, size, lambda: f"req-{rng.getrandbits(32):08x}")
-    users = _unique(rng, size, lambda: f"u-{rng.getrandbits(24):06x}")
+    reqs = _unique(size, lambda: f"req-{rng.getrandbits(32):08x}")
+    users = _unique(size, lambda: f"u-{rng.getrandbits(24):06x}")
     lines, hits = [], []
     for i in range(size):
         t = f"2026-11-03T{i // 3600 % 24:02d}:{i // 60 % 60:02d}:{i % 60:02d}Z"
@@ -86,9 +87,7 @@ def snapshot(size: int, planted: frozenset[int], seed: str, quiet: bool = False)
     """A Playwright-style accessibility snapshot of an invoices page; a rule-kind anomaly is a
     disabled Pay button, a quiet one an invoice of $0.00."""
     rng = random.Random(seed)
-    invoices = _unique(
-        rng, size, lambda: f"INV-{rng.randint(10, 99)}{rng.getrandbits(20):05x}"
-    )  # with a digit
+    invoices = _unique(size, lambda: f"INV-{rng.randint(10, 99)}{rng.getrandbits(20):05x}")  # with a digit
     refs = [f"e{r}" for r in rng.sample(range(10, 100_000), 2 * size + 8)]
     lines = [
         "- Page URL: https://billing.local/invoices",
@@ -119,10 +118,8 @@ def figma(size: int, planted: frozenset[int], seed: str, quiet: bool = False) ->
     """Figma-style node metadata, packed on one line, for a grid of product cards; a rule-kind
     anomaly is a hidden layer, a quiet one a card half the width of the others."""
     rng = random.Random(seed)
-    names = _unique(
-        rng, size, lambda: f"Card {rng.choice('ABCDEFGHJKLMNPQRSTUVWXYZ')}{rng.randint(1000, 9999)}"
-    )
-    ids = _unique(rng, 5 * size + 2, lambda: f"{rng.randint(1, 99999)}:{rng.randint(1, 99999)}")
+    names = _unique(size, lambda: f"Card {rng.choice('ABCDEFGHJKLMNPQRSTUVWXYZ')}{rng.randint(1000, 9999)}")
+    ids = _unique(5 * size + 2, lambda: f"{rng.randint(1, 99999)}:{rng.randint(1, 99999)}")
     parts = [f'<canvas id="{ids[-1]}" name="Checkout">', f'<frame id="{ids[-2]}" name="Product grid">']
     for i in range(size):
         bad = i in planted

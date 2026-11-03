@@ -100,7 +100,11 @@ def score_answer(truth: Truth, answer: str) -> Score:
     """A model's answer against the truth, read from its ANSWER line.
 
     Without one, the answer is scored leniently on its prose and marked `parsed=False`, so a run
-    report can show how often the instruction was not followed."""
+    report can show how often the instruction was not followed.
+
+    Raises:
+        AssertionError: a kind of truth with no scorer (a new kind added without one).
+    """
     line = answer_line(answer)
     if line is None:
         return _score_prose(truth, answer)
@@ -156,7 +160,11 @@ def score_fold(truth: Truth, fold: str) -> Score:
 
     A count is sufficient when the fold states it (a summary's entry, a marker's count) or shows
     every counted item; a number that merely appears (a line number, a date) is not enough. A
-    location needs the line shown with its number; an absent anomaly needs nothing promoted."""
+    location needs the line shown with its number; an absent anomaly needs nothing promoted.
+
+    Raises:
+        AssertionError: a kind of truth with no scorer (a new kind added without one).
+    """
     match truth:
         case Needle(token=t) | Exact(value=t):
             return Score(mentions(fold, t))

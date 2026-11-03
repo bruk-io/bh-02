@@ -87,7 +87,7 @@ def coverage(source: str, out: str, numbered: bool) -> list[str]:
 
 def _line_holds(lines: list[str], i: int, item: object) -> bool:
     try:
-        return json.loads(lines[i]) == item
+        return bool(json.loads(lines[i]) == item)
     except IndexError, ValueError:
         return False
 
@@ -168,9 +168,7 @@ def check(task: Task, budget: int, query_on: bool) -> Row:
     again = fold_text(raw, budget=budget, path=task.path, query=query, quiet=True)
     out = result.text
     passthrough = result.branch is None
-    branch = (
-        "passthrough" if passthrough else (f"code-{result.language}" if result.language else result.branch)
-    )
+    branch = f"code-{result.language}" if result.language else (result.branch or "passthrough")
     violations: list[str] = []
     if again.text != out:
         violations.append("folding twice gave different text")

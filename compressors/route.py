@@ -91,7 +91,11 @@ def _cut_chars(raw: str, budget_tokens: int) -> str:
 def _body(
     branch: str, parsed: _Parsed, raw: str, terms: frozenset[str], budget_tokens: int
 ) -> tuple[str, str | None]:
-    """The folded text, and the text its line numbers refer to when that is not `raw`."""
+    """The folded text, and the text its line numbers refer to when that is not `raw`.
+
+    Raises:
+        AssertionError: a branch arrived without what it parses (a bug in `_detect` or `_parse_as`).
+    """
     match branch, parsed:
         case "xml", XmlTree() as tree:
             return fold_xml_tree(tree, budget_tokens, terms).text, (
@@ -138,12 +142,9 @@ def fold(
 
     None when the result fits the budget, or when folding would keep more than 90% of it. `terms`
     are the query (`common.query_words` of a query, `common.query_terms` of a tool call's
-    arguments); `force` names the branch instead of detecting it.
-
-    Raises:
-        ValueError: `force` names a branch the text cannot take (JSON that does not parse, XML that
-            is not well formed) or no branch at all.
-    """
+    arguments); `force` names the branch instead of detecting it. A `force` the text cannot take
+    (JSON that does not parse, XML that is not well formed) or that is no branch at all raises
+    ValueError, from `_parse_as`."""
     raw_tokens = estimate_tokens(raw)
     if raw_tokens <= budget_tokens:
         return None
