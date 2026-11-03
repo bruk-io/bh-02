@@ -552,7 +552,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--formats", nargs="+", choices=FORMATS, default=list(FORMATS))
     parser.add_argument("--kinds", nargs="+", choices=KINDS, default=list(KINDS))
     parser.add_argument("--bands", nargs="+", choices=("S", "M", "L"), default=["M", "L"])
-    parser.add_argument("--conditions", nargs="+", choices=sorted({*MCP_CONDITIONS, *FILE_CONDITIONS}))
+    parser.add_argument(
+        "--conditions", nargs="+", choices=sorted({*MCP_CONDITIONS, *BASH_CONDITIONS, *FILE_CONDITIONS})
+    )
     parser.add_argument("--ids", nargs="+", default=(), help="exact task ids (overrides the other filters)")
     parser.add_argument("--reps", type=int, default=1)
     parser.add_argument(
