@@ -10,7 +10,7 @@ The array stays a JSON array, and every marker says which indices it hides and a
 import json
 import re
 from collections import Counter
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -163,11 +163,32 @@ def _reasons(
     return out
 
 
+def _words(values: Iterable[Any]) -> set[str]:
+    return {
+        w
+        for v in values
+        if isinstance(v, str | int) and not isinstance(v, bool)
+        for w in split_identifiers(str(v))
+    }
+
+
+def _discriminating(terms: frozenset[str], item_words: list[set[str]]) -> frozenset[str]:
+    """The query terms that pick out a few items; one that matches most of them says nothing.
+
+    Arguments often name the container (an owner, a namespace), and every item repeats it.
+    """
+    if not terms:
+        return terms
+    cut = max(1, int(0.2 * len(item_words)))
+    return frozenset(t for t in terms if sum(t in words for words in item_words) <= cut)
+
+
 def _promote(arr: list[Any], terms: frozenset[str], limit: int, shown: set[int]) -> list[tuple[int, str]]:
     """Up to `limit` indices worth showing, strongest first, with why."""
     if all(isinstance(x, Mapping) for x in arr):
         flats = [_flatten(x) for x in arr]
         rare_values, rare_keys = _rarity(flats)
+        terms = _discriminating(terms, [_words(f.values()) for f in flats]) if terms else terms
         scored = []
         for i, flat in enumerate(flats):
             if i in shown:
@@ -180,6 +201,7 @@ def _promote(arr: list[Any], terms: frozenset[str], limit: int, shown: set[int])
         scored.sort()
         return [(i, why) for _, i, why in scored[:limit]]
     if all(isinstance(x, str) for x in arr):
+        terms = _discriminating(terms, [_words([x]) for x in arr]) if terms else terms
         hits = []
         for i, s in enumerate(arr):
             if i in shown:

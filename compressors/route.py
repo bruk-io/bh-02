@@ -1,5 +1,6 @@
 """The middleware's one entry point: route a tool result to a compressor, or pass it through."""
 
+import re
 from collections.abc import Mapping
 from typing import Any
 
@@ -12,12 +13,22 @@ _MIN_LINES = 40  # fewer lines than this and the text is cut by characters inste
 _MAX_AVG_LINE = 500
 _WORTH_IT = 0.9  # a result that keeps more than this share of the raw tokens is passed through
 
+_FOLDED_SLICE = re.compile(r'"_folded": "(\$[^"\s]*)\[(\d+):(\d+)\] omitted')
 _HOW_TO_RECOVER = {
-    "json": 'a path such as "$.items[10:20]" or "$.items[312].status", or "grep:<text>"',
     "lines": '"lines:<first>-<last>" (1-based, inclusive) or "grep:<text>"',
     "html": '"lines:<first>-<last>" of the page text (1-based, inclusive) or "grep:<text>"',
     "text": '"chars:<start>-<end>" (0-based, end exclusive) or "grep:<text>"',
 }
+
+
+def _how_to_recover(branch: str, body: str) -> str:
+    if branch != "json":
+        return _HOW_TO_RECOVER[branch]
+    m = _FOLDED_SLICE.search(body)
+    example = f"{m[1]}[{m[2]}:{min(int(m[3]), int(m[2]) + 5)}]" if m else "$.key[3]"
+    return (
+        f'a JSON path such as "{example}" (keys as .name, indices as [i], slices as [a:b]), or "grep:<text>"'
+    )
 
 
 def detect(raw: str) -> str:
@@ -74,9 +85,10 @@ def compress(
     terms = query_terms(args) if use_query else frozenset()
     body = _body(branch, raw, terms, budget_tokens)
     cid = call_id_for(raw)
+    how = _how_to_recover(branch, body)
     banner = (
         f"[Output folded: ~{raw_tokens} tokens -> ~{estimate_tokens(body)}. Markers show what was left out. "
-        f'To read omitted parts call recover(call_id="{cid}", query=...) with {_HOW_TO_RECOVER[branch]}.]'
+        f'To read omitted parts call recover(call_id="{cid}", query=...) with {how}.]'
     )
     text = f"{banner}\n{body}"
     out_tokens = estimate_tokens(text)
