@@ -33,7 +33,9 @@ _BODY_KINDS = frozenset(
         "literal_value",  # go composite literals
     }
 )
-_LITERAL_KINDS = frozenset({"object", "array", "dictionary", "list", "set", "tuple", "jsx_element"})
+_LITERAL_KINDS = frozenset(
+    {"object", "array", "dictionary", "list", "set", "tuple", "jsx_element", "string", "template_string"}
+)
 _LANGUAGES = {
     ".py": "python",
     ".pyi": "python",

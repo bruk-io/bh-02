@@ -185,9 +185,10 @@ def fold_tree(
         return own <= 0.25 * open_cost(n.first, n.last, n.children, None)
 
     def key(depth: int, n: Node) -> tuple[int, int, int, int]:
-        """Stand-outs open first, then containers, then bodies; shallower first, cheaper first."""
+        """Stand-outs open first, then containers, then bodies; shallower first, then the ones that
+        cost least to open, so a long docstring opens after the small bodies around it."""
         rank = 0 if (n.first, n.last) in standouts else 1 if is_container(n) else 2
-        return (rank, depth, folded_cost(n), n.first)
+        return (rank, depth, open_cost(n.first, n.last, n.children, None) - folded_cost(n), n.first)
 
     heap = [(*key(1, roots[i]), roots[i]) for i in shown_children(roots, root_k)]
     heapq.heapify(heap)
