@@ -10,7 +10,8 @@ from typing import Any, Protocol, runtime_checkable
 from cordis import Effects, acquire, bind, component
 from runner_cordis_plugin import allowlist
 from runner_cordis_plugin.approval import Approval, Graded
-from runner_cordis_plugin.jail import BrigConfig, BrigJail, Host
+from runner_cordis_plugin.jail import BrigJail, Host
+from runner_cordis_plugin.policy import BrigConfig
 from runner_cordis_plugin.runner import Runner
 from runner_cordis_plugin.unconfined import Unjailed
 

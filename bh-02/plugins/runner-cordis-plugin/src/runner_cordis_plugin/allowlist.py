@@ -23,7 +23,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from host_paths import config_home, passes, roots
-from runner_cordis_plugin.jail import BASELINE_ENV, BrigConfig
+from runner_cordis_plugin.policy import BASELINE_ENV, BrigConfig
 
 __all__ = ["FILE", "Refused", "Standing", "effective", "location", "parsed", "read"]
 

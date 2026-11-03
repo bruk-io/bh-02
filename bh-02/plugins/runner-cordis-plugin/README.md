@@ -73,6 +73,20 @@ to hand to the runner, not about each effect a component yields (that is cordis'
 policy seam, not this).
 
 `runner:confined`'s mechanism, `BrigJail`, compiles a jail for each start from one policy.
+The modules, so the swap to a new brig replaces two of them:
+- `policy.py`: `Policy`, bh-02's own frozen intent (writable roots, write denies, read model and
+  readable roots, masks, the environment allowlist and the variables set, the program's channel),
+  and the pure functions that make it (`spec_for`, `allowlisted`, `link_directories`,
+  `readable_roots`, `told_reads`, `git_author`). No brig.
+- `mounts.py`: what a Linux jail does with mounts, as decisions on a `Policy` (`mountable`,
+  `uncovered`, `held`, `tripwired`, the notice and the grade). No brig.
+- `placeholders.py`: the directories the jail makes on the host, their record, and the jail lock
+  (`jails.lock` in the state directory). No brig. `facts.py`: what the host is (one walk of the
+  links on the way to the interpreter, which paths exist, the git identity). No brig.
+- `brig_spec.py`: `to_brig_spec`, the one function from a `Policy` to the old brig's `Spec`.
+- `jail.py`: the shell (`BrigJail`, the launch, `_Jailed`). With `brig_spec.py`, the only modules
+  that import brig.
+
 `spec_for` is the policy, as a pure function:
 
 - **writes**: the project root, a scratch directory of the jail's own (`TMPDIR`), and the
@@ -131,7 +145,7 @@ policy seam, not this).
   interpreter's file, the directory that holds the link is denied whenever it lies strictly under
   a root the jail may write (generic: uv, pyenv, a venv's own `bin`). The decision is a pure
   function beside `spec_for`, `link_directories(links, writable)`, which takes the chain as the
-  host found it; the shell, `_links_on_the_way`, only walks it, one path component at a time, so a
+  host found it; the shell, `facts.links_on_the_way`, only walks it, one path component at a time, so a
   link is found in the directory that physically holds it (a link reached through a link to a
   directory is that directory's). What it denies in the common layouts:
   - bh-02 run from its own checkout (`uv run bh-02`), the project the checkout: its `.venv/bin`
@@ -296,7 +310,7 @@ holding the path again before you could create anything
 
 When they go: the jail removes the ones it made once brig has verified the program it ran is gone
 and no other bh-02 jail of the same user is running (a shared `flock` on
-`/tmp/bh-02-jails-<uid>.lock`, held by every running jail and taken exclusively to clean up: a
+`jails.lock` in bh-02's state directory (`$XDG_STATE_HOME/bh-02/`, not `/tmp`, where another local user could create the name first), held by every running jail and taken exclusively to clean up: a
 second session in the same project binds the first one's placeholders read-only, and removing them
 would detach those binds). `BrigJail` takes that path as its `lock` parameter: only tests pass one
 of their own (a `tmp_path`), so a bh-02 jail running on the machine can't hold the lock out from

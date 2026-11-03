@@ -30,6 +30,8 @@ from runner_cordis_plugin import (
     SYSTEM_READABLE,
     BrigConfig,
     BrigJail,
+    Policy,
+    ReadModel,
     Runner,
     Tripwire,
     allowlisted,
@@ -43,6 +45,8 @@ from runner_cordis_plugin import (
     identity,
     lifted,
     link_directories,
+    links_on_the_way,
+    lock_path,
     made_by_the_jail,
     mountable,
     notice_for,
@@ -91,13 +95,13 @@ def test_the_project_s_auto_memory_directory_is_a_root_an_input_may_write() -> N
         host=(),
         memory="/Users/me/.local/state/bh-02/projects/-w-app/memory",
     )
-    assert spec.fs.write_allows == (
+    assert spec.writable == (
         "/Users/me/.local/state/bh-02/projects/-w-app/memory",
         "/tmp/j/tmp",
         "/tmp/k",  # the socket's directory (brig's decision-186; TASK-0079.31 replaces it)
         "/w/app",
     )
-    assert not any(d.startswith("/Users/me/.local/state") for d in spec.fs.write_denies)
+    assert not any(d.startswith("/Users/me/.local/state") for d in spec.write_denies)
     assert spec_for(
         root="/w/app",
         endpoint="/tmp/k/k.sock",
@@ -106,7 +110,7 @@ def test_the_project_s_auto_memory_directory_is_a_root_an_input_may_write() -> N
         config=BrigConfig(),
         layers=(),
         host=(),
-    ).fs.write_allows == ("/tmp/j/tmp", "/tmp/k", "/w/app")
+    ).writable == ("/tmp/j/tmp", "/tmp/k", "/w/app")
 
 
 def test_the_spec_denies_what_would_reach_outside_the_jail_later() -> None:
@@ -120,8 +124,8 @@ def test_the_spec_denies_what_would_reach_outside_the_jail_later() -> None:
         host=("/w/app/src", "/usr/lib/python3.15", "/w/app/.venv", "/w/app"),
         secrets=("/src/bh/private.txt",),
     )
-    assert spec.fs.write_allows == ("/tmp/j/tmp", "/tmp/k", "/w/app")
-    denies = set(spec.fs.write_denies)
+    assert spec.writable == ("/tmp/j/tmp", "/tmp/k", "/w/app")
+    denies = set(spec.write_denies)
     assert {"/w/app/mine.toml", "/elsewhere/chat.toml"} <= denies  # the composition's own files
     assert {
         "/w/app/src",
@@ -134,15 +138,15 @@ def test_the_spec_denies_what_would_reach_outside_the_jail_later() -> None:
         "/w/app/.claude",
     } <= denies  # brig's self-modify list
     assert not {"/w/app/CLAUDE.md", "/w/app/AGENTS.md"} & denies  # but the guidance files: `allow`'s default
-    assert "/Users/me/.ssh" in spec.fs.read_denies
-    assert "/w/app/private.txt" in spec.fs.read_denies  # a file `hide` names, beside the project
-    assert "/src/bh/private.txt" in spec.fs.read_denies  # a secret, wherever the project is
+    assert "/Users/me/.ssh" in spec.masks
+    assert "/w/app/private.txt" in spec.masks  # a file `hide` names, beside the project
+    assert "/src/bh/private.txt" in spec.masks  # a secret, wherever the project is
     assert "/w/app/private.txt" in denies  # one it may not read it may not overwrite either
     assert "/src/bh/private.txt" not in denies  # outside every writable root: nothing to deny
-    assert dict(spec.env.set) == {"TMPDIR": "/tmp/j/tmp"} and "PATH" in spec.env.allow_names
+    assert dict(spec.env_set) == {"TMPDIR": "/tmp/j/tmp"} and "PATH" in spec.env_allow
     # The channel by name; its socket's directory is a write root (above), as brig granted it
     # per channel until its decision-186.
-    assert [c.name for c in spec.channels] == ["program"]
+    assert spec.channel == "program"
 
 
 #: The made-up home, resolved the way `spec_for` resolves a root (`Path.resolve`): on macOS
@@ -152,8 +156,10 @@ _HOME = str(Path("/home/me").resolve())
 
 
 def _denied(spec: Any, path: str) -> bool:
-    """Whether `spec` denies writing `path`: it is a write deny, or under one."""
-    return any(path == d or path.startswith(d + "/") for d in spec.fs.write_denies)
+    """Whether `spec` (a `Policy`, or the brig Spec a jail compiled) denies writing `path`: it is a
+    write deny, or under one."""
+    denies = spec.write_denies if isinstance(spec, Policy) else spec.fs.write_denies
+    return any(path == d or path.startswith(d + "/") for d in denies)
 
 
 def test_bh_02_run_from_the_home_directory_may_not_write_its_configuration() -> None:
@@ -184,9 +190,9 @@ def test_bh_02_run_from_the_home_directory_may_not_write_its_configuration() -> 
         assert _denied(spec, f"{_HOME}/xdg/bh-02/{name}"), name  # $XDG_CONFIG_HOME/bh-02
     assert _denied(spec, f"{_HOME}/.config/bh-02")  # the directory itself: no link swapped in
     assert not _denied(spec, f"{_HOME}/.config/gh/hosts.yml") and not _denied(spec, f"{_HOME}/notes.md")
-    assert "/elsewhere/bh-02" not in spec.fs.write_denies  # outside every writable root
+    assert "/elsewhere/bh-02" not in spec.write_denies  # outside every writable root
     project = home_rooted(f"{_HOME}/src/app")  # the usual case: the home is not writable at all
-    assert not set(trusted) & set(project.fs.write_denies)
+    assert not set(trusted) & set(project.write_denies)
     extra = home_rooted(f"{_HOME}/src/app", write=(".", _HOME))  # a root `write` adds
     assert _denied(extra, f"{_HOME}/.config/bh-02/startup.py")
     inside = home_rooted(f"{_HOME}/.config/bh-02")  # bh-02 run in its own config directory
@@ -230,10 +236,10 @@ def test_bh_02_s_own_code_under_a_writable_root_is_denied_as_its_layer_files_are
         assert _denied(spec, shipped), root
         assert _denied(spec, f"{_CODE[0]}/planted.py"), root  # a module bh-02 could import
         assert all(_denied(spec, code) for code in _CODE[:3]), root  # every plugin's, and cordis's
-        assert _CODE[3] not in spec.fs.write_denies  # outside every writable root
+        assert _CODE[3] not in spec.write_denies  # outside every writable root
         assert not _denied(spec, f"{_CHECKOUT}/README.md")  # the rest of the checkout is the project's
     elsewhere = rooted(f"{_HOME}/work/app")  # the usual case: none is under the project
-    assert not set(_CODE) & set(elsewhere.fs.write_denies)
+    assert not set(_CODE) & set(elsewhere.write_denies)
     inside = rooted(_CODE[0])  # bh-02 run in a package's own directory
     assert not _denied(inside, f"{_CODE[0]}/notes.md")
 
@@ -271,13 +277,13 @@ def test_the_interpreter_bh_02_runs_on_is_denied_where_an_input_could_write_it()
     assert not _denied(rooted(_HOME, in_a_venv), sibling)  # a name beside it is not the file
     assert _denied(rooted(_HOME, without_one), sibling)  # (no venv: the whole base is the host's)
     elsewhere = rooted(f"{_HOME}/work/app", in_a_venv)  # the usual case: the Python is not under the project
-    assert interpreter not in elsewhere.fs.write_denies
+    assert interpreter not in elsewhere.write_denies
     system = rooted(_HOME, in_a_venv, ("/usr/bin/python3.13",))  # a system Python, outside every root
-    assert "/usr/bin/python3.13" not in system.fs.write_denies
+    assert "/usr/bin/python3.13" not in system.write_denies
     in_its_directory = rooted(f"{base}/bin", in_a_venv)  # the project is its directory: only the file
     assert _denied(in_its_directory, interpreter) and not _denied(in_its_directory, f"{base}/bin/notes.md")
     itself = rooted(interpreter, in_a_venv)  # a root is never denied, or the project would be read-only
-    assert interpreter not in itself.fs.write_denies
+    assert interpreter not in itself.write_denies
 
 
 def _a_python_in(project: Path) -> tuple[Path, Path, Path]:
@@ -369,7 +375,7 @@ def test_the_directory_of_each_link_on_the_way_to_the_interpreter_is_denied_wher
     for directory in in_the_home:
         assert _denied(denies(_HOME), f"{directory}/anything"), directory  # nothing in it is written
     assert not _denied(denies(_HOME), f"{_HOME}/notes.md")
-    assert not set(in_the_home) & set(denies(f"{_HOME}/work/app").fs.write_denies)  # the usual case
+    assert not set(in_the_home) & set(denies(f"{_HOME}/work/app").write_denies)  # the usual case
     assert not _denied(denies(uv), uv) and _denied(denies(uv), f"{uv}/cpython-3.15.0-linux/bin/python3")
 
 
@@ -488,9 +494,9 @@ def test_a_linux_jail_reads_bh_02_s_own_code_and_writes_none_of_it(tmp_path: Pat
         code=_CODE,
     )
     linux = allowlisted(policy, readable)
-    read = linux.fs.read_allows  # brig keeps a tree once: one under another (`/opt/py`) is that one
+    read = linux.readable  # brig keeps a tree once: one under another (`/opt/py`) is that one
     assert all(any(c == r or c.startswith(r + "/") for r in read) for c in _CODE), read
-    assert not any(c == w or c.startswith(w + "/") for c in _CODE for w in linux.fs.write_allows)
+    assert not any(c == w or c.startswith(w + "/") for c in _CODE for w in linux.writable)
     # and the row's jail compiles them in: bound read-only, as they are on the host
     package = tmp_path / "src" / "cordis"
     package.mkdir(parents=True)
@@ -534,16 +540,18 @@ def test_on_linux_the_policy_reads_by_allowlist_and_keeps_every_deny() -> None:
         secrets=("/src/bh/private.txt",),
     )
     linux = allowlisted(policy, ("/usr", "/etc", "/opt/py"))
-    assert linux.fs.read_allows == ("/etc", "/opt/py", "/usr")
-    assert linux.fs.read_denies == policy.fs.read_denies
-    assert {"/w/app/private.txt", "/src/bh/private.txt", "/home/me/.ssh"} <= set(linux.fs.read_denies)
-    assert (
-        "/w/app/private.txt" in policy.fs.write_denies and "/w/app/private.txt" not in linux.fs.write_denies
+    assert linux.readable == ("/etc", "/opt/py", "/usr")
+    assert linux.masks == policy.masks
+    assert {"/w/app/private.txt", "/src/bh/private.txt", "/home/me/.ssh"} <= set(linux.masks)
+    assert "/w/app/private.txt" in policy.write_denies and "/w/app/private.txt" not in linux.write_denies
+    kept = tuple(d for d in policy.write_denies if d != "/w/app/private.txt")
+    assert (linux.writable, linux.write_denies) == (policy.writable, kept)
+    assert (linux.env_allow, linux.env_set, linux.channel) == (
+        policy.env_allow,
+        policy.env_set,
+        policy.channel,
     )
-    kept = tuple(d for d in policy.fs.write_denies if d != "/w/app/private.txt")
-    assert (linux.fs.write_allows, linux.fs.write_denies) == (policy.fs.write_allows, kept)
-    assert (linux.env, linux.channels) == (policy.env, policy.channels)
-    assert linux.fs.read_model.value == "allow_list" and policy.fs.read_model.value == "deny_list"
+    assert linux.read_model is ReadModel.ALLOWLIST and policy.read_model is ReadModel.DENYLIST
 
 
 def test_a_linux_jail_reads_the_system_the_interpreter_and_what_the_command_names() -> None:
@@ -989,6 +997,37 @@ async def test_a_linux_jail_ends_when_the_host_renames_over_a_write_deny_and_a_n
         assert "planted" not in config.read_text() and "Pat" in config.read_text()  # held again
     finally:
         await started.stop()
+
+
+def test_the_jail_lock_is_in_bh_02_s_state_directory_not_in_a_directory_every_user_can_write() -> None:
+    """Another local user could create a name in `/tmp` first and hold the lock, or keep it from
+    being made; the state directory is the person's own."""
+    assert lock_path({"XDG_STATE_HOME": "/x"}, "/home/me") == "/x/bh-02/jails.lock"
+    assert lock_path({}, "/home/me") == "/home/me/.local/state/bh-02/jails.lock"
+
+
+async def test_a_jail_with_no_lock_given_takes_the_one_in_the_state_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    await BrigJail(BrigConfig(), Host(), platform="linux").release()
+    assert (tmp_path / "state" / "bh-02" / "jails.lock").is_file()
+
+
+def test_one_walk_of_the_links_serves_the_policy_and_the_readable_trees(tmp_path: Path) -> None:
+    """Every link on the way is found, in the directory that holds it; the ones the lookup goes on
+    through (a link to a directory in the middle of a path) are told from the ones it ends at."""
+    (tmp_path / "store" / "3.15.0" / "bin").mkdir(parents=True)
+    (tmp_path / "store" / "3.15.0" / "bin" / "python3").write_text("")
+    (tmp_path / "alias").symlink_to("store/3.15.0")
+    (tmp_path / "bin").mkdir()
+    (tmp_path / "bin" / "python").symlink_to("../alias/bin/python3")
+    found = links_on_the_way([f"{tmp_path}/bin/python"])
+    assert [(link.entry, link.through) for link in found] == [
+        (f"{tmp_path}/bin/python", False),
+        (f"{tmp_path}/alias", True),
+    ]
+    assert links_on_the_way([f"{tmp_path}/alias/bin/python3", ""]) == (found[1],)
 
 
 def test_a_jail_s_record_of_its_placeholders_is_in_bh_02_s_state_directory() -> None:
@@ -2554,7 +2593,7 @@ def test_a_linux_jail_watches_an_absent_secret_only_where_no_input_may_create_it
     )
     linux = allowlisted(policy, ("/usr",))
     absent = {"/w/app/private.txt", "/w/app/src/private.txt"}
-    assert "/w/app/private.txt" not in linux.fs.write_denies  # an input may create it
+    assert "/w/app/private.txt" not in linux.write_denies  # an input may create it
     watched = tripwired(linux, absent)
     assert "/w/app/private.txt" not in watched and "/w/app/private.txt" not in held(linux, absent)
     assert "/w/app/src/private.txt" in watched

@@ -30,10 +30,12 @@ GROUPS = (
     Group(
         name="jail-lock",
         why=(
-            "A Linux jail of bh-02 holds /tmp/bh-02-jails-<uid>.lock shared for as long as it runs, and "
+            "A Linux jail of bh-02 holds the user's jail lock (`jails.lock` in bh-02's state directory) "
+            "shared for as long as it runs, and "
             "removes its placeholders (and its record) only when it can take that lock exclusively, "
             "that is, when no other jail of the user runs (runner_cordis_plugin.jail: `_hold`, "
-            "`_clear_up`). The lock is one file per user, so a jail that one worker starts keeps the "
+            "`placeholders.clear_up`). The lock is one file per user, so a jail that one worker starts "
+            "keeps the "
             "placeholders of a jail another worker stops, and the tests that assert nothing is left "
             "behind fail. Every test that starts a BrigJail on the default lock is in these modules; "
             "the ones that give their BrigJail a lock of their own (TASK-0085, TASK-0091) are among "

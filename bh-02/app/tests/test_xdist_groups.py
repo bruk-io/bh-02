@@ -34,9 +34,10 @@ def test_every_file_a_group_names_is_a_test_file_that_exists() -> None:
 
 
 def test_every_test_file_that_starts_a_jail_is_in_a_group() -> None:
-    """A jail of bh-02's own holds `/tmp/bh-02-jails-<uid>.lock` for as long as it runs, so a test that
-    starts one must not run beside another (the `jail-lock` group): a file that starts one belongs in
-    a group of the repository's `conftest.py`, with a reason there."""
+    """A jail of bh-02's own holds the user's jail lock (`jails.lock` in bh-02's state directory) for
+    as long as it runs, so a test that starts one must not run beside another (the `jail-lock`
+    group): a file that starts one belongs in a group of the repository's `conftest.py`, with a
+    reason there."""
     conftest = _conftest()
     files = [
         path.relative_to(_ROOT).as_posix()
