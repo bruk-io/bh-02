@@ -25,7 +25,7 @@ From the architecture review of the bh-02/brig seam, 2026-11-02 (TASK-0176). Tod
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 runner.start's contract gives the owner its endpoint rather than taking one, in CONTRACTS.md and in every implementation and fake
-- [ ] #2 scripts/check passes
+- [x] #2 scripts/check passes
 <!-- AC:END -->
 
 ## Implementation Notes
