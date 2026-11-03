@@ -6,6 +6,19 @@ uv workspace member and no gate sees it). Move it to its own repo when it has re
 
 Source idea: `Filtering_Large_Tool_Outputs.pdf` (a Gemini chat export). Take the ideas, not the code.
 
+## The tool
+
+```
+./lab fold FILE [--budget 2000] [--query WORDS] [--as FORMAT] [--lang LANG] [--save PATH]
+COMMAND | ./lab fold [--budget 2000] ...
+```
+
+Prints the shape of a large text in a token budget, with markers that say what they hide (a JSON
+path, or a line or character range), so `jq`, `sed -n 'A,Bp'` or a paged read fetches exactly that.
+Code (by extension, or `--lang`) folds through ast-grep: every class, function and block header at
+its real line number. Other text folds by what it is: JSON, XML, accessibility outlines, HTML, logs,
+plain text. Text that fits the budget comes back unchanged.
+
 ## Target: Claude Code
 
 The lab now tests the idea inside Claude Code, through two hooks and a headless A/B:

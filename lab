@@ -5,7 +5,7 @@
 #   ./lab stats [...]           corpus size and format report
 #   ./lab needle [...]          synthetic needle-survival grid
 #   ./lab ab [...]              headless Claude Code, native against the fold hook (costs money)
-#   ./lab outline FILE          a file's outline with real line numbers (code, XML, outlines)
+#   ./lab fold [FILE|-] [...]   fold a file or stdin into a token budget (the tool itself)
 set -euo pipefail
 cd "$(dirname "$0")"
 export UV_SYSTEM_CERTS="${UV_SYSTEM_CERTS:-${UV_NATIVE_TLS:-}}"; unset UV_NATIVE_TLS
@@ -15,6 +15,6 @@ case "$cmd" in
   check) run ruff format . && run ruff check . && run pytest "$@" ;;
   extract|stats|needle) run python -m "harness.$cmd" "$@" ;;
   ab) run python -m claude_code.ab "$@" ;;
-  outline) run python -m claude_code.outline "$@" ;;
-  *) echo "unknown command '$cmd': use check, extract, stats, needle, ab or outline" >&2; exit 2 ;;
+  fold) run python -m compressors.cli "$@" ;;
+  *) echo "unknown command '$cmd': use check, fold, extract, stats, needle or ab" >&2; exit 2 ;;
 esac

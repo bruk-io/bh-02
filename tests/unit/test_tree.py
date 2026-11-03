@@ -98,14 +98,3 @@ def test_a_sibling_that_stands_out_is_shown_inside_a_partly_open_list():
     assert "siblings)" in fold.text
     assert 'button "Pay invoice 117" [ref=e119] [disabled]' in fold.text
     assert 'button "Pay invoice 150"' not in fold.text
-
-
-def test_the_outline_tool_folds_code_and_passes_small_files_whole(tmp_path):
-    from claude_code.outline import outline
-
-    body = "\n".join(f"        x{i} = {i}" for i in range(400))
-    src = f"class A:\n    def big(self):\n{body}\n\n    def small(self):\n        return 1\n"
-    text = outline("a.py", src, budget=200)
-    assert "1\tclass A:" in text and "def big(self):" in text and "def small(self):" in text
-    assert "folded" in text
-    assert outline("a.py", "x = 1\n", budget=200) == "1\tx = 1"

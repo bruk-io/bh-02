@@ -96,18 +96,34 @@ class Folded:
 
 
 def fold(
-    args: Mapping[str, Any], raw: str, *, budget_tokens: int = 2000, use_query: bool = True
+    args: Mapping[str, Any],
+    raw: str,
+    *,
+    budget_tokens: int = 2000,
+    use_query: bool = True,
+    terms: frozenset[str] = frozenset(),
+    force: str | None = None,
 ) -> Folded | None:
     """The folded body of a large result, or None when it should pass through untouched.
 
-    None when the result fits the budget, or when folding would keep more than 90% of it.
+    None when the result fits the budget, or when folding would keep more than 90% of it. Query
+    terms are `terms` plus, with `use_query`, the words of the tool call's arguments. `force` names
+    the branch instead of detecting it.
+
+    Raises:
+        ValueError: `force` names a branch the text cannot take (JSON that does not parse, XML that
+            is not well formed) or no branch at all.
     """
     raw_tokens = estimate_tokens(raw)
     if raw_tokens <= budget_tokens:
         return None
-    branch = detect(raw)
-    terms = query_terms(args) if use_query else frozenset()
-    body, source = _body(branch, raw, terms, budget_tokens)
+    branch = force or detect(raw)
+    if force == "json" and parse_json_or_jsonl(raw) is None:
+        raise ValueError("--as json: the text does not parse as JSON or JSON Lines")
+    if force == "xml" and xml_tree(raw) is None:
+        raise ValueError("--as xml: the text is not well-formed XML")
+    all_terms = terms | (query_terms(args) if use_query else frozenset())
+    body, source = _body(branch, raw, all_terms, budget_tokens)
     if estimate_tokens(body) > raw_tokens * _WORTH_IT:
         return None
     return Folded(branch, body, raw_tokens, source)
