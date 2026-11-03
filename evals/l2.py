@@ -26,7 +26,7 @@ import statistics
 import subprocess
 import sys
 import tempfile
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
@@ -34,7 +34,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
-from evals.stats import bootstrap, paired, wilson
+from evals.stats import bootstrap, paired, paired_accuracy, wilson
 from evals.tasks import FORMATS, KINDS, TOOLS, Task, skipped, tasks
 from evals.truth import Truth, answer_line, score_answer
 
@@ -234,7 +234,11 @@ def _paired(base: dict[str, dict[str, Any]], runs: dict[str, dict[str, Any]]) ->
     """The table cells for one condition against native: each change with its 95% interval, and the
     verdict the kill criteria give."""
     diffs = partial(_diffs, base, runs)  # (field, scale=1.0): this condition minus native, per pair
-    acc = bootstrap(diffs("correct"), statistics.mean)
+    shared = base.keys() & runs.keys()
+    outcome = Counter((runs[k]["correct"], base[k]["correct"]) for k in shared)  # (here, native)
+    gains, losses = outcome[True, False], outcome[False, True]
+    change, lo, hi, p = paired_accuracy(outcome[True, True], gains, losses, outcome[False, False])
+    acc = (change, lo, hi)
     cost, ctx, inp, secs = (
         bootstrap(diffs("cost_usd")),
         bootstrap(diffs("final_context")),
@@ -248,7 +252,7 @@ def _paired(base: dict[str, dict[str, Any]], runs: dict[str, dict[str, Any]]) ->
     )
     verdict += " (indicative: under 30 pairs)" if n < 30 else ""
     return (
-        f"| {n} | {acc[0]:+.0%} [{acc[1]:+.0%}, {acc[2]:+.0%}] "
+        f"| {n} | {acc[0]:+.0%} [{acc[1]:+.0%}, {acc[2]:+.0%}] | {gains}/{losses}, p {p:.2f} "
         f"| ${cost[0]:+.4f} [{cost[1]:+.4f}, {cost[2]:+.4f}] "
         f"| {ctx[0]:+.0f} [{ctx[1]:+.0f}, {ctx[2]:+.0f}] "
         f"| {inp[0]:+.0f} [{inp[1]:+.0f}, {inp[2]:+.0f}] "
@@ -270,7 +274,8 @@ def report(rows: list[dict[str, Any]], model: str) -> str:
         f"{len(rows)} runs, ${sum(r['cost_usd'] for r in rows):.2f}; {len(scored)} scored, "
         f"{len(rows) - len(scored)} failed to answer (listed at the end). Correct = the ANSWER line "
         "matches the computed truth; intervals are 95% (Wilson for accuracy, bootstrap for paired "
-        f"differences). {sum(not r['parsed'] for r in scored)} answers had no ANSWER line (scored on "
+        f"differences)."
+        f" {sum(not r['parsed'] for r in scored)} answers had no ANSWER line (scored on "
         f"their prose); {sum(r.get('hit_max_turns', False) for r in scored)} ran out of turns "
         "(scored as wrong).",
         "",
@@ -293,11 +298,11 @@ def report(rows: list[dict[str, Any]], model: str) -> str:
             f"| {sum(r['ran_fold'] for r in rs)}/{len(rs)} |"
         )
     columns = (
-        "| pairs | accuracy change | cost change | final context change | input change | time change "
-        "| verdict |"
+        "| pairs | accuracy change | right only here / only native | cost change | final context change "
+        "| input change | time change | verdict |"
     )
     out += ["", "## Each condition against native, paired by task and repetition, per size band", ""]
-    out += [f"| format | band | condition {columns}", "|---|---|---|---|---|---|---|---|---|---|"]
+    out += [f"| format | band | condition {columns}", "|---|---|---|---|---|---|---|---|---|---|---|"]
     by_cell: dict[tuple[str, str, str], dict[str, dict[str, Any]]] = defaultdict(dict)
     for r in scored:  # a pair needs both runs scored
         by_cell[(r["fmt"], r["band"], r["condition"])][f"{r['task_id']}#{r['rep']}"] = r
@@ -305,7 +310,7 @@ def report(rows: list[dict[str, Any]], model: str) -> str:
         if cond != "native" and (fmt, band, "native") in by_cell:
             out.append(f"| {fmt} | {band} | {cond} {_paired(by_cell[(fmt, band, 'native')], runs)}")
     out += ["", "## Every format together, per size band", ""]
-    out += [f"| band | condition {columns}", "|---|---|---|---|---|---|---|---|---|"]
+    out += [f"| band | condition {columns}", "|---|---|---|---|---|---|---|---|---|---|"]
     by_band: dict[tuple[str, str], dict[str, dict[str, Any]]] = defaultdict(dict)
     for r in scored:
         by_band[(r["band"], r["condition"])][f"{r['task_id']}#{r['rep']}"] = r
@@ -316,9 +321,10 @@ def report(rows: list[dict[str, Any]], model: str) -> str:
         "",
         "Verdict: passes when the accuracy change's lower bound is above -3 points and the final context "
         "shrinks (its upper bound below zero); fails when accuracy surely drops more than 3 points or the "
-        "context surely grows; undecided otherwise. Input is every input token the requests carried (cached "
-        "or not, summed), the other reading of the kill criterion's "
-        '"input tokens, recovery reads included".',
+        "context surely grows; undecided otherwise. The accuracy interval is Newcombe's for paired "
+        "proportions, with McNemar's exact p; the cost, context, input and time intervals are a bootstrap of "
+        "the pairs. Input is every input token the requests carried (cached or not, summed), the other "
+        'reading of the kill criterion\'s "input tokens, recovery reads included".',
     ]
     errors = [r for r in rows if r["error"]]
     if errors:

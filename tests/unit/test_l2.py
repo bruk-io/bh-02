@@ -84,10 +84,16 @@ def _rows(n: int = 5) -> list[dict]:
     return rows
 
 
-def test_the_report_pairs_conditions_and_labels_small_samples():
+def test_the_report_pairs_conditions_and_five_agreeing_pairs_cannot_show_accuracy_kept():
     text = report(_rows(), "test")
-    assert "| json | M | fold | 5 | +0%" in text and "passes (indicative: under 30 pairs)" in text
-    assert "| M | fold | 5 | +0%" in text  # every format together
+    assert "| json | M | fold | 5 | +0% [" in text and "| 0/0, p 1.00 |" in text
+    assert "undecided (indicative: under 30 pairs)" in text
+
+
+def test_enough_agreeing_pairs_and_a_smaller_context_pass():
+    text = report(_rows(150), "test")  # 150 pairs, all right: the interval's lower bound is -2.5 points
+    assert "| json | M | fold | 150 | +0% [-2%, +2%] | 0/0, p 1.00 |" in text and "| passes |" in text
+    assert "| M | fold | 150 | +0%" in text  # every format together
     assert "| -20000 [-20000, -20000] | -20000 [-20000, -20000] |" in text  # final context and input
 
 

@@ -257,26 +257,87 @@ whole run takes about 15 seconds.
 32. One budget-edge case: the fold's own cost estimate runs about 15% above what it renders, so the
     Netherlands' last group of 3 entries waits for 2,200 tokens instead of 2,000. To calibrate.
 
+## P2: layer 2 on the eval tasks, Haiku (`l2-p2.md`, 712 runs, $4.93)
+
+Every M and L task under every condition of its channel, twice: 52 MCP tasks a band (JSON, logs,
+accessibility snapshots, Figma XML) under native, fold of spilled results (`fold`) and fold of all
+results (`fold-all`); 22 file tasks (Python, Rust, the ISO XML, PyPI JSON) under native and
+`lab-fold` named in CLAUDE.md (`fold-tool`). Haiku 5.5, headless Claude Code. Two repetitions, not
+the planned three: stage 1 cost what was estimated ($2.47), and a third would have taken P2 to about
+$7.40 against its $5. No run failed to answer and none ran out of turns. Accuracy intervals are
+Newcombe's for paired proportions with McNemar's exact p; the others are a paired bootstrap.
+Per-band and pooled tables: `l2-p2.md`; each repetition: `l2-p2-r1.md`, `l2-p2-r2.md`.
+
+33. **The control holds, and it showed the first accuracy interval was too sure.** At M nothing
+    spills, so `fold` is native plus a hook that never acts: final context, input and cost are
+    unchanged (-1 token). Its accuracy differed in 4 pairs, all for `fold` and all on prompts that
+    read two ways (38). The paired bootstrap put that at +4% [+1%, +8%], while McNemar's p is 0.125:
+    with no losses to resample, a bootstrap cannot reach zero. The report now uses Newcombe's
+    interval (+4% [-0%, +10%]); the thresholds are as set before the run. One consequence: 104
+    pairs that all agree give about +-3.3 points, so this sample cannot show accuracy kept within
+    3 points; a cell needs about 150 agreeing pairs for that.
+34. **Folding spilled results (L) answers more, in fewer requests, and ends with a larger context.**
+    `fold`: accuracy +7% [+1%, +14%] (8 pairs right only when folded, 1 only native, p = 0.04).
+    Six of the eight are spot tasks on accessibility and Figma trees, where native answered "none"
+    and the fold's stand-outs showed the anomaly. It saves 1.2 requests and 1.8 tool calls a run
+    (5.9 to 4.8 requests), so summed input falls 44k a run, cost $0.0006 (about 9%) and time 1.8 s.
+    But Haiku still reads the saved raw in 97 of 104 runs (native: 104 of 104), and the fold, about
+    2k tokens, is larger than Claude Code's own preview, so the final context grows 800 tokens
+    [+170, +1,280]. `fold-all` at L is the same: +6% [+0%, +12%], +750 tokens. By the final context
+    it fails; by summed input it passes.
+35. **Folding results under the spill threshold (M) shrinks the context and keeps answers, for an
+    extra round trip.** `fold-all`: accuracy +1% [-2%, +5%], final context -7.1k [-9.5k, -6.8k]
+    (JSON and logs -11k, trees -5k to -6k), cost -$0.0007. Haiku reads the raw in 96 of 104 runs,
+    1.4 more requests, so summed input rises 42.5k and time 3.6 s. It passes by the final context
+    and fails by summed input. A/B 1 had found more tokens and more time here, and two misses; the
+    tokens and time agree, the misses do not recur.
+36. **Haiku does not use a named fold tool.** With `lab-fold` described in CLAUDE.md, it ran it once
+    in 44 runs and grepped instead. Accuracy is unchanged (no discordant pair), and the CLAUDE.md
+    lines add 300 tokens to the final context: it fails. Sonnet did the same (24-27).
+37. **Which reading of "input tokens" decides changes the verdict.** The kill criterion is "input
+    tokens, recovery reads included, are not lower". The final context (what the context holds at
+    the end, recovery reads included) and summed input (every token every request carried, mostly
+    the cached ~45k base) disagree in both directions: at L folding cuts requests and so summed
+    input while the final context grows; at M, the reverse. The verdict column uses the final
+    context, chosen in R9 before any P2 run, and both are reported. Cost, which prices cached input,
+    falls slightly in both. Which one matters (headroom in a long session, or spend and latency) is
+    the owner's call, not the data's.
+38. **The runs found task flaws.** Every enumerate prompt ends `ANSWER: <every name, separated by
+    commas>`, even when it asks for codes or orders. For Andorra's subdivision codes Haiku listed
+    the parishes' names under both conditions; for failed orders in logs it answered "none (the logs
+    have no names)" in some runs and listed the orders in others. These tasks flip between runs
+    whatever the condition: all four of the control's discordant pairs are among them. The quiet log
+    anomaly asks to "name the order or request it concerns", and Haiku sometimes names the event.
+    The prompts stay as they were for P2, so both repetitions saw the same ones; fixing them is for
+    P3. The scorer refused `N7697` for `Card N7697`; fixed (an item may name the one candidate that
+    holds it). Rescoring the saved answers changed 2 of 712, both Figma enumerate answers under
+    `fold` that native also got right: before the fix they counted as two losses for folding.
+39. **Caveats.** One model; two repetitions of the same tasks, which are not independent cases (52
+    MCP tasks a band); synthetic payloads on the MCP channel; a file channel of 22 tasks. Per-format
+    cells (26 pairs) are indicative.
+
 ## Where the design stands
 
 | Piece | Evidence | Leaning |
 |---|---|---|
-| Fold MCP results Claude Code spilled | A/B 1 and 2 (Haiku): about -35% tokens, -25% to -35% time, same accuracy; A/B 3 (Sonnet): -20% tokens, -11% time, -3% cost | keep; the default |
-| Fold MCP results under the spill threshold | A/B 1: more tokens, more time, two misses | drop |
+| Fold MCP results Claude Code spilled | P2 (Haiku, 104 pairs): accuracy +7% [+1%, +14%], 1.2 fewer requests, -9% cost, -1.8 s, but the final context +800 tokens (34); A/B 1-3 indicative (K1) | keep; the default. Fails the final-context reading of the input criterion, passes the summed one |
+| Fold MCP results under the spill threshold | P2: answers kept, final context -7.1k, but 1.4 more requests, +42k summed input, +3.6 s (35) | depends on which input reading the criterion means (37) |
 | JSON folding with promotion | real MCP JSON to 13%; built anomaly kinds survive | keep |
 | Line folding for logs | error words survive; quiet anomalies lost, and the loss costs answers | keep, with the gap stated |
 | Tree folding for XML and accessibility trees | A/B 2 (Haiku): -37% tokens on spilled results; A/B 3 (Sonnet): no gain | keep for weaker models; Sonnet does as well alone |
 | Read gate with ast-grep outlines | works, but Haiku and Sonnet page and grep on their own, even for overviews | drop |
-| `fold` as a tool for code | comprehension A/B: Sonnet writes its own `ast` scripts; told about `fold`, it used it twice, at a cost | no gain with Sonnet on exact questions; untested on open-ended ones |
+| `fold` as a tool for code | comprehension A/B: Sonnet writes its own `ast` scripts; told about `fold`, it used it twice, at a cost. P2: Haiku ran it once in 44 runs (36) | no gain with Haiku or Sonnet on exact questions; untested on open-ended ones |
 
 ## Next
 
-0. P2 of EVALS.md: layer 2 on the layer-1 tasks, Haiku, sizes M and L, paired (about $5).
-1. Measure context growth (the final context's size), not only tokens summed over requests.
-2. More seeds for A/B 3, and Opus, to tell real differences on trees from noise.
-3. Where `fold` should help most and is untested: harnesses with no shell (an MCP tool that returns
-   outlines), weaker models, and open-ended reading of large code (judged answers).
-4. A banner variant that says what the fold guarantees, to see whether it saves the checking call.
+0. A decision for the owner: which reading of "input tokens" the kill criterion means, the final
+   context, summed input or cost (37). It decides both fold modes.
+1. P3 (Sonnet, the no-shell channel, edit tasks), with the enumerate instruction naming what is
+   listed (38), and about 150 agreeing pairs a cell so a verdict can resolve 3 points (33).
+2. At L the fold is larger than Claude Code's preview and Haiku reads the raw anyway (34): try a
+   fold no larger than the preview, or a banner that says what the fold guarantees, to see whether
+   it saves the read.
+3. More than one task per cell: two repetitions of 52 tasks are not 104 independent cases.
 
 ## Earlier results (bh-02 corpus and synthetic grid, kept as recorded)
 

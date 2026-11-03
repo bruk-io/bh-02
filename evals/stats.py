@@ -1,4 +1,5 @@
-"""Intervals for the layer-2 report: Wilson for accuracy, a seeded bootstrap for paired differences."""
+"""Intervals for the layer-2 report: Wilson for accuracy, Newcombe's interval and McNemar's test for
+paired accuracy, and a seeded bootstrap for paired differences in cost, context and time."""
 
 import math
 import random
@@ -33,3 +34,31 @@ def bootstrap(
 def paired(a: dict[str, float], b: dict[str, float]) -> list[float]:
     """b - a for every key both have (the same task and repetition under two conditions)."""
     return [b[k] - a[k] for k in sorted(a.keys() & b.keys())]
+
+
+def _binomial_cdf(k: int, n: int, p: float) -> float:
+    """P(X <= k) for X ~ Binomial(n, p)."""
+    return sum(math.comb(n, i) * p**i * (1 - p) ** (n - i) for i in range(k + 1))
+
+
+def paired_accuracy(both: int, gains: int, losses: int, neither: int) -> tuple[float, float, float, float]:
+    """The accuracy change over paired runs (`gains` pairs right only under the condition, `losses`
+    only under native), its 95% interval by Newcombe's method 10 (the two rates' Wilson intervals,
+    combined through their correlation), and McNemar's exact two-sided p.
+
+    Not a bootstrap: with few discordant pairs it is too sure (4 gains and no losses can never
+    resample to a loss, so its interval excludes zero although p is 0.125). Not an interval
+    conditioned on the discordant count either: that one caps the change at the share of pairs that
+    differ, and claims [0, 0] when none do."""
+    n = both + gains + losses + neither
+    if n == 0:
+        return math.nan, math.nan, math.nan, 1.0
+    change, p1, p2 = (gains - losses) / n, (both + gains) / n, (both + losses) / n
+    (l1, u1), (l2, u2) = wilson(both + gains, n), wilson(both + losses, n)
+    spread = (both + gains) * (losses + neither) * (both + losses) * (gains + neither)
+    phi = (both * neither - gains * losses) / math.sqrt(spread) if spread else 0.0
+    below = math.sqrt(max(0.0, (p1 - l1) ** 2 - 2 * phi * (p1 - l1) * (u2 - p2) + (u2 - p2) ** 2))
+    above = math.sqrt(max(0.0, (u1 - p1) ** 2 - 2 * phi * (u1 - p1) * (p2 - l2) + (p2 - l2) ** 2))
+    m = gains + losses
+    p = 1.0 if m == 0 else min(1.0, 2 * _binomial_cdf(min(gains, losses), m, 0.5))
+    return change, change - below, change + above, p
