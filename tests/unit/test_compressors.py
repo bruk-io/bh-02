@@ -206,3 +206,17 @@ def test_pages_and_fragments_are_still_html():
     )
     packed = "<div>" + "".join(f"<p>para <b>{i}</b> text<br></p>" for i in range(300)) + "</div>"
     assert [detect(t) for t in (page, cards, packed)] == ["html"] * 3
+
+
+@pytest.mark.parametrize("encoding", ["ISO-8859-1", "UTF-16"])
+def test_a_declared_encoding_does_not_decode_the_text_again(encoding):
+    items = "".join(f'<item name="Zürich {i}" code="CH-{i:03d}"/>' for i in range(400))
+    folded = fold(f'<?xml version="1.0" encoding="{encoding}"?><root>{items}</root>', budget_tokens=300)
+    assert folded is not None and folded.branch == "xml"
+    assert "Zürich 0" in folded.body and "Ã" not in folded.body
+
+
+def test_a_byte_order_mark_does_not_hide_json_or_xml():
+    pods = json.dumps(_pods(400))
+    xml = "<root>\n" + "".join(f'  <item name="x{i}"><v>{i}</v></item>\n' for i in range(400)) + "</root>\n"
+    assert [fold("﻿" + raw, budget_tokens=300).branch for raw in (pods, xml)] == ["json", "xml"]

@@ -19,6 +19,7 @@ from compressors.tree import (
 
 _MIN_LINES = 40  # fewer lines than this and the text is cut by characters instead
 _MAX_AVG_LINE = 500
+_BOM = "\ufeff"
 _WORTH_IT = 0.9  # a result that keeps more than this share of the raw tokens is passed through
 
 
@@ -146,6 +147,7 @@ def fold(
     raw_tokens = estimate_tokens(raw)
     if raw_tokens <= budget_tokens:
         return None
+    raw = raw.removeprefix(_BOM)  # it defeats JSON and XML detection, and dropping it moves no line
     branch, parsed = _parse_as(force, raw) if force else _detect(raw)
     body, source = _body(branch, parsed, raw, terms, budget_tokens)
     if estimate_tokens(body) > raw_tokens * _WORTH_IT:
