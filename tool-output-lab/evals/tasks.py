@@ -12,7 +12,7 @@ import json
 import random
 from collections.abc import Callable
 from dataclasses import dataclass
-from functools import cache
+from functools import cache, partial
 from pathlib import Path
 
 from compressors.common import estimate_tokens, read_text
@@ -86,6 +86,10 @@ _ASK = {
 }
 
 
+def _raw(fmt: str, size: int, planted: frozenset[int], seed: str, quiet: bool) -> str:
+    return _payload(fmt, size, planted, seed, quiet).raw
+
+
 @cache
 def _payload(
     fmt: str, size: int, planted: frozenset[int], seed: str, quiet: bool = False
@@ -111,10 +115,22 @@ def _synthetic(fmt: str, band: str) -> list[Task]:
     size = _SIZES[fmt][band]
     out: list[Task] = []
 
-    def add(kind, tag, planted, truth_of, subject=None, quiet=False) -> None:
+    def add(
+        kind: str,
+        tag: str,
+        planted: frozenset[int],
+        truth_of: Callable[[synthetic.Payload], Truth] | None,
+        subject: int | None = None,  # the item whose unique value is the answer (a lookup)
+        quiet: bool = False,
+    ) -> None:
         seed = f"{fmt}/{band}/{kind}/{tag}"
         p = _payload(fmt, size, planted, seed, quiet)
-        name, value = p.lookups[subject] if subject is not None else ("", "")
+        if subject is not None:
+            name, value = p.lookups[subject]
+            truth: Truth = Exact(value)
+        else:
+            assert truth_of is not None, "a task with no lookup subject computes its truth with truth_of"
+            name, truth = "", truth_of(p)
         out.append(
             Task(
                 task_id=f"{fmt}-{band}-{kind}-{tag}",
@@ -123,11 +139,9 @@ def _synthetic(fmt: str, band: str) -> list[Task]:
                 band=band,
                 path="",
                 prompt=_prompt(fmt, kind, name),
-                truth=Exact(value) if subject is not None else truth_of(p),
+                truth=truth,
                 query=name,
-                load=lambda size=size, planted=planted, seed=seed, quiet=quiet: (
-                    _payload(fmt, size, planted, seed, quiet).raw
-                ),
+                load=partial(_raw, fmt, size, planted, seed, quiet),
             )
         )
 
@@ -177,7 +191,7 @@ def _file_task(
         prompt=f"{prompt.format(path=path)} {ANSWER_INSTRUCTION[kind]}.",
         truth=truth,
         query=query,
-        load=lambda path=path: _read(path),
+        load=partial(_read, path),
     )
 
 

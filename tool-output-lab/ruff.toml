@@ -2,4 +2,7 @@ line-length = 110
 target-version = "py315"
 
 [lint]
-select = ["E", "F", "I", "UP", "B", "SIM", "RET"]
+preview = true  # DOC501 and DOC502 are preview rules
+explicit-preview-rules = true  # and only the preview rules named here are on
+select = ["E", "F", "I", "UP", "B", "SIM", "RET", "BLE", "ARG", "RUF", "DOC501", "DOC502"]
+ignore = ["RUF031"]  # parentheses around a subscript's tuple: style only

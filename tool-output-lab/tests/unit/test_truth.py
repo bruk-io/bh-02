@@ -65,8 +65,13 @@ def test_a_count_is_not_sufficient_from_a_number_that_merely_appears():
 
 def test_promotion_is_seen_in_trees_and_logs_not_only_in_json():
     tree = "\n".join(
-        ["- list:", "  - item a", "  [... lines 3-40 folded (19 siblings)]", "  - item odd"]
-        + ["  [... lines 42-90 folded (24 siblings)]"]
+        [
+            "- list:",
+            "  - item a",
+            "  [... lines 3-40 folded (19 siblings)]",
+            "  - item odd",
+            "  [... lines 42-90 folded (24 siblings)]",
+        ]
     )
     assert promotes(tree)
     assert not promotes("- list:\n  - item a\n  [... lines 3-90 folded (44 siblings)]\n  - item last")

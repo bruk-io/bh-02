@@ -60,7 +60,8 @@ confidence intervals.
 ## Running
 
 ```
-./lab check                                   # format, lint, tests (Python 3.15 through uv)
+./lab check                                   # green: format and lint checked, strict mypy, tests (Python 3.15 through uv)
+./lab fix                                     # apply the formatter and ruff's safe fixes
 ./lab extract ~/.claude/projects              # transcripts -> corpus/results.jsonl
 ./lab stats [--budget 2000] [-o results/x.md] # corpus sizes, formats, deterministic compression
 ./lab evals l1 [--budget 2000]                # layer 1: every eval task folded and checked (free)

@@ -143,7 +143,7 @@ def _parse(source: str, language: str) -> SgRoot:
     """
     try:
         return SgRoot(source, language)
-    except BaseException as e:  # noqa: BLE001  # only the one panic is translated; the rest re-raise
+    except BaseException as e:  # only the one panic is translated; the rest re-raise
         if type(e).__module__ != "pyo3_runtime" or "LanguageNotSupported" not in str(e):
             raise
         known = ", ".join(sorted(set(_LANGUAGES.values())))
@@ -154,11 +154,8 @@ def _parse(source: str, language: str) -> SgRoot:
 
 
 def code_tree(source: str, language: str) -> tuple[Node, ...]:
-    """The source's foldable nodes: definitions, blocks and multi-line literals, nested.
-
-    Raises:
-        ValueError: ast-grep has no grammar for `language`.
-    """
+    """The source's foldable nodes: definitions, blocks and multi-line literals, nested. A language
+    ast-grep has no grammar for raises ValueError, from `_parse`."""
     return tuple(_nodes(_parse(source, language).root(), split_lines(source)))
 
 
@@ -166,11 +163,8 @@ def fold_code(
     source: str, language: str, budget_tokens: int, terms: frozenset[str] = frozenset()
 ) -> TreeFold:
     """The outline of a source file, opened as far as the budget allows, with real line numbers;
-    definitions that hold a query term (few others do) open first.
-
-    Raises:
-        ValueError: ast-grep has no grammar for `language`.
-    """
+    definitions that hold a query term (few others do) open first. A language ast-grep has no
+    grammar for raises ValueError, from `_parse`."""
     lines = split_lines(source)
     text, opened, folded = fold_tree(
         lines, code_tree(source, language), budget_tokens, numbered=True, terms=terms

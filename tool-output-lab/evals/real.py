@@ -106,7 +106,11 @@ def rust_names(src: str) -> frozenset[str]:
 
 
 def iso_entries(src: str, country: str) -> list[tuple[str, str]]:
-    """(code, name) of every subdivision of a country in iso_3166-2.xml."""
+    """(code, name) of every subdivision of a country in iso_3166-2.xml.
+
+    Raises:
+        LookupError: the file has no such country.
+    """
     root = ET.fromstring(lenient_xml(src).encode("utf-8"))
     for c in root.iter("iso_3166_country"):
         if c.get("code") == country:
@@ -138,4 +142,4 @@ def pypi_released_in(src: str, year: str) -> frozenset[str]:
 def pypi_sha256(src: str, version: str) -> str:
     files = json.loads(src)["releases"][version]
     wheel = next((f for f in files if f["packagetype"] == "bdist_wheel"), files[0])
-    return wheel["digests"]["sha256"]
+    return str(wheel["digests"]["sha256"])

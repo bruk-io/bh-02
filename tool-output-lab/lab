@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # The lab's one entry point, so nobody retypes the uv flags.
-#   ./lab check                 format, lint, tests
+#   ./lab check [PYTEST ARGS]   the one definition of green: format and lint (checked, not
+#                               rewritten), strict types, tests
+#   ./lab fix                   apply the formatter and ruff's safe fixes
 #   ./lab extract PATH... [-o]  transcripts -> corpus/results.jsonl
 #   ./lab stats [...]           corpus size and format report
 #   ./lab fold [FILE|-] [...]   fold a file or stdin into a token budget (the tool itself)
@@ -9,12 +11,13 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 export UV_SYSTEM_CERTS="${UV_SYSTEM_CERTS:-${UV_NATIVE_TLS:-}}"; unset UV_NATIVE_TLS
-run() { uv run --quiet --no-project --python 3.15 --with pytest --with ruff --with ast-grep-py "$@"; }
+run() { uv run --quiet --no-project --python 3.15 --with pytest --with ruff --with "mypy>=2.3" --with ast-grep-py "$@"; }
 cmd="${1:-check}"; shift || true
 case "$cmd" in
-  check) run ruff format . && run ruff check . && run pytest "$@" ;;
+  check) run ruff format --check . && run ruff check --no-fix . && run mypy && run pytest "$@" ;;
+  fix) run ruff format . && run ruff check --fix . ;;
   extract|stats) run python -m "harness.$cmd" "$@" ;;
   evals) layer="${1:-l1}"; shift || true; run python -m "evals.$layer" "$@" ;;
   fold) run python -m compressors.cli "$@" ;;
-  *) echo "unknown command '$cmd': use check, fold, evals, extract or stats" >&2; exit 2 ;;
+  *) echo "unknown command '$cmd': use check, fix, fold, evals, extract or stats" >&2; exit 2 ;;
 esac

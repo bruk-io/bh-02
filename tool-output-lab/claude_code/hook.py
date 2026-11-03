@@ -152,7 +152,11 @@ def _read_spill(path: str, session: Path, cap: int = MAX_SPILL_BYTES) -> str | N
 
 
 def _write_private(target: Path, text: str) -> None:
-    """Write `text` to `target` at 0600, atomically, never through a link."""
+    """Write `text` to `target` at 0600, atomically, never through a link.
+
+    Raises:
+        OSError: the folder is a link, or the write fails.
+    """
     target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     if target.parent.is_symlink():
         raise OSError(f"refusing to write into a linked folder: {target.parent}")
@@ -220,11 +224,8 @@ def decide(event: dict[str, Any], action: Inline | Spilled, raw: str, budget: in
 
 def handle(event: dict[str, Any], budget: int, fold_inline: bool = False) -> dict[str, Any] | None:
     """The hook's JSON reply for one event, or None to leave the result alone: `plan` and `decide`
-    choose, this reads the spill and writes what they say.
-
-    Raises:
-        OSError: a copy could not be saved (main reports it and leaves the result alone).
-    """
+    choose, this reads the spill and writes what they say. A copy that cannot be saved raises
+    OSError from `_write_private`; main reports it and leaves the result alone."""
     action = plan(event, fold_inline)
     if action is None:
         return None

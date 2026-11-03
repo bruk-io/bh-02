@@ -69,8 +69,15 @@ def summarise(rows: list[dict[str, Any]], budget: int) -> str:
         _table(
             ["tool", "results", "tokens", "share", "median", "max", f"over {budget}"],
             (
-                [t, len(v), sum(v), f"{sum(v) / total:.0%}", int(statistics.median(v)), max(v)]
-                + [sum(1 for x in v if x > budget)]
+                [
+                    t,
+                    len(v),
+                    sum(v),
+                    f"{sum(v) / total:.0%}",
+                    int(statistics.median(v)),
+                    max(v),
+                    sum(1 for x in v if x > budget),
+                ]
                 for t, v in sorted(per_tool.items(), key=lambda kv: -sum(kv[1]))
             ),
         )
