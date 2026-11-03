@@ -14,7 +14,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from compressors.common import ANOMALY_RE, split_identifiers
+from compressors.common import ANOMALY_RE, discriminating, matches
 
 _ERROR_KEYS = frozenset({"error", "errors", "err", "exception", "traceback", "fault", "failure", "stderr"})
 _STATUS_KEYS = frozenset({"status", "state", "phase", "health", "result", "outcome", "conclusion", "reason"})
@@ -38,6 +38,8 @@ _WHOLE_STRING_KEYS = frozenset(
         "message",
     }
 )
+# keys whose values are identifiers or digests: cut, they are useless (sha256, md5, blake2b_256, node_id)
+_IDENTIFYING = re.compile(r"sha\d*|md5|blake|digest|hash|checksum|uuid|(^|_)id$|url$|uri$")
 _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_-]*\Z")
 
 
@@ -46,7 +48,7 @@ class _Limits:
     max_items: int = 6  # arrays longer than this are folded
     head: int = 2
     tail: int = 1
-    max_promoted: int = 3
+    max_promoted: int = 10
     max_keys: int = 40  # objects wider than this are folded
     keep_keys: int = 15
     max_str: int = 300
@@ -56,8 +58,9 @@ class _Limits:
 # Tried in order until the result fits the budget; the last one is used regardless.
 _LEVELS = (
     _Limits(),
-    _Limits(max_str=120, max_keys=25, keep_keys=10),
+    _Limits(max_str=120, max_keys=25, keep_keys=10, max_promoted=5),
     _Limits(max_items=4, head=1, tail=1, max_promoted=2, max_str=80, max_keys=15, keep_keys=8),
+    _Limits(max_items=2, head=1, tail=1, max_promoted=1, max_str=60, max_keys=8, keep_keys=3),
 )
 
 
@@ -153,34 +156,15 @@ def _reasons(
             out.append((3, f"{k}={v!r}"))
         if leaf in _OK_KEYS and v is False:
             out.append((3, f"{k} is false"))
-        if (
-            terms
-            and isinstance(v, str | int)
-            and not isinstance(v, bool)
-            and set(split_identifiers(str(v))) & terms
-        ):
-            out.append((5, f"{k} matches the query"))
+        if terms and isinstance(v, str | int) and not isinstance(v, bool):
+            hits = sum(matches(str(v), t) for t in terms)
+            if hits:
+                out.append((5 * hits, f"{k} matches the query"))
     return out
 
 
-def _words(values: Iterable[Any]) -> set[str]:
-    return {
-        w
-        for v in values
-        if isinstance(v, str | int) and not isinstance(v, bool)
-        for w in split_identifiers(str(v))
-    }
-
-
-def _discriminating(terms: frozenset[str], item_words: list[set[str]]) -> frozenset[str]:
-    """The query terms that pick out a few items; one that matches most of them says nothing.
-
-    Arguments often name the container (an owner, a namespace), and every item repeats it.
-    """
-    if not terms:
-        return terms
-    cut = max(1, int(0.2 * len(item_words)))
-    return frozenset(t for t in terms if sum(t in words for words in item_words) <= cut)
+def _text(values: Iterable[Any]) -> str:
+    return " ".join(str(v) for v in values if isinstance(v, str | int) and not isinstance(v, bool))
 
 
 def _promote(arr: list[Any], terms: frozenset[str], limit: int, shown: set[int]) -> list[tuple[int, str]]:
@@ -188,7 +172,7 @@ def _promote(arr: list[Any], terms: frozenset[str], limit: int, shown: set[int])
     if all(isinstance(x, Mapping) for x in arr):
         flats = [_flatten(x) for x in arr]
         rare_values, rare_keys = _rarity(flats)
-        terms = _discriminating(terms, [_words(f.values()) for f in flats]) if terms else terms
+        terms = discriminating(terms, [_text(f.values()) for f in flats])
         scored = []
         for i, flat in enumerate(flats):
             if i in shown:
@@ -204,14 +188,14 @@ def _promote(arr: list[Any], terms: frozenset[str], limit: int, shown: set[int])
         scored.sort()
         return [(i, why) for _, i, why in scored[:limit]]
     if all(isinstance(x, str) for x in arr):
-        terms = _discriminating(terms, [_words([x]) for x in arr]) if terms else terms
+        terms = discriminating(terms, arr)
         hits = []
         for i, s in enumerate(arr):
             if i in shown:
                 continue
             if ANOMALY_RE.search(s):
                 hits.append((i, "contains an error word"))
-            elif terms and set(split_identifiers(s)) & terms:
+            elif any(matches(s, t) for t in terms):
                 hits.append((i, "matches the query"))
         return hits[:limit]
     return []
@@ -273,15 +257,23 @@ def _fold_object(obj: Mapping[str, Any], path: str, terms: frozenset[str], lim: 
     if len(keys) <= lim.max_keys:
         kept = keys
     else:
+        rest = keys[lim.keep_keys :]
+        # a key is wanted when its name, or its value's text, holds a query term few values hold
+        values = [json.dumps(obj[k], ensure_ascii=False)[:20_000] for k in rest]
+        useful = discriminating(terms, values)
         wanted = {
-            k for k in keys[lim.keep_keys :] if k.lower() in _ERROR_KEYS or set(split_identifiers(k)) & terms
+            k
+            for k, v in zip(rest, values, strict=True)
+            if k.lower() in _ERROR_KEYS
+            or any(matches(k, t) for t in terms)
+            or any(matches(v, t) for t in useful)
         }
         kept = [k for i, k in enumerate(keys) if i < lim.keep_keys or k in wanted]
     out: dict[str, Any] = {k: _fold(obj[k], child_path(path, k), terms, lim, depth + 1) for k in kept}
     if len(kept) < len(keys):
         omitted = [k for k in keys if k not in set(kept)]
         names = ", ".join(omitted[:40]) + (", ..." if len(omitted) > 40 else "")
-        out["_folded_keys"] = f"{len(omitted)} keys of {path} omitted: {names}"
+        out["_folded_keys"] = f"{len(omitted)} of {len(keys)} keys of {path} omitted: {names}"
     return out
 
 
@@ -294,7 +286,7 @@ def _fold(value: Any, path: str, terms: frozenset[str], lim: _Limits, depth: int
         return _fold_array(value, path, terms, lim, depth)
     if isinstance(value, str) and len(value) > lim.max_str:
         leaf = path.rsplit(".", 1)[-1].lower()
-        if leaf in _WHOLE_STRING_KEYS:
+        if leaf in _WHOLE_STRING_KEYS or _IDENTIFYING.search(leaf):
             return value
         return value[: lim.max_str] + f"...[+{len(value) - lim.max_str} chars]"
     return value

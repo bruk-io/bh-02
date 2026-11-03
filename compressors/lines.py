@@ -10,7 +10,7 @@ import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 
-from compressors.common import ANOMALY_RE
+from compressors.common import ANOMALY_RE, discriminating, matches
 
 _VARIABLE = re.compile(r"0x[0-9a-fA-F]+|[0-9a-fA-F]{8,}|\d+")
 
@@ -42,8 +42,7 @@ def _runs_of(lines: list[str]) -> list[_Run]:
 def _is_signal(line: str, terms: Iterable[str]) -> bool:
     if ANOMALY_RE.search(line):
         return True
-    low = line.lower()
-    return any(t in low for t in terms)
+    return any(matches(line, t) for t in terms)
 
 
 def _choose_runs(
@@ -51,6 +50,7 @@ def _choose_runs(
 ) -> tuple[list[int], int]:
     """Indices of the runs to keep, and how many signal runs did not fit."""
     n = len(runs)
+    terms = discriminating(terms, [r.line for r in runs])
     keep = set(range(min(head, n))) | set(range(max(0, n - tail), n))
     added = 0
     dropped_signals = 0
