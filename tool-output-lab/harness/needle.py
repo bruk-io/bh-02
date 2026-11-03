@@ -11,6 +11,7 @@ report shows where the heuristics stop, not only where they work.
 import argparse
 import json
 import random
+import re
 import statistics
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Iterator
@@ -25,6 +26,8 @@ LOG_KINDS = ("error_word", "query_match", "stack_trace_tail", "quiet_line")
 POSITIONS = (0.0, 0.05, 0.25, 0.5, 0.75, 0.95, 1.0)
 JSON_SIZES = (50, 500, 5000)
 LOG_SIZES = (200, 2000, 20000)
+A11Y_SIZES = (50, 500)
+FIGMA_SIZES = (50, 500)
 BUDGET = 2000
 
 
@@ -153,6 +156,8 @@ def cases(seeds: int) -> Iterator[Case]:
     grids: list[tuple[Callable[..., Case], tuple[str, ...], tuple[int, ...]]] = [
         (json_case, JSON_KINDS, JSON_SIZES),
         (log_case, LOG_KINDS, LOG_SIZES),
+        (a11y_case, A11Y_KINDS, A11Y_SIZES),
+        (figma_case, FIGMA_KINDS, FIGMA_SIZES),
     ]
     for make, kinds, sizes in grids:
         for kind in kinds:
@@ -163,9 +168,14 @@ def cases(seeds: int) -> Iterator[Case]:
                         yield make(kind, size, position, rng)
 
 
+def contains(text: str, needle: str) -> bool:
+    """The needle as a whole token: `e123` is not found inside `e1234`."""
+    return re.search(rf"(?<![\w-]){re.escape(needle)}(?![\w])", text) is not None
+
+
 def evaluate(case: Case, use_query: bool) -> Outcome:
     c = compress("tool", case.args, case.raw, budget_tokens=BUDGET, use_query=use_query)
-    survived = case.needle in c.text
+    survived = contains(c.text, case.needle)
     return Outcome(
         case.fmt, case.kind, case.size, case.position, use_query, survived, c.raw_tokens, c.out_tokens
     )
@@ -243,3 +253,94 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+# --- tree-shaped payloads: accessibility snapshots and Figma node metadata ---------------------------
+
+A11Y_KINDS = ("disabled_button", "error_alert", "lookup")
+FIGMA_KINDS = ("hidden_layer", "variant_mismatch", "lookup")
+
+
+def a11y_case(kind: str, size: int, position: float, rng: random.Random) -> Case:
+    """A Playwright-style snapshot of an invoices page with `size` invoices."""
+    target = _index(size, position)
+    ids = [f"INV-{rng.randint(1000, 9999)}-{i:04d}" for i in range(size)]
+    needle = ids[target]
+    ref = iter(range(1, 10**6))
+    lines = [
+        "- Page URL: https://billing.local/invoices",
+        "- Page Title: Invoices",
+        "- Page Snapshot:",
+        f"- generic [ref=e{next(ref)}]:",
+        f"  - banner [ref=e{next(ref)}]:",
+        f'    - link "Billing home" [ref=e{next(ref)}] [cursor=pointer]:',
+        "      - /url: /",
+        f"    - navigation [ref=e{next(ref)}]:",
+    ]
+    for name in ("Invoices", "Customers", "Reports", "Settings"):
+        lines += [
+            f'      - link "{name}" [ref=e{next(ref)}] [cursor=pointer]:',
+            f"        - /url: /{name.lower()}",
+        ]
+    lines += [
+        f"  - main [ref=e{next(ref)}]:",
+        f'    - heading "Invoices" [level=1] [ref=e{next(ref)}]',
+        f"    - list [ref=e{next(ref)}]:",
+    ]
+    lookup_ref = ""
+    for i, inv in enumerate(ids):
+        button_ref = f"e{next(ref)}"
+        flag = " [disabled]" if kind == "disabled_button" and i == target else ""
+        lines += [
+            f"      - listitem [ref=e{next(ref)}]:",
+            f"        - text: Invoice {inv}",
+            f"        - text: ${rng.randint(20, 900)}.00 due {rng.randint(1, 28):02d} Nov",
+            f'        - button "Pay {inv}" [ref={button_ref}]{flag} [cursor=pointer]',
+        ]
+        if kind == "error_alert" and i == target:
+            lines.append(f"        - alert [ref=e{next(ref)}]: Payment for {inv} failed: card declined")
+        if i == target:
+            lookup_ref = button_ref
+    lines += [f"  - contentinfo [ref=e{next(ref)}]:", "    - text: (c) Billing"]
+    if kind not in A11Y_KINDS:
+        raise ValueError(f"unknown accessibility kind {kind!r}: use one of {', '.join(A11Y_KINDS)}")
+    if kind == "lookup":
+        needle = lookup_ref  # the question names the invoice; the answer is its button's ref
+        args: dict[str, Any] = {"invoice": ids[target]}
+    else:
+        args = {}
+    return Case("a11y", kind, size, position, "\n".join(lines), args, needle)
+
+
+def figma_case(kind: str, size: int, position: float, rng: random.Random) -> Case:
+    """Figma-style node metadata (XML, packed on one line) for a page of `size` product cards."""
+    target = _index(size, position)
+    parts = [
+        '<canvas id="0:1" name="Checkout">',
+        '<frame id="1:2" name="Header" x="0" y="0" width="1440" height="80">',
+    ]
+    parts += ['<instance id="1:3" name="Logo" x="24" y="20" width="120" height="40"/>', "</frame>"]
+    parts.append('<frame id="1:10" name="Product grid" x="0" y="80" width="1440" height="4000">')
+    needle = ""
+    for i in range(size):
+        node = f"{10 + i}:{1000 + i}"
+        name = f"Card {rng.randint(100, 999)}-{i:04d}"
+        hidden = ' hidden="true"' if kind == "hidden_layer" and i == target else ""
+        button = "Button/Secondary" if kind == "variant_mismatch" and i == target else "Button/Primary"
+        x, y = (i % 4) * 340, (i // 4) * 420
+        parts += [
+            f'<frame id="{node}" name="{name}" x="{x}" y="{y}" width="320" height="400"{hidden}>',
+            f'<rectangle id="{10 + i}:5001" name="Image" x="0" y="0" width="320" height="240"/>',
+            f'<text id="{10 + i}:5002" name="Title" x="16" y="256" width="288" height="24"/>',
+            f'<text id="{10 + i}:5003" name="Price" x="16" y="288" width="120" height="24"/>',
+            f'<instance id="{10 + i}:5004" name="{button}" x="16" y="336" width="288" height="48"/>',
+            "</frame>",
+        ]
+        if i == target:
+            needle = name if kind != "lookup" else node
+            lookup_name = name
+    parts += ["</frame>", "</canvas>"]
+    if kind not in FIGMA_KINDS:
+        raise ValueError(f"unknown Figma kind {kind!r}: use one of {', '.join(FIGMA_KINDS)}")
+    args: dict[str, Any] = {"name": lookup_name} if kind == "lookup" else {}
+    return Case("figma", kind, size, position, "".join(parts), args, needle)
