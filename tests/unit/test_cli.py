@@ -58,3 +58,41 @@ def test_the_cli_reads_a_file_and_writes_the_pretty_copy(tmp_path, capsys):
     assert "[fold: xml" in capsys.readouterr().out
     assert len(pretty.read_text().splitlines()) > 300
     assert main([str(tmp_path / "missing.txt")]) == 1
+
+
+def _line(text: str, n: int) -> str:
+    """Line n (1-based) as sed -n 'np' counts it: newline-separated only."""
+    return text.split("\n")[n - 1].rstrip("\r")
+
+
+def test_line_numbers_count_newlines_only_as_sed_and_read_do():
+    import re
+
+    src = "import os\n\x0c\n# page two\n" + "".join(
+        f"def func_{i}(a):\n    x = a + {i}\n    y = x * 2\n    z = y - 1\n    return z\n\n"
+        for i in range(150)
+    )
+    out = fold_text(src, budget=300, path="ff.py", quiet=True).text
+    for n, shown in re.findall(r"(?m)^(\d+)\t(.*?)(?:  \[\.\.\. lines .*)?$", out):
+        assert shown == _line(src, int(n)), n
+
+
+def test_a_progress_line_with_carriage_returns_stays_one_line():
+    import re
+
+    lines = [f"2026-11-03T10:00:{i % 60:02d}Z INFO step {i} ok" for i in range(300)]
+    lines[100] = "Downloading 10%\r 50%\r 100%"
+    lines[200] = "2026-11-03T10:03:20Z ERROR upload failed"
+    raw = "\n".join(lines)
+    out = fold_text(raw, budget=300, quiet=True).text
+    last = max(int(b) for _, b in re.findall(r"lines (\d+)-(\d+)", out))
+    assert last <= len(lines)
+    assert "ERROR upload failed" in out
+
+
+def test_crlf_input_folds_exactly_like_lf():
+    src = "".join(f"def f{i}(a):\n    x = a\n    y = x\n    return y\n\n" for i in range(300))
+    crlf = fold_text(src.replace("\n", "\r\n"), budget=300, path="a.py", quiet=True).text
+    assert (
+        crlf == fold_text(src, budget=300, path="a.py", quiet=True).text
+    )  # the header's size differs, not the fold

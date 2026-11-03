@@ -5,7 +5,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from compressors.common import Compressed, call_id_for, estimate_tokens, query_terms
+from compressors.common import Compressed, call_id_for, estimate_tokens, query_terms, split_lines
 from compressors.html import html_to_text, looks_like_html
 from compressors.json_fold import fold_json, parse_json_or_jsonl
 from compressors.lines import fold_lines
@@ -43,7 +43,7 @@ def detect(raw: str) -> str:
         return "xml"
     if looks_like_html(raw):
         return "html"
-    lines = raw.splitlines()
+    lines = split_lines(raw)
     if looks_like_outline(lines):
         return "outline"
     if len(lines) >= _MIN_LINES and len(raw) / len(lines) <= _MAX_AVG_LINE:

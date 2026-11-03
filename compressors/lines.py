@@ -10,7 +10,7 @@ import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 
-from compressors.common import ANOMALY_RE, discriminating, matches
+from compressors.common import ANOMALY_RE, discriminating, matches, split_lines
 
 _VARIABLE = re.compile(r"0x[0-9a-fA-F]+|[0-9a-fA-F]{8,}|\d+")
 
@@ -92,7 +92,7 @@ def fold_lines(
     max_window_runs: int = 60,
     max_line_chars: int = 400,
 ) -> str:
-    lines = raw.splitlines()
+    lines = split_lines(raw)
     runs = _runs_of(lines)
     kept, dropped_signals = _choose_runs(
         runs, terms, head=head, tail=tail, window=window, max_window_runs=max_window_runs

@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from compressors.code import fold_code, language_for
-from compressors.common import estimate_tokens, query_words
+from compressors.common import estimate_tokens, query_words, read_text
 from compressors.route import fold
 
 FORMATS = ("auto", "code", "json", "xml", "html", "outline", "lines", "text")
@@ -97,11 +97,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--quiet", action="store_true", help="no header line")
     ns = parser.parse_args(argv)
     try:
-        text = (
-            sys.stdin.read()
-            if ns.file == "-"
-            else Path(ns.file).read_text(encoding="utf-8", errors="replace")
-        )
+        if ns.file == "-":  # bytes, decoded: no newline translation, so line numbers match sed's
+            text = sys.stdin.buffer.read().decode("utf-8", errors="replace")
+        else:
+            text = read_text(ns.file)
         result = fold_text(
             text,
             budget=ns.budget,

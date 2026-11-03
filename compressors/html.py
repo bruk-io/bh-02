@@ -9,6 +9,8 @@ things the lab measures.
 import re
 from html.parser import HTMLParser
 
+from compressors.common import split_lines
+
 _SKIP = frozenset(
     {"script", "style", "svg", "noscript", "template", "iframe", "canvas", "nav", "footer", "aside"}
 )
@@ -93,7 +95,7 @@ def html_to_text(raw: str) -> str:
     parser = _TextExtractor()
     parser.feed(raw)
     parser.close()
-    lines = [re.sub(r"[ \t\r\f\v]+", " ", line).strip() for line in "".join(parser.parts).splitlines()]
+    lines = [re.sub(r"[ \t\r\f\v]+", " ", line).strip() for line in split_lines("".join(parser.parts))]
     out: list[str] = []
     for line in lines:
         if line or (out and out[-1]):

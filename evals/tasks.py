@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
 
-from compressors.common import estimate_tokens
+from compressors.common import estimate_tokens, read_text
 from evals import real, synthetic
 from evals.truth import Absent, Exact, Items, Location, Needle, Number, Truth
 
@@ -140,7 +140,7 @@ def _synthetic(fmt: str, band: str) -> list[Task]:
 
 @cache
 def _read(path: Path) -> str:
-    return path.read_text(encoding="utf-8", errors="replace")
+    return read_text(str(path))
 
 
 def _file_task(
