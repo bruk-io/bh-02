@@ -158,3 +158,16 @@
 | M | fold-bash-all (against bash-native) | 52 | -2% [-10%, +5%] | 0/1, p 1.00 | $-0.0007 [-0.0010, -0.0005] | -7826 [-8634, -6870] | +42724 [+41045, +90968] | +4.7s [+4.0, +6.0] | undecided |
 
 Verdict: passes when the accuracy change's lower bound is above -3 points and the final context shrinks (its upper bound below zero); fails when accuracy surely drops more than 3 points or the context surely grows; undecided otherwise. The accuracy interval is Newcombe's for paired proportions, with McNemar's exact p; the cost, context, input and time intervals are a bootstrap of the pairs. The input criterion is the final context (the owner's reading, FINDINGS 37); summed input, every input token the requests carried (cached or not), is reported beside it.
+
+## Cache and requests, every format together, per size band
+
+Input price these runs' costs imply: $0.110 per million tokens (80% of runs between $0.104 and $0.117); too spread to price a read.
+
+| band | condition | pairs | requests | cache writes | cache reads | uncached input | warm starts (here, baseline) | each later request |
+|---|---|---|---|---|---|---|---|---|
+| L | fold-bash (against bash-native) | 52 | +0.1 [-0.3, +0.4] | -41.8 [-776.1, +648.3] | +2,964 [-12,664, +19,898] | +0.1 [-0.5, +0.8] | -, - | +18 tokens |
+| L | fold-bash-all (against bash-native) | 52 | -0.6 [-1.0, -0.3] | +961 [+148, +1,555] | -27,086 [-44,296, -10,068] | -1.3 [-2.0, -0.6] | -, - | +1,498 tokens |
+| M | fold-bash (against bash-native) | 52 | +1.5 [+1.2, +1.7] | -8,286 [-8,902, -7,582] | +71,484 [+59,489, +83,713] | +3.0 [+2.5, +3.5] | -, - | -8,090 tokens |
+| M | fold-bash-all (against bash-native) | 52 | +1.5 [+1.3, +1.8] | -7,959 [-8,687, -7,072] | +73,008 [+61,334, +86,179] | +3.0 [+2.5, +3.5] | -, - | -7,826 tokens |
+
+A folded result is written to the cache once and re-read by every later request, so a context N tokens smaller saves N cache-read tokens on each request after it: the last column, by the median change in the final context, priced at the implied cache-read price when the runs agree on it. Requests, writes, reads and uncached input are mean changes per run against the baseline, with bootstrap intervals. A warm start is a run whose first request read 10,000 tokens or more from the cache: a prefix another session had written, which lowers that run's cost.

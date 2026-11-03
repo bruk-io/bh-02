@@ -92,6 +92,34 @@ confident is the harm, so it is reported separately from wrong and hedged.
 - **Recovery:** reads of the saved raw file, and how much of it was read.
 - **Tool use:** whether `fold` was run, and how.
 
+## The prompt cache
+
+Claude Code caches each request's prefix (system prompt, tools, the conversation so far) and writes
+it with a one-hour lifetime (`modelUsage.cacheCreationEphemeral1hInputTokens`), priced at 2x the
+input price; a cache read is 0.1x, output 5x. Under that structure a run's cost implies one input
+price, and the report checks that runs agree on it (Haiku 5.5: $0.10 per million; Sonnet 5.5:
+about $1.84) before pricing anything with it.
+
+The hook rewrites a tool result before it enters the conversation and never touches an earlier
+message, so it cannot invalidate what is cached. What it changes is what comes after:
+
+- A folded result is written once and re-read by every later request. A context N tokens smaller
+  saves N cache-read tokens on each request after it: the report's "each later request" column.
+  A one-question eval has few later requests; a long session has many, so this is where a fold's
+  saving or cost compounds.
+- Every extra request (a recovery read, a second look) re-reads the whole prefix: the "requests"
+  and "cache reads" columns.
+- A change to the prefix itself (a CLAUDE.md line, an MCP tool's description, a different set of
+  allowed tools) makes every later request write a new prefix: offered tools pay this, the hook
+  does not.
+- The same input must fold to the same text, or repeated calls cannot share cache entries; layer
+  1 checks this. A fold that depends on session state (folding a command's output only once) is a
+  knob, not a default.
+- Parallel eval runs with the same prefix read each other's cached system prompt: "warm starts"
+  counts runs whose first request read 10,000 tokens or more from the cache. Conditions with a
+  different prefix warm separately, which can tilt a cost comparison; interleaving conditions in
+  the job list keeps it even.
+
 ## Statistics
 
 - **Paired design:** the same case and seed in every condition, so differences are per case.
@@ -111,7 +139,13 @@ confident is the harm, so it is reported separately from wrong and hedged.
 ./lab evals l2 --dry-run [--bands M L] [--reps N]                   # layer 2: the plan and its cost
 ./lab evals l2 --bands M L --name l2-x [--first-rep N]              # run it (headless Claude Code)
 ./lab evals l2 --merge l2-x l2-y --name l2-xy                       # report runs together, rescored
+./lab evals sweep sweeps/schema-rare.toml                           # layer 1 over a grid of knobs (free)
 ```
+
+Every entry point takes the same knobs (`compressors/config.py`): `--config FILE.toml` and
+`--set NAME=VALUE` for `./lab fold`, `./lab evals l1` and `./lab evals l2`; the hook reads
+`TOOL_OUTPUT_LAB_CONFIG`, `TOOL_OUTPUT_LAB_SET` and `TOOL_OUTPUT_LAB_VIEW`. Layer 1 and layer 2
+record the knobs and view with every row, and layer 2 will not merge runs folded differently.
 
 The code: `evals/truth.py` (answer kinds and scorers), `evals/synthetic.py` (planted payloads),
 `evals/real.py` (real files and their computed answers), `evals/tasks.py` (the registry),

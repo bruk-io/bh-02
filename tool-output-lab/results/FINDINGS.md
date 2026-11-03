@@ -421,6 +421,32 @@ claim of a schema view against the data with its own path walker, and runs the q
     of the right shape that selects against the wrong value passed until the check also required
     the selected-against value to be the dominant one.
 
+## Knobs and the cache (`sweep-*.md`, EVALS.md "The prompt cache")
+
+51. **Sweeps over the same tasks, free.** The knobs (`compressors/config.py`) reach every entry point,
+    with the defaults byte-identical to before (all 1,206 folds, both views). First sweeps, layer 1:
+    the schema view at 500 tokens is sufficient for more JSON folds (35 of 47) than the sample fold
+    at 1,000 (34), and keeps the quiet anomalies at every budget (3 of 3, against 0 or 1); raising
+    `schema.rare` to 0.15 lists the 12 failures among 100 pods for 3 more tokens; raising the tree
+    stand-out cap (`tree.max_promoted`) from 10 to 25, with `tree.rare_share` 0.2, takes trees from
+    62 to 74 sufficient of 90 at the same median size, inventing nothing. The planted counts of 12
+    and 20 exist to test that cap, so a cap of 25 passes them by construction: layer 1 shows what
+    becomes visible, and only layer 2 says whether models do better with it.
+52. **Layer 2 counted output tokens wrong, and the cache's price structure checks out.** A message's
+    `usage` in stream-json is a snapshot from when it began streaming (8 and 5 output tokens where
+    the result event's total was 139); every row before this fix undercounts output. No finding
+    rested on output tokens. Input, cache writes and cache reads summed correctly. Claude Code writes
+    the cache with a one-hour lifetime (2x input); with reads at 0.1x and output at 5x, one run's
+    cost implies exactly $0.10 per million input tokens for Haiku 5.5, and P3's runs agree on about
+    $1.84 for Sonnet 5.5.
+53. **What the cache adds to the verdicts.** Folding a medium result inline costs 1.4 more requests
+    and about 70k more cache reads now, writes 7k to 9k fewer tokens, and saves 7.1k (Haiku) to
+    8.8k (Sonnet) cache-read tokens on every request after it: $0.0016 a later request on Sonnet,
+    about $0.08 over 50 more turns for one folded result. Folding a spill is the other way round:
+    1.2 to 1.5 fewer requests now, then 800 more tokens on every later request with Haiku (900 fewer
+    with Sonnet, undecided). The hook never invalidates the cache, since it changes a result before
+    it enters the conversation; offered tools do, once, by changing the prefix.
+
 ## Where the design stands
 
 | Piece | Evidence | Leaning |

@@ -8,6 +8,7 @@ from evals.l2 import (
     BASH_CONDITIONS,
     HOOK_MODE,
     MCP_CONDITIONS,
+    implied_input_price,
     merged,
     parse_stream,
     patched,
@@ -91,6 +92,8 @@ def _rows(n: int = 5) -> list[dict]:
                     "input_tokens": 10,
                     "cache_read": ctx,
                     "cache_write": 0,
+                    "output_tokens": 50,
+                    "requests": 2,
                 }
             )
     return rows
@@ -198,3 +201,16 @@ def test_runs_folded_with_different_settings_are_not_merged():
     later = [r | {"model": "m", "rep": 1, "view": "schema", "config": "schema.rare=0.2"} for r in _rows(2)]
     with pytest.raises(ValueError, match="folded with different settings"):
         merged({"a": first, "b": later})
+
+
+def test_a_runs_cost_implies_the_input_price_under_the_price_structure():
+    # one real Haiku run: 4 uncached, 18,094 one-hour writes, 69,315 reads, 139 out, $0.00438185
+    row = {"input_tokens": 4, "cache_write": 18094, "cache_write_1h": 18094, "cache_read": 69315}
+    row |= {"output_tokens": 139, "cost_usd": 0.00438185}
+    assert round(implied_input_price(row) * 1e6, 5) == 0.1  # exactly $0.10 per million: the structure holds
+
+
+def test_the_report_has_a_cache_section_with_what_each_later_request_pays():
+    text = report(_rows(40), "test")
+    assert "## Cache and requests" in text and "| M | fold | 40 |" in text.split("## Cache and requests")[1]
+    assert "-20,000 tokens" in text

@@ -94,6 +94,11 @@ class Session:
     cache_write: int
     output_tokens: int
     final_context: int  # the last request's whole input: how big the context grew
+    first_cache_read: int  # the first request's cache reads: a prefix another session had warmed
+    first_cache_write: int  # the first request's cache writes
+    cache_write_1h: (
+        int  # cache writes with the one-hour lifetime (2x the input price; five-minute ones 1.25x)
+    )
     error: str | None  # the run failed to produce an answer (no result, an API or usage error): not scored
 
 
@@ -122,10 +127,21 @@ def parse_stream(lines: Iterable[str]) -> Session:
         elif event.get("type") == "result":
             result = event
 
+    found = result.get("usage")
+    totals: dict[str, Any] = found if isinstance(found, dict) else {}
+
     def total(key: str) -> int:
+        """The session's total: the result event's (a message's own usage is a streaming snapshot,
+        whose output count is what had streamed when it was sent), else the messages' sum."""
+        if key in totals:
+            return int(totals[key] or 0)
         return sum(int(u.get(key, 0) or 0) for u in usage.values())
 
+    models = (result.get("modelUsage") or {}).values()
+    hour = sum(int(m.get("cacheCreationEphemeral1hInputTokens", 0) or 0) for m in models)
+
     last = list(usage.values())[-1] if usage else {}
+    first = next(iter(usage.values()), {})
     final = sum(
         int(last.get(k, 0) or 0)
         for k in ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
@@ -145,6 +161,9 @@ def parse_stream(lines: Iterable[str]) -> Session:
         cache_write=total("cache_creation_input_tokens"),
         output_tokens=total("output_tokens"),
         final_context=final,
+        first_cache_read=int(first.get("cache_read_input_tokens", 0) or 0),
+        first_cache_write=int(first.get("cache_creation_input_tokens", 0) or 0),
+        cache_write_1h=hour,
         error=_run_error(result),
     )
 
@@ -290,6 +309,9 @@ def run_one(
                 cache_write=0,
                 output_tokens=0,
                 final_context=0,
+                first_cache_read=0,
+                first_cache_write=0,
+                cache_write_1h=0,
                 error="timed out after 900s",
             )
         if edit:
@@ -376,6 +398,92 @@ def _paired(base: dict[str, dict[str, Any]], runs: dict[str, dict[str, Any]]) ->
     )
 
 
+_TOKEN_CLASSES = ("input_tokens", "cache_write", "cache_read", "output_tokens")
+_WARM = 10_000  # a first request that reads this much from the cache started on a prefix already warm
+
+
+def implied_input_price(row: dict[str, Any]) -> float | None:
+    """The USD per input token a run's cost implies under Anthropic's price structure: uncached
+    input at the base price, cache writes at 2x (one-hour lifetime) or 1.25x (five-minute), cache
+    reads at 0.1x and output at 5x. The same value across runs says the structure holds, and prices
+    a cache read without a price list that may be out of date. Rows recorded before the result
+    event's totals were read undercount output, by under 2% of the cost."""
+    hour = row.get("cache_write_1h", row["cache_write"])  # Claude Code writes with the one-hour lifetime
+    weighted = (
+        row["input_tokens"]
+        + 2.0 * hour
+        + 1.25 * (row["cache_write"] - hour)
+        + 0.1 * row["cache_read"]
+        + 5.0 * row["output_tokens"]
+    )
+    return row["cost_usd"] / weighted if weighted > 0 and row["cost_usd"] > 0 else None
+
+
+def _mean_change(base: dict[str, dict[str, Any]], runs: dict[str, dict[str, Any]], field: str) -> str:
+    diffs = _diffs(base, runs, field)
+    mid, lo, hi = bootstrap(diffs, statistics.mean)
+    return (
+        f"{mid:+,.1f} [{lo:+,.1f}, {hi:+,.1f}]" if abs(mid) < 100 else f"{mid:+,.0f} [{lo:+,.0f}, {hi:+,.0f}]"
+    )
+
+
+def _warm(runs: dict[str, dict[str, Any]]) -> str:
+    known = [r for r in runs.values() if "first_cache_read" in r]
+    return f"{sum(r['first_cache_read'] >= _WARM for r in known)}/{len(known)}" if known else "-"
+
+
+def _cache_section(
+    by_band: dict[tuple[str, str], dict[str, dict[str, Any]]], rows: list[dict[str, Any]]
+) -> list[str]:
+    out = ["", "## Cache and requests, every format together, per size band", ""]
+    implied = sorted(p for r in rows if "cache_read" in r and (p := implied_input_price(r)) is not None)
+    read = None
+    if implied:
+        mid, lo, hi = (
+            statistics.median(implied),
+            implied[len(implied) // 10],
+            implied[-1 - len(implied) // 10],
+        )
+        if (hi - lo) / mid <= 0.1:  # the structure holds when eight runs in ten imply the same price
+            read = 0.1 * mid
+        verdict = (
+            f"so a cache read costs ${read * 1e6:.3f} per million" if read else "too spread to price a read"
+        )
+        out += [
+            f"Input price these runs' costs imply: ${mid * 1e6:.3f} per million tokens (80% of runs between "
+            f"${lo * 1e6:.3f} and ${hi * 1e6:.3f}); {verdict}.",
+            "",
+        ]
+    out += [
+        "| band | condition | pairs | requests | cache writes | cache reads | uncached input "
+        "| warm starts (here, baseline) | each later request |",
+        "|---|---|---|---|---|---|---|---|---|",
+    ]
+    for (band, cond), runs in sorted(by_band.items()):
+        base_cond = BASELINE.get(cond, "native")
+        if cond == base_cond or (band, base_cond) not in by_band:
+            continue
+        base = by_band[(band, base_cond)]
+        pairs = len(base.keys() & runs.keys())
+        context = statistics.median(_diffs(base, runs, "final_context")) if pairs else 0.0
+        later = f"{context:+,.0f} tokens" + (f", ${context * read:+.5f}" if read is not None else "")
+        out.append(
+            f"| {band} | {_against(cond)} | {pairs} | {_mean_change(base, runs, 'requests')} "
+            f"| {_mean_change(base, runs, 'cache_write')} | {_mean_change(base, runs, 'cache_read')} "
+            f"| {_mean_change(base, runs, 'input_tokens')} | {_warm(runs)}, {_warm(base)} | {later} |"
+        )
+    out += [
+        "",
+        "A folded result is written to the cache once and re-read by every later request, so a context N "
+        "tokens smaller saves N cache-read tokens on each request after it: the last column, by the median "
+        "change in the final context, priced at the implied cache-read price when the runs agree on it. "
+        "Requests, writes, reads and uncached input are mean changes per run against the "
+        "baseline, with bootstrap intervals. A warm start is a run whose first request read 10,000 tokens "
+        "or more from the cache: a prefix another session had written, which lowers that run's cost.",
+    ]
+    return out
+
+
 def report(rows: list[dict[str, Any]], model: str) -> str:
     """The run as tables. Runs that failed to produce an answer (see `_run_error`) are listed, not
     scored: counted as wrong at no cost, they would make a condition look both worse and cheaper."""
@@ -448,6 +556,7 @@ def report(rows: list[dict[str, Any]], model: str) -> str:
         "the pairs. The input criterion is the final context (the owner's reading, FINDINGS 37); summed "
         "input, every input token the requests carried (cached or not), is reported beside it.",
     ]
+    out += _cache_section(by_band, scored)
     errors = [r for r in rows if r["error"]]
     if errors:
         out += ["", f"{len(errors)} runs had errors:"] + [
