@@ -5,6 +5,7 @@ import re
 
 import pytest
 
+from compressors.common import query_terms
 from compressors.html import html_to_text
 from compressors.recovery import RecoveryError, resolve
 from compressors.route import detect, fold
@@ -21,7 +22,8 @@ def _pods(n: int, **overrides_at: dict) -> list[dict]:
 
 
 def _text(raw: str, budget: int, args: dict | None = None, use_query: bool = True) -> str:
-    folded = fold(args or {}, raw, budget_tokens=budget, use_query=use_query)
+    terms = query_terms(args or {}) if use_query else frozenset()
+    folded = fold(raw, budget_tokens=budget, terms=terms)
     return raw if folded is None else folded.body
 
 
@@ -37,12 +39,12 @@ def _log(n: int) -> list[str]:
 
 
 def test_small_results_pass_through_untouched():
-    assert fold({}, "hello\n" * 10, budget_tokens=2000) is None
+    assert fold("hello\n" * 10, budget_tokens=2000) is None
 
 
 def test_a_long_array_stays_an_array_and_shows_head_tail_and_markers():
     raw = json.dumps({"pods": _pods(500)})
-    folded = fold({}, raw, budget_tokens=500)
+    folded = fold(raw, budget_tokens=500)
     assert folded is not None and folded.branch == "json"
     pods = json.loads(folded.body)["pods"]
     assert isinstance(pods, list)
@@ -78,7 +80,7 @@ def test_a_value_matching_the_query_is_promoted_only_when_the_query_is_used():
 
 def test_jsonl_is_folded_as_one_array():
     raw = "\n".join(json.dumps(p) for p in _pods(300, at100={"phase": "Evicted"}))
-    folded = fold({}, raw, budget_tokens=300)
+    folded = fold(raw, budget_tokens=300)
     assert folded is not None and folded.branch == "json"
     assert "JSONL" in folded.body and "pod-0100" in folded.body
 
@@ -115,7 +117,7 @@ def test_gap_markers_name_the_lines_they_hide():
 
 
 def test_long_text_with_few_lines_is_cut_by_characters():
-    folded = fold({}, "x" * 50_000, budget_tokens=500)
+    folded = fold("x" * 50_000, budget_tokens=500)
     assert folded is not None and folded.branch == "text" and "omitted" in folded.body
 
 
@@ -141,7 +143,7 @@ def test_detect():
 
 def test_folding_that_saves_little_passes_through():
     raw = json.dumps([{f"k{j}": j for j in range(7)} for _ in range(2)])  # two short items: nothing to fold
-    assert fold({}, raw, budget_tokens=10) is None
+    assert fold(raw, budget_tokens=10) is None
 
 
 def test_the_last_line_of_a_stack_trace_counts_as_an_error():

@@ -98,3 +98,51 @@ def test_crlf_input_folds_exactly_like_lf():
     assert (
         crlf == fold_text(src, budget=300, path="a.py", quiet=True).text
     )  # the header's size differs, not the fold
+
+
+def test_query_reaches_code_and_opens_the_definition_that_holds_it():
+    import random
+
+    rng = random.Random(5)
+    words = ["alpha", "bravo", "cargo", "delta", "ember", "fable", "grove", "haven", "ivory", "jolly"]
+    calls = [f"{rng.choice(words)}_{rng.choice(words)}_{rng.choice(words)}" for _ in range(400)]
+    calls[237] = "webhook_client"  # every body differs, so only the query can pick this one out
+    src = "".join(
+        f"def handler_{i}(req):\n    x = {c}()\n    y = parse(x)\n    return y\n\n"
+        for i, c in enumerate(calls)
+    )
+    assert "webhook_client" not in fold_text(src, budget=300, path="h.py", quiet=True).text
+    assert "webhook_client" in fold_text(src, budget=300, path="h.py", query="webhook", quiet=True).text
+
+
+def test_a_query_matching_a_few_of_thirty_siblings_still_shows_them():
+    offices = []
+    for i in range(30):
+        city = "Kyoto" if i in (11, 19) else f"City{i}"
+        offices += [
+            f"- office {i}:",
+            f"  - city: {city}",
+            "  - staff: 12",
+            "  - phone: 555-0100",
+            "  - open: yes",
+        ]
+    out = fold_text("\n".join(offices), budget=150, query="Kyoto", quiet=True).text
+    assert out.count("Kyoto") == 2
+
+
+def test_a_query_that_names_every_key_keeps_none_of_them_specially():
+    import json
+
+    raw = json.dumps({f"node-{i}": {"cpu": i % 7} for i in range(5000)})
+    out = fold_text(raw, budget=2000, query="node", quiet=True).text
+    assert len(out) / 4 <= 2200
+
+
+def test_matching_many_items_against_many_terms_is_quick():
+    import json
+    import time
+
+    items = [{"id": i, "name": f"item {i}", "note": "alpha beta gamma delta " * 3} for i in range(20000)]
+    start = time.perf_counter()
+    fold_text(json.dumps(items), budget=2000, query=" ".join(f"term{j}" for j in range(40)), quiet=True)
+    assert time.perf_counter() - start < 8

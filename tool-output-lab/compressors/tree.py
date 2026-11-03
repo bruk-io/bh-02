@@ -151,17 +151,17 @@ def fold_tree(
         is why they are shown."""
         n = len(children)
         texts = [_subtree_text(lines, c) for c in children]
-        if n < 10:  # too few siblings for "rare"; a query match still marks the way down
+        if n < 10:  # too few siblings for "rare"; a query match still marks the way down and shows
             picks = [i for i, text in enumerate(texts) if any(matches(text, t) for t in terms)]
             standouts.update(id(children[i]) for i in picks)
-            return ()
+            return tuple(picks)
         patterns = [_signature(lines, c) for c in children]
         counts = Counter(patterns)
         rare_cut = max(1, int(0.1 * n))  # no summary counts here, so rare reaches 10%
         dominant = counts.most_common(1)[0][1] / n >= 0.6
         heads = [lines[c.first] for c in children]
-        useful_head = discriminating(terms, heads, share=0.05)
-        useful_deep = discriminating(terms, texts, share=0.05)
+        useful_head = discriminating(terms, heads, share=0.05, floor=3)  # a few matches still pick out
+        useful_deep = discriminating(terms, texts, share=0.05, floor=3)
         scored = []
         for i, (pat, head, text) in enumerate(zip(patterns, heads, texts, strict=True)):
             # a match on the node's own header (code="AD") weighs more than one deep inside it

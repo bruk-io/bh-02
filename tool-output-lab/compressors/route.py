@@ -1,10 +1,8 @@
 """The middleware's one entry point: route a tool result to a compressor, or pass it through."""
 
-from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
 
-from compressors.common import estimate_tokens, query_terms, split_lines
+from compressors.common import estimate_tokens, split_lines
 from compressors.html import html_to_text, looks_like_html
 from compressors.json_fold import fold_json, parse_json_or_jsonl
 from compressors.lines import fold_lines
@@ -78,19 +76,17 @@ class Folded:
 
 
 def fold(
-    args: Mapping[str, Any],
     raw: str,
     *,
     budget_tokens: int = 2000,
-    use_query: bool = True,
     terms: frozenset[str] = frozenset(),
     force: str | None = None,
 ) -> Folded | None:
     """The folded body of a large result, or None when it should pass through untouched.
 
-    None when the result fits the budget, or when folding would keep more than 90% of it. Query
-    terms are `terms` plus, with `use_query`, the words of the tool call's arguments. `force` names
-    the branch instead of detecting it.
+    None when the result fits the budget, or when folding would keep more than 90% of it. `terms`
+    are the query (`common.query_words` of a query, `common.query_terms` of a tool call's
+    arguments); `force` names the branch instead of detecting it.
 
     Raises:
         ValueError: `force` names a branch the text cannot take (JSON that does not parse, XML that
@@ -104,8 +100,7 @@ def fold(
         raise ValueError("--as json: the text does not parse as JSON or JSON Lines")
     if force == "xml" and xml_tree(raw) is None:
         raise ValueError("--as xml: the text is not well-formed XML")
-    all_terms = terms | (query_terms(args) if use_query else frozenset())
-    body, source = _body(branch, raw, all_terms, budget_tokens)
+    body, source = _body(branch, raw, terms, budget_tokens)
     if estimate_tokens(body) > raw_tokens * _WORTH_IT:
         return None
     return Folded(branch, body, raw_tokens, source)

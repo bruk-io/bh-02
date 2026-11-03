@@ -14,7 +14,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
-from compressors.common import estimate_tokens
+from compressors.common import estimate_tokens, query_terms
 from compressors.route import detect, fold
 
 _BUCKETS = ((500, "<500"), (2000, "500-2k"), (8000, "2k-8k"), (32000, "8k-32k"), (None, ">=32k"))
@@ -86,7 +86,7 @@ def summarise(rows: list[dict[str, Any]], budget: int) -> str:
     detected: Counter[str] = Counter()
     for r in large:
         detected[detect(r["text"])] += 1
-        folded = fold(r["args"], r["text"], budget_tokens=budget)
+        folded = fold(r["text"], budget_tokens=budget, terms=query_terms(r["args"]))
         raw_tokens = estimate_tokens(r["text"])
         out_tokens = estimate_tokens(folded.body) if folded else raw_tokens
         branch = folded.branch if folded else "passthrough"

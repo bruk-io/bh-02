@@ -58,14 +58,12 @@ def fold_text(
     if fmt == "code" and language is None:
         raise ValueError("--as code needs a language: pass --lang python (or typescript, rust, go, ...)")
     if fmt in ("auto", "code") and language is not None:
-        tree = fold_code(text, language, budget)
+        tree = fold_code(text, language, budget, terms)
         body, branch, source = tree.text, f"code ({language})", None
     else:
-        folded = fold(
-            {}, text, budget_tokens=budget, use_query=False, terms=terms, force=None if fmt == "auto" else fmt
-        )
+        folded = fold(text, budget_tokens=budget, terms=terms, force=None if fmt == "auto" else fmt)
         if folded is None:  # the structured fold saved too little: cut by characters instead
-            folded = fold({}, text, budget_tokens=budget, use_query=False, terms=terms, force="text")
+            folded = fold(text, budget_tokens=budget, terms=terms, force="text")
         if folded is None:
             return Result(text, None)
         body, branch, source = folded.body, folded.branch, folded.source
