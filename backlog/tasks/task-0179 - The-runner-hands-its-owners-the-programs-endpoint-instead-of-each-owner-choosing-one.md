@@ -6,10 +6,12 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-11-02T17:24:00Z'
+updated_date: '2026-11-03T02:31:00Z'
 labels:
   - runner
   - size-3
-dependencies: []
+dependencies:
+  - TASK-0178
 type: task
 ---
 
@@ -24,3 +26,9 @@ From the architecture review of the bh-02/brig seam, 2026-11-02 (TASK-0176). Tod
 - [ ] #1 runner.start's contract gives the owner its endpoint rather than taking one, in CONTRACTS.md and in every implementation and fake
 - [ ] #2 scripts/check passes
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Accepted 2026-11-03 under the owner's goal (see TASK-0178). Blocked on TASK-0178 (same files).
+<!-- SECTION:NOTES:END -->
