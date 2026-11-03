@@ -1,8 +1,10 @@
-"""The hook's decisions, as data: which events it acts on, and which spill paths it trusts."""
+"""The hook's decisions, as data: which events it acts on, which spill paths it trusts, what it saves
+and what its banner points to."""
 
 import json
+from pathlib import Path
 
-from claude_code.hook import Inline, Spilled, plan, render, trusted_spill
+from claude_code.hook import Inline, Spilled, decide, plan, render, trusted_spill
 from compressors.route import fold
 
 NOTICE = (
@@ -55,3 +57,37 @@ def test_the_banners_jq_example_reads_json_lines_as_one_array():
     assert lines is not None and doc is not None
     assert "jq -s '.[2:7]' /s/out.txt" in render(lines, "/s/out.txt")
     assert "jq '.pods[2:7]' /s/out.txt" in render(doc, "/s/out.txt")
+
+
+_PODS = json.dumps([{"name": f"pod-{i:04d}", "phase": "Running"} for i in range(400)])
+_PACKED_XML = "<a>" + "".join(f'<b id="{i}"><c/><c/><c/><c/></b>' for i in range(300)) + "</a>"
+_SESSION = Path("/s/session/tool-results")
+
+
+def _banner(outcome) -> str:
+    return outcome.reply["hookSpecificOutput"]["updatedToolOutput"].splitlines()[0]
+
+
+def test_a_spill_is_read_from_claude_codes_file_and_nothing_is_saved():
+    spill = str(_SESSION / "mcp-fixture-list_pods-1.txt")
+    out = decide(_event(""), Spilled(spill), _PODS, 300, _SESSION)
+    assert out.saves == () and f"Full output: {spill}." in _banner(out)
+
+
+def test_an_inline_result_is_saved_privately_before_the_banner_names_it():
+    out = decide(_event(""), Inline(_PODS), _PODS, 300, _SESSION)
+    assert out.saves == ((_SESSION / "folded-toolu_1.txt", _PODS),)
+    assert f"Full output: {_SESSION / 'folded-toolu_1.txt'}." in _banner(out)
+
+
+def test_a_view_is_saved_when_the_line_numbers_refer_to_one_and_the_raw_is_still_named():
+    spill = str(_SESSION / "mcp-fixture-get_figma_metadata-1.txt")
+    out = decide(_event(""), Spilled(spill), _PACKED_XML, 300, _SESSION)
+    ((view, text),) = out.saves
+    assert view == _SESSION / "folded-toolu_1.view.txt" and len(text.splitlines()) > 300
+    assert f"Full output: {view} (the raw output: {spill})" in _banner(out)
+
+
+def test_a_result_that_fits_is_left_alone_and_logged():
+    out = decide(_event(""), Inline("small"), "small", 300, _SESSION)
+    assert (out.saves, out.reply, out.log["branch"]) == ((), None, "passthrough")
