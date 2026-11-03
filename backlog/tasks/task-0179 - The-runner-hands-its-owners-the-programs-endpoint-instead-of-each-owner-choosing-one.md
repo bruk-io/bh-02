@@ -1,9 +1,9 @@
 ---
-id: DRAFT-0020
+id: TASK-0179
 title: >-
   The runner hands its owners the program's endpoint, instead of each owner
   choosing one
-status: Draft
+status: To Do
 assignee: []
 created_date: '2026-11-02T17:24:00Z'
 labels:
