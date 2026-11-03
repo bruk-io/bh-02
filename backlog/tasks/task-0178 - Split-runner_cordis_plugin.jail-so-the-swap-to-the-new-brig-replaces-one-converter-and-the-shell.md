@@ -6,6 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-11-02T17:24:00Z'
+updated_date: '2026-11-03T02:31:00Z'
 labels:
   - runner
   - size-5
@@ -27,3 +28,9 @@ Proposed, as a no-behaviour change against the old brig (like TASK-0176.06): pol
 - [ ] #2 No module but the shell and that converter imports brig
 - [ ] #3 No behaviour changes: the runner's tests pass unchanged but for imports, and scripts/check passes
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Accepted 2026-11-03 under the owner's goal ("go through all of these tasks ... until we finish the entire migration; backwards compatible code should be removed and not kept").
+<!-- SECTION:NOTES:END -->
