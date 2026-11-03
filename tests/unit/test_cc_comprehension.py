@@ -17,3 +17,24 @@ def test_known_answers():
 def test_score_counts_whole_words_only():
     assert score("create_server and getaddrinfo", frozenset({"create_server", "getaddrinfo"})) == 1.0
     assert score("_create_server_getaddrinfo", frozenset({"create_server"})) == 0.0
+
+
+def test_fold_is_seen_alone_and_in_a_pipeline_but_not_in_a_word():
+    import json
+
+    from claude_code.comprehension import ran_fold
+
+    def call(cmd):
+        return [
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "message": {"content": [{"type": "tool_use", "name": "Bash", "input": {"command": cmd}}]},
+                }
+            )
+        ]
+
+    assert ran_fold(call("fold x.py --budget 6000 | grep def"))
+    assert ran_fold(call("cd /lib && fold subprocess.py"))
+    assert not ran_fold(call("python3 -c 'print(unfold)'"))
+    assert not ran_fold(call("grep -n scaffold x.py"))

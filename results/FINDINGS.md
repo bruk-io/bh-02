@@ -152,6 +152,39 @@ detection, `--save` writes the pretty-printed copy when the line numbers refer t
     suspended user in place and the status counts; a 5,000-line log ~40k -> ~60 tokens with its one
     error line; `subprocess.py` (3,300 lines) to ~5.4k tokens with every method signature.
 
+## Needle survival for trees (`needle-4-trees.md`, 3 seeds, no model)
+
+22. **Figma XML:** a hidden layer and a different button variant survive at every position and size
+    (50 and 500 cards, ~20% of the tokens at 50 and ~4% at 500); a lookup by name survives with the
+    query, and only partly without it, as designed.
+23. **Accessibility outlines exposed a bug:** with 50 invoices (just over the budget) the disabled
+    button and the alert were never kept (0%), while with 500 they always were. The list fit in
+    full, so stand-outs were never computed (only partial openings did that), and the stand-out's
+    longer line made it the last item "cheapest first" would open. Fixed: stand-outs are found
+    whenever a node opens and open first (`test_a_stand_out_opens_first_even_when_its_list_opens_in_full`);
+    21/21 cells now survive at both sizes. Rerun: `needle-5-standouts-open.md`.
+
+## Comprehension A/B: `fold` named in CLAUDE.md, Sonnet (`comp-1-sonnet.md`, 20 runs, $1.61)
+
+Five structural questions over large stdlib files (which methods of BaseEventLoop are async, which
+Popen methods are defined in both platform branches, which classes subclass Action, which classes
+define close and where, which top-level functions are cached), answers computed with `ast`. Both
+conditions had `fold` on the PATH; only `fold` had a CLAUDE.md naming it.
+
+24. **Every run was right in both conditions** (20/20, recall 1.00 and 0.98), in 1 or 2 tool calls.
+25. **Claude computes structural answers rather than reading structure.** Of 25 tool calls, 10 were
+    its own Python `ast` scripts, the same way the ground truth was computed, and most others were
+    grep or awk one-liners. For a question with an exact answer that beats any outline.
+26. **`fold` was used in 2 of 20 runs**, both told about it and both on the Popen question, as
+    `fold subprocess.py --budget 6000 | grep ...`. Those were the most expensive cells (161k against
+    89k input tokens, 2.5 calls against 1). It was never used when not named, and never on the other
+    questions when named. (The report's "ran fold" column reads 0 for all rows: its detector looked
+    for `"name": "Bash"` with a space, which the stream does not write. Counted from the sessions'
+    transcripts instead; the detector is fixed and tested.)
+27. So for code, with Sonnet: an outline tool adds nothing on questions that have exact answers.
+    What is left untested is open-ended understanding (no exact answer, so a judge would be needed),
+    and weaker models or harnesses with no shell, where Claude cannot write its own `ast` script.
+
 ## Where the design stands
 
 | Piece | Evidence | Leaning |
@@ -161,14 +194,15 @@ detection, `--save` writes the pretty-printed copy when the line numbers refer t
 | JSON folding with promotion | real MCP JSON to 13%; built anomaly kinds survive | keep |
 | Line folding for logs | error words survive; quiet anomalies lost, and the loss costs answers | keep, with the gap stated |
 | Tree folding for XML and accessibility trees | A/B 2 (Haiku): -37% tokens on spilled results; A/B 3 (Sonnet): no gain | keep for weaker models; Sonnet does as well alone |
-| Read gate with ast-grep outlines | works, but Haiku and Sonnet page and grep on their own, even for overviews | drop the gate; offer the outline as a tool |
+| Read gate with ast-grep outlines | works, but Haiku and Sonnet page and grep on their own, even for overviews | drop |
+| `fold` as a tool for code | comprehension A/B: Sonnet writes its own `ast` scripts; told about `fold`, it used it twice, at a cost | no gain with Sonnet on exact questions; untested on open-ended ones |
 
 ## Next
 
 1. Measure context growth (the final context's size), not only tokens summed over requests.
 2. More seeds for A/B 3, and Opus, to tell real differences on trees from noise.
-3. `fold` as a tool Claude calls (through Bash, named in CLAUDE.md) against its own grep outlines,
-   on comprehension tasks over large code files.
+3. Where `fold` should help most and is untested: harnesses with no shell (an MCP tool that returns
+   outlines), weaker models, and open-ended reading of large code (judged answers).
 4. A banner variant that says what the fold guarantees, to see whether it saves the checking call.
 
 ## Earlier results (bh-02 corpus and synthetic grid, kept as recorded)

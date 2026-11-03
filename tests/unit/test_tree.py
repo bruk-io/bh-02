@@ -98,3 +98,13 @@ def test_a_sibling_that_stands_out_is_shown_inside_a_partly_open_list():
     assert "siblings)" in fold.text
     assert 'button "Pay invoice 117" [ref=e119] [disabled]' in fold.text
     assert 'button "Pay invoice 150"' not in fold.text
+
+
+def test_a_stand_out_opens_first_even_when_its_list_opens_in_full():
+    lines = ["- list [ref=e1]:"]
+    for i in range(50):
+        flag = " [disabled]" if i == 0 else ""
+        lines += [f"  - listitem [ref=e{i + 2}]:", f"    - text: Invoice {i}", "    - text: due soon"]
+        lines.append(f'    - button "Pay invoice {i}" [ref=e{i + 900}]{flag}')
+    fold = fold_outline("\n".join(lines), budget_tokens=600)
+    assert 'button "Pay invoice 0" [ref=e900] [disabled]' in fold.text
