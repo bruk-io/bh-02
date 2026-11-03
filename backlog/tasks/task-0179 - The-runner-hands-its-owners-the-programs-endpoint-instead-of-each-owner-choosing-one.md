@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-02T17:24:00Z'
-updated_date: '2026-11-03T03:14:00Z'
+updated_date: '2026-11-03T03:19:00Z'
 labels:
   - runner
   - size-3
@@ -34,4 +34,70 @@ From the architecture review of the bh-02/brig seam, 2026-11-02 (TASK-0176). Tod
 Accepted 2026-11-03 under the owner's goal (see TASK-0178). Blocked on TASK-0178 (same files).
 
 Shape chosen: one call, start(argv_for, *, cwd) -> started with started.endpoint. Both owners have one pattern (build argv from the socket, start, dial), so a reserve-then-start pair would add a reservation that can leak between its two calls and a second place the owner must clean up; with one call the runner owns the path's whole life (it is made before argv_for runs, removed by started.stop() or by a failed start). The mechanism chooses the path (runner.reserved_endpoint: mkdtemp bh-s- under /tmp, k.sock, same short /tmp directory the owners used, still a write root of the policy); the new brig will choose it inside the adapter with no contract change. Files: runner.py (Mechanism, Runner.start, Started.endpoint, reserved_endpoint/unreserve_endpoint), jail.py (BrigJail/_Jailed), unconfined.py (Unjailed/_Process), python client.py, extensions host.py and testing.py (PlainJail), CONTRACTS.md, runner and python READMEs, root pyproject (two no-impure-functions entries: the mkdtemp/rmtree moved from the owners, whose methods were already budgeted). Owners no longer make or remove a socket directory. The owners' re-dial after start is unchanged (open_unix_connection(started.endpoint)); brig-verified connection (the task description's ask) is TASK-0079.31's, not done here. Old signature removed everywhere (no compat); all test fakes and ~50 test call sites migrated. Proof: new tests test_the_python_process_builds_its_command_from_the_endpoint_the_runner_chose_and_dials_it, test_the_extensions_dial_the_endpoint_the_runner_chose_for_their_worker, test_the_runner_hands_the_command_the_endpoint_it_started_the_program_on, test_an_unconfined_start_chooses_a_short_socket_in_a_directory_of_its_own_and_stop_removes_it (seen failing with the Unjailed stop's cleanup removed, passing restored). scripts/check run per member: runner (full, with gates and docs), python, extensions, app (no gates/docs) all pass; arch-check --no-fix ok. Linux bwrap jail tests ran here and pass. AC2 (scripts/check) left unticked for the reviewer.
+
+Check `scripts/check` exited 1
+
+(72 earlier lines omitted)
+```text
+________ test_a_keyed_model_s_key_never_reaches_an_input_s_environment _________
+[gw3] linux -- Python 3.15.0 /home/user/bh-02/.venv/bin/python3
+
+tmp_path = PosixPath('/tmp/pytest-of-root/pytest-130/popen-gw3/test_a_keyed_model_s_key_never0')
+
+    def test_a_keyed_model_s_key_never_reaches_an_input_s_environment(tmp_path: Path) -> None:
+        """A key a command prints (`key = { cmd = ... }`) goes only into its requests' Authorization
+        header: bh-02 holds it and sets it in no environment, so an unjailed input (whose environment
+        is scrubbed of Claude's names alone) does not find it. A key read from bh-02's environment
+        (`{ env = ... }`) would be there under `--no-jail`, by design (the jail docs say so)."""
+        work, state, config = tmp_path / "work", tmp_path / "state", tmp_path / "config"
+        work.mkdir()
+        pin = tmp_path / "keyed.toml"
+        pin.write_text('[[plugin]]\nid = "model"\nconfig = { default = "k/keyed" }\n')
+        with StubServer(key="fake-verify-key") as stub:
+            keyed = f'[k]\nprovider = "openai"\nbase_url = "{stub.base_url}"\n'
+            keyed += 'key = { cmd = "printf fake-verify-key" }\n'
+            keyed += '[k.models.keyed]\nid = "stub-1"\n'
+            _models_file(config, keyed)
+            app = Launched(["--no-jail", "--patch", str(pin)], work, state, config=config)
+            try:
+                ready = app.wait_for(_READY, 60)
+                app.wait_for("model: k/keyed", after=0)
+                app.type(
+                    'call import os; print("VERIFY_STUB_KEY" in os.environ, "fake-verify-key" in str(os.environ))'
+                )
+                app.wait_for("Run this python code", 10, after=ready)
+                app.answer(b"y")
+                app.wait_for("the input said: False False", 20, after=ready)
+                app.press(b"\x11")
+>               assert app.exit_code() == 0
+E               assert 1 == 0
+E                +  where 1 = exit_code()
+E                +    where exit_code = <bh-02.app.tests.test_real_launch.Launched object at 0x7fb8a42024e0>.exit_code
+
+bh-02/app/tests/test_real_launch.py:980: AssertionError
+=========================== short test summary info ============================
+FAILED bh-02/app/tests/test_real_launch.py::test_a_keyed_model_s_key_never_reaches_an_input_s_environment
+1 failed, 3964 passed, 118 skipped in 262.43s (0:04:22)
+   FAILED: tests
+== gates
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+== (root)
+   ok
+== libs/brig
+   ok
+== libs/cordis
+   ok
+== libs/cordis-helpers
+   ok
+== libs/host-paths
+   ok
+   ok
+== docs
+INFO    -  Cleaning site directory
+INFO    -  Building documentation to directory: /home/user/bh-02/site
+INFO    -  Documentation built in 5.22 seconds
+   ok
+== tokens
+   skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
+```
 <!-- SECTION:NOTES:END -->
