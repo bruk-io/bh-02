@@ -1,8 +1,10 @@
-"""The CLI as a process: a reader that closes the pipe early is not an error (review R22)."""
+"""The CLI with files and pipes: what it reads, what it saves, and a reader that stops early."""
 
 import subprocess
 import sys
 from pathlib import Path
+
+from compressors.cli import main
 
 _LAB = Path(__file__).resolve().parents[2]
 
@@ -21,3 +23,13 @@ def test_a_reader_that_stops_early_leaves_exit_status_0_and_nothing_on_stderr(tm
     proc.stdout.close()  # what `| head -1` does
     stderr = proc.stderr.read()
     assert proc.wait(timeout=30) == 0 and stderr == b""
+
+
+def test_the_cli_reads_a_file_and_writes_the_pretty_copy(tmp_path, capsys):
+    xml = tmp_path / "page.xml"
+    xml.write_text("<a>" + "".join(f'<b id="{i}"><c/><c/><c/><c/></b>' for i in range(300)) + "</a>")
+    pretty = tmp_path / "pretty.xml"
+    assert main([str(xml), "--budget", "300", "--save", str(pretty)]) == 0
+    assert "[fold: xml" in capsys.readouterr().out
+    assert len(pretty.read_text().splitlines()) > 300
+    assert main([str(tmp_path / "missing.txt")]) == 1

@@ -175,8 +175,56 @@ def _log(entry: dict[str, Any]) -> None:
         print(f"tool-output-lab hook could not log to {target}: {e}", file=sys.stderr)
 
 
+@dataclass(frozen=True)
+class Outcome:
+    """What the hook does once it has the raw text: the files to save, what to log, and the reply
+    (None to leave the result alone)."""
+
+    saves: tuple[tuple[Path, str], ...]
+    log: dict[str, Any]
+    reply: dict[str, Any] | None
+
+
+def decide(event: dict[str, Any], action: Inline | Spilled, raw: str, budget: int, session: Path) -> Outcome:
+    """The fold, and where its banner points: Claude Code's own file for a spill, a saved copy of
+    the raw for an inline result, and a saved view when the line numbers refer to one."""
+    folded = fold(raw, budget_tokens=budget, terms=query_terms(event.get("tool_input") or {}))
+    log = {
+        "tool": event.get("tool_name"),
+        "tool_use_id": event.get("tool_use_id"),
+        "spilled": isinstance(action, Spilled),
+        "raw_tokens": estimate_tokens(raw),
+        "branch": folded.branch if folded else "passthrough",
+        "out_tokens": estimate_tokens(folded.body) if folded else None,
+    }
+    if folded is None:
+        return Outcome((), log, None)
+    call = re.sub(r"[^A-Za-z0-9_-]", "_", str(event.get("tool_use_id", "call")))
+    saves: list[tuple[Path, str]] = []
+    match action:
+        case Spilled(path=path):
+            raw_path = path
+        case Inline():  # keep the raw, always
+            saved = session / f"folded-{call}.txt"
+            saves.append((saved, raw))
+            raw_path = str(saved)
+    path = raw_path
+    if folded.source is not None:  # the line numbers refer to a copy (pretty XML, page text): save it too
+        view = session / f"folded-{call}.view.txt"
+        saves.append((view, folded.source))
+        path = str(view)
+    text = render(folded, path, raw_path)
+    reply = {"hookSpecificOutput": {"hookEventName": "PostToolUse", "updatedToolOutput": text}}
+    return Outcome(tuple(saves), log, reply)
+
+
 def handle(event: dict[str, Any], budget: int, fold_inline: bool = False) -> dict[str, Any] | None:
-    """The hook's JSON reply for one event, or None to leave the result alone."""
+    """The hook's JSON reply for one event, or None to leave the result alone: `plan` and `decide`
+    choose, this reads the spill and writes what they say.
+
+    Raises:
+        OSError: a copy could not be saved (main reports it and leaves the result alone).
+    """
     action = plan(event, fold_inline)
     if action is None:
         return None
@@ -188,32 +236,12 @@ def handle(event: dict[str, Any], budget: int, fold_inline: bool = False) -> dic
                 _log({"tool": event.get("tool_name"), "event": "untrusted-spill", "path": path})
                 return None
         case Inline(raw=raw):
-            path = ""
-    folded = fold(raw, budget_tokens=budget, terms=query_terms(event.get("tool_input") or {}))
-    _log(
-        {
-            "tool": event.get("tool_name"),
-            "tool_use_id": event.get("tool_use_id"),
-            "spilled": isinstance(action, Spilled),
-            "raw_tokens": estimate_tokens(raw),
-            "branch": folded.branch if folded else "passthrough",
-            "out_tokens": estimate_tokens(folded.body) if folded else None,
-        }
-    )
-    if folded is None:
-        return None
-    call = re.sub(r"[^A-Za-z0-9_-]", "_", str(event.get("tool_use_id", "call")))
-    if isinstance(action, Inline):  # keep the raw, always
-        raw_path = session / f"folded-{call}.txt"
-        _write_private(raw_path, raw)
-        path = str(raw_path)
-    raw_path = path
-    if folded.source is not None:  # the line numbers refer to a copy (pretty XML, page text): save it too
-        view = session / f"folded-{call}.view.txt"
-        _write_private(view, folded.source)
-        path = str(view)
-    text = render(folded, path, raw_path)
-    return {"hookSpecificOutput": {"hookEventName": "PostToolUse", "updatedToolOutput": text}}
+            pass
+    outcome = decide(event, action, raw, budget, session)
+    _log(outcome.log)
+    for target, text in outcome.saves:
+        _write_private(target, text)
+    return outcome.reply
 
 
 def main() -> int:

@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from compressors.cli import fold_text, main
+from compressors.cli import fold_text
 
 
 def _src() -> str:
@@ -66,16 +66,6 @@ def test_the_result_names_what_folded_it():
 def test_forcing_a_format_the_text_cannot_take_says_so():
     with pytest.raises(ValueError, match="does not parse as JSON"):
         fold_text("not json " * 2000, budget=100, fmt="json")
-
-
-def test_the_cli_reads_a_file_and_writes_the_pretty_copy(tmp_path, capsys):
-    xml = tmp_path / "page.xml"
-    xml.write_text("<a>" + "".join(f'<b id="{i}"><c/><c/><c/><c/></b>' for i in range(300)) + "</a>")
-    pretty = tmp_path / "pretty.xml"
-    assert main([str(xml), "--budget", "300", "--save", str(pretty)]) == 0
-    assert "[fold: xml" in capsys.readouterr().out
-    assert len(pretty.read_text().splitlines()) > 300
-    assert main([str(tmp_path / "missing.txt")]) == 1
 
 
 def _line(text: str, n: int) -> str:
