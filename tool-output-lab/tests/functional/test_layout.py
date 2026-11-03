@@ -19,7 +19,7 @@ def test_every_entry_point_is_the_last_thing_in_its_module():
 _IO_IN_A_UNIT_TEST = re.compile(  # matched per line
     r"\b(tmp_path|capsys|capfd|monkeypatch)\b|^import subprocess"
     r"|\.(read_text|write_text|open)\("
-    r"|from evals\.tasks import"
+    r"|from evals\.tasks import|\b(tasks|task|select)\("  # the registry, directly or through l2's job list
 )
 
 

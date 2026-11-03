@@ -1,6 +1,6 @@
 import json
 
-from evals.l2 import parse_stream, report, select
+from evals.l2 import parse_stream, report
 
 
 def _stream() -> list[str]:
@@ -53,16 +53,9 @@ def test_a_session_is_read_per_request_with_its_final_context():
     assert s.answer.endswith("ANSWER: web-1") and s.error is None
 
 
-def test_jobs_pair_every_task_with_its_channels_conditions():
-    jobs = select(["json"], ["spot"], ["M"], None)
-    assert {c for _, c in jobs} == {"native", "fold", "fold-all"}
-    jobs = select(["python"], ["locate"], ["L"], None)
-    assert {c for _, c in jobs} == {"native", "fold-tool"} and all(t.path for t, _ in jobs)
-
-
-def test_the_report_pairs_conditions_and_labels_small_samples():
+def _rows(n: int = 5) -> list[dict]:
     rows = []
-    for i in range(5):
+    for i in range(n):
         for cond, correct, ctx in (("native", True, 50000), ("fold", True, 30000)):
             row = {
                 "task_id": f"json-M-spot-{i}",
@@ -73,5 +66,37 @@ def test_the_report_pairs_conditions_and_labels_small_samples():
             }
             row |= {"rep": 0, "correct": correct, "parsed": True, "cost_usd": 0.01, "final_context": ctx}
             rows.append(row | {"tool_calls": 2, "duration_ms": 9000, "error": None})
-    text = report(rows, "test")
+    return rows
+
+
+def test_the_report_pairs_conditions_and_labels_small_samples():
+    text = report(_rows(), "test")
     assert "| json | fold | 5 | +0%" in text and "passes (indicative: under 30 pairs)" in text
+
+
+def test_a_run_that_failed_to_answer_is_listed_not_scored_or_paired():
+    rows = _rows()
+    rows[1] |= {
+        "correct": False,
+        "cost_usd": 0.0,
+        "final_context": 0,
+        "error": "no result event",
+    }  # a fold run
+    text = report(rows, "test")
+    assert "9 scored, 1 failed to answer" in text
+    assert "| json | spot | M | fold | 4/4" in text and "| json | fold | 4 | +0%" in text
+    assert "- json-M-spot-0 fold: no result event" in text
+
+
+def _result(**fields) -> list[str]:
+    return [json.dumps({"type": "result", "result": "", "num_turns": 25, **fields})]
+
+
+def test_an_api_or_usage_error_is_a_failed_run_and_running_out_of_turns_is_a_wrong_answer():
+    limit = parse_stream(_result(is_error=True, subtype="success", result="Claude AI usage limit reached"))
+    assert limit.error == "success: Claude AI usage limit reached"
+    crash = parse_stream(_result(is_error=True, subtype="error_during_execution"))
+    assert crash.error is not None and crash.error.startswith("error_during_execution")
+    turns = parse_stream(_result(is_error=True, subtype="error_max_turns"))
+    assert turns.error is None and turns.hit_max_turns
+    assert parse_stream([]).error == "no result event"
