@@ -1,6 +1,8 @@
 import json
 
-from evals.l2 import parse_stream, report
+import pytest
+
+from evals.l2 import merged, parse_stream, report
 
 
 def _stream() -> list[str]:
@@ -100,3 +102,14 @@ def test_an_api_or_usage_error_is_a_failed_run_and_running_out_of_turns_is_a_wro
     turns = parse_stream(_result(is_error=True, subtype="error_max_turns"))
     assert turns.error is None and turns.hit_max_turns
     assert parse_stream([]).error == "no result event"
+
+
+def test_runs_merge_into_one_report_and_a_repeated_repetition_is_refused():
+    first, later = _rows(2), [r | {"rep": 1} for r in _rows(2)]
+    for r in first + later:
+        r["model"] = "m"
+    assert len(merged({"a": first, "b": later})) == 8
+    with pytest.raises(ValueError, match="run later repetitions with --first-rep"):
+        merged({"a": first, "b": first})
+    with pytest.raises(ValueError, match="different models"):
+        merged({"a": first, "b": [r | {"rep": 1, "model": "n"} for r in first]})
