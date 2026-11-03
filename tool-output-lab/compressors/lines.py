@@ -7,6 +7,7 @@ model can ask for them by number.
 """
 
 import re
+from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass
 
@@ -20,22 +21,54 @@ class _Run:
     first: int  # 0-based index of the first line in the run
     last: int  # 0-based index of the last line in the run
     line: str  # the first line, as written
+    rare: bool = False  # a value its run's lines almost never hold, in a slot with few values
 
 
 def _normalise(line: str) -> str:
     return _VARIABLE.sub("#", line.strip())
 
 
+def _rare_lines(lines: list[str], first: int, last: int) -> set[int]:
+    """Lines of one run (same shape, numbers aside) holding a rare value in a categorical slot:
+    a slot (the k-th number) with few distinct values, one of them dominant, such as a status
+    code, an exit code or a failure count. Slots with many values (times, sizes, ids) say nothing."""
+    n = last - first + 1
+    if n < 10:
+        return set()
+    slots = [_VARIABLE.findall(lines[i].strip()) for i in range(first, last + 1)]
+    rare: set[int] = set()
+    for k in range(min(len(s) for s in slots)):
+        counts = Counter(s[k] for s in slots)
+        if len(counts) > 10 or counts.most_common(1)[0][1] / n < 0.8:
+            continue
+        cut = max(1, int(0.02 * n))
+        rare |= {first + j for j, s in enumerate(slots) if counts[s[k]] <= cut}
+    return rare
+
+
 def _runs_of(lines: list[str]) -> list[_Run]:
-    runs: list[_Run] = []
+    """Consecutive lines of the same shape (numbers aside) as one run each, except that a line with
+    a rare value in a categorical slot (one 500 among 200s) is a run of its own, and stands out."""
+    groups: list[tuple[int, int]] = []
     prev_norm: str | None = None
     for i, line in enumerate(lines):
         norm = _normalise(line)
-        if runs and norm == prev_norm:
-            runs[-1] = _Run(runs[-1].first, i, runs[-1].line)
+        if groups and norm == prev_norm:
+            groups[-1] = (groups[-1][0], i)
         else:
-            runs.append(_Run(i, i, line))
+            groups.append((i, i))
         prev_norm = norm
+    runs: list[_Run] = []
+    for first, last in groups:
+        rare = _rare_lines(lines, first, last)
+        start = first
+        for i in sorted(rare):
+            if i > start:
+                runs.append(_Run(start, i - 1, lines[start]))
+            runs.append(_Run(i, i, lines[i], rare=True))
+            start = i + 1
+        if start <= last:
+            runs.append(_Run(start, last, lines[start]))
     return runs
 
 
@@ -57,7 +90,7 @@ def _choose_runs(
     added = 0
     hidden_signals = 0
     for i, run in enumerate(runs):
-        if not _is_signal(run.line, terms):
+        if not (run.rare or _is_signal(run.line, terms)):
             continue
         span = set(range(max(0, i - window), min(n, i + window + 1))) - keep
         if added + len(span) > max_window_runs:
