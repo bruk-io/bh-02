@@ -53,7 +53,7 @@ extensions' own process. Two components can fill it:
 
 The runner starts a program, and the row that started it is the one that stops it. On
 `/release` (`runner:release`) the runner asks each such row to stop its own (the python row its
-Python process, the extensions row its process), then lets go of the placeholders its jails hold on the
+Python process, the extensions row its process), then says whether a program of its jails still runs, brig having removed the placeholders its jails held on the
 host. It never stops a row's program itself: if one still runs, `/release` says so. The next
 start ends the release, whoever starts: the next input, or an extension that changed.
 
@@ -63,12 +63,8 @@ directory, the paths it imports from) or what could run code later; reads of eve
 credentials; no network; a scrubbed environment. [The jail](../using/jail.md) lists it as you meet
 it.
 
-Two stacks enforce it, from [brig](../../brig/index.md):
-
-| Platform | Mechanism | Reads |
-|---|---|---|
-| macOS | Seatbelt | by denylist: everything but what the policy hides |
-| Linux | bubblewrap | by allowlist: the system, the interpreter, the project; nothing else exists |
+brig's bubblewrap jail enforces it on Linux (by allowlist: the system, the interpreter, the project;
+nothing else exists). brig has no jail for macOS yet, so the confined runner refuses there.
 
 brig grades every part of what it enforces (`enforced`, `best_effort`, `cooperative`,
 `unenforced`) by what the stack can deliver, and the status bar's `jail` field (the `grades`

@@ -1,29 +1,56 @@
-"""The one place a bh-02 `Policy` becomes the old brig's `Spec` (with its `FsPolicy`, `EnvPolicy`,
-`ReadModel` and `Channel`). The swap to the new brig replaces this function and the shell
-(`jail`); no other module's signature names brig's Spec.
+"""The one place a bh-02 `Policy` becomes the new brig's policies: its `FsPolicy` (what the
+program may read and write, and what is kept from it), its `EnvPolicy` (the names of the
+environment that reach it), the candidate environment those names are taken from, and its `Stdio`.
+No other module's signature names a brig policy.
 """
 
-from brig.core import Channel, ChannelKind, EnvMode, EnvPolicy, FsPolicy, Spec
-from brig.core import ReadModel as BrigReadModel
+from collections.abc import Mapping
+from dataclasses import dataclass
+
+from brig import Claim, EnvPolicy, FsPolicy, Grade, Stdio
 from runner_cordis_plugin.policy import Policy, ReadModel
 
-__all__ = ["to_brig_spec"]
+__all__ = ["Brigged", "report_of", "to_brig"]
 
-_READ_MODELS = {ReadModel.DENYLIST: BrigReadModel.DENY_LIST, ReadModel.ALLOWLIST: BrigReadModel.ALLOW_LIST}
+#: By denylist the program reads everything but its masks: the whole host, read-only, less them.
+_WHOLE_HOST = ("/",)
 
 
-def to_brig_spec(policy: Policy) -> Spec:
-    """`policy` as the old brig's Spec: the writable roots and denies, the read model with its
-    readable roots, the masks as read denies (brig's carve-outs under the allowlist), the scrubbed
-    environment, and the one channel the program listens on."""
-    return Spec(
+@dataclass(frozen=True, slots=True)
+class Brigged:
+    """What `create_bwrap_jail` is given for a `Policy`: `fs`, `env_policy`, `env` (the candidate
+    environment, not yet scrubbed) and `stdio`."""
+
+    fs: FsPolicy
+    env_policy: EnvPolicy
+    env: Mapping[str, str]
+    stdio: Stdio
+
+
+def to_brig(policy: Policy, *, environ: Mapping[str, str], stdout: str, stderr: str) -> Brigged:
+    """`policy` as brig takes it. `fs`: the readable roots (the policy's, or the whole host by
+    denylist), the writable roots, the write denies and the masks, as intent; brig compiles them
+    and makes what a deny or mask at an absent path needs. `env_policy`: an allow-list of the
+    policy's `env_allow` and the names it sets itself, and `env`: `environ` with those set
+    (`TMPDIR`, the git author), so the allow-list is the one thing that decides what the program
+    sees. `stdio`: the program's stdin is `/dev/null`, its stdout and stderr the files `stdout` and
+    `stderr` name (outside every writable root, which brig refuses otherwise)."""
+    readable = _WHOLE_HOST if policy.read_model is ReadModel.DENYLIST else policy.readable
+    own = dict(policy.env_set)
+    return Brigged(
         fs=FsPolicy(
-            write_allows=policy.writable,
+            readable=readable,
+            writable=policy.writable,
             write_denies=policy.write_denies,
-            read_model=_READ_MODELS[policy.read_model],
-            read_allows=policy.readable,
-            read_denies=policy.masks,
+            masks=policy.masks,
         ),
-        env=EnvPolicy(mode=EnvMode.SCRUB, allow_names=policy.env_allow, set=policy.env_set),
-        channels=(Channel(name=policy.channel, kind=ChannelKind.LISTEN),),
+        env_policy=EnvPolicy(allowed=tuple(dict.fromkeys((*policy.env_allow, *own)))),
+        env=frozendict({**environ, **own}),
+        stdio=Stdio(stdin="/dev/null", stdout=stdout, stderr=stderr),
     )
+
+
+def report_of(report: Mapping[Claim, Grade]) -> dict[str, str]:
+    """A jail's report as the runner's (CONTRACTS.md: report): each claim by its name, each grade
+    in lower case (`best_effort`), exactly as brig graded them."""
+    return {claim.name: grade.value.lower() for claim, grade in report.items()}

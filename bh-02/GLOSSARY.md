@@ -40,7 +40,6 @@ As [cordis's README](../libs/cordis/README.md) defines them (its "Concepts").
 - **the shell**: `bh_02` (`app/`): the `bh-02` command, which reads the layers, boots them and waits for the chat to end.
 - **layer files**: `bh-02.toml` (the whole harness), a session's `session.toml`, and your `--patch` files, applied in that order.
 - **stack** (a session's): the model a session started on, kept in its `meta.json` and listed by `bh-02 sessions`; not always the model that answered.
-- **stack** (brig's): the mechanisms brig composes into one jail; bh-02's runner uses `scratch_darwin()` (Seatbelt) on macOS and `strict_linux()` (bubblewrap) on Linux (`stack_for`).
 - **stack** (a fiber's, in cordis): the undos a fiber has recorded, run last first when it unloads.
 - **loop** (row and key): the agent loop, `agent:loop`: sends the conversation to the model, runs each call it asks for through its tool, and nudges a step that didn't count ([The loop](../docs/bh-02/how-it-works/loop.md)).
 - **model** (row and key), **the model row**: the model itself, one step at a time (`models:model`), the one its `default` names, chosen by `--model NAME` or `/model NAME`.
@@ -92,7 +91,7 @@ As [cordis's README](../libs/cordis/README.md) defines them (its "Concepts").
 - **jail**: brig's sandbox around one program the confined runner started; its grades say what it enforces.
 - **confined**, **unconfined**: whether the runner enforces writes and network, so the model's code runs without asking (`jailed` in the status bar), or not, so each input is put to you first (`unjailed`).
 - **grades**: how well each part of the jail holds (`enforced`, `best_effort`, `cooperative`, `unenforced`), shown in the status bar as ✓, ~, ? and ✗.
-- **placeholder** (Linux): an empty directory the jail makes in the project to hold a path an input may not create (`.envrc/`, `.claude/`), removed when the jail ends ([The jail](../docs/bh-02/using/jail.md#on-linux)).
+- **placeholder** (Linux): an empty directory the jail makes in the project to hold a path an input may not create (`.envrc/`, `.claude/`), made and removed by brig, removed when the last jail holding it ends ([The jail](../docs/bh-02/using/jail.md#on-linux)).
 - **tripwire** (Linux): the jail ending itself at once when the host replaces, moves or removes a path it holds with a mount ([The jail](../docs/bh-02/using/jail.md#on-linux)).
 - **release** (row): `runner:release`: `/release`, which stops the Python process and the extensions process until the next input and frees the placeholders their jails held.
 - **approval** (row and key): `runner:approval`, the one rule for whether what the model asked for runs unasked; what it doesn't let run is put to you ([The jail and approval](../docs/bh-02/how-it-works/jail-and-approval.md)).

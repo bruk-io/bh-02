@@ -8,6 +8,7 @@ members (a mark in each test file would repeat its name and its reason). A new t
 thing goes into the group, in this table.
 """
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -28,20 +29,15 @@ class Group:
 
 GROUPS = (
     Group(
-        name="jail-lock",
+        name="jails",
         why=(
-            "A Linux jail of bh-02 holds the user's jail lock (`jails.lock` in bh-02's state directory) "
-            "shared for as long as it runs, and "
-            "removes its placeholders (and its record) only when it can take that lock exclusively, "
-            "that is, when no other jail of the user runs (runner_cordis_plugin.jail: `_hold`, "
-            "`placeholders.clear_up`). The lock is one file per user, so a jail that one worker starts "
-            "keeps the "
-            "placeholders of a jail another worker stops, and the tests that assert nothing is left "
-            "behind fail. Every test that starts a BrigJail on the default lock is in these modules; "
-            "the ones that give their BrigJail a lock of their own (TASK-0085, TASK-0091) are among "
-            "them, safe alone and so only as slow as the others. test_host_values.py boots "
-            "runner:confined and expects it to refuse before any jail starts; it is here because a "
-            "regression in that refusal would start one on the default lock."
+            "These tests start real bubblewrap jails (runner_cordis_plugin.jail) and measure how long "
+            "one takes to end (the tripwire's milliseconds, a killed bh-02's jail going with it), which "
+            "a worker loaded with other jails' namespaces flakes. brig keeps its placeholders and the "
+            "lock over them under its own state directory (`BRIG_HOME`), which the fixture below gives "
+            "each test, so none shares that. test_host_values.py boots runner:confined and expects it "
+            "to refuse before any jail starts; it is here because a regression in that refusal would "
+            "start one."
         ),
         modules=(
             "bh-02/app/tests/test_host_values.py",
@@ -52,6 +48,18 @@ GROUPS = (
         ),
     ),
 )
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _a_brig_home_of_its_own(tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
+    """brig keeps its state (the jails' channel directories and the placeholders it makes, with the
+    lock over them) in `BRIG_HOME`, else `~/.brig`: each test process names a directory of its own,
+    so no test writes the person's. One for the process, not for each test: brig resolves the
+    directory once per process and keeps it, and the processes a test starts inherit it. Short (a
+    socket path must fit in about 100 bytes)."""
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv("BRIG_HOME", str(tmp_path_factory.mktemp("brig")))
+        yield
 
 
 def group_of(module: str) -> str | None:

@@ -1,64 +1,48 @@
 """What a Linux jail does with mounts, as decisions on a `Policy`: bubblewrap holds a deny or a
-mask with a mount on the host's own directory entry, so which denies it can mount (`mountable`,
-`uncovered`), which masks it holds under a root an input may write (`held`), which paths the
-host undoing would let an input in (`tripwired`), and what the person is told (`notice_for`,
-`graded`, `released_for`). Pure; what they read of the host is handed in (`facts`).
+mask with a mount on the host's own directory entry, so which denies it can mount (`mountable`),
+which masks it holds under a root an input may write (`held`), which paths the host undoing would
+let an input in (`tripwired`), and what the person is told (`notice_for`, `released_for`). Pure;
+what they read of the host is handed in (`facts`).
 """
 
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 
 from runner_cordis_plugin.policy import Policy
 
 __all__ = [
-    "graded",
     "held",
     "mountable",
     "notice_for",
     "released_for",
     "tripwired",
-    "uncovered",
 ]
 
 
-def uncovered(denies: Sequence[str]) -> tuple[str, ...]:
-    """The write denies that no other one contains. bubblewrap mounts each in turn, and one
-    inside a directory already bound read-only (an absent secret under a directory the host
-    imports code from) would need a mount point made on a read-only mount, which fails the
-    launch; the outer deny holds it already."""
-    return tuple(d for d in denies if not any(d.startswith(o + "/") for o in denies if o != d))
-
-
-def held(policy: Policy, absent: Collection[str]) -> tuple[str, ...]:
-    """The masks a Linux jail (`policy`, `allowlisted`) holds at or under a root an input
-    may write: one that is there (not in `absent`), which bubblewrap masks with a mount on the
-    path itself, and an absent one no input can create, at or under a write deny (a directory
-    bound read-only), where only
-    the host could put a file, which the jail could then read. A mount is on the host's
-    directory entry, so replacing that entry on the host (an editor saves by renaming a new file
-    over it) or removing it detaches the mount inside the jail, and an input can then read and
-    rewrite what is there (measured). Not an absent one nothing holds (a `hide`n file the project
-    has none of): an input may create it, and a file the host creates there is readable, which
-    brig's `fs_read` grade names. The rest are outside every writable root, where the allowlist
-    alone keeps them out of the jail."""
-    roots, denies = policy.writable, policy.write_denies
+def held(policy: Policy) -> tuple[str, ...]:
+    """The masks a Linux jail (`policy`, `allowlisted`) holds at or under a root an input may
+    write. bubblewrap masks each with a mount on the path itself (an absent one first gets a
+    directory brig makes there, so no input can create it), and a mount is on the host's directory
+    entry: replacing that entry on the host (an editor saves by renaming a new file over it) or
+    removing it detaches the mount inside the jail, and an input can then read and rewrite what is
+    there (measured). A mask under another is hidden already and mounted by nothing. The rest are
+    outside every writable root, where the allowlist alone keeps them out of the jail."""
+    roots, masks = policy.writable, policy.masks
     return tuple(
-        d
-        for d in policy.masks
-        if any(d == r or d.startswith(r + "/") for r in roots)
-        and (d not in absent or any(d == w or d.startswith(w + "/") for w in denies))
+        m
+        for m in masks
+        if any(m == r or m.startswith(r + "/") for r in roots)
+        and not any(o != m and m.startswith(o + "/") for o in masks)
     )
 
 
-def tripwired(policy: Policy, absent: Collection[str]) -> tuple[str, ...]:
+def tripwired(policy: Policy) -> tuple[str, ...]:
     """The paths a Linux jail holds with a mount that the host can undo: every write deny under
     a root an input may write (an existing path bound read-only over itself, or a placeholder) and
-    every secret held there (`held`; `absent` names the masks that are not there). Replacing,
-    moving or removing one on the host ends the jail (`Tripwire`); a deny outside every writable
-    root is not mounted at all. Never a path an input may create: that would end the jail it
-    runs in, blaming the host."""
+    every secret held there (`held`). Replacing, moving or removing one on the host ends the jail
+    (`Tripwire`); a deny outside every writable root is not mounted at all."""
     roots = policy.writable
     under = [d for d in policy.write_denies if any(d.startswith(r + "/") for r in roots)]
-    return tuple(dict.fromkeys([*under, *held(policy, absent)]))
+    return tuple(dict.fromkeys([*under, *held(policy)]))
 
 
 def notice_for(platform: str, holds: Sequence[str]) -> str:
@@ -87,16 +71,6 @@ def released_for(running: bool = False) -> str:
         "A program this runner started still runs (its row did not stop it on /release), and "
         "its jail holds what it holds: /rows shows the rows; /restart one, then /release again."
     )
-
-
-def graded(report: Mapping[str, str], holds: Sequence[str]) -> dict[str, str]:
-    """brig's grades, with `fs_read` best-effort while a Linux jail holds a secret with a mount
-    (`held`): brig grades a masked path enforced, and it is, until the host replaces or
-    removes it."""
-    out = dict(report)
-    if holds and out.get("fs_read") == "enforced":
-        out["fs_read"] = "best_effort"
-    return out
 
 
 def mountable(denies: Sequence[str], instead: Mapping[str, str]) -> tuple[str, ...]:

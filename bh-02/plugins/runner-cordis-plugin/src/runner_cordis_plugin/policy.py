@@ -1,7 +1,6 @@
 """What bh-02 means the confined runner's jail to keep and allow: `Policy`, bh-02's own intent,
 and the pure functions that make it. No brig here: `spec_for` is the whole policy, `brig_spec`
-turns a `Policy` into the old brig's Spec, and the swap to the new brig replaces that and the
-shell (`jail`).
+turns a `Policy` into brig's policies, and `jail` is the shell.
 
 What an input may write: the project root (`write`) and a scratch directory of the jail's own.
 What it may not, even inside those: the composition's layer files (an input rewriting one would
@@ -20,13 +19,10 @@ when bh-02 runs from the home directory), whose models file and startup file a l
 reads on the host and trusts. What it may not read: the credential paths under the home directory
 (`CREDENTIALS`), `hide` under the project (nothing by default), and what the `host` value names as
 `secrets` (the sessions' state, where Claude Code keeps its tokens). No network: the program's
-own socket is the one way in or out. The worker's environment is scrubbed to a short allowlist.
-brig's host process, which starts the worker from outside the jail, keeps bh-02's own
-environment: brig's host runtime composes `{**os.environ, **jail.env}` by its spec, and
-`jail.env` can add keys but not remove them. So a variable of the launching shell (a `CLAUDE_*`
-of a Claude Code that launched bh-02, say) sits in that process, out of an input's reach (in the
-jail, `ps` fails with a permission error; measured). A key the person exports for a model
-(`key = { env = ... }`) is there too, and in no worker's environment unless `env` lists it.
+own socket (a channel brig reserves) is the one way in or out. The worker's environment is exactly a
+short allowlist: brig is handed bh-02's environment as the candidate and lets through the names
+the policy lists (`brig_spec.to_brig`), so a variable of the launching shell (a `CLAUDE_*` of a Claude
+Code that launched bh-02, a key the person exports for a model) reaches no worker unless `env` lists it.
 
 One policy, two platforms; only the read model differs: darwin reads by denylist (everything but
 the secrets, `spec_for` as it is), Linux by allowlist (`allowlisted`).
@@ -81,8 +77,7 @@ class Policy:
     `read_model` and `readable`: by denylist (`readable` empty) or allowlist (the trees it may
     read). `masks`: what it may not read, whichever model (the secrets). `env_allow`: the names
     of bh-02's own environment that survive; `env_set`: the variables it sets besides (`TMPDIR`,
-    the git author). `channel`: the name of the one channel the program listens on (the socket its
-    owner dials).
+    the git author).
 
     Each tuple is a set kept in order (`_paths`), `writable` and `readable` as trees (`_roots`),
     and `env_set` has one value per name, the last."""
@@ -94,7 +89,6 @@ class Policy:
     env_set: tuple[tuple[str, str], ...]
     read_model: ReadModel = ReadModel.DENYLIST
     readable: tuple[str, ...] = ()
-    channel: str = "program"
 
     def __post_init__(self) -> None:
         if self.read_model is ReadModel.DENYLIST and self.readable:
@@ -171,7 +165,6 @@ class BrigConfig:
 def spec_for(
     *,
     root: str,
-    endpoint: str,
     scratch: str,
     home: str,
     config: BrigConfig,
@@ -226,7 +219,7 @@ def spec_for(
     # library and the venv's prefix, but in a venv layout the base's own binary is on neither (with
     # no venv the whole prefix is, and this adds nothing). Files only: a deny on a link is the mount
     # on what it leads to, so the file is what holds. Strictly under a root, as `host`.
-    allows = (*writable, str(Path(endpoint).parent))
+    allows = tuple(writable)
     interpreter = [i for i in interpreters if i not in allows and any(i.startswith(r + "/") for r in allows)]
     # And the links on the way to it, which a mount on the file does not hold (the entry of a link
     # can be renamed, and an input plant its own interpreter at the name): their directories.
@@ -243,9 +236,8 @@ def spec_for(
         *holders,
     ]
     return Policy(
-        # The program's socket directory too: the channel names no path (brig's decision-186), so the
-        # directory the owner chose for its socket is granted here, as brig granted it per channel
-        # until then. TASK-0079.31 moves the owners to a socket brig reserves, and this goes.
+        # The program's socket is a channel brig reserves and binds into the jail (`jail`), so no
+        # directory for it is named here.
         writable=allows,
         write_denies=tuple(denies),
         masks=(*(str(Path(home, name)) for name in CREDENTIALS), *hidden),
@@ -274,7 +266,7 @@ def link_directories(links: Sequence[str], writable: Sequence[str]) -> tuple[str
 
 def allowlisted(policy: Policy, readable: Sequence[str]) -> Policy:
     """`policy`, reading by allowlist: `readable` is the tree an input may read, and the policy's
-    masks become the carve-outs inside it. The environment and the channel are the policy's,
+    masks become the carve-outs inside it. The environment is the policy's,
     unchanged, and so are the writes but one kind: a path denied both reading and writing (a
     secret under the project) keeps only its mask. bubblewrap masks an existing one with a
     read-only `/dev/null`, which refuses writes and removal too (a write deny as well would be a

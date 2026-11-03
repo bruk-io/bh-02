@@ -1,7 +1,7 @@
 """What bh-02 learns from the host before it can judge a policy: the links on the way to its
-interpreter (one walk, for the policy's `links` and for the Linux jail's readable trees), which
-of its paths exist, and the person's git identity. Everything here reads the filesystem or runs
-`git`; the decisions on what it finds are in `policy` and `mounts`.
+interpreter (one walk, for the policy's `links` and for the Linux jail's readable trees) and the
+person's git identity. Everything here reads the filesystem or runs `git`; the decisions on what it
+finds are in `policy` and `mounts`.
 """
 
 import os
@@ -12,13 +12,10 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 __all__ = [
-    "absent_denies",
-    "absent_secrets",
     "git_identity",
     "instead",
     "interpreter_files",
     "links_on_the_way",
-    "present",
 ]
 
 #: How many links one lookup follows before the kernel gives up (ELOOP): `links_on_the_way` stops there.
@@ -33,12 +30,6 @@ class _Link:
 
     entry: str
     through: bool
-
-
-def present(candidates: Sequence[str]) -> dict[str, str]:
-    """Each of `candidates` that is an executable file on this host (through its links), with the
-    path it resolves to: what `supervisor_interpreter` chooses among."""
-    return {c: str(Path(c).resolve()) for c in candidates if Path(c).is_file() and os.access(c, os.X_OK)}
 
 
 def interpreter_files(spelled: Sequence[str]) -> tuple[str, ...]:
@@ -141,25 +132,3 @@ def instead(denies: Sequence[str], writable: Sequence[str]) -> dict[str, str]:
         elif str(top) != deny and any(top.is_relative_to(r) and top != r for r in roots):
             found[deny] = str(top)
     return found
-
-
-def absent_secrets(masks: Sequence[str]) -> frozenset[str]:
-    """The masks that are not there, by the test brig's compile uses to choose what it masks
-    (`os.path.exists`): nothing masks one, so a jail holds it only where no input can create it
-    (`mounts.held`)."""
-    return frozenset(d for d in masks if not os.path.exists(d))
-
-
-def absent_denies(writable: Sequence[str], denies: Sequence[str]) -> list[str]:
-    """Every write-denied path under a write root that does not exist, and each of its missing
-    parents: what bubblewrap will create on the host to mount over."""
-    roots = [str(Path(r).resolve()) for r in writable]
-    absent: list[str] = []
-    for deny in denies:
-        path = Path(deny).resolve()
-        if not any(path.is_relative_to(r) and str(path) != r for r in roots):
-            continue
-        while not path.exists() and str(path) not in roots:
-            absent.append(str(path))
-            path = path.parent
-    return absent

@@ -34,10 +34,9 @@ def test_every_file_a_group_names_is_a_test_file_that_exists() -> None:
 
 
 def test_every_test_file_that_starts_a_jail_is_in_a_group() -> None:
-    """A jail of bh-02's own holds the user's jail lock (`jails.lock` in bh-02's state directory) for
-    as long as it runs, so a test that starts one must not run beside another (the `jail-lock`
-    group): a file that starts one belongs in a group of the repository's `conftest.py`, with a
-    reason there."""
+    """A test that starts a jail of bh-02's own measures how long it takes to end, which a worker
+    loaded with other jails flakes (the `jails` group): a file that starts one belongs in a
+    group of the repository's `conftest.py`, with a reason there."""
     conftest = _conftest()
     files = [
         path.relative_to(_ROOT).as_posix()
@@ -47,4 +46,4 @@ def test_every_test_file_that_starts_a_jail_is_in_a_group() -> None:
     ]
     assert files, "no test file starts a jail: the pattern no longer finds what it is for"
     ungrouped = [path for path in files if conftest.group_of(path) is None]
-    assert not ungrouped, f"these start a jail but are in no group of conftest.py (jail-lock?): {ungrouped}"
+    assert not ungrouped, f"these start a jail but are in no group of conftest.py (jails?): {ungrouped}"

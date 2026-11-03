@@ -26,10 +26,11 @@ from typing import Any, Protocol, runtime_checkable
 
 __all__ = ["Approval", "Graded", "is_confined"]
 
-_CONFINING = (
-    "fs_write",
-    "network",
-)  # the axes a runner must enforce for what runs in it to count as confined
+# The grades each axis a runner must hold for what runs in it to count as confined may have.
+# `fs_write` may be best-effort: brig grades it so while the jail holds a path with a mount the
+# host can undo, which the jail's tripwire ends the jail for (`runner_cordis_plugin.tripwire`), and
+# bh-02's policy always holds some (the layer files, `.git/hooks`).
+_CONFINING = {"fs_write": ("enforced", "best_effort"), "network": ("enforced",)}
 _JAIL = "jail"  # where a call runs when its question says nothing (CONTRACTS.md: tools, `runs`)
 # bh-02's own tool that reaches only the jail and bh-02's own state: asked exactly as the jail's are
 _HARNESS = "harness"
@@ -47,9 +48,10 @@ class Graded(Protocol):
 
 
 def is_confined(report: Mapping[str, str]) -> bool:
-    """Whether a runner's report says what runs in it can write only where it was allowed and
-    reach no network."""
-    return all(report.get(axis) == "enforced" for axis in _CONFINING)
+    """Whether a runner's report says what runs in it can write only where it was allowed
+    (`fs_write` enforced, or best-effort: unless the host undoes a mount, which ends the jail) and
+    reach no network (`network` enforced)."""
+    return all(report.get(axis) in grades for axis, grades in _CONFINING.items())
 
 
 @dataclass(frozen=True, slots=True)

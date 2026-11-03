@@ -23,6 +23,11 @@ class _Runner:
 def test_confined_means_writes_and_network_are_enforced() -> None:
     assert is_confined({"fs_write": "enforced", "network": "enforced", "fs_read": "unenforced"})
     assert not is_confined({"fs_write": "enforced", "network": "best_effort"})
+    # brig grades writes best-effort while the jail holds a path with a mount the host can undo (the
+    # tripwire ends the jail then): confined; one it could not hold at all is not
+    assert is_confined({"fs_write": "best_effort", "network": "enforced"})
+    assert not is_confined({"fs_write": "unenforced", "network": "enforced"})
+    assert not is_confined({"fs_write": "violated", "network": "enforced"})
     assert not is_confined(UNENFORCED)
     assert not is_confined({})
 

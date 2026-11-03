@@ -75,6 +75,8 @@ def gates() -> list[Path]:
     """The root, then every library that keeps a gate of its own."""
     found = [ROOT]
     for pyproject in sorted(ROOT.glob("libs/*/pyproject.toml")):
+        if pyproject.parent.name == "brig":
+            continue  # no workspace member since TASK-0176.07 (`pypeeker` is not installed there); TASK-0176.08 removes it
         if "tool" in (config := tomllib.loads(pyproject.read_text())) and "pypeeker" in config["tool"]:
             found.append(pyproject.parent)
     return found

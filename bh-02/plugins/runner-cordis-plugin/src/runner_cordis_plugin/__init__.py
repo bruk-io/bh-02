@@ -1,41 +1,13 @@
 """What runs the model's code: a runner (`runner`), confined by brig (the only package in the
-workspace that imports brig) or not at all; the rule for what runs unasked (`approval`); and
+workspace that imports brig, bruk-io/brig's) or not at all; the rule for what runs unasked (`approval`); and
 `/release`, which asks each owner to stop its own program and lets go of what the runner holds."""
 
 from runner_cordis_plugin import allowlist
 from runner_cordis_plugin.approval import Approval, Graded, is_confined
+from runner_cordis_plugin.brig_spec import Brigged, report_of, to_brig
 from runner_cordis_plugin.facts import links_on_the_way
-from runner_cordis_plugin.jail import (
-    SYSTEM_READABLE,
-    BrigJail,
-    Host,
-    group_alive,
-    host_interpreters,
-    stack_for,
-    still_running,
-    supervisor_interpreter,
-)
-from runner_cordis_plugin.mounts import (
-    graded,
-    held,
-    mountable,
-    notice_for,
-    released_for,
-    tripwired,
-    uncovered,
-)
-from runner_cordis_plugin.placeholders import (
-    MARK,
-    identity,
-    lock_path,
-    made_by_the_jail,
-    record_text,
-    recorded,
-    recorded_group,
-    records_dir,
-    remove_placeholders,
-    still_made,
-)
+from runner_cordis_plugin.jail import CHANNEL, PLANNED, SYSTEM_READABLE, BrigJail, Host, planned
+from runner_cordis_plugin.mounts import held, mountable, notice_for, released_for, tripwired
 from runner_cordis_plugin.policy import (
     BASELINE_ENV,
     CREDENTIALS,
@@ -58,14 +30,16 @@ from runner_cordis_plugin.wiring import approval, confined, release, unconfined
 
 __all__ = [
     "BASELINE_ENV",
+    "CHANNEL",
+    "PLANNED",
     "CREDENTIALS",
-    "MARK",
     "SELF_MODIFYING",
     "SYSTEM_READABLE",
     "UNENFORCED",
     "Approval",
     "BrigConfig",
     "BrigJail",
+    "Brigged",
     "Graded",
     "Host",
     "Mechanism",
@@ -81,38 +55,25 @@ __all__ = [
     "confined",
     "decoded",
     "git_author",
-    "graded",
-    "group_alive",
     "held",
-    "host_interpreters",
-    "identity",
     "is_confined",
     "lifted",
     "link_directories",
     "links_on_the_way",
-    "lock_path",
-    "made_by_the_jail",
     "mountable",
     "notice_for",
+    "planned",
     "readable_roots",
-    "record_text",
-    "recorded",
-    "recorded_group",
-    "records_dir",
     "release",
+    "report_of",
     "released_for",
-    "remove_placeholders",
     "self_modify_denied",
     "spec_for",
-    "stack_for",
-    "still_made",
-    "still_running",
-    "supervisor_interpreter",
     "told_reads",
+    "to_brig",
     "tripped_for",
     "tripwired",
     "unconfined",
-    "uncovered",
     "unended_for",
     "wires",
 ]

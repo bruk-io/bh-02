@@ -27,8 +27,9 @@ Programs the model's code starts run inside the same jail. brig's host process, 
 Python process from outside the jail, keeps the environment bh-02 was launched with (brig's
 launcher passes it on, so a key or token your shell exports is there, and bh-02 never adds one of its own); a jailed input can't read it.
 
-The jail is brig's. On macOS it is Seatbelt; on Linux it is bubblewrap, which must be installed
-(the `bubblewrap` package). Without it, bh-02 tells you to install it or run with `--no-jail`.
+The jail is brig's (bruk-io/brig). On Linux it is bubblewrap, which must be installed (the
+`bubblewrap` package); without it, bh-02 tells you to install it or run with `--no-jail`. On macOS
+brig has no jail yet, so `runner:confined` refuses and names `--no-jail`.
 
 ## The status bar
 
