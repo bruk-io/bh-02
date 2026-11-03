@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-02T17:24:00Z'
-updated_date: '2026-11-03T03:25:00Z'
+updated_date: '2026-11-03T03:39:00Z'
 labels:
   - runner
   - size-3
@@ -102,4 +102,40 @@ INFO    -  Documentation built in 5.22 seconds
 ```
 
 Review (reviewer, 2026-11-03): NOT CLOSED. AC #2 unmet: full scripts/check exited 1 (recorded above): bh-02/app/tests/test_real_launch.py::test_a_keyed_model_s_key_never_reaches_an_input_s_environment, a --no-jail real launch whose quit exited 1 instead of 0; 3964 passed; gates and docs ok; no files reformatted. The test passes 3/3 alone, so it fails under parallel load; whether it is a pre-existing flake or the Unjailed stop/unreserve change (that path is exactly what this commit changed) is unshown, and either way check is not green. Needed: a green full check, and the failure explained (reproduce under -n auto on 1e0b11b^ vs 1e0b11b, or read the app's stderr on that exit). AC #1 met on reading: no start(argv, cwd, endpoint) form, adapter or fallback remains (remaining endpoint= are spec_for/compile policy calls); runner owns the socket dir (reserved after the refusals stack_for/bwrap/lock, before argv_for; removed on stop and in the failed-start except in BrigJail and Unjailed); /tmp/bh-s-XXXXXXXX/k.sock ~26 bytes; spec_for still allows only dirname(endpoint). Brig-verified connection left out and said so honestly (TASK-0079.31). Minor, no task: PlainJail (extensions testing fake) leaves its bh-t- dir when its readiness wait times out or the worker exits (no stop on that raise); BrigJail reserves the endpoint before os.pipe outside the try, so a pipe failure leaks it (same as jail_dir before).
+
+Check `scripts/check` exited 0
+
+(63 earlier lines omitted)
+```text
+........................................................................ [ 88%]
+........................................................................ [ 89%]
+........................................................................ [ 91%]
+........................................................................ [ 93%]
+........................................................................ [ 95%]
+........................................................................ [ 97%]
+........................................................................ [ 98%]
+.................................................                        [100%]
+3965 passed, 118 skipped in 248.98s (0:04:08)
+   ok
+== gates
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+== (root)
+   ok
+== libs/brig
+   ok
+== libs/cordis
+   ok
+== libs/cordis-helpers
+   ok
+== libs/host-paths
+   ok
+   ok
+== docs
+INFO    -  Cleaning site directory
+INFO    -  Building documentation to directory: /home/user/bh-02/site
+INFO    -  Documentation built in 5.73 seconds
+   ok
+== tokens
+   skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
+```
 <!-- SECTION:NOTES:END -->
