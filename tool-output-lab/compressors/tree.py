@@ -129,12 +129,19 @@ def fold_tree(
         standouts.update((children[i].first, children[i].last) for i in picks)
         return tuple(picks)
 
+    promoted_of: dict[int, tuple[int, ...]] = {}
+
     def shown_children(children: tuple[Node, ...], k: int | None) -> tuple[int, ...]:
-        """Indices of the children shown: all (k is None), or the first k, the stand-outs and the last few."""
+        """Indices of the children shown: all (k is None), or the first k, the stand-outs and the last few.
+
+        Stand-outs are found either way: when a list opens in full they still open first, before
+        siblings that cost less to open (a stand-out's lines are often the longer ones)."""
+        if id(children) not in promoted_of:
+            promoted_of[id(children)] = promoted(children)
         n = len(children)
         if k is None:
             return tuple(range(n))
-        return tuple(sorted({*range(k), *promoted(children), *range(n - tail_children, n)}))
+        return tuple(sorted({*range(k), *promoted_of[id(children)], *range(n - tail_children, n)}))
 
     def open_cost(first: int, last: int, children: tuple[Node, ...], k: int | None) -> int:
         shown_set = set(shown_children(children, k))

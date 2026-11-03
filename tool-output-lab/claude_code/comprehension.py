@@ -15,6 +15,7 @@ import argparse
 import ast
 import json
 import os
+import re
 import statistics
 import subprocess
 import tempfile
@@ -144,6 +145,29 @@ QUESTIONS = (
 )
 
 
+_FOLD_COMMAND = re.compile(r"(^|[;&|(]\s*)fold\s")
+
+
+def ran_fold(stream: list[str]) -> bool:
+    """Whether any Bash call in a stream-json session ran `fold` (alone, or in a pipeline)."""
+    for line in stream:
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if event.get("type") != "assistant":
+            continue
+        for block in event.get("message", {}).get("content", []):
+            command = str(block.get("input", {}).get("command", ""))
+            if (
+                block.get("type") == "tool_use"
+                and block.get("name") == "Bash"
+                and _FOLD_COMMAND.search(command)
+            ):
+                return True
+    return False
+
+
 def score(answer: str, expected: frozenset[str]) -> float:
     """The share of expected items the answer names as whole words."""
     return sum(contains(answer, e) for e in expected) / len(expected)
@@ -181,10 +205,7 @@ def run_one(q: Question, condition: str, model: str, rep: int) -> dict[str, Any]
             )
             lines = proc.stdout.splitlines()
             stats = asdict(parse_stream(lines, needle="\x00"))
-            used_fold = any(
-                '"name": "Bash"' in line and "fold " in line and '"type": "tool_use"' in line
-                for line in lines
-            )
+            used_fold = ran_fold(lines)
             error = stats["error"] and f"{stats['error']}; stderr: {proc.stderr[-300:]}"
         except subprocess.TimeoutExpired:
             stats = {"answer": "", "tool_calls": 0, "turns": 0, "cost_usd": 0.0, "input_tokens": 0}
