@@ -27,7 +27,7 @@ from pathlib import Path
 
 from compressors.cli import fold_text
 from compressors.code import language_for
-from compressors.common import estimate_tokens
+from compressors.common import estimate_tokens, split_lines
 from compressors.recovery import recover
 from compressors.route import detect
 from evals.tasks import BUDGET, FORMATS, Task, tasks
@@ -56,10 +56,10 @@ def _same(shown: str, source: str) -> bool:
 def coverage(source: str, out: str, numbered: bool) -> list[str]:
     """Problems with how the output accounts for the source's lines; empty when every line is
     shown at its place or inside exactly one marker."""
-    src = source.splitlines()
+    src = split_lines(source)
     problems: list[str] = []
     i = 0  # the next source line (0-based) the output must account for
-    for k, line in enumerate(out.splitlines()):
+    for k, line in enumerate(split_lines(out)):
         if _NOTE.match(line.strip()):
             continue
         if (m := _MARKER.match(line.strip())) is not None:

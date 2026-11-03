@@ -8,7 +8,7 @@ import json
 import re
 from typing import Any
 
-from compressors.common import estimate_tokens
+from compressors.common import estimate_tokens, split_lines
 from compressors.html import html_to_text, looks_like_html
 from compressors.json_fold import child_path, parse_json_or_jsonl
 
@@ -125,7 +125,7 @@ def _answer(raw: str, query: str) -> str:
     if query.startswith("chars:"):
         start, end = _range(query[6:], "chars")
         return text[start:end]
-    lines = text.splitlines()
+    lines = split_lines(text)
     if query.startswith("lines:"):
         first, last = _range(query[6:], "lines")
         if first < 1 or first > len(lines):

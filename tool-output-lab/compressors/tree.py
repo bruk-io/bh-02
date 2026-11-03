@@ -18,7 +18,7 @@ import xml.parsers.expat
 from collections import Counter
 from dataclasses import dataclass
 
-from compressors.common import discriminating, estimate_tokens, matches
+from compressors.common import discriminating, estimate_tokens, matches, split_lines
 
 _VARIABLE = re.compile(r"0x[0-9a-fA-F]+|[0-9a-fA-F]{8,}|\d+")
 
@@ -332,11 +332,11 @@ def looks_like_xml(raw: str) -> bool:
 
 def _pretty(raw: str) -> str:
     """One element per line, when the XML came packed onto few lines."""
-    lines = raw.splitlines()
+    lines = split_lines(raw)
     if len(lines) >= raw.count("<") / 4 and max((len(line) for line in lines), default=0) <= 1000:
         return raw
     pretty = xml.dom.minidom.parseString(raw.encode("utf-8")).toprettyxml(indent="  ")
-    return "\n".join(line for line in pretty.splitlines() if line.strip())
+    return "\n".join(line for line in split_lines(pretty) if line.strip())
 
 
 _BARE_AMP = re.compile(r"&(?!(?:[A-Za-z][\w.-]*|#\d+|#x[0-9A-Fa-f]+);)")
@@ -396,7 +396,7 @@ def xml_tree(raw: str) -> tuple[list[str], tuple[Node, ...]] | None:
             continue
         roots = _element_tree(source)
         if roots is not None:
-            return (raw.splitlines() if source is text else source.splitlines()), roots
+            return (split_lines(raw) if source is text else split_lines(source)), roots
     return None
 
 
@@ -410,6 +410,6 @@ def fold_xml(raw: str, budget_tokens: int, terms: frozenset[str] = frozenset()) 
 
 
 def fold_outline(raw: str, budget_tokens: int, terms: frozenset[str] = frozenset()) -> TreeFold:
-    lines = raw.splitlines()
+    lines = split_lines(raw)
     text, opened, folded = fold_tree(lines, indent_tree(lines), budget_tokens, numbered=False, terms=terms)
     return TreeFold(text, raw, opened, folded)

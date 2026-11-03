@@ -85,6 +85,24 @@ def split_identifiers(text: str) -> list[str]:
     return [w for w in words if w not in _STOPWORDS]
 
 
+def split_lines(text: str) -> list[str]:
+    """Lines as sed, grep -n, Read and ast-grep count them: split on newline only. A trailing
+    carriage return is dropped for display; form feeds and other separators stay inside their line
+    (str.splitlines would split on them and shift every later line number)."""
+    if not text:
+        return []
+    parts = text.split("\n")
+    if text.endswith("\n"):
+        parts.pop()
+    return [p[:-1] if p.endswith("\r") else p for p in parts]
+
+
+def read_text(path: str) -> str:
+    """A file's text with its line endings as they are (no newline translation), as sed sees it."""
+    with open(path, "rb") as f:
+        return f.read().decode("utf-8", errors="replace")
+
+
 def query_words(query: str) -> frozenset[str]:
     """An explicit query's terms: its identifier words, and each whitespace-separated token as
     written (lowercased, two characters or more), so short codes such as NL or JP-13 count."""

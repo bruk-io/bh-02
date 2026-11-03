@@ -12,6 +12,7 @@ from pathlib import Path
 
 from ast_grep_py import SgNode, SgRoot
 
+from compressors.common import split_lines
 from compressors.tree import Node, TreeFold, fold_tree
 
 _BODY_KINDS = frozenset(
@@ -116,12 +117,12 @@ def _as_nodes(node: SgNode, lines: list[str]) -> list[Node]:
 
 
 def code_tree(source: str, language: str) -> tuple[Node, ...]:
-    lines = source.splitlines()
+    lines = split_lines(source)
     return tuple(_nodes(SgRoot(source, language).root(), lines))
 
 
 def fold_code(source: str, language: str, budget_tokens: int) -> TreeFold:
     """The outline of a source file, opened as far as the budget allows, with real line numbers."""
-    lines = source.splitlines()
+    lines = split_lines(source)
     text, opened, folded = fold_tree(lines, code_tree(source, language), budget_tokens, numbered=True)
     return TreeFold(text, source, opened, folded)
