@@ -21,12 +21,13 @@ plain text. Text that fits the budget comes back unchanged.
 
 ## Target: Claude Code
 
-The lab now tests the idea inside Claude Code, through two hooks and a headless A/B:
+The lab tests the idea inside Claude Code, through a hook and headless runs:
 
 - `claude_code/hook.py`, a `PostToolUse` hook on `mcp__.*`: folds large MCP results (JSON, XML,
   accessibility outlines, logs), including the ones Claude Code itself spilled to a file, and
-  points Claude at the saved raw output. By default it folds only what Claude Code spilled, which
-  is what the A/Bs recommend; `TOOL_OUTPUT_LAB_MODE=all` folds inline results too.
+  points Claude at the saved raw output. By default (`inline`) it folds only results under Claude
+  Code's spill threshold and leaves spills to Claude Code, the one mode P2 kept (FINDINGS 34-35);
+  `TOOL_OUTPUT_LAB_MODE=spilled` folds only spills, `all` both.
 - `evals/l2.py` with `claude_code/fixture_mcp.py`: headless `claude -p` runs on the eval tasks,
   native against the hook (or against `lab-fold` named in CLAUDE.md, for files), scored from the
   answer's ANSWER line, with tokens per request, the final context, cost, calls and intervals.
@@ -50,12 +51,14 @@ The query signal is the tool call's own arguments, ignoring terms most items sha
 A branch, or a mode of the hook, is cut if either holds against native Claude Code:
 
 - answers drop more than 3 points;
-- input tokens, recovery reads included, are not lower.
+- input tokens, recovery reads included, are not lower: measured as the final context, the input
+  of the session's last request, which holds every recovery read (the owner's reading, 2026-11-03,
+  FINDINGS 37; summed input is reported, not judged).
 
-Change these numbers only before a run, never after seeing one. So far, indicatively (13-14 runs a
-cell, no intervals; see FINDINGS K1): folding results Claude Code spilled kept answers and cut round
-trips with Haiku; folding inline results failed both criteria. Layer 2 applies the criteria to
-confidence intervals.
+Change these numbers only before a run, never after seeing one. Layer 2 applies the criteria to
+95% intervals. With Haiku (P2, FINDINGS 33-39): folding results under the spill threshold passes;
+folding spilled results fails the input criterion (the final context grows 800 tokens) and is cut,
+pending Sonnet in P3.
 
 ## Running
 
