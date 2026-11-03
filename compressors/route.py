@@ -1,33 +1,73 @@
 """The middleware's one entry point: route a tool result to a compressor, or pass it through."""
 
 from dataclasses import dataclass
+from typing import Any
 
 from compressors import markers
 from compressors.common import estimate_tokens, split_lines
 from compressors.html import html_to_text, looks_like_html
 from compressors.json_fold import fold_json, parse_json_or_jsonl
 from compressors.lines import fold_lines
-from compressors.tree import fold_outline, fold_xml, looks_like_outline, looks_like_xml, xml_tree
+from compressors.tree import (
+    XmlTree,
+    fold_outline,
+    fold_xml_tree,
+    looks_like_outline,
+    looks_like_xml,
+    xml_tree,
+)
 
 _MIN_LINES = 40  # fewer lines than this and the text is cut by characters instead
 _MAX_AVG_LINE = 500
 _WORTH_IT = 0.9  # a result that keeps more than this share of the raw tokens is passed through
 
 
-def detect(raw: str) -> str:
-    """The branch a large result would take: json, xml, html, outline, lines or text."""
-    if parse_json_or_jsonl(raw) is not None:
-        return "json"
-    if looks_like_xml(raw) and xml_tree(raw) is not None:
-        return "xml"
+# What detection parsed, handed to the fold so nothing is parsed twice: a JSON document and its
+# kind ("json" or "jsonl"), an XML element tree, or nothing for the branches that parse as they fold.
+type _Parsed = tuple[Any, str] | XmlTree | None
+
+_BRANCHES = ("json", "xml", "html", "outline", "lines", "text")
+
+
+def _detect(raw: str) -> tuple[str, _Parsed]:
+    if (doc := parse_json_or_jsonl(raw)) is not None:
+        return "json", doc
+    if looks_like_xml(raw) and (tree := xml_tree(raw)) is not None:
+        return "xml", tree
     if looks_like_html(raw):
-        return "html"
+        return "html", None
     lines = split_lines(raw)
     if looks_like_outline(lines):
-        return "outline"
+        return "outline", None
     if len(lines) >= _MIN_LINES and len(raw) / len(lines) <= _MAX_AVG_LINE:
-        return "lines"
-    return "text"
+        return "lines", None
+    return "text", None
+
+
+def detect(raw: str) -> str:
+    """The branch a large result would take: json, xml, html, outline, lines or text."""
+    return _detect(raw)[0]
+
+
+def _parse_as(branch: str, raw: str) -> _Parsed:
+    """What `branch` needs parsed, for a branch named instead of detected.
+
+    Raises:
+        ValueError: the text cannot take that branch, or there is no such branch.
+    """
+    match branch:
+        case "json":
+            if (doc := parse_json_or_jsonl(raw)) is None:
+                raise ValueError("--as json: the text does not parse as JSON or JSON Lines")
+            return doc
+        case "xml":
+            if (tree := xml_tree(raw)) is None:
+                raise ValueError("--as xml: the text is not well-formed XML")
+            return tree
+        case _ if branch in _BRANCHES:
+            return None
+        case _:
+            raise ValueError(f"unknown branch {branch!r}: use one of {', '.join(_BRANCHES)}")
 
 
 def _cut_chars(raw: str, budget_tokens: int) -> str:
@@ -36,34 +76,31 @@ def _cut_chars(raw: str, budget_tokens: int) -> str:
     return f"{raw[:head]}\n{markers.chars_omitted(head, len(raw) - tail)}\n{raw[len(raw) - tail :]}"
 
 
-def _body(branch: str, raw: str, terms: frozenset[str], budget_tokens: int) -> tuple[str, str | None]:
+def _body(
+    branch: str, parsed: _Parsed, raw: str, terms: frozenset[str], budget_tokens: int
+) -> tuple[str, str | None]:
     """The folded text, and the text its line numbers refer to when that is not `raw`."""
-    match branch:
-        case "xml":
-            fold = fold_xml(raw, budget_tokens, terms)
-            assert fold is not None
-            return fold.text, (fold.source if fold.source != raw else None)
-        case "outline":
-            return fold_outline(raw, budget_tokens, terms).text, None
-        case "json":
-            parsed = parse_json_or_jsonl(raw)
-            assert parsed is not None
-            value, kind = parsed
+    match branch, parsed:
+        case "xml", XmlTree() as tree:
+            return fold_xml_tree(tree, budget_tokens, terms).text, (
+                "\n".join(tree.lines) if tree.pretty else None
+            )
+        case "json", (value, kind):
             note = "JSONL shown as one array; index i is line i+1.\n" if kind == "jsonl" else ""
             return note + fold_json(value, terms, budget_tokens), None
-        case "html":
+        case "outline", None:
+            return fold_outline(raw, budget_tokens, terms).text, None
+        case "html", None:
             text = html_to_text(raw)
             return (
                 text if estimate_tokens(text) <= budget_tokens else fold_lines(text, terms, budget_tokens)
             ), text
-        case "lines":
+        case "lines", None:
             return fold_lines(raw, terms, budget_tokens), None
-        case "text":
+        case "text", None:
             return _cut_chars(raw, budget_tokens), None
         case _:
-            raise ValueError(
-                f"unknown branch {branch!r}: detect() returns json, xml, html, outline, lines or text"
-            )
+            raise AssertionError(f"branch {branch!r} reached the fold without what it parses")
 
 
 @dataclass(frozen=True)
@@ -96,12 +133,8 @@ def fold(
     raw_tokens = estimate_tokens(raw)
     if raw_tokens <= budget_tokens:
         return None
-    branch = force or detect(raw)
-    if force == "json" and parse_json_or_jsonl(raw) is None:
-        raise ValueError("--as json: the text does not parse as JSON or JSON Lines")
-    if force == "xml" and xml_tree(raw) is None:
-        raise ValueError("--as xml: the text is not well-formed XML")
-    body, source = _body(branch, raw, terms, budget_tokens)
+    branch, parsed = (force, _parse_as(force, raw)) if force else _detect(raw)
+    body, source = _body(branch, parsed, raw, terms, budget_tokens)
     if estimate_tokens(body) > raw_tokens * _WORTH_IT:
         return None
     return Folded(branch, body, raw_tokens, source)

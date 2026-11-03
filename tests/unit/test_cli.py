@@ -47,6 +47,22 @@ def test_packed_xml_says_its_line_numbers_refer_to_a_pretty_copy():
     assert r.source is not None and len(r.source.splitlines()) > 300
 
 
+def test_xml_already_one_element_per_line_refers_to_the_input_even_with_a_final_newline():
+    raw = "<a>\n" + "".join(f'  <b id="{i}"><c/></b>\n' for i in range(400)) + "</a>\n"
+    r = fold_text(raw, budget=300)
+    assert r.branch == "xml" and r.source is None
+    assert "line numbers refer to the input" in r.text.splitlines()[0]
+
+
+def test_the_result_names_what_folded_it():
+    assert fold_text("x = 1\n", budget=200).branch is None
+    assert fold_text(json.dumps(list(range(2000))), budget=100).branch == "json"
+    code = fold_text(_src(), budget=200, path="a.py")
+    assert (code.branch, code.language) == ("code", "python")
+    cut = fold_text("x" * 50_000, budget=100)
+    assert cut.branch == "text" and cut.text.startswith("[fold: text,")
+
+
 def test_forcing_a_format_the_text_cannot_take_says_so():
     with pytest.raises(ValueError, match="does not parse as JSON"):
         fold_text("not json " * 2000, budget=100, fmt="json")

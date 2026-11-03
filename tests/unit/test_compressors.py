@@ -156,3 +156,8 @@ def test_a_query_term_most_items_share_promotes_nothing():
     raw = json.dumps([{"repo": "bh-02", "owner": "bruk-io", "sha": f"{i:040x}"} for i in range(60)])
     items = _json(raw, 200, {"owner": "bruk-io", "repo": "bh-02"})
     assert not any("_next_item_shown_because" in p for p in items)
+
+
+def test_forcing_a_branch_that_does_not_exist_names_the_ones_that_do():
+    with pytest.raises(ValueError, match="json, xml, html, outline, lines, text"):
+        fold("x" * 50_000, budget_tokens=100, force="yaml")

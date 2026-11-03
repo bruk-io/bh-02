@@ -416,7 +416,14 @@ def _element_tree(source: str) -> tuple[Node, ...] | None:
     return tuple(stack[0][1])
 
 
-def xml_tree(raw: str) -> tuple[list[str], tuple[Node, ...]] | None:
+@dataclass(frozen=True)
+class XmlTree:
+    lines: list[str]  # the lines the element tree's line numbers refer to
+    roots: tuple[Node, ...]
+    pretty: bool  # the lines are a pretty-printed copy (the XML came packed), not the input's own
+
+
+def xml_tree(raw: str) -> XmlTree | None:
     """The XML's lines (pretty-printed if it came packed) and its element tree; None if not XML.
 
     XML that fails to parse only for bare ampersands is read leniently; its lines are shown as
@@ -428,17 +435,20 @@ def xml_tree(raw: str) -> tuple[list[str], tuple[Node, ...]] | None:
             continue
         roots = _element_tree(source)
         if roots is not None:
-            return (split_lines(raw) if source is text else split_lines(source)), roots
+            pretty = source is not text
+            return XmlTree(split_lines(source if pretty else raw), roots, pretty)
     return None
 
 
 def fold_xml(raw: str, budget_tokens: int, terms: frozenset[str] = frozenset()) -> TreeFold | None:
-    parsed = xml_tree(raw)
-    if parsed is None:
-        return None
-    lines, roots = parsed
-    text, opened, folded = fold_tree(lines, roots, budget_tokens, numbered=False, terms=terms)
-    return TreeFold(text, "\n".join(lines), opened, folded)
+    tree = xml_tree(raw)
+    return None if tree is None else fold_xml_tree(tree, budget_tokens, terms)
+
+
+def fold_xml_tree(tree: XmlTree, budget_tokens: int, terms: frozenset[str] = frozenset()) -> TreeFold:
+    """`fold_xml` for XML already parsed (the router parses once, to detect it)."""
+    text, opened, folded = fold_tree(tree.lines, tree.roots, budget_tokens, numbered=False, terms=terms)
+    return TreeFold(text, "\n".join(tree.lines), opened, folded)
 
 
 def fold_outline(raw: str, budget_tokens: int, terms: frozenset[str] = frozenset()) -> TreeFold:

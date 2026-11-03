@@ -127,8 +127,9 @@ def test_long_xml_comments_and_the_doctype_fold_like_elements():
     raw = (
         f'<?xml version="1.0"?>\n<!--\n{comment}\n-->\n<!DOCTYPE root [\n{doctype}\n]>\n<root>\n<a/>\n</root>'
     )
-    lines, roots = xml_tree(raw)
-    spans = [(n.first + 1, n.last + 1) for n in roots]
+    tree = xml_tree(raw)
+    assert tree is not None and not tree.pretty
+    spans = [(n.first + 1, n.last + 1) for n in tree.roots]
     assert spans == [(2, 43), (44, 65), (66, 68)]
     fold = fold_xml(raw, budget_tokens=60)
     assert "comment line 20" not in fold.text and "<root>" in fold.text
