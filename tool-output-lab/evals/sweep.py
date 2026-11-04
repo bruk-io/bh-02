@@ -1,16 +1,16 @@
 """Layer 1 over a grid of knobs: the same tasks folded under each point, side by side. Free.
 
-    ./lab evals sweep sweeps/schema-rare.toml
+    ./lab evals sweep sweeps/envelopes.toml
 
-    name = "schema-rare"
+    name = "envelopes"
     only = ["json", "pypi"]       # formats (all of them when left out)
-    by = "band"                   # a row per point and size band (optional): how a dial scales
+    by = "band"                   # a row per point and size band (optional): how a composition scales
     bands = ["L", "XL", "XXL"]    # the size bands to fold (S, M and L when left out)
     [base]                        # what every point sets: knobs, and budget or view
     view = "schema"
     [grid]                        # each axis's values; the points are every combination
-    "schema.rare" = [0.05, 0.1, 0.15]
-    budget = [1000, 2000]
+    "json_envelope.samples" = ["none", "matches", "typical"]
+    budget = [500, 2000]
 
 Writes results/sweep-NAME.md, one row per point: sufficiency overall and over the folds that folded,
 by task kind and for the quiet anomalies, the median tokens out, and how many folds broke an

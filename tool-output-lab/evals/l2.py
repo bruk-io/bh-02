@@ -595,7 +595,7 @@ def report(rows: list[dict[str, Any]], model: str) -> str:
         "shrinks (its upper bound below zero); fails when accuracy surely drops more than 3 points or the "
         "context surely grows; undecided otherwise. The accuracy interval is Newcombe's for paired "
         "proportions, with McNemar's exact p; the cost, context, input and time intervals are a bootstrap of "
-        "the pairs. The input criterion is the final context (the owner's reading, FINDINGS 37); summed "
+        "the pairs. The input criterion is the final context (the owner's reading, 2026-11-03); summed "
         "input, every input token the requests carried (cached or not), is reported beside it.",
     ]
     out += _cache_section(by_band, scored)

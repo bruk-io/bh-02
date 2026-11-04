@@ -138,7 +138,7 @@ class Score:
 
 # What each kind's ANSWER line holds. "As the question asks" leaves the question to say what is
 # listed (codes, orders, versions): saying "name" here made Haiku list Andorra's parishes for their
-# codes and answer "the logs have no names" for failed orders (FINDINGS 38).
+# codes and answer "the logs have no names" for failed orders.
 _ONE = "End your reply with one line: ANSWER: <the item, as the question asks for it>, or ANSWER: none"
 ANSWER_INSTRUCTION = {
     "spot": _ONE,
