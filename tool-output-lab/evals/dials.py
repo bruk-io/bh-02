@@ -47,7 +47,7 @@ from compressors.config import DEFAULT, with_sets
 from compressors.route import VIEWS
 from evals.l2 import _COST_PER_RUN, Dials, implied_input_price, report, run_jobs
 from evals.stats import bootstrap, paired, paired_accuracy
-from evals.tasks import FORMATS, Task, tasks
+from evals.tasks import BANDS, FORMATS, Task, tasks
 
 _LAB = Path(__file__).resolve().parent.parent
 _MODES = ("inline", "spilled", "all")
@@ -213,7 +213,7 @@ def main(argv: list[str] | None = None) -> int:
     spec = tomllib.loads(ns.spec.read_text(encoding="utf-8"))
     name, model = str(spec.get("name", ns.spec.stem)), str(spec.get("model", "claude-haiku-5-5"))
     chosen = settings(spec)
-    planned = jobs(spec, chosen, tasks())
+    planned = jobs(spec, chosen, tasks(spec.get("bands", ["M"])))
     per_run = next((v for k, v in _COST_PER_RUN.items() if k in model), _COST_PER_RUN["sonnet"])
     print(f"{len(planned)} runs on {model}, about ${len(planned) * per_run:.2f} (a rough estimate):")
     for cond in ["native", *(s.name for s in chosen)]:
@@ -222,7 +222,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     rows = run_jobs(planned, model, f"dials-{name}", ns.workers, spec.get("max_cost"))
     lines = [f"# Dials {name}: {model}, the same tasks native and under each setting", ""]
-    bands = [b for b in ("S", "M", "L", "XL", "XXL") if any(r["band"] == b for r in rows)]
+    bands = [b for b in BANDS if any(r["band"] == b for r in rows)]
     if len(bands) > 1:  # how each setting scales: a table per size band, smallest first
         for b in bands:
             sized = [r for r in rows if r["band"] == b]

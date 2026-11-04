@@ -2,8 +2,10 @@
 
 Size bands, against the default budget of 2,000 tokens and Claude Code's MCP spill threshold of
 50,000 characters (~12,500 tokens): S under the budget, M between the two, L over the threshold.
-`tasks()` builds the whole registry. Synthetic payloads are generated when first asked for. Real
-files are read when the registry is built, since their truths are computed from them; a source
+XL and XXL are 4 and 16 times L (about 75k to 660k tokens): synthetic only, for how a fold behaves
+as outputs grow, and built only when asked for, by `tasks(BANDS)` or `task(id)`. `tasks()` builds
+the usual registry, S to L. Real files are read when the registry is built, since their truths are
+computed from them; a source
 whose files are missing on this host (the Python 3.13 stdlib, the cargo registry, iso-codes, the
 saved PyPI JSON in the untracked corpus/) is left out, and `skipped()` says which and why.
 """
@@ -11,7 +13,7 @@ saved PyPI JSON in the untracked corpus/) is left out, and `skipped()` says whic
 import json
 import random
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from functools import cache, partial
 from pathlib import Path
@@ -43,17 +45,26 @@ class Task:
         return self.load()
 
 
+BANDS = ("S", "M", "L", "XL", "XXL")  # smallest first, the order reports list them in
+_USUAL = BANDS[:3]  # what `tasks()` builds; real files fall in these by their size
+
+
 def band_of(tokens: int) -> str:
     return "S" if tokens <= BUDGET else "M" if tokens <= SPILL_TOKENS else "L"
+
+
+def size_order(band: str) -> int:
+    """A band's place among BANDS, for sorting rows smallest first (an unknown band goes last)."""
+    return BANDS.index(band) if band in BANDS else len(BANDS)
 
 
 # --- synthetic ----------------------------------------------------------------------------------
 
 _SIZES = {
-    "json": {"S": 20, "M": 100, "L": 500},
-    "log": {"S": 60, "M": 300, "L": 2000},
-    "a11y": {"S": 30, "M": 150, "L": 500},
-    "figma": {"S": 20, "M": 100, "L": 500},
+    "json": {"S": 20, "M": 100, "L": 500, "XL": 2000, "XXL": 8000},
+    "log": {"S": 60, "M": 300, "L": 2000, "XL": 8000, "XXL": 32000},
+    "a11y": {"S": 30, "M": 150, "L": 500, "XL": 2000, "XXL": 8000},
+    "figma": {"S": 20, "M": 100, "L": 500, "XL": 2000, "XXL": 8000},
 }
 _MAKE = {"json": synthetic.pods, "log": synthetic.logs, "a11y": synthetic.snapshot, "figma": synthetic.figma}
 TOOLS = {"json": "list_pods", "log": "get_logs", "a11y": "browser_snapshot", "figma": "get_figma_metadata"}
@@ -148,7 +159,7 @@ def _needle(p: synthetic.Payload, *, fmt: str) -> Needle:
 
 def _synthetic(fmt: str, band: str) -> list[Task]:
     """Spot (a rule-kind anomaly at three positions, and a quiet one the fold has no rule for),
-    absent, count and enumerate (k under and, at M and L, over the stand-out cap of 10), lookup."""
+    absent, count and enumerate (k under and, from M up, over the stand-out cap of 10), lookup."""
     size = _SIZES[fmt][band]
     out: list[Task] = []
 
@@ -430,12 +441,15 @@ def _pypi() -> list[Task]:
 
 
 def task(task_id: str) -> Task:
-    """One task by id.
+    """One task by id. A synthetic id builds its own format and band alone, so a session's fixture
+    generates one payload, not the registry's.
 
     Raises:
         KeyError: no task has this id; the message lists a few that do.
     """
-    found = {t.task_id: t for t in tasks()}
+    fmt, band, *_ = [*task_id.split("-", 2), "", ""]
+    pool = _synthetic(fmt, band) if fmt in _SIZES and band in BANDS else tasks()
+    found = {t.task_id: t for t in pool}
     if task_id not in found:
         raise KeyError(f"no eval task {task_id!r}; ids look like {', '.join(list(found)[:3])}")
     return found[task_id]
@@ -521,13 +535,21 @@ def skipped() -> dict[str, str]:
     return out
 
 
-def tasks() -> list[Task]:
+def tasks(bands: Iterable[str] = _USUAL) -> list[Task]:
+    """Every task in these bands (S, M and L by default; XL and XXL hold synthetic tasks alone).
+
+    Raises:
+        ValueError: a band that is none of BANDS.
+    """
+    want = set(bands)
+    if unknown := want - set(BANDS):
+        raise ValueError(f"no size band {', '.join(sorted(unknown))}: the bands are {', '.join(BANDS)}")
     out: list[Task] = []
     for fmt in _SIZES:
-        for band in ("S", "M", "L"):
+        for band in (b for b in BANDS if b in want):
             out += _synthetic(fmt, band)
     gone = skipped()
     for source, (_, build) in _REAL.items():
-        if source not in gone:
-            out += build()
+        if source not in gone and want & set(_USUAL):
+            out += [t for t in build() if t.band in want]
     return out

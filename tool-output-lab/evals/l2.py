@@ -46,7 +46,7 @@ from compressors.common import read_text
 from compressors.config import DEFAULT, FoldConfig, label, load, sets, with_sets
 from compressors.route import VIEWS
 from evals.stats import bootstrap, paired, paired_accuracy, wilson
-from evals.tasks import FORMATS, KINDS, TOOLS, Task, bash_prompt, skipped, tasks
+from evals.tasks import BANDS, FORMATS, KINDS, TOOLS, Task, bash_prompt, size_order, skipped, task, tasks
 from evals.truth import Edited, Truth, answer_line, score_answer, score_edit
 
 _LAB = Path(__file__).resolve().parent.parent
@@ -486,7 +486,7 @@ def _cache_section(
         "| warm starts (here, baseline) | each later request |",
         "|---|---|---|---|---|---|---|---|---|",
     ]
-    for (band, cond), runs in sorted(by_band.items()):
+    for (band, cond), runs in sorted(by_band.items(), key=lambda kv: (size_order(kv[0][0]), kv[0][1])):
         base_cond = BASELINE.get(cond, "native")
         if cond == base_cond or (band, base_cond) not in by_band:
             continue
@@ -539,7 +539,9 @@ def report(rows: list[dict[str, Any]], model: str) -> str:
     groups: dict[tuple[str, str, str, str], list[dict[str, Any]]] = defaultdict(list)
     for r in scored:
         groups[(r["fmt"], r["kind"], r["band"], r["condition"])].append(r)
-    for (fmt, kind, band, cond), rs in sorted(groups.items()):
+    for (fmt, kind, band, cond), rs in sorted(
+        groups.items(), key=lambda kv: (kv[0][0], kv[0][1], size_order(kv[0][2]), kv[0][3])
+    ):
         out.append(
             f"| {fmt} | {kind} | {band} | {cond} | {_ci(sum(r['correct'] for r in rs), len(rs))} "
             f"| ${statistics.median(r['cost_usd'] for r in rs):.4f} "
@@ -561,7 +563,9 @@ def report(rows: list[dict[str, Any]], model: str) -> str:
     by_cell: dict[tuple[str, str, str], dict[str, dict[str, Any]]] = defaultdict(dict)
     for r in scored:  # a pair needs both runs scored
         by_cell[(r["fmt"], r["band"], r["condition"])][f"{r['task_id']}#{r['rep']}"] = r
-    for (fmt, band, cond), runs in sorted(by_cell.items()):
+    for (fmt, band, cond), runs in sorted(
+        by_cell.items(), key=lambda kv: (kv[0][0], size_order(kv[0][1]), kv[0][2])
+    ):
         base = BASELINE.get(cond, "native")
         if cond != base and (fmt, band, base) in by_cell:
             out.append(f"| {fmt} | {band} | {_against(cond)} {_paired(by_cell[(fmt, band, base)], runs)}")
@@ -570,7 +574,7 @@ def report(rows: list[dict[str, Any]], model: str) -> str:
     by_band: dict[tuple[str, str], dict[str, dict[str, Any]]] = defaultdict(dict)
     for r in scored:
         by_band[(r["band"], r["condition"])][f"{r['task_id']}#{r['rep']}"] = r
-    for (band, cond), runs in sorted(by_band.items()):
+    for (band, cond), runs in sorted(by_band.items(), key=lambda kv: (size_order(kv[0][0]), kv[0][1])):
         base = BASELINE.get(cond, "native")
         if cond != base and (band, base) in by_band:  # pairs: the tasks both conditions ran
             out.append(f"| {band} | {_against(cond)} {_paired(by_band[(band, base)], runs)}")
@@ -601,7 +605,7 @@ def select(
 ) -> list[tuple[Task, str]]:
     want_f, want_k, want_b, want_ids = set(formats), set(kinds), set(bands), set(ids)
     jobs = []
-    for t in tasks():
+    for t in [task(i) for i in sorted(want_ids)] if want_ids else tasks(want_b):
         if (
             (t.task_id in want_ids)
             if want_ids
@@ -714,7 +718,7 @@ def _merge(names: list[str], name: str) -> int:
     except ValueError as e:
         print(f"l2 --merge: {e}", file=sys.stderr)
         return 1
-    by_id = {t.task_id: t for t in tasks()}
+    by_id = {t.task_id: t for t in tasks({r["band"] for r in rows})}
     rows = [
         rescored(r, (t := by_id[r["task_id"]]).truth, t.payload() if isinstance(t.truth, Edited) else None)
         for r in rows
@@ -768,7 +772,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--model", default="claude-haiku-5-5")
     parser.add_argument("--formats", nargs="+", choices=FORMATS, default=list(FORMATS))
     parser.add_argument("--kinds", nargs="+", choices=KINDS, default=list(KINDS))
-    parser.add_argument("--bands", nargs="+", choices=("S", "M", "L"), default=["M", "L"])
+    parser.add_argument("--bands", nargs="+", choices=BANDS, default=["M", "L"])
     parser.add_argument(
         "--conditions", nargs="+", choices=sorted({*MCP_CONDITIONS, *BASH_CONDITIONS, *FILE_CONDITIONS})
     )
@@ -800,7 +804,7 @@ def main(argv: list[str] | None = None) -> int:
     ns = parser.parse_args(argv)
     if ns.merge:
         return _merge(ns.merge, ns.name)
-    if unknown := set(ns.ids) - {t.task_id for t in tasks()}:
+    if ns.ids and (unknown := set(ns.ids) - {t.task_id for t in tasks(BANDS)}):
         parser.error(
             f"no eval task {', '.join(sorted(unknown))}: ids look like json-M-spot-at50 or "
             "python-L-locate-communicate, and every one is in the task_id field of results/l1-*.jsonl"
