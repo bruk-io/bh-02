@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-04T14:18:00Z'
-updated_date: '2026-11-04T14:40:00Z'
+updated_date: '2026-11-04T14:49:00Z'
 labels:
   - subagents
   - size-1
@@ -136,4 +136,30 @@ INFO    -  Documentation built in 5.09 seconds
 ```
 
 Review (reviewer, not the worker): every criterion met and ticked; close-task refused. scripts/check full tier exit 0 (2601 passed; first line is uv's UV_NATIVE_TLS deprecation warning, then '== format', nothing reformatted). #1: _agents_config raises at the generator's first line, before any effect, so the row fails and /explain carries the message; the repro test asserts both phrases in loader.explain('agents'). #2: that test. The Mapping | AgentsConfig annotation does not weaken the contract: cordis's configure() only builds the dataclass, which _agents_config now does (unknown keys still refused, still before any effect; Row.config defaults to {}). Criteria clean: #1 and #2 only. close-task refusal: 'the repro test file changed since 4057a84'. The repro test itself is unchanged from 4057a84 through 3cff21d; the file changed only in 63d6f38 (TASK-0189, another test in the same file). Status left In Progress for the lead: close by hand-off once the script accepts, or record a new repro on HEAD.
+
+Repro at 8453723b64be, test files: bh-02/plugins/subagents-cordis-plugin/tests/test_agents_wiring.py; command: `uv run pytest -q -p no:cacheprovider bh-02/plugins/subagents-cordis-plugin/tests/test_agents_wiring.py -k names_no_rows` exited 1
+
+(38 earlier lines omitted)
+```text
+F                                                                        [100%]
+=================================== FAILURES ===================================
+_ test_an_agents_row_whose_config_names_no_rows_is_refused_saying_where_the_list_is _
+
+    async def test_an_agents_row_whose_config_names_no_rows_is_refused_saying_where_the_list_is() -> None:
+        """A patch's config replaces the row's whole, so `{ start = 60 }` drops the shipped `rows`: the
+        row fails at boot, and `/explain agents` says to list the child's rows in the row's `rows` and
+        where the shipped list is (bh-02.toml's agents row), not only which keyword is missing."""
+        rows = _rows(_Model(parent=[]), _Screen(), agents=Row("agents", "subagents:parent", {"start": 60}))
+        booted = await _bounded(boot((), rows, watch=None))
+        await _bounded(booted.runtime.settle())
+        assert booted.loader.status()["agents"] != "active"
+        said = booted.loader.explain("agents")
+>       assert "list the child's rows in the agents row's `rows`" in said
+E       assert "list the child's rows in the agents row's `rows`" in 'agents#15: failed\n  error: TypeError("parent: invalid config for AgentsConfig: AgentsConfig.__init__() missing 1 req...nfig.__init__() missing 1 required positional argument: \'rows\'")\n  unloading agents#15\n  failed-inactive agents#15'
+
+bh-02/plugins/subagents-cordis-plugin/tests/test_agents_wiring.py:1918: AssertionError
+=========================== short test summary info ============================
+FAILED bh-02/plugins/subagents-cordis-plugin/tests/test_agents_wiring.py::test_an_agents_row_whose_config_names_no_rows_is_refused_saying_where_the_list_is
+1 failed, 59 deselected in 15.32s
+```
 <!-- SECTION:NOTES:END -->
