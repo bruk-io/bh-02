@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-04T13:57:00Z'
-updated_date: '2026-11-04T16:59:00Z'
+updated_date: '2026-11-04T17:04:00Z'
 labels:
   - tests
   - size-1
@@ -23,8 +23,8 @@ Seen in the reviewer's full scripts/check for TASK-0186 (2026-11-04, on 16fb291)
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Each test's failure under load is reproduced or its timing dependence is named
-- [ ] #2 The agent-records test passes 50 of 50 under the load that failed it, its cause fixed; the real-launch modal test's cause is a product bug, moved to TASK-0193 with its own criteria
+- [x] #1 Each test's failure under load is reproduced or its timing dependence is named
+- [x] #2 The agent-records test passes 50 of 50 under the load that failed it, its cause fixed; the real-launch modal test's cause is a product bug, moved to TASK-0193 with its own criteria
 <!-- AC:END -->
 
 ## Implementation Notes
