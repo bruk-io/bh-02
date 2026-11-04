@@ -72,3 +72,11 @@ before one can prove it). So the swap waits on that too.
 - A masked secret reads as a permission error, not an empty file. Nothing of bh-02's reads one.
 - `supervisor_interpreter`'s choice of `/usr/bin/python3` goes: the new supervisor runs under
   bh-02's own interpreter and refuses one older than 3.15 (decision-0007 already asks for 3.15).
+
+## Amended 2026-11-04, by @bruk
+
+The swap lands before Seatbelt. The owner's Mac is not available for a while, and the owner chose
+to land the Linux half now rather than hold it: on Linux `runner:confined` jails through
+bruk-io/brig; on darwin it refuses to start and names `runner:unconfined` (and `--no-jail`), so
+every input there is asked about until TASK-0176.05 builds and proves Seatbelt. "The swap waits
+for all four" above no longer holds for item 4; items 1 to 3 were met before landing.
