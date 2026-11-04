@@ -297,3 +297,10 @@
 {"tool": "mcp__r__weather-data_weather_astronomy", "tool_use_id": "toolu_01KrrPVPshAmf9HAfNedGRje", "spilled": false, "raw_tokens": 135, "branch": "passthrough", "out_tokens": null}
 {"tool": "mcp__r__weather-data_weather_astronomy", "tool_use_id": "toolu_018V7MTnMkcuTTtjZCUqkmB8", "spilled": false, "raw_tokens": 135, "branch": "passthrough", "out_tokens": null}
 {"tool": "mcp__r__arxiv_search_papers", "tool_use_id": "toolu_01GYYg3RWECjDhvPhWLiA15S", "spilled": false, "raw_tokens": 475, "branch": "passthrough", "out_tokens": null}
+{"tool": "mcp__r__arxiv_search_papers", "tool_use_id": "toolu_01TzGN56xf22XX53VUMyjhtT", "spilled": false, "raw_tokens": 475, "branch": "passthrough", "out_tokens": null}
+{"tool": "mcp__r__lara-translate_translate", "tool_use_id": "toolu_01JVu3A5QPvp8URU6VB8K9sw", "spilled": false, "raw_tokens": 33, "branch": "passthrough", "out_tokens": null}
+{"tool": "mcp__r__airtable_list_bases", "tool_use_id": "toolu_01R833NNr6hDZGjjq3iuWvFh", "spilled": false, "raw_tokens": 26, "branch": "passthrough", "out_tokens": null}
+{"tool": "mcp__r__airtable_list_tables", "tool_use_id": "toolu_01FYg2QEvc9EjRfK86WUjDkG", "spilled": false, "raw_tokens": 7359, "branch": "json", "out_tokens": 694}
+{"tool": "mcp__r__airtable_list_bases", "tool_use_id": "toolu_0139Dp39KHp45nqfPRxDr9sB", "spilled": false, "raw_tokens": 26, "branch": "passthrough", "out_tokens": null}
+{"tool": "mcp__r__airtable_list_tables", "tool_use_id": "toolu_01CCf91KrChKWKrC3LrQrL7r", "spilled": false, "raw_tokens": 7359, "branch": "json", "out_tokens": 458}
+{"tool": "mcp__r__filesystem_list_allowed_directories", "tool_use_id": "toolu_01GD63B6TXWybrtFCoj5Pa51", "spilled": false, "raw_tokens": 7, "branch": "passthrough", "out_tokens": null}
