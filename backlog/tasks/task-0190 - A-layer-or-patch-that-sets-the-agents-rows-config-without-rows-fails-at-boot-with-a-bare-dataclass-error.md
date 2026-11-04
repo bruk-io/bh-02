@@ -32,4 +32,6 @@ TASK-0187 made AgentsConfig.rows required. A patch's config replaces the layer's
 
 <!-- SECTION:NOTES:BEGIN -->
 finish-moved: the lead asked for the acceptance criteria after promotion (the task had none when the worker began).
+
+Correction: the task already carried criteria #1 and #2 when the worker began (the lead's brief said none); the worker added two duplicates, then removed them. The finish-moved label stays only because the lead asked for it.
 <!-- SECTION:NOTES:END -->
