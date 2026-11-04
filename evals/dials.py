@@ -110,12 +110,15 @@ def jobs(
 
 
 def _pairs(
-    rows: list[dict[str, Any]], name: str
+    rows: list[dict[str, Any]], name: str, acted_only: bool = False
 ) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
+    """Native's runs and a setting's, by task and repetition; with `acted_only`, only the setting's
+    runs whose hook folded the task's large output."""
+
     def by_key(cond: str) -> dict[str, dict[str, Any]]:
         return {f"{r['task_id']}#{r['rep']}": r for r in rows if r["condition"] == cond and not r["error"]}
 
-    runs = by_key(name)
+    runs = {k: v for k, v in by_key(name).items() if v.get("large_folded") or not acted_only}
     base = {k: v for k, v in by_key("native").items() if k in runs}
     return base, runs
 
@@ -136,20 +139,21 @@ def _mean(values: list[float], fmt: str) -> str:
     return f"{mid:{fmt}} [{lo:{fmt}}, {hi:{fmt}}]"
 
 
-def dial_table(rows: list[dict[str, Any]], chosen: list[Setting]) -> list[str]:
+def dial_table(rows: list[dict[str, Any]], chosen: list[Setting], acted_only: bool = False) -> list[str]:
     scored = [r for r in rows if not r["error"]]
     implied = sorted(p for r in scored if (p := implied_input_price(r)) is not None)
     read = 0.1 * statistics.median(implied) if implied else None
     native = [r for r in scored if r["condition"] == "native"]
     out = [
-        "| setting | pairs | accuracy | final context | summed input | cache writes | cache reads "
+        "| setting | pairs | acted | accuracy | final context | summed input | cache writes | cache reads "
         "| each later request | cost | time |",
-        "|---|---|---|---|---|---|---|---|---|---|",
+        "|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     if native:
         cells = [
             "native (absolute)",
             str(len(native)),
+            "-",
             f"{sum(r['correct'] for r in native) / len(native):.0%}",
             f"{statistics.median(r['final_context'] for r in native):,.0f}",
             f"{statistics.mean(r['input_tokens'] + r['cache_read'] + r['cache_write'] for r in native):,.0f}",
@@ -161,10 +165,12 @@ def dial_table(rows: list[dict[str, Any]], chosen: list[Setting]) -> list[str]:
         ]
         out.append("| " + " | ".join(cells) + " |")
     for s in chosen:
-        base, runs = _pairs(scored, s.name)
+        every = [r for r in scored if r["condition"] == s.name]
+        hit = f"{sum(bool(r.get('large_folded')) for r in every)}/{len(every)}"
+        base, runs = _pairs(scored, s.name, acted_only)
         keys = base.keys() & runs.keys()
         if not keys:
-            out.append(f"| {s.name} | 0 | - | - | - | - | - | - | - | - |")
+            out.append(f"| {s.name} | 0 | {hit} | - | - | - | - | - | - | - | - |")
             continue
         both = sum(1 for k in keys if runs[k]["correct"] and base[k]["correct"])
         gains = sum(1 for k in keys if runs[k]["correct"] and not base[k]["correct"])
@@ -176,6 +182,7 @@ def dial_table(rows: list[dict[str, Any]], chosen: list[Setting]) -> list[str]:
         cells = [
             s.name,
             str(len(keys)),
+            hit,
             f"{change:+.0%} [{lo:+.0%}, {hi:+.0%}], {gains}/{losses}",
             _mean(_change(base, runs, "final_context"), "+,.0f"),
             _mean(_change(base, runs, "all_input"), "+,.0f"),
@@ -192,6 +199,7 @@ def dial_table(rows: list[dict[str, Any]], chosen: list[Setting]) -> list[str]:
     return [
         *out,
         "",
+        "Acted: the setting's runs whose hook folded the task's large output (matched by digest). "
         "Each setting against native on the same tasks and repetitions: accuracy as the change with its "
         "95% interval (Newcombe) and the pairs won and lost; the rest as mean changes per run with bootstrap "
         "intervals. Final context: the input of the session's last request. Summed input: every input token "
@@ -231,6 +239,12 @@ def main(argv: list[str] | None = None) -> int:
             lines += [*dial_table(sized, chosen), ""]
         lines += ["## Every band together", ""]
     lines += dial_table(rows, chosen)
+    lines += [
+        "",
+        "## Only the pairs where the envelope acted",
+        "",
+        *dial_table(rows, chosen, acted_only=True),
+    ]
     text = "\n".join(lines) + "\n\n" + report(rows, model)
     (_LAB / "results" / f"dials-{name}.md").write_text(text, encoding="utf-8")
     print(text, end="")

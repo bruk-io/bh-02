@@ -26,10 +26,12 @@ Environment: TOOL_OUTPUT_LAB_BUDGET (tokens, default 2000), TOOL_OUTPUT_LAB_MODE
 default, `spilled` or `all`), TOOL_OUTPUT_LAB_VIEW (`sample`, the default, or `schema`),
 TOOL_OUTPUT_LAB_CONFIG (a TOML file of knobs, `compressors/config.py`), TOOL_OUTPUT_LAB_SET (knobs,
 `schema.rare=0.15;tree_envelope.rare=0.25`, over the file's), TOOL_OUTPUT_LAB_LOG (a JSONL file to
-append one line per decision to). A failure inside the hook leaves the tool result untouched: it
-must never be why a tool call fails.
+append one line per decision to: the tool, the session, a digest of the raw text, the branch and the
+sizes, so an eval can tell whether a session's large output was folded). A failure inside the hook
+leaves the tool result untouched: it must never be why a tool call fails.
 """
 
+import hashlib
 import json
 import os
 import re
@@ -252,6 +254,11 @@ class Outcome:
     reply: dict[str, Any] | None
 
 
+def digest(text: str) -> str:
+    """A short digest of a result's text, for the log: enough to tell one output from another."""
+    return hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest()[:16]
+
+
 def decide(
     event: dict[str, Any],
     action: Inline | Spilled,
@@ -268,6 +275,8 @@ def decide(
     log = {
         "tool": event.get("tool_name"),
         "tool_use_id": event.get("tool_use_id"),
+        "session_id": event.get("session_id"),
+        "digest": digest(raw),  # which output this was: an eval matches it to its task's
         "spilled": isinstance(action, Spilled),
         "raw_tokens": estimate_tokens(raw),
         "branch": folded.branch if folded else "passthrough",

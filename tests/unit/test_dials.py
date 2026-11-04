@@ -46,7 +46,15 @@ def test_the_table_sets_each_setting_against_native_on_the_same_tasks():
     rows += [_row(i, "small", i != 3, 50_000, 0.006) for i in range(40)]
     chosen = settings({"setting": [{"name": "small", "budget": 500}]})
     table = "\n".join(dial_table(rows, chosen))
-    assert "| native (absolute) | 40 | 100% | 58,000 |" in table
+    assert "| native (absolute) | 40 | - | 100% | 58,000 |" in table
     line = next(x for x in table.splitlines() if x.startswith("| small |"))
-    assert "| 40 | -2% [" in line and "], 0/1 |" in line and "| -8,000 [-8,000, -8,000] |" in line
+    assert "| 40 | 0/40 | -2% [" in line and "], 0/1 |" in line and "| -8,000 [-8,000, -8,000] |" in line
     assert "-14% ($-0.0010)" in line
+
+
+def test_the_acted_table_pairs_only_the_runs_whose_hook_folded_the_large_output():
+    rows = [_row(i, "native", True, 58_000, 0.007) for i in range(40)]
+    rows += [_row(i, "small", True, 50_000, 0.006) | {"large_folded": i < 30} for i in range(40)]
+    chosen = settings({"setting": [{"name": "small", "budget": 500}]})
+    line = next(x for x in dial_table(rows, chosen, acted_only=True) if x.startswith("| small |"))
+    assert line.startswith("| small | 30 | 30/40 |")

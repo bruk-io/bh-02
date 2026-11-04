@@ -3,11 +3,12 @@ import json
 
 import pytest
 
-from claude_code.hook import Mode, mode_of
+from claude_code.hook import Mode, digest, mode_of
 from evals.l2 import (
     BASH_CONDITIONS,
     HOOK_MODE,
     MCP_CONDITIONS,
+    acted,
     implied_input_price,
     merged,
     parse_stream,
@@ -214,3 +215,28 @@ def test_the_report_has_a_cache_section_with_what_each_later_request_pays():
     text = report(_rows(40), "test")
     assert "## Cache and requests" in text and "| M | fold | 40 |" in text.split("## Cache and requests")[1]
     assert "-20,000 tokens" in text
+
+
+def test_a_session_says_its_id_and_the_hook_says_whether_it_folded_the_large_output():
+    lines = [json.dumps({"type": "system", "subtype": "init", "session_id": "s-1"}), *_stream()]
+    assert parse_stream(lines).session_id == "s-1"
+    payload = '{"items": []}\n'
+    entries = [
+        {"session_id": "s-1", "digest": digest("small"), "branch": "passthrough"},
+        {"session_id": "s-1", "digest": digest(payload.rstrip("\n")), "branch": "json"},  # a shell's stdout
+    ]
+    assert acted(entries, payload) == {"folds": 1, "large_seen": True, "large_folded": True}
+    assert acted(entries[:1], payload) == {"folds": 0, "large_seen": False, "large_folded": False}
+    seen_not_folded = [{"digest": digest(payload), "branch": "passthrough"}]
+    assert (
+        acted(seen_not_folded, payload)["large_seen"] and not acted(seen_not_folded, payload)["large_folded"]
+    )
+
+
+def test_the_report_pairs_only_the_sessions_where_the_envelope_acted_apart():
+    rows = _rows(6)
+    for i, r in enumerate(r for r in rows if r["condition"] == "fold"):
+        r |= {"large_folded": i < 4, "large_seen": i < 5}
+    text = report(rows, "test")
+    assert "## When the envelope acted" in text
+    assert "| M | fold | 4/6 (saw it 5) | 4 | +0% [" in text  # four pairs, not six
