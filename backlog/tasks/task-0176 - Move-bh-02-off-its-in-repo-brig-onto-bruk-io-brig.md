@@ -5,7 +5,7 @@ status: To Do
 assignee:
   - '@bruk'
 created_date: '2026-10-31T03:54:00Z'
-updated_date: '2026-11-04T02:02:00Z'
+updated_date: '2026-11-04T03:31:00Z'
 labels:
   - brig
   - size-8
@@ -58,4 +58,6 @@ decision-0011 accepted by @bruk, 2026-10-31; Seatbelt waits for a Mac run (TASK-
 Architecture review, 2026-11-02 (three reviewers: brig's internals, the bh-02/brig seam, brig's security). Where it challenges decision-0011: (1) spec_for producing the new brig's ordered Binds bakes bwrap into bh-02's policy and forces a second rewrite when darwin lands; better, spec_for returns bh-02's own intent type and brig compiles an intent policy per jail type (brig DRAFT-0013); (2) the swap is not the adapter alone: the runner's endpoint contract changes (draft above); (3) the new brig lacks more than the four gaps listed: cwd and stdio (brig DRAFT-0016), cleanup of mountpoints for absent paths (DRAFT-0015, measured), a refusal for an unreachable interpreter (DRAFT-0017), and a runtime report (noted on brig TASK-0021). (4) Critical, measured: the jailed command can forge the supervisor's events and ptrace it (brig TASK-0022); the swap waits on it too. decision-0011 stays as accepted until the owner revisits it.
 
 Owner, 2026-11-04 (relayed by the lead): land the swap without darwin confinement; decision-0011 amended the same day. Criterion 'runner:confined confines on darwin and on Linux' replaced: darwin refuses and names runner:unconfined until TASK-0176.05. Seatbelt (TASK-0176.05) stays under this intent and keeps it open.
+
+Owner, 2026-11-04: approval keeps counting fs_write best_effort as confined (runner:approval's _CONFINING). best_effort means the jail itself cannot undo a protected path, but a host process replacing one mid-session (git's config.lock rename over .git/config, say) leaves the jail's read-only mount on the old inode; the tripwire ends the jail when it sees that. The tripwire's gap over brig's rename pins is to be closed next (DRAFT-0022's first item).
 <!-- SECTION:NOTES:END -->
