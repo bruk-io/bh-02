@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-03T17:47:00Z'
-updated_date: '2026-11-04T13:57:00Z'
+updated_date: '2026-11-04T13:58:00Z'
 labels:
   - commands
   - cordis
@@ -170,4 +170,6 @@ bh-02/plugins/commands-cordis-plugin/tests/test_restart.py:51: AssertionError
 FAILED bh-02/plugins/commands-cordis-plugin/tests/test_restart.py::test_restarting_the_ui_or_jobs_never_leaves_a_row_unmounted
 1 failed in 0.59s
 ```
+
+Lead, 2026-11-04: the repro file was made stricter in c7e8e27 (an 'is refused' check on each answer, a /restart operator step). A new repro is recorded above: the test as it now stands, run on the code before the fix (2aa4b7d), committed in a throwaway local worktree so record-check could name it; it fails on '/restart ui' answering a restart instead of a refusal.
 <!-- SECTION:NOTES:END -->
