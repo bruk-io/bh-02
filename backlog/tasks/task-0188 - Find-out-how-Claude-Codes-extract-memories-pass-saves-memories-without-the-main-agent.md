@@ -3,7 +3,7 @@ id: TASK-0188
 title: >-
   Find out how Claude Code's extract-memories pass saves memories without the
   main agent
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: 2026-10-10 12:15
@@ -52,4 +52,6 @@ HOW IT SAVES WITHOUT THE MAIN AGENT, in one line: after a turn ends, a forked co
 SHOULD bh-02 DO THE SAME? Not yet, and no follow-up is logged: nothing shows bh-02's model under-saves (the draft's premise is 'if a main agent under-saves'; scripts/model-friction could show it). If it does, the shape to copy is cheap: a post-turn background conversation with the same prefix, the tools limited to TASK-0068's memory tool, a skip when the main agent saved in the range, a 'new user prose since last pass' guard, one run at a time with a trailing run, a small turn cap. Open for the owner: bh-02 must pay for the extra model call per turn (Claude Code gates it by a server flag and every_n_turns) and whether the person sees what was saved.
 
 WHAT DRAFT-0002 WOULD REUSE. DRAFT-0002 is the auto-dream tidy pass, a different pass (consolidation on a 24 h / 5 sessions trigger), so only the mechanics carry over: (1) a forked agent whose permissions are a canUseTool allow-list by path (here: memory dir, .md only, deletes only via rm of .md, denials reported to the model); in bh-02 TASK-0068's memory tool already gives that by construction; (2) the 'Existing memory files' manifest in the prompt; (3) one-at-a-time with a coalesced trailing run, and drain-with-timeout at exit; (4) a turn cap (5) and errors that never reach the main turn; (5) appendSystemMessage-style summary to the person of what changed. It does not reuse the trigger, the cursor on messages, or the 'skip if main agent wrote' rule.
+
+Reviewer, 2026-11-04: closed. AC3: it names SDK 0.2.158 / CLI 2.1.280 and says the draft's 0.2.159 is not installed. The how is answered (a forked agent with the same prefix and model, writing only in the memory dir, after the turn). AC1: each part is located by chunk and minified function name, and the model is marked as inferred. AC2: not yet, with the reason. AC4: DRAFT-0002 reuses five mechanics, listed, and what it doesn't reuse is stated. No credential or token appears in the notes. Spike: notes only, no code changed; its full check is shared with TASK-0186's run.
 <!-- SECTION:NOTES:END -->
