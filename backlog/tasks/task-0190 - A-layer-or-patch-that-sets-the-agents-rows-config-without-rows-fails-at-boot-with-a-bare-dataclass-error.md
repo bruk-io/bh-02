@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-04T14:18:00Z'
-updated_date: '2026-11-04T14:24:00Z'
+updated_date: '2026-11-04T14:25:00Z'
 labels:
   - subagents
   - size-1
@@ -66,4 +66,6 @@ bh-02/plugins/subagents-cordis-plugin/tests/test_agents_wiring.py:1889: Assertio
 FAILED bh-02/plugins/subagents-cordis-plugin/tests/test_agents_wiring.py::test_an_agents_row_whose_config_names_no_rows_is_refused_saying_where_the_list_is
 1 failed, 57 deselected in 0.32s
 ```
+
+Fix: wiring.py builds AgentsConfig itself (config annotated Mapping | AgentsConfig, so cordis passes the payload through) and raises a TypeError saying to list the child's rows in the agents row's rows, with bh-02.toml's agents row as the shipped list. The repro test (commit 4057a84, recorded) failed before and passes after. pytest on the plugin: 139 passed; mypy clean; scripts/check bh-02/plugins/subagents-cordis-plugin exit 0 (first line is the uv NATIVE_TLS deprecation warning; the '== format' section follows). Criteria left unticked for the reviewer.
 <!-- SECTION:NOTES:END -->
