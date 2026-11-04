@@ -197,6 +197,41 @@ conversation 1  transcript.jsonl  2026-10-17 20:47:12.345
 
 The raw request of a step is not shown yet.
 
+## `bh-02 grants`
+
+```text
+Usage: bh-02 grants [OPTIONS] [COMMAND] [ARGS]...
+
+  List what this project's always-grants let the jail do, one per line: its
+  id, the kind and target, `always (project)`, and who asked and why. They are
+  kept in the project's grants store, outside every jail; `/grants` in a
+  session lists those and the session's own. Nothing is started but the broker
+  that reads the store.
+
+Options:
+  --help  Show this message and exit.
+
+Commands:
+  revoke  Take back the always-grant ID (the first column of `bh-02...
+```
+
+```text
+Usage: bh-02 grants revoke [OPTIONS] ID
+
+  Take back the always-grant ID (the first column of `bh-02 grants`): the next
+  start of a session no longer applies it, and a session running now stops
+  applying it at its next start of a program. Exits 1 and says so for an id no
+  grant has, or a store that can't be used.
+
+Options:
+  --help  Show this message and exit.
+```
+
+Both read this directory's project's store (`grants.toml`, kept outside every jail) and start
+nothing else: no ui, no jail. A revoke is gone at the next start of a session, which reads the
+store each time. Inside a session `/grants` lists the same and the session's own grants, and
+`/grants revoke ID` does the same.
+
 ## `bh-02 check-examples`
 
 ```text

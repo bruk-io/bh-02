@@ -10,6 +10,8 @@ over it; and `/release`. The only package in the workspace that imports brig (th
 | `runner:confined` | `runner` over a brig jail (bruk-io/brig's `create_bwrap_jail`, bubblewrap: Linux only for now, darwin, or Linux with no `bwrap`, reports every grade `unenforced` from the start and says before the first input to use `runner:unconfined`, and refuses each start), a jail per start; config: `write` (default `["."]`), `deny`, `hide` (files in the project inputs may not read; none by default), `env` (the names that survive the scrub; unset, they are the baseline `PATH`, `HOME`, `LANG`, `LC_ALL`, `TERM` plus the names in the person's `runner.toml`, below) | `host`, `models` (`key_envs()`, below) |
 | `runner:unconfined` | `runner`: each program as a plain subprocess (`--no-jail`), every axis reported `unenforced`, its environment without `CLAUDE*` (`CLAUDE_CODE_OAUTH_TOKEN`, and what a Claude Code that launched bh-02 leaves, a messaging token among them), `ANTHROPIC_*`, `TMUX` or `TMUX_PANE` (hygiene, not a boundary: an input without a jail can find the tmux socket itself; the confined runner's `env` allowlist never passes them, `tests/test_runner_tmux.py` shows both) | |
 | `runner:approval` | `approval`: `confined` (whether the runner confines what runs in it), `unasked(question) -> bool` (whether it runs without asking the person) | `runner` (`report`) |
+| `runner:grants` | `grants`: the broker of what the person granted the jail (`need`, `ask`, `granted`, `on_change`, `serve`, `list`, `revoke`) | `host` |
+| `runner:grant_prompt` | (nothing: registers `/grants`, which lists and revokes; TASK-0181.06 adds the prompt) | `grants` (`list`, `revoke`), `commands` (`register`) |
 | `runner:release` | (nothing: registers `/release`) | `runner` (`release`), `commands` (`register`) |
 
 `runner.py`'s `Runner` is the `runner` value both rows bind, over a mechanism (`BrigJail` in
@@ -313,8 +315,40 @@ Where a refusal is reported: for now in the start's `notice()` (`BrigJail` appen
 since nothing asks yet; the broker that asks (TASK-0181.05) refuses a request at the moment it is
 made, with the same `grants.refusal` words, before the person is asked.
 
-Where the grants come from: `BrigJail._granted` reads the always-grants from the store
-(`store.read(host.grants)`, at each start) and adds the session's, an empty `Grants` until the broker
-holds them. That method is the one seam the broker replaces. A store that is wrong (`store.Refused`)
-fails the start with its message, and grants nothing. `BrigJail(egress_hosts=...)` is brig's table the
+Where the grants come from: `BrigJail` asks its `grants` (the broker, below) for `granted()` at each
+start. A store that is wrong (`store.Refused`) grants nothing and does not fail the start: the start's
+`notice()` carries the words (`Broker.problem()`). `BrigJail(egress_hosts=...)` is brig's table the
 egress proxy resolves names from instead of the host's resolver; only tests pass it.
+
+## The grants broker
+
+`broker.py`'s `Broker` is the `grants` value, a plain value (no cordis) that `runner:grants` binds once
+(decision-0012 items 2 and 7). It holds:
+
+- **the project's always-grants**, in the store, read fresh at each `granted()` off the event loop, so an
+  `always` or a revoke from another process (or `bh-02 grants revoke`) counts at the next start;
+- **the session's answers**: `once` (applied while it was asked for with `ask`, or while some row holds a
+  `need` for it, and remembered after the row leaves so a remounted row is not asked again) and `no`
+  (remembered, not asked again).
+
+Rows ask with `need(request)` (acquired, so it leaves with the row), anything else with `await ask(request)`.
+Questions go one at a time through the prompt `serve` was given, and two for one grant are one question; with
+no prompt served `ask` answers `no`, and held needs are asked the moment one is. A prompt that returns None
+(Ctrl-C) records nothing. An `always` is written by reading the store fresh and writing it whole
+(`store.write`); a store that is refused is never written over, the grant is then kept for the session and
+`problem()` says why. Two processes writing `grants.toml` can lose an update (the next `always` reads again).
+Whether a request is already inside the current policy (decision-0012 item 5's `standing`) is TASK-0181.08's:
+here `standing` means already granted.
+
+Why `approval` depends on neither `grants` nor a requester: what reloads is what depends. The broker row
+depends on `host`, which the shell pins, so it never reloads, and a grant changes the value's contents and not
+its binding; `runner:confined` depends on it and reads `granted()` at each start. `approval` depends on
+`runner` alone, so a grant, an `always`, a requester's remount and a requester leaving all leave the rule
+up (`test_runner_grants_wiring.py` watches the loader for it).
+
+`/grants` (`runner:grant_prompt`) lists one line each (id, kind, target, answer and scope, who asked and
+why) and `/grants revoke ID` takes one back. `bh-02 grants` and `bh-02 grants revoke ID` do the same outside a
+session: the command line boots the `host` and `grants` rows alone, by name, and reads the value through a
+Protocol of its own (`bh_02.granting`), since the app imports no plugin. An id is the first 8 hex digits of the
+SHA-256 of the grant's text, so the two agree. A sub-agent's realm reads `grants` from outside (its rows
+ask the one broker).

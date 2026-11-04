@@ -104,6 +104,17 @@ use = "runner:confined"
 id = "approval"
 use = "runner:approval"
 
+# The broker of what the person granted the jail (decision-0012): rows' needs, requesters' asks, and
+# the always-grants of the project; it depends on `host` alone, so a grant reloads no row.
+[[plugin]]
+id = "grants"
+use = "runner:grants"
+
+# `/grants`: lists what is granted and takes a grant back (`bh-02 grants` does the same outside a session).
+[[plugin]]
+id = "grant-prompt"
+use = "runner:grant_prompt"
+
 # `/release`: each row stops its own program, then the runner frees what its jails held.
 [[plugin]]
 id = "release"

@@ -4,8 +4,8 @@ each child's realm, `output` (the child's, over `asker`) and `child` (its type's
 prompt, and its loop passed to the run that mounted it).
 
 A child is `use(cordis.loader:loader, config=LoaderConfig(overrides=rows, watch=None),
-expose={runner, approval, host, asker})`: the realm's own loader resolves its rows by name, so
-this plugin imports no other, and the realm reads nothing from outside but those four keys.
+expose={runner, approval, host, asker, grants})`: the realm's own loader resolves its rows by name, so
+this plugin imports no other, and the realm reads nothing from outside but those five keys.
 Every other key it binds (`loop`, `tools`, `transcript`, `model`, ...) is its own. The performer's
 undo for each mount is the child's retirement, so the agents row unloading retires every child
 it still holds.
@@ -42,8 +42,9 @@ from subagents_cordis_plugin.kinds import read_types, type_names
 __all__ = ["ChildConfig", "OutputConfig", "child", "output", "parent", "status"]
 
 # What a child's realm reads from outside (decision-0002): its python tool's runner, the one
-# approval rule, what the jail keeps from the model, and the asker over the parent's output.
-_EXPOSED = ("runner", "approval", "host", "asker")
+# approval rule, what the jail keeps from the model, the asker over the parent's output, and the
+# grants broker (decision-0012: a child's rows ask the one broker, never a copy of it).
+_EXPOSED = ("runner", "approval", "host", "asker", "grants")
 
 
 @runtime_checkable

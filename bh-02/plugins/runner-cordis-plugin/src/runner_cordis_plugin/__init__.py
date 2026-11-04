@@ -2,9 +2,10 @@
 workspace that imports brig, bruk-io/brig's) or not at all; the rule for what runs unasked (`approval`); and
 `/release`, which asks each owner to stop its own program and lets go of what the runner holds."""
 
-from runner_cordis_plugin import allowlist, grants, store
+from runner_cordis_plugin import allowlist, store
 from runner_cordis_plugin.approval import Approval, Graded, is_confined
 from runner_cordis_plugin.brig_spec import Brigged, report_of, to_brig
+from runner_cordis_plugin.broker import Broker, Entry, Outcome, Prompt, Scope, Unknown
 from runner_cordis_plugin.facts import links_on_the_way
 from runner_cordis_plugin.jail import (
     CHANNEL,
@@ -13,6 +14,7 @@ from runner_cordis_plugin.jail import (
     PLANNED,
     SYSTEM_READABLE,
     BrigJail,
+    Granting,
     Host,
     planned,
 )
@@ -36,7 +38,7 @@ from runner_cordis_plugin.policy import (
 from runner_cordis_plugin.runner import Mechanism, Runner, Started
 from runner_cordis_plugin.tripwire import Tripwire, decoded, lifted, tripped_for, unended_for, wires
 from runner_cordis_plugin.unconfined import UNENFORCED, Unjailed
-from runner_cordis_plugin.wiring import approval, confined, release, unconfined
+from runner_cordis_plugin.wiring import approval, confined, grant_prompt, grants, release, unconfined
 
 __all__ = [
     "BASELINE_ENV",
@@ -53,6 +55,13 @@ __all__ = [
     "BrigConfig",
     "BrigJail",
     "Brigged",
+    "Broker",
+    "Entry",
+    "Granting",
+    "Outcome",
+    "Prompt",
+    "Scope",
+    "Unknown",
     "Graded",
     "Host",
     "Mechanism",
@@ -68,6 +77,7 @@ __all__ = [
     "confined",
     "decoded",
     "git_author",
+    "grant_prompt",
     "grants",
     "is_confined",
     "lifted",
