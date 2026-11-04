@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-04T14:14:00Z'
-updated_date: '2026-11-04T14:49:00Z'
+updated_date: '2026-11-04T14:53:00Z'
 labels:
   - subagents
   - size-2
@@ -41,4 +41,70 @@ child.py no longer has _MEMORY_USE, _AUTO_USE or _COMMANDS_USE (grep for 'memory
 Review (reviewer, not the worker): NOT closed, though both criteria are met and ticked. Check: the full tier ran once on this tree (HEAD 63d6f38) and was recorded on TASK-0190: exit 0, 2601 passed. #1: child.py names no memory: or commands: component. #2: wiring._injects_commands reads cordis.loader.resolve(use).inject, and child_rows adds a registry of the parent's commands row's component. The changed wiring test is the intended behaviour, not a weakened check: it still asserts the parent's value never reaches the child (seen[0] is not parent), which is what the old 'stays unmounted' test guarded. Blocking finding (high): decision-0002 regression. refused defaults to (), so a child is kept from auto memory only while the active config repeats refused = ["memory:auto"]. A patch's config replaces the row's whole, and TASK-0190's message tells people to copy bh-02.toml's rows, so a config that copies rows without refused lets a child mount memory-auto with no error. The plugin tests added refused explicitly, so no test pins a safe default. Filed as the draft 'A child can get auto memory again unless the agents row's config lists it in refused'. Recommended default: refused = ("memory:auto",) in AgentsConfig (agents.py), or a metadata flag on the auto memory component that wiring.py reads. Minor: the refusal message lists every refused component, not the one the offending row uses. Closes once that draft's fix lands here, or the owner accepts the regression.
 
 Lead, 2026-11-04, on the review's high finding: fixed in d957d98. Auto memory is ALWAYS_REFUSED in the agents plugin, a floor joined to the config's refused (deduplicated), not a default a layer can drop; bh-02.toml no longer names it. A new test (refused unset, and refused empty) fails without the change. The review's DRAFT-0028 is archived.
+
+Check `scripts/check` exited 1
+
+(52 earlier lines omitted)
+```text
+__ test_a_step_that_failed_or_was_stopped_has_a_record_of_what_came_before_it __
+[gw3] linux -- Python 3.15.0 /home/user/bh-02-sub/.venv/bin/python
+
+    async def test_a_step_that_failed_or_was_stopped_has_a_record_of_what_came_before_it() -> None:
+        class Failing(Timing):
+            async def complete(self, messages: Sequence[Json], tools: Sequence[Json]) -> AsyncIterator[Json]:
+                self.stepped.advance(0.5)
+                yield text("Hel")
+                self.stepped.advance(0.25)
+                raise RuntimeError("429")
+    
+        stepped, transcript = Stepped(), MemoryTranscript()
+        with pytest.raises(RuntimeError):
+            await reply(loop(Failing(stepped, transcript), transcript, stepped), "hi")
+        (answer,) = entries(transcript, "assistant")
+        assert answer["content"].endswith(FAILED)
+        assert answer["step"] == {
+            "at": START,
+            "first_chunk": 0.5,
+            "took": 0.5,
+        }  # up to the last chunk, not the error
+    
+        class Silent(Timing):
+            async def complete(self, messages: Sequence[Json], tools: Sequence[Json]) -> AsyncIterator[Json]:
+                await asyncio.Event().wait()
+                yield text("never")  # pragma: no cover
+    
+        stepped, transcript = Stepped(), MemoryTranscript()
+        task = asyncio.create_task(reply(loop(Silent(stepped, transcript), transcript, stepped), "hi"))
+        await asyncio.sleep(0.01)
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        (answer,) = entries(transcript, "assistant")
+>       assert answer["content"] == STOPPED and answer["step"] == {"at": START}  # no chunk came
+                                                ^^^^^^^^^^^^^^
+E       KeyError: 'step'
+
+bh-02/plugins/agent-cordis-plugin/tests/test_agent_records.py:281: KeyError
+=========================== short test summary info ============================
+FAILED bh-02/plugins/agent-cordis-plugin/tests/test_agent_records.py::test_a_step_that_failed_or_was_stopped_has_a_record_of_what_came_before_it
+1 failed, 2602 passed, 6 skipped, 1 xfailed in 209.09s (0:03:29)
+   FAILED: tests
+== gates
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+== (root)
+   ok
+== libs/cordis
+   ok
+== libs/cordis-helpers
+   ok
+== libs/host-paths
+   ok
+   ok
+== docs
+INFO    -  Cleaning site directory
+INFO    -  Building documentation to directory: /home/user/bh-02-sub/site
+INFO    -  Documentation built in 5.88 seconds
+   ok
+== tokens
+   skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
+```
 <!-- SECTION:NOTES:END -->
