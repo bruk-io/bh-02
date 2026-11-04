@@ -28,6 +28,7 @@ __all__ = [
     "code_directories",
     "code_packages",
     "config_directories",
+    "grants_directory",
     "memory_directory",
     "project_of",
     "unreadable",
@@ -74,8 +75,9 @@ class _Host:
     (`paths`), what no input may read (`secrets`): the sessions' state (Claude Code's own config
     and tokens), bh-02's configuration directories (`trusted`), whose files the host reads and
     trusts, the directories bh-02 runs its own code from (`code`), and the project's auto memory
-    directory (`auto_memory`), which the model writes and the memory rows read. The jail keeps an
-    input from rewriting the first and from reading the secrets, from writing or creating any
+    directory (`auto_memory`), which the model writes and the memory rows read, and the project's
+    grants store (`grants`), which only the runner's broker reads and writes. The jail keeps an
+    input from rewriting the first, from reading the secrets or the store, from writing or creating any
     secret under a root it may write, and from writing in a configuration directory or in bh-02's
     own code under one; lets it write the memory directory; and every jail reads bh-02's own
     code."""
@@ -85,6 +87,7 @@ class _Host:
     trusted: tuple[str, ...] = ()
     code: tuple[str, ...] = ()
     auto_memory: str = ""
+    grants: str = ""
 
 
 def unreadable(states: Iterable[str]) -> tuple[str, ...]:
@@ -144,6 +147,13 @@ def memory_directory(project: Path, environ: Mapping[str, str], home: Path) -> s
         / re.sub(r"[^A-Za-z0-9]", "-", str(project))
         / "memory"
     )
+
+
+def grants_directory(project: Path, environ: Mapping[str, str], home: Path) -> str:
+    """Where the project's always-grants are kept (the `host` value's `grants`): beside the auto
+    memory, `$XDG_STATE_HOME/bh-02/projects/<project>/grants`, keyed as `memory_directory` keys it
+    (so every worktree of a repository shares one, and another project has its own)."""
+    return str(Path(memory_directory(project, environ, home)).parent / "grants")
 
 
 #: The packages bh-02 runs code from besides its plugins: the app, and the libraries they import.
@@ -408,6 +418,7 @@ async def run(
     trusted: Iterable[str] = (),
     code: Iterable[str] = (),
     auto_memory: str = "",
+    grants: str = "",
 ) -> None:
     """Boot, wait for the chat row's own work to end (CONTRACTS.md: `done`), then unwind.
 
@@ -424,7 +435,9 @@ async def run(
     directories (`config_directories`; the jail denies an input writing there), `code`, the
     directories bh-02 runs its own code from (`code_directories`; every jail reads them, and
     denies an input writing them), and `auto_memory`, the project's auto memory directory
-    (`memory_directory`; the jail lets an input write it, and none when empty), `session`, which
+    (`memory_directory`; the jail lets an input write it, and none when empty), `grants`, the
+    project's grants store (`grants_directory`; the jail keeps an input from reading or writing it),
+    `session`, which
     binds this directory's sessions and the running one (`session`; the default lists none), and
     `shell`, whose only job is to declare the shell's dependency on `done`, so a chat row that
     never binds it is an ordinary "waiting on" stall and a `done` of the wrong shape is an
@@ -458,6 +471,7 @@ async def run(
         "trusted": list(trusted),
         "code": list(code),
         "auto_memory": auto_memory,
+        "grants": grants,
     }
     last = [
         *overrides,

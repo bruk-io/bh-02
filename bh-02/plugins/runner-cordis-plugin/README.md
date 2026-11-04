@@ -183,6 +183,12 @@ The modules:
 
   A started program's `writes()` names the roots its inputs may write (the
   python row reads nothing on the host whose way passes through one);
+- **grants store**: `host.grants` (`$XDG_STATE_HOME/bh-02/projects/<project>/grants/`) holds
+  `grants.toml`, the always-grants of the project (decision-0012: `grants.py` is the values, their
+  validation and the never-grantable floor, `store.py` the file, read and written only through
+  `host_paths` at 0600). `spec_for` masks the directory from reads and, where a writable root holds
+  it (bh-02 run from the home directory), denies writing it; the command line makes it at 0700
+  before any jail starts, so brig holds no placeholder there.
 - **reads**: everything except the credential paths under `$HOME` (`CREDENTIALS`: `.ssh`, `.aws`, ...) and
   what `host` names as `secrets`: the sessions' state directories, this run's
   (`$XDG_STATE_HOME/bh-02/sessions`) and the default one (`~/.local/state/bh-02/sessions`),

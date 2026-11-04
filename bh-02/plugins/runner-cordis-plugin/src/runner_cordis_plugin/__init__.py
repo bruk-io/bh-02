@@ -2,7 +2,7 @@
 workspace that imports brig, bruk-io/brig's) or not at all; the rule for what runs unasked (`approval`); and
 `/release`, which asks each owner to stop its own program and lets go of what the runner holds."""
 
-from runner_cordis_plugin import allowlist
+from runner_cordis_plugin import allowlist, grants, store
 from runner_cordis_plugin.approval import Approval, Graded, is_confined
 from runner_cordis_plugin.brig_spec import Brigged, report_of, to_brig
 from runner_cordis_plugin.facts import links_on_the_way
@@ -54,6 +54,7 @@ __all__ = [
     "confined",
     "decoded",
     "git_author",
+    "grants",
     "is_confined",
     "lifted",
     "link_directories",
@@ -67,6 +68,7 @@ __all__ = [
     "released_for",
     "self_modify_denied",
     "spec_for",
+    "store",
     "told_reads",
     "to_brig",
     "tripped_for",

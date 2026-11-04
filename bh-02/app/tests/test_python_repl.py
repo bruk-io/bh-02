@@ -444,6 +444,7 @@ class _Host:
     trusted: tuple[str, ...] = ()
     code: tuple[str, ...] = ()
     auto_memory: str = ""
+    grants: str = ""
 
 
 def _python(jail: BrigJail | Runner, config: PythonProcessConfig) -> PythonProcess:

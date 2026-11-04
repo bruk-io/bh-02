@@ -24,6 +24,7 @@ class _Host:
     trusted: tuple[str, ...] = ()
     code: tuple[str, ...] = ()
     auto_memory: str = ""
+    grants: str = ""
 
 
 class _Models:

@@ -160,6 +160,7 @@ def spec_for(
     interpreters: Sequence[str] = (),
     links: Sequence[str] = (),
     memory: str = "",
+    grants: str = "",
 ) -> Policy:
     """The jail's `Policy`. `host` is every path the host process loads code from; any under a
     writable root is denied, as are the layer files and the self-modification list.
@@ -171,7 +172,9 @@ def spec_for(
     directory of each of `links` (absolute: the links on the way to them, `facts.links_on_the_way`;
     `link_directories`). `memory` (absolute: the project's auto memory directory, '' for none) may be
     written, as a root of its own outside the project: no self-modification list applies there,
-    since nothing reads it but the memory row, through no link."""
+    since nothing reads it but the memory row, through no link. `grants` (absolute: the grants store,
+    `host.grants`, '' for none) may be neither read nor written, wherever it is: it is a secret,
+    since an input that could edit it would grant itself anything."""
     roots = [str(Path(root, w).resolve()) for w in config.write]
     writable = [*roots, scratch, *([str(Path(memory).resolve())] if memory else [])]
     # A host import path *inside* a writable root is denied. One that *is* a root (the project
@@ -180,7 +183,11 @@ def spec_for(
     # the host has not imported yet. The `bh-02` console script never puts the root on sys.path.
     under = [p for p in host if p not in writable and any(p.startswith(r + "/") for r in writable)]
     selfmod = [str(Path(r, name)) for r in roots for name in self_modify_denied(config.allow)]
-    hidden = [*(str(Path(root, name).resolve()) for name in config.hide), *secrets]
+    hidden = [
+        *(str(Path(root, name).resolve()) for name in config.hide),
+        *secrets,
+        *([str(Path(grants).resolve())] if grants else []),
+    ]
     # A secret an input may not read, it may not overwrite or remove either: one under a writable
     # root (a `hide`n file, a state directory) is denied writing too, or an input could replace
     # what it can't see.

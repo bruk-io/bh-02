@@ -232,6 +232,7 @@ exclude = [
     "bh_02.cli:_launch",                                      # makes the project's auto memory directory
     "bh_02.bootstrap:project_of",                             # reads .git: a worktree's main repository
     "runner_cordis_plugin.allowlist:read",                    # reads the person's runner.toml (the jail's environment list); the pure parts are parsed and effective
+    "runner_cordis_plugin.store:read",                        # reads the project's grants.toml (host_paths.read_beneath) and checks its directory is there; the pure parts are parsed and rendered
     "runner_cordis_plugin.runner:reserved_endpoint",          # makes the directory a start's socket lives in (it moved here from the owners, whose methods were already in the budget)
     "runner_cordis_plugin.runner:unreserve_endpoint",         # removes it once the program is stopped
     # the session's rows.jsonl: a listener that reads the clock and queues each kept lifecycle event

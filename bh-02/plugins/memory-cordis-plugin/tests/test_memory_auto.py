@@ -107,6 +107,7 @@ def test_an_index_the_model_made_a_link_or_a_second_name_is_not_read(tmp_path: P
 class _Host:
     def __init__(self, auto_memory: str) -> None:
         self.auto_memory = auto_memory
+        self.grants = ""
 
 
 class _Prompt:

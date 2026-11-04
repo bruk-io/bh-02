@@ -61,6 +61,7 @@ class _Runner:
 class _Host:
     def __init__(self, auto_memory: str) -> None:
         self.auto_memory = auto_memory
+        self.grants = ""
 
 
 @component(provides=("model",))
