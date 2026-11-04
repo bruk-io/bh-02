@@ -7,7 +7,7 @@ status: To Do
 assignee:
   - '@bruk'
 created_date: '2026-11-03T18:22:00Z'
-updated_date: '2026-11-04T23:41:00Z'
+updated_date: '2026-11-04T23:42:00Z'
 labels:
   - runner
   - approval
@@ -43,7 +43,7 @@ Today approval is one rule (runner:approval) that asks about every call unless b
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A plugin can request a capability (read a path, write a path, pass an environment variable, reach a network destination as hostname or IP plus port) with a reason, and an input that hits a denial can raise the same request
+- [x] #1 A plugin can request a capability (read a path, write a path, pass an environment variable, reach a network destination as hostname or IP plus port) with a reason, and an input that hits a denial can raise the same request
 - [ ] #2 The person answers each request once, always for this project, or no; an always-grant is not asked again in that project, and a no is not re-asked within the session
 - [ ] #3 The runner plugin turns the grants into brig's policy at each jail start, and the report still grades the resulting jail honestly
 - [ ] #4 Network grants are per hostname and/or IP address plus port, enforced by brig: a program that ignores the proxy reaches nothing, and a destination not granted is refused or asked about
