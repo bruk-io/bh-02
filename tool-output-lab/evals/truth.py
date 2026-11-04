@@ -49,7 +49,7 @@ class Items:
 class Number:
     value: int
     items: frozenset[str] = frozenset()  # the things counted, as they show in the payload
-    stated: tuple[str, ...] = ()  # texts that state the count itself (a summary entry, a marker)
+    stated: tuple[str, ...] = ()  # texts that state the count itself (a shape's count)
 
 
 @dataclass(frozen=True)
@@ -256,7 +256,7 @@ def promotes(fold: str) -> bool:
 def score_fold(truth: Truth, fold: str) -> Score:
     """Whether the answer can be read off the fold text alone.
 
-    A count is sufficient when the fold states it (a summary's entry, a marker's count) or shows
+    A count is sufficient when the fold states it (a shape's count) or shows
     every counted item; a number that merely appears (a line number, a date) is not enough. A
     location needs the line shown with its number; an absent anomaly needs nothing promoted.
 

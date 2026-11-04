@@ -3,18 +3,17 @@
     ./lab fold FILE [--budget 2000] [--query WORDS] [--as FORMAT] [--lang LANG] [--save PATH]
     COMMAND | ./lab fold [-] ...
 
-Source code (by extension, or --lang for stdin) folds through ast-grep: every class, function and
-block header with its real line number, opened as far as the budget allows. Other text folds by
-what it is: JSON as an envelope (its shape, the rows that break it, samples, and jq commands to get
-more; --view picks the recipe), XML (by element, pretty-printed first when packed), indentation
-outlines such as accessibility snapshots (by nesting), HTML (to text), logs (repeated lines
-collapsed, head, tail and windows around error words) or plain text (head and tail). Each marker
-or path says what it hides: a jq path, or a line or character range, so `jq`, `sed -n 'A,Bp'` or
-Read with offset and limit fetch exactly that.
+Every text folds as an envelope of four parts: its shape, the anomalies that break it, samples,
+and how to get more. JSON is addressed by jq path; everything else by line number, as sed and grep
+count lines: a log by its line templates and their counts, XML (pretty-printed first when packed),
+an indentation outline such as an accessibility snapshot, and HTML once it is text by their
+outline, with each run of like items counted; source code (by extension, or --lang for stdin)
+by its definitions, through ast-grep. --view picks a recipe (sample or schema) for any format, and
+--set FORMAT_envelope.PART=PRODUCER swaps one part.
 
-Text that already fits the budget is printed unchanged. --query keeps in view the array items,
-siblings and log lines that hold those words (words that most items share are ignored). When the
-line numbers refer to a pretty-printed copy rather than the input (packed XML), --save writes
+Text that already fits the budget is printed unchanged. --query keeps in view the rows, items and
+lines that hold those words (words that most of them share are ignored). When the line numbers
+refer to a copy rather than the input (packed XML pretty-printed, a page's text), --save writes
 that copy, and the header says so. The first line of output is a header, unless --quiet.
 """
 
@@ -126,9 +125,9 @@ def main(argv: list[str] | None = None) -> int:
         "--view",
         choices=VIEWS,
         default="sample",
-        help="JSON's envelope recipe: sample (types and few-valued counts, the items that stand out, head "
-        "and tail) or schema (every field's values and counts, every row that breaks them, a ready jq "
-        "query); a json_envelope knob swaps one part (--set json_envelope.samples=typical)",
+        help="the envelope's recipe, for any format: sample (samples from the ends, how to read any "
+        "part) or schema (for JSON every field's values and counts; the rows or lines the query names, "
+        "a ready command for the anomalies); a knob swaps one part (--set log_envelope.samples=typical)",
     )
     ns = parser.parse_args(argv)
     try:

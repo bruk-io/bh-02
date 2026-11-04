@@ -145,5 +145,6 @@ def grep_for(lines: tuple[str, ...], rows: tuple[int, ...], tmpl: str, min_len: 
         if "\n" in piece or "'" in piece:
             continue
         if {i for i, line in enumerate(lines) if piece in line} == want:
-            return Prints(f"grep -nF {shlex.quote(piece)} FILE", tuple(i + 1 for i in sorted(rows)))
+            dash = " -e" if piece.startswith("-") else ""  # else grep reads the pattern as an option
+            return Prints(f"grep -nF{dash} {shlex.quote(piece)} FILE", tuple(i + 1 for i in sorted(rows)))
     return None

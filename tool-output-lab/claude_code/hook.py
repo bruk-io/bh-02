@@ -25,7 +25,7 @@ only when regular and under a size cap, and written privately (0600) and atomica
 Environment: TOOL_OUTPUT_LAB_BUDGET (tokens, default 2000), TOOL_OUTPUT_LAB_MODE (`inline`, the
 default, `spilled` or `all`), TOOL_OUTPUT_LAB_VIEW (`sample`, the default, or `schema`),
 TOOL_OUTPUT_LAB_CONFIG (a TOML file of knobs, `compressors/config.py`), TOOL_OUTPUT_LAB_SET (knobs,
-`schema.rare=0.15;tree.max_promoted=25`, over the file's), TOOL_OUTPUT_LAB_LOG (a JSONL file to
+`schema.rare=0.15;tree_envelope.rare=0.25`, over the file's), TOOL_OUTPUT_LAB_LOG (a JSONL file to
 append one line per decision to). A failure inside the hook leaves the tool result untouched: it
 must never be why a tool call fails.
 """
@@ -42,7 +42,6 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
-from compressors import markers
 from compressors.common import estimate_tokens, query_terms
 from compressors.config import DEFAULT, FoldConfig, load, with_sets
 from compressors.route import Folded, fold
@@ -163,7 +162,8 @@ def trusted_spill(resolved: str, session_resolved: str, from_field: bool = False
 def render(folded: Folded, path: str, raw_path: str = "") -> str:
     """The folded view, under a banner that says where the full output is and how to read it.
 
-    `path` is the file the markers' line numbers refer to; `raw_path`, when different, the raw."""
+    `path` is the file the envelope's line numbers or jq paths refer to; `raw_path`, when different,
+    the raw."""
     quoted = shlex.quote(path)
     raw_note = f" (the raw output: {raw_path})" if raw_path and raw_path != path else ""
     size = f"~{folded.raw_tokens} tokens -> ~{estimate_tokens(folded.body)}"
@@ -181,15 +181,12 @@ def render(folded: Folded, path: str, raw_path: str = "") -> str:
                 "lines that break them, samples, and how to get more, by line number. FILE in a command "
                 f"is {quoted}"
             )
-        case "html" | "xml" | "outline":
-            m = markers.ANY_RANGE.search(folded.body)
-            first, last = (int(m[1]), min(int(m[2]), int(m[1]) + 20)) if m else (1, 20)
+        case _:  # a tree: XML, an outline, a page's text, plain text
             how = (
-                "Markers name the line numbers they hide. "
-                f"Read them with sed -n '{first},{last}p' {quoted} or grep -n"
+                "This is the output's envelope: its outline, each run of like items counted, the items "
+                "that break a run, samples, and how to get more, by line number. FILE in a command is "
+                f"{quoted}"
             )
-        case _:
-            how = f"Markers give the character offsets they hide; read them with python or grep on {quoted}"
     return f"{head}. {how}.]\n{folded.body}"
 
 

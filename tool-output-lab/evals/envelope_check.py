@@ -262,17 +262,22 @@ def _grep(source: str, lines: list[str], command: str, run_tools: bool) -> tuple
         argv = shlex.split(command)
     except ValueError as e:
         return None, f"cannot read the command {command!r}: {e}"
+    if len(argv) == 5 and argv[2] == "-e":  # a pattern that starts with "-"
+        argv = [argv[0], argv[1], argv[3], argv[4]]
     if len(argv) != 4 or argv[0] != "grep" or argv[1] not in ("-nF", "-nE") or argv[3] != "FILE":
         return None, f"cannot read the command {command!r}"
     if run_tools and shutil.which("grep") is not None:
-        proc = subprocess.run(argv[:3], input=source, capture_output=True, text=True, timeout=60, check=False)
+        flags, pattern = argv[:2], argv[2]
+        proc = subprocess.run(
+            [*flags, "-e", pattern], input=source, capture_output=True, text=True, timeout=60, check=False
+        )
         if proc.returncode > 1:
             return None, f"grep rejects {command!r}: {proc.stderr.strip()[:200]}"
         return [int(out.split(":", 1)[0]) for out in proc.stdout.splitlines()], ""
     if argv[1] == "-nF":
         return [i + 1 for i, line in enumerate(lines) if argv[2] in line], ""
-    pattern = re.compile(argv[2])
-    return [i + 1 for i, line in enumerate(lines) if pattern.search(line)], ""
+    regex = re.compile(argv[2])
+    return [i + 1 for i, line in enumerate(lines) if regex.search(line)], ""
 
 
 def wrong_lines(source: str, lines: list[str], claim: Claim, run_tools: bool = True) -> list[str]:

@@ -15,7 +15,7 @@ def _sample() -> list[str]:
 
 
 @pytest.mark.parametrize("task_id", _sample())
-def test_folds_account_for_every_line_and_every_marker_is_true(task_id):
+def test_every_claim_an_envelope_makes_holds(task_id):
     task = _BY_ID[task_id]
     for query_on in {False, bool(task.query)}:
         assert check(task, 2000, query_on).violations == []
@@ -50,7 +50,7 @@ def test_an_anomaly_the_fold_has_a_rule_for_is_in_view_and_none_is_ever_invented
         ("xml-L-enumerate-AD", True),  # a header match outweighs `Ad` in other countries' names
         ("pypi-L-lookup-sha", True),  # digests are never cut
         ("pypi-L-enumerate-2023", True),  # keys kept for what their values hold
-        ("pypi-L-count-releases", False),  # the key total is in the marker
+        ("pypi-L-count-releases", False),  # the key total is in the shape
     ],
 )
 def test_cases_the_layer_1_fixes_made_sufficient(task_id, query_on):
