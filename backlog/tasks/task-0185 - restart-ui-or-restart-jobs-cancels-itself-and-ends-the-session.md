@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-03T17:47:00Z'
-updated_date: '2026-11-04T13:56:00Z'
+updated_date: '2026-11-04T13:57:00Z'
 labels:
   - commands
   - cordis
@@ -23,8 +23,8 @@ Architecture review 2026-11-03 (reproduced in memory): commands:jobs runs each r
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A /restart either finishes with every row back up or refuses and says why; it never leaves rows unmounted; repro test: ui, jobs and operator rows, /restart ui then /restart jobs, and every row is active with output remounted
-- [ ] #2 GLOSSARY.md and the commands wiring docstring say what /restart does to the ui and jobs
+- [x] #1 A /restart either finishes with every row back up or refuses and says why; it never leaves rows unmounted; repro test: ui, jobs and operator rows, /restart ui then /restart jobs, and every row is active with output remounted
+- [x] #2 GLOSSARY.md and the commands wiring docstring say what /restart does to the ui and jobs
 <!-- AC:END -->
 
 ## Implementation Notes
