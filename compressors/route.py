@@ -4,13 +4,14 @@ from dataclasses import dataclass
 from typing import Any
 
 from compressors import envelope_log, envelope_tree, markers
+from compressors.code import code_tree
 from compressors.common import estimate_tokens, split_lines
 from compressors.config import DEFAULT, FoldConfig
+from compressors.envelope import Envelope
 from compressors.envelope_json import VIEWS, envelope
 from compressors.html import html_to_text, looks_like_html
 from compressors.json_items import parse_json_or_jsonl
-from compressors.lines import fold_lines
-from compressors.tree import XmlTree, indent_tree, looks_like_outline, looks_like_xml, xml_tree
+from compressors.tree import XmlTree, heading_tree, indent_tree, looks_like_outline, looks_like_xml, xml_tree
 
 _MIN_LINES = 40  # fewer lines than this and the text is cut by characters instead
 _MAX_AVG_LINE = 500
@@ -76,10 +77,52 @@ def _records_by_line(raw: str) -> bool:
     return filled == list(range(len(filled)))
 
 
-def _cut_chars(raw: str, budget_tokens: int) -> str:
-    keep = budget_tokens * 4
-    head, tail = int(keep * 0.65), int(keep * 0.3)
-    return f"{raw[:head]}\n{markers.chars_omitted(head, len(raw) - tail)}\n{raw[len(raw) - tail :]}"
+LINE_BRANCHES = ("lines", "xml", "outline", "html", "text", "code")  # read as lines, addressed by number
+
+
+def lines_envelope(
+    raw: str,
+    branch: str,
+    terms: frozenset[str],
+    budget_tokens: int,
+    config: FoldConfig = DEFAULT,
+    view: str = "sample",
+    *,
+    language: str = "",
+    tree: XmlTree | None = None,
+) -> tuple[Envelope, str]:
+    """The envelope of a text read as lines, and the source its line numbers refer to: a log's
+    (`envelope_log`), or a tree's (`envelope_tree`) over an outline's indentation, XML's elements
+    (`tree`, when detection parsed it already), a page's headings once it is text, a plain text's
+    lines, or code's definitions (`language`). A language ast-grep has no grammar for raises
+    ValueError, from `code.code_tree`.
+
+    Raises:
+        ValueError: the branch is not read as lines, or the text is not well-formed XML.
+    """
+    match branch:
+        case "lines":
+            return envelope_log.envelope(raw, terms, budget_tokens, config, view), raw
+        case "xml":
+            if (tree := tree or xml_tree(raw)) is None:
+                raise ValueError("the text is not well-formed XML")
+            source = "\n".join(tree.lines) if tree.pretty else raw
+            return envelope_tree.envelope(
+                tuple(tree.lines), tree.roots, terms, budget_tokens, config, view
+            ), source
+        case "outline" | "html" | "text" | "code":
+            source = html_to_text(raw) if branch == "html" else raw
+            lines = tuple(split_lines(source))
+            match branch:
+                case "outline":
+                    roots = indent_tree(list(lines))
+                case "code":
+                    roots = code_tree(source, language)
+                case _:
+                    roots = heading_tree(list(lines))
+            return envelope_tree.envelope(lines, roots, terms, budget_tokens, config, view), source
+        case _:
+            raise ValueError(f"{branch!r} is not read as lines: those are {', '.join(LINE_BRANCHES)}")
 
 
 def _body(
@@ -97,28 +140,23 @@ def _body(
         AssertionError: a branch arrived without what it parses (a bug in `_detect` or `_parse_as`).
     """
     match branch, parsed:
-        case "xml", XmlTree() as tree:
-            env = envelope_tree.envelope(tuple(tree.lines), tree.roots, terms, budget_tokens, config, view)
-            return env.text(), ("\n".join(tree.lines) if tree.pretty else None)
         case "json", (value, "json"):
             return envelope(value, terms, budget_tokens, config=config, view=view).text(), None
         case "jsonl", (list() as records, "jsonl"):
             note = markers.jsonl_note(len(records), _records_by_line(raw))
             body = envelope(records, terms, budget_tokens, slurp=True, config=config, view=view).text()
             return f"{note}\n{body}", None
-        case "outline", None:
-            lines = tuple(split_lines(raw))
-            env = envelope_tree.envelope(lines, indent_tree(list(lines)), terms, budget_tokens, config, view)
-            return env.text(), None
+        case "xml", XmlTree() as tree:
+            env, source = lines_envelope(raw, "xml", terms, budget_tokens, config, view, tree=tree)
+            return env.text(), (source if tree.pretty else None)
         case "html", None:
             text = html_to_text(raw)
-            return (
-                text if estimate_tokens(text) <= budget_tokens else fold_lines(text, terms, budget_tokens)
-            ), text
-        case "lines", None:
-            return envelope_log.envelope(raw, terms, budget_tokens, config, view).text(), None
-        case "text", None:
-            return _cut_chars(raw, budget_tokens), None
+            if estimate_tokens(text) <= budget_tokens:
+                return text, text
+            env, source = lines_envelope(raw, "html", terms, budget_tokens, config, view)
+            return env.text(), source
+        case (("lines" | "outline" | "text"), None):
+            return lines_envelope(raw, branch, terms, budget_tokens, config, view)[0].text(), None
         case _:
             raise AssertionError(f"branch {branch!r} reached the fold without what it parses")
 

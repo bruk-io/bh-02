@@ -35,4 +35,4 @@ def test_the_server_folds_a_real_file_over_stdio(tmp_path):
     replies = [json.loads(line) for line in proc.stdout.splitlines()]
     assert [r["id"] for r in replies] == [1, 2]
     text = replies[1]["result"]["content"][0]["text"]
-    assert text.startswith("[fold: code (python),") and "1\tdef f0(x):" in text
+    assert text.startswith("[fold: code (python),") and "\n  1: def f0(x):" in text

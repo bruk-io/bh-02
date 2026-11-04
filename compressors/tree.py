@@ -414,6 +414,33 @@ def indent_tree(lines: list[str]) -> tuple[Node, ...]:
     return tuple(roots)
 
 
+_HEADING = re.compile(r"(#{1,6}) \S")
+
+
+def heading_tree(lines: list[str]) -> tuple[Node, ...]:
+    """A document's headings (`# Title`, `## Part`, as `html.html_to_text` writes them) as nodes,
+    each spanning its section, the lines before the first heading one node of their own; with no
+    heading, every non-blank line a node."""
+    marks = [(i, len(m[1])) for i, line in enumerate(lines) if (m := _HEADING.match(line))]
+    if not marks:
+        return tuple(Node(i, i, i) for i, line in enumerate(lines) if line.strip())
+    roots: list[Node] = []
+    stack: list[tuple[int, int, list[Node]]] = []  # (level, first, children)
+
+    def close(level: int, end: int) -> None:
+        while stack and stack[-1][0] >= level:
+            _, first, kids = stack.pop()
+            (stack[-1][2] if stack else roots).append(Node(first, first, end, tuple(kids)))
+
+    if marks[0][0] > 0:
+        roots.append(Node(0, 0, marks[0][0] - 1))
+    for i, level in marks:
+        close(level, i - 1)
+        stack.append((level, i, []))
+    close(0, len(lines) - 1)
+    return tuple(roots)
+
+
 def looks_like_outline(lines: list[str]) -> bool:
     """Many lines, mostly indented, nested at least three levels: an outline, not a log."""
     body = [line for line in lines if line.strip()]

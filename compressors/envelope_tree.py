@@ -130,7 +130,8 @@ def _lines(n: int, what: str = "line") -> str:
 
 # --- shape ---------------------------------------------------------------------------------------------
 
-_OUTLINE_LEVELS = ((80, 12, 300), (40, 6, 200), (20, 4, 160), (10, 2, 120))  # headers, depth, clip
+# headers shown, characters of each: the first level is for text of few long lines
+_OUTLINE_LEVELS = ((400, 1500), (400, 300), (200, 200), (100, 160), (50, 160), (25, 120), (12, 120))
 
 
 def _total(data: TreeData) -> tuple[str, Total]:
@@ -156,25 +157,61 @@ def _indent(line: str) -> str:
     return line[: len(line) - len(line.lstrip())]
 
 
+@dataclass(frozen=True)
+class _Shown:
+    node: Node
+    depth: int
+    parent: int  # the index of the node's parent in the list, or -1 at the top level
+
+
+def _nodes(data: TreeData, under: Mapping[int, Run]) -> list[_Shown]:
+    """Every node a run does not hold, in the order the source has them."""
+    out: list[_Shown] = []
+    pending = [] if -1 in under else [(n, 0, -1) for n in reversed(data.roots)]
+    while pending:
+        n, d, parent = pending.pop()
+        out.append(_Shown(n, d, parent))
+        if n.first not in under:
+            k = len(out) - 1
+            pending += [(c, d + 1, k) for c in reversed(n.children)]
+    return out
+
+
+def _chosen(nodes: list[_Shown], cap: int) -> list[_Shown]:
+    """At most `cap` nodes, a parent's children all or none: the top level first, then each group of
+    siblings under a node already chosen, shallowest first and, within a depth, the larger group
+    first (a class's methods before an if's branches), skipping a group there is no room for and a
+    lone child (one block in a function says little)."""
+    siblings: dict[int, list[int]] = {}
+    for k, s in enumerate(nodes):
+        siblings.setdefault(s.parent, []).append(k)
+    top = siblings.get(-1, [])
+    if len(top) > cap:
+        return [nodes[k] for k in top[:cap]]
+    taken = set(top)
+    order = sorted((p for p in siblings if p >= 0), key=lambda p: (nodes[p].depth, -len(siblings[p]), p))
+    for p in order:
+        if p in taken and len(siblings[p]) > 1 and len(taken) + len(siblings[p]) <= cap:
+            taken |= set(siblings[p])
+    return [nodes[k] for k in sorted(taken)]
+
+
 def outline(data: TreeData, /) -> Part:
-    """The tree's headers to a depth, each at its number, and each run counted by its kinds of item."""
+    """The tree's headers, each at its number, as many groups of siblings as the room allows, and each
+    run counted by its kinds of item."""
     head, total = _total(data)
     under = {r.parent: r for r in data.runs}
+    nodes = _nodes(data, under)
     levels = []
-    for cap, depth, clip in _OUTLINE_LEVELS:
+    for cap, clip in _OUTLINE_LEVELS:
         body: list[str] = []
         claims: list[Claim] = [total]
-        left = 0
         if (top := under.get(-1)) is not None:
             s, c = _summary(data, top, "")
             body += s
             claims += c
-        pending = [(n, 0) for n in reversed(data.roots)] if top is None else []
-        while pending:
-            n, d = pending.pop()
-            if len(body) >= cap or d > depth:
-                left += 1
-                continue
+        chosen = _chosen(nodes, cap)
+        for n in (s.node for s in chosen):
             text, said = numbered(data.lines, (n.first,), clip)
             body += text
             claims += said
@@ -182,9 +219,7 @@ def outline(data: TreeData, /) -> Part:
                 s, c = _summary(data, run, _indent(data.lines[n.first]) + "      ")
                 body += s
                 claims += c
-            else:
-                pending += [(c, d + 1) for c in reversed(n.children)]
-        if left:
+        if left := len(nodes) - len(chosen):
             body.append(f"[+ {left} more nodes, deeper or further on]")
         levels.append(Level(head, tuple(body), tuple(claims)))
     levels.append(Level(head, (), (total,)))
@@ -341,16 +376,28 @@ def _listed(anomalies: Part) -> set[int]:
     }
 
 
+def _node_at(roots: tuple[Node, ...], i: int) -> Node | None:
+    """The deepest node holding line i (0-based), if any does."""
+    found, nodes = None, roots
+    while nodes:
+        k = bisect.bisect_right([n.first for n in nodes], i) - 1
+        if k < 0 or i > nodes[k].last:
+            break
+        found, nodes = nodes[k], nodes[k].children
+    return found
+
+
 def _blocks(data: TreeData, picked: tuple[int, ...]) -> list[tuple[int, ...]]:
-    """The lines (0-based) to show for the picked lines, one block per item, in order: a short item
-    whole, a long one by its first line and the lines picked in it; a line no run holds, alone."""
+    """The lines (0-based) to show for the picked lines, one block per item (or, outside a run, per
+    deepest node holding the line), in order: a short one whole, a long one by its first line and the
+    lines picked in it; a line no node holds, alone."""
     by: dict[tuple[int, int], set[int]] = {}
     for i in picked:
         found = _item_at(data, i)
-        if found is None:
+        item = found[0].items[found[1]] if found is not None else _node_at(data.roots, i)
+        if item is None:
             by.setdefault((i, -1), set()).add(i)
             continue
-        item = found[0].items[found[1]]
         rows = range(item.first, item.last + 1) if item.last - item.first < _BLOCK else (item.first, i)
         by.setdefault((item.first, item.last), set()).update(rows)
     return [
@@ -382,14 +429,16 @@ def matches(data: TreeData, _shape: Part, anomalies: Part, /) -> Part:
 
 
 def typical(data: TreeData, _shape: Part, anomalies: Part, /) -> Part:
-    """Those, and the first item of each run."""
-    return _samples(data, anomalies, tuple(r.first for r in data.runs))
+    """Those, and the first item of each run (with no run, the first node)."""
+    firsts = tuple(r.first for r in data.runs) or tuple(n.first for n in data.roots[:1])
+    return _samples(data, anomalies, firsts)
 
 
 def head_tail(data: TreeData, _shape: Part, anomalies: Part, /) -> Part:
-    """Those, and the first two items of each run and its last."""
-    picked = tuple(n.first for r in data.runs for n in (*r.items[:2], r.items[-1]))
-    return _samples(data, anomalies, picked)
+    """Those, and the first two items of each run and its last (with no run, the first two nodes and
+    the last)."""
+    ends = [(*r.items[:2], r.items[-1]) for r in data.runs] or [(*data.roots[:2], *data.roots[-1:])]
+    return _samples(data, anomalies, tuple(dict.fromkeys(n.first for e in ends for n in e)))
 
 
 def no_samples(_data: TreeData, _shape: Part, _anomalies: Part, /) -> Part:
@@ -408,17 +457,26 @@ def grep(data: TreeData, _shape: Part, anomalies: Part, _samples: Part, /) -> Pa
             continue
         if (cmd := grep_for(data.lines, by[c.template], c.template)) is not None:
             found.append((f"{cmd.command}  (the {_lines(len(cmd.lines))} like it)", cmd))
+    reads = _reads(data)
     levels = []
     for cap in (3, 1):
         picked = found[:cap]
-        levels.append(Level("", (*(t for t, _ in picked), SED), tuple(c for _, c in picked)))
-    levels.append(Level("", (SED,)))
+        levels.append(Level("", (*(t for t, _ in picked), *reads), tuple(c for _, c in picked)))
+    levels.append(Level("", reads))
     return Part(Role.NAV, tuple(levels))
 
 
-def sed(_data: TreeData, _shape: Part, _anomalies: Part, _samples: Part, /) -> Part:
+_CUT = "sed -n 'Np' FILE | cut -c A-B  (any characters of a long line)"
+
+
+def _reads(data: TreeData) -> tuple[str, ...]:
+    """How to read any lines, and any part of a line, when some are longer than a sample shows."""
+    return (SED, _CUT) if any(len(line) > 300 for line in data.lines) else (SED,)
+
+
+def sed(data: TreeData, _shape: Part, _anomalies: Part, _samples: Part, /) -> Part:
     """How to read any lines."""
-    return Part(Role.NAV, (Level("", (SED,)),))
+    return Part(Role.NAV, (Level("", _reads(data)),))
 
 
 def no_nav(_data: TreeData, _shape: Part, _anomalies: Part, _samples: Part, /) -> Part:

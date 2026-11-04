@@ -24,11 +24,11 @@ import sys
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from compressors.code import fold_code, language_for
+from compressors.code import language_for
 from compressors.common import estimate_tokens, query_words, read_text
 from compressors.config import DEFAULT, FoldConfig, load, with_sets
 from compressors.envelope_json import VIEWS
-from compressors.route import fold
+from compressors.route import fold, lines_envelope
 
 FORMATS = ("auto", "code", "json", "xml", "html", "outline", "lines", "text")
 
@@ -72,8 +72,8 @@ def fold_text(
     if fmt == "code" and language is None:
         raise ValueError("--as code needs a language: pass --lang python (or typescript, rust, go, ...)")
     if fmt in ("auto", "code") and language is not None:
-        tree = fold_code(text, language, budget, terms, config.tree)
-        body, branch, source = tree.text, "code", None
+        env, _ = lines_envelope(text, "code", terms, budget, config, view, language=language)
+        body, branch, source = env.text(), "code", None
     else:
         force = None if fmt == "auto" else fmt
         folded = fold(text, budget_tokens=budget, terms=terms, force=force, view=view, config=config)

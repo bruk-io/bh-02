@@ -114,9 +114,10 @@ def test_every_numbered_line_is_the_line_at_that_number():
     assert numbered and all(lines[int(n) - 1] == text for n, text in numbered)
 
 
-def test_long_text_with_few_lines_is_cut_by_characters():
+def test_long_text_with_few_lines_is_clipped_and_says_how_to_read_any_part():
     folded = fold("x" * 50_000, budget_tokens=500)
-    assert folded is not None and folded.branch == "text" and "omitted" in folded.body
+    assert folded is not None and folded.branch == "text"
+    assert "1: xxx" in folded.body and "chars]" in folded.body and "cut -c A-B" in folded.body
 
 
 def test_html_keeps_headings_and_text_and_drops_scripts_and_chrome():

@@ -249,17 +249,8 @@ def _score_prose(truth: Truth, answer: str) -> Score:
 
 
 def promotes(fold: str) -> bool:
-    """Whether the fold shows something as standing out: an envelope's anomalies; a list of siblings
-    with something shown between two hidden runs (a tree stand-out); or a log with lines shown
-    between two gaps (a window around a signal)."""
-    if markers.ENVELOPE_ANOMALIES.search(fold):
-        return True
-    runs_per_indent: dict[str, int] = {}
-    for indent in markers.SIBLING_RUN.findall(fold):
-        runs_per_indent[indent] = runs_per_indent.get(indent, 0) + 1
-    if any(n >= 2 for n in runs_per_indent.values()):
-        return True
-    return len(markers.LOG_GAP.findall(fold)) >= 2
+    """Whether the fold shows something as standing out: an envelope's anomalies part names some."""
+    return markers.ENVELOPE_ANOMALIES.search(fold) is not None
 
 
 def score_fold(truth: Truth, fold: str) -> Score:
@@ -287,10 +278,10 @@ def score_fold(truth: Truth, fold: str) -> Score:
                 return Score(True)
             seen = sum(mentions(fold, x) for x in items) / len(items) if items else 0.0
             return Score(bool(items) and seen == 1.0, seen)
-        case Location(line=n, text=t):
-            return Score(re.search(rf"(?m)^{n}\t.*{re.escape(t)}", fold) is not None)
+        case Location(line=n, text=t):  # an envelope's numbered line, `  412: text`
+            return Score(re.search(rf"(?m)^\s*{n}: .*{re.escape(t)}", fold) is not None)
         case Edited(target=t):  # where to start: the definition shown with its line number
-            return Score(re.search(rf"(?m)^\d+\t.*{re.escape(t)}\b", fold) is not None)
+            return Score(re.search(rf"(?m)^\s*\d+: .*{re.escape(t)}\b", fold) is not None)
         case Claims(in_payload=facts):  # the answer's facts the large output holds must survive the fold
             text = plain(fold)
             found = numbers_in(text)
