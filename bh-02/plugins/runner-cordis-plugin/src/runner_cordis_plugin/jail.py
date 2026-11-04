@@ -118,7 +118,8 @@ class Host(Protocol):
     which an input may not write; the secrets, which it may not read; bh-02's configuration directories
     (`trusted`), whose files the host reads and trusts, which it may not write; the directories
     bh-02 runs its own code from (`code`), which every jail reads and no input writes; and the
-    project's auto memory directory (`auto_memory`), which it may write ('' for none)."""
+    project's auto memory directory (`auto_memory`), which it may write ('' for none); and the
+    project's grants store (`grants`), which it may neither read nor write ('' for none)."""
 
     @property
     def paths(self) -> tuple[str, ...]: ...
@@ -130,6 +131,8 @@ class Host(Protocol):
     def code(self) -> tuple[str, ...]: ...
     @property
     def auto_memory(self) -> str: ...
+    @property
+    def grants(self) -> str: ...
 
 
 def _not_ready_message(outcome: ChannelNotReady | ChannelRefused | ChannelJailFinished) -> str:
@@ -294,6 +297,7 @@ def planned(
         interpreters=interpreter_files(names),
         links=[link.entry for link in links_on_the_way(names)],
         memory=host.auto_memory,
+        grants=host.grants,
     )
     readable = readable_roots(
         argv=argv, interpreter=(base_prefix, prefix), system=SYSTEM_READABLE, code=host.code

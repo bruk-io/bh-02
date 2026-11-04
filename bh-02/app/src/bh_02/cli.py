@@ -30,6 +30,7 @@ from bh_02.bootstrap import (
     code_directories,
     code_packages,
     config_directories,
+    grants_directory,
     layers,
     memory_directory,
     project_of,
@@ -320,6 +321,11 @@ def _launch(
     code = code_directories(code_packages(ep.module for ep in entry_points(group="cordis.plugins")))
     memory = memory_directory(project_of(Path.cwd().resolve()), os.environ, Path.home())
     Path(memory).mkdir(mode=0o700, parents=True, exist_ok=True)
+    # And the grants store beside it, which must exist before any jail starts: a deny on an absent
+    # path would make brig hold a placeholder there. Only the person reads it (0700).
+    grants = grants_directory(project_of(Path.cwd().resolve()), os.environ, Path.home())
+    Path(grants).mkdir(mode=0o700, parents=True, exist_ok=True)
+    Path(grants).chmod(0o700)
     try:
         asyncio.run(
             run(
@@ -332,6 +338,7 @@ def _launch(
                 trusted=trusted,
                 code=code,
                 auto_memory=memory,
+                grants=grants,
             )
         )
     except CompositionError as error:

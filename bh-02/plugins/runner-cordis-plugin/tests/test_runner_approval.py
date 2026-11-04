@@ -15,6 +15,7 @@ class _Host:
     trusted: tuple[str, ...] = ()
     code: tuple[str, ...] = ()
     auto_memory: str = ""
+    grants: str = ""
 
 
 _CONFINED = {**UNENFORCED, "fs_write": "enforced", "network": "enforced"}

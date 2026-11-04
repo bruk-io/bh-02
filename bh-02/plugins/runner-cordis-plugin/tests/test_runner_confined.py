@@ -67,6 +67,7 @@ class Host:
     trusted: tuple[str, ...] = ()
     code: tuple[str, ...] = ()
     auto_memory: str = ""
+    grants: str = ""
 
 
 class _NoKeys:
@@ -102,6 +103,38 @@ def test_the_project_s_auto_memory_directory_is_a_root_an_input_may_write() -> N
         layers=(),
         host=(),
     ).writable == ("/tmp/j/tmp", "/w/app")
+
+
+def test_the_grants_store_is_masked_and_never_written_wherever_it_is() -> None:
+    """decision-0012 item 3: the store is a secret of the host's, so `spec_for` masks it, and denies
+    writing it where a writable root holds it (bh-02 run from the home directory)."""
+    store = "/Users/me/.local/state/bh-02/projects/-Users-me/grants"
+    inside = spec_for(
+        root="/Users/me",
+        scratch="/tmp/j/tmp",
+        home="/Users/me",
+        config=BrigConfig(),
+        layers=(),
+        host=(),
+        grants=store,
+    )
+    assert store in inside.masks and store in inside.write_denies
+    outside = spec_for(
+        root="/w/app",
+        scratch="/tmp/j/tmp",
+        home="/Users/me",
+        config=BrigConfig(),
+        layers=(),
+        host=(),
+        grants=store,
+    )
+    assert store in outside.masks and store not in outside.write_denies
+    assert (
+        store
+        not in spec_for(
+            root="/w/app", scratch="/tmp/j/tmp", home="/Users/me", config=BrigConfig(), layers=(), host=()
+        ).masks
+    )
 
 
 def test_the_spec_denies_what_would_reach_outside_the_jail_later() -> None:
@@ -707,6 +740,79 @@ async def test_a_linux_jail_lets_an_input_write_its_project_s_auto_memory_and_no
         await started.stop()
 
 
+# Listens; once the jail has seen it listen, reaches for the grants store argv[2] (list it, read its file,
+# overwrite the file, make another, remove the file) and says what each came to in argv[3], waits.
+_LISTEN_THEN_REACH_FOR_THE_STORE = """
+import os, socket, sys, time
+server = socket.socket(socket.AF_UNIX)
+server.bind(sys.argv[1])
+server.listen(4)
+server.accept()
+store, said = sys.argv[2:4]
+file = store + "/grants.toml"
+def read():
+    return "read: " + open(file).read()
+tries = {
+    "list": lambda: "list: " + ",".join(os.listdir(store)),
+    "read": read,
+    "overwrite": lambda: open(file, "w").write("planted") and "overwrite: done",
+    "make": lambda: open(store + "/new.toml", "w").write("planted") and "make: done",
+    "remove": lambda: os.unlink(file) or "remove: done",
+}
+came_to = []
+for name, attempt in tries.items():
+    try:
+        came_to.append(attempt())
+    except OSError as error:
+        came_to.append(name + ": " + os.strerror(error.errno))
+with open(said + ".tmp", "w") as report:
+    report.write("\\n".join(came_to))
+os.replace(said + ".tmp", said)
+time.sleep(60)
+"""
+
+
+async def test_a_linux_jail_keeps_the_grants_store_from_being_read_or_written_where_the_project_holds_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The store (`host.grants`) under the project, as when bh-02 runs from the home directory: the
+    root is writable, yet an input finds nothing of the store's to read and changes none of it. The
+    file the person keeps their always-grants in is the same afterwards, and no file was made."""
+    _needs_bwrap()
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "records"))
+    project = tmp_path / "project"
+    store = project / "state" / "bh-02" / "projects" / "-project" / "grants"
+    store.mkdir(parents=True, mode=0o700)
+    (store / "grants.toml").write_text("SECRET-GRANT")
+    one = BrigJail(BrigConfig(), Host(grants=str(store)))
+    said = project / "said"
+
+    def argv(endpoint: str) -> list[str]:
+        return [sys.executable, "-I", "-c", _LISTEN_THEN_REACH_FOR_THE_STORE, endpoint, str(store), str(said)]
+
+    started = await one.start(argv, cwd=str(project))
+    try:
+        for _ in range(200):
+            if said.exists():
+                break
+            await asyncio.sleep(0.05)
+        assert said.exists()
+        outcome = said.read_text()
+        assert "SECRET-GRANT" not in outcome
+        # nothing listed, the file not there to open, and every write refused
+        assert outcome.splitlines() == [
+            "list: ",
+            "read: No such file or directory",
+            "overwrite: Read-only file system",
+            "make: Read-only file system",
+            "remove: Read-only file system",
+        ]
+        assert (store / "grants.toml").read_text() == "SECRET-GRANT"
+        assert sorted(p.name for p in store.iterdir()) == ["grants.toml"]
+    finally:
+        await started.stop()
+
+
 # Listens; once the jail has seen it listen, tries what an input could do to the interpreter file
 # argv[2] (write it, write through its link argv[3], rename it, remove it) and writes a file beside
 # them, argv[4]; says what each came to in argv[5] (renamed into place, so whole), waits.
@@ -1000,7 +1106,7 @@ from runner_cordis_plugin import Approval, BrigConfig, BrigJail, Runner
 from python_cordis_plugin import PythonProcess, PythonProcessConfig
 
 class Host:
-    paths, secrets, trusted, code, auto_memory = (), (), (), (), ""
+    paths, secrets, trusted, code, auto_memory, grants = (), (), (), (), "", ""
 
 LOOP = (
     "import os, sys, time\\n"
