@@ -15,7 +15,7 @@ from typing import Any
 from bh_02 import layers, run
 from cordis import Effects, Row, bind, component
 from cordis.loader import read_layer, resolve
-from subagents_cordis_plugin import GENERAL, child_rows
+from subagents_cordis_plugin import ALWAYS_REFUSED, GENERAL, child_rows
 
 # What a child's realm reads from outside (the agents row's `expose`), and the key it binds itself
 # in place of the parent's (`subagents:output`): none of their rows is copied.
@@ -155,7 +155,7 @@ def test_the_agents_row_rewrites_those_fields_of_the_shipped_rows() -> None:
         place=Path("/s/agents/general-1"),  # type: ignore[arg-type]
         hand=None,
         commands_row=rows["agents"].config["commands_row"],
-        refused=rows["agents"].config["refused"],
+        refused=tuple(dict.fromkeys((*ALWAYS_REFUSED, *rows["agents"].config.get("refused", ())))),
         wants_commands=lambda use: "commands" in resolve(use).inject,
     )
     by_id = {r.id: dict(r.config) for r in made}

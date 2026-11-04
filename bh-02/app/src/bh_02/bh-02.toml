@@ -17,13 +17,13 @@ use = "agent:tools"
 # `transcript`, `system`, `asides`, `executor`; `approval` and `output` are the realm's own),
 # `python` (the loop's `requires`), and the project's guidance (`memory`, `on-touch`, `access`);
 # never `agents` or `memory-auto`. `commands_row`: the row whose component is the registry a child
-# whose row injects `commands` is given its own of; `refused`: the components a child never has
-# (auto memory: children would race one directory). A new dependency of `loop` or tool row for children goes here;
+# whose row injects `commands` is given its own of; `refused` (unset here) adds to what a child never
+# has, which is auto memory always (subagents' ALWAYS_REFUSED). A new dependency of `loop` or tool row for children goes here;
 # bh-02's tests/test_child_boot.py fails when a dependency of `loop` is missing.
 [[plugin]]
 id = "agents"
 use = "subagents:parent"
-config = { rows = ["loop", "tools", "transcript", "model", "system", "asides", "access", "memory", "on-touch", "executor", "python"], commands_row = "commands", refused = ["memory:auto"] }
+config = { rows = ["loop", "tools", "transcript", "model", "system", "asides", "access", "memory", "on-touch", "executor", "python"], commands_row = "commands" }
 
 # The status bar's agents field, `agents: N running`, while a sub-agent runs (absent at none).
 [[plugin]]

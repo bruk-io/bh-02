@@ -916,6 +916,29 @@ async def test_a_layer_naming_the_auto_memory_row_among_the_child_s_rows_fails_t
     await _bounded(rt.shutdown())
 
 
+@pytest.mark.parametrize("config", [{}, {"refused": []}], ids=["refused-unset", "refused-empty"])
+async def test_auto_memory_is_refused_to_a_child_whatever_the_layer_s_refused_says(
+    tmp_path: Path, config: dict[str, Any]
+) -> None:
+    """Auto memory is a floor of what a child never has (decision-0002), not a default the agents
+    row's config could leave out: a layer that copies `rows` and nothing else, or sets `refused`
+    empty, still has the call refused and no child mounted."""
+    model = _Model(parent=[[_call("1", "agent", prompt="p", type="general")], _text("ok")])
+    named = [*_KEPT, "memory", "on-touch", "memory-auto"]
+    rows = _rows(
+        model,
+        _Screen(),
+        agents=Row("agents", "subagents:parent", {"rows": named, **config}),
+        **_guidance(_project(tmp_path), **{"memory-auto": Row("memory-auto", "memory:auto")}),
+    )
+    booted = await _booted(rows)
+    rt = booted.runtime
+    [result] = _results(await _bounded(_reply(rt, "go")))
+    assert "a child must not have memory:auto (decision-0002: " in result and "'memory-auto'" in result
+    assert _children(rt) == [] and not any(_CHILD in p for p in model.prompts)
+    await _bounded(rt.shutdown())
+
+
 # What a person's type's prompt says, so the scripted model knows it is a child and its name.
 _TYPE = 'prompt = """You are a sub-agent: You are agent {{name}}, of type {kind}."""\n'
 

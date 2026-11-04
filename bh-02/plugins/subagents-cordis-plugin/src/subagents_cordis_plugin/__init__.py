@@ -8,6 +8,7 @@ from subagents_cordis_plugin.agents import (
     AGENT_SEND,
     AGENT_STOP,
     AGENT_WAIT,
+    ALWAYS_REFUSED,
     Agents,
     AgentsConfig,
     Asker,
@@ -66,6 +67,7 @@ from subagents_cordis_plugin.kinds import (
 from subagents_cordis_plugin.wiring import ChildConfig, OutputConfig, child, output, parent, status
 
 __all__ = [
+    "ALWAYS_REFUSED",
     "LOG",
     "AGENT",
     "AGENT_SEND",

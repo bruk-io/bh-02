@@ -348,14 +348,21 @@ class Hand:
         return parent_message(taken) if (taken := self.take()) else ""
 
 
+#: What a child never has, whatever the agents row's config says: auto memory, since children would
+#: race one directory and only the parent's conversation keeps it (decision-0002). A floor, not a
+#: default, so a layer that leaves `refused` out, or sets it empty, still refuses it.
+ALWAYS_REFUSED: tuple[str, ...] = ("memory:auto",)
+
+
 @dataclass(frozen=True, slots=True)
 class AgentsConfig:
     """The `agents` row's config. `rows`: the parent's rows a child's conversation is made of,
     by id; `tools`: those of them a type may grant (tool rows), the rest every child has;
     `transcript_row`, `model_row` and `commands_row`: which of them is the transcript, the model
     and the commands registry (a child whose row injects `commands` gets one of its own, of that
-    row's component); `refused`: the components (`plugin:component`) a child never has, so a `rows`
-    naming a row that uses one is refused (bh-02.toml names auto memory); `start`:
+    row's component); `refused`: components (`plugin:component`) a child never has, beyond
+    `ALWAYS_REFUSED` (auto memory, decision-0002), which no config can drop, so a `rows` naming a row
+    that uses one is refused; `start`:
     how long, in seconds, a child's loop has to come up; `max_running`: how many children run at
     once (a further one waits for a slot); `session_agents`: how many children start before
     each further start is put to the person. `rows` has no default: the layer names them beside
@@ -529,7 +536,7 @@ class Agents:
                 place=place,
                 hand=hand,
                 commands_row=self._config.commands_row,
-                refused=self._config.refused,
+                refused=tuple(dict.fromkeys((*ALWAYS_REFUSED, *self._config.refused))),
                 wants_commands=self._wants_commands,
             )
         except BaseException:  # re-raised: no child exists, so the start is not spent
