@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-03T17:47:00Z'
-updated_date: '2026-11-04T12:50:00Z'
+updated_date: '2026-11-04T12:59:00Z'
 labels:
   - runner
   - size-1
@@ -161,4 +161,6 @@ INFO    -  Documentation built in 2.98 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+Review (reviewer, 2026-11-04): NOT CLOSED. Blocker: scripts/check (full) exited 1 on bh-02/app/tests/test_xdist_groups.py::test_every_test_file_that_starts_a_jail_is_in_a_group - the new repro makes test_runner_approval.py match BrigJail( but it is in no group of the root conftest.py; add it to the jails group (with a reason) and re-run scripts/check. Everything else holds: the second repro fails for the right reason (confined True is False); off Linux report() is UNENFORCED before and after a refused start, and the status bar's jailed follows approval.confined only; the grades row queues the runner's notice at bind, before any input; scripts/linux-jail-check passed with and without --as-root (366 passed, 1 skipped, 1 xfailed each), so a ready Linux host is unchanged. Findings for the lead: the criteria were ticked by the worker in 799b449, not by a reviewer; 799b449 also carries unrelated board files (decision-0012, task-0181.01). No drafts filed: the blocker is this task's own.
 <!-- SECTION:NOTES:END -->
