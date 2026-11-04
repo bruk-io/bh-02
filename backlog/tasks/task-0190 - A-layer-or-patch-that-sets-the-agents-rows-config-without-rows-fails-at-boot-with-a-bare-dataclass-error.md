@@ -24,8 +24,8 @@ TASK-0187 made AgentsConfig.rows required. A patch's config replaces the layer's
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A layer naming subagents:parent without rows fails with a message that says to list the child's rows in the agents row's config and points to bh-02.toml's list
-- [ ] #2 A test pins that message
+- [x] #1 A layer naming subagents:parent without rows fails with a message that says to list the child's rows in the agents row's config and points to bh-02.toml's list
+- [x] #2 A test pins that message
 <!-- AC:END -->
 
 ## Implementation Plan
