@@ -97,12 +97,34 @@ class LogEnvelopeKnobs:
 
 
 @dataclass(frozen=True)
+class TreeEnvelopeKnobs:
+    """The envelope of a tree read as lines, an accessibility snapshot or another indented outline,
+    or XML (`compressors.envelope_tree`): which producer makes each part ("" leaves it to the view's
+    recipe), the order the parts claim the budget in, and how runs of like items are read."""
+
+    shape: str = ""  # outline: the tree's headers, each run of like items counted
+    anomalies: str = ""  # rare: items holding a line or a value few items hold; errors: error words; none
+    samples: str = ""  # matches: the query's items; typical: and each run's first; head-tail; none
+    nav: str = ""  # grep: a command per anomaly printing exactly its lines; sed: how to read any lines; none
+    priority: str = "shape,anomalies,nav,samples"
+    min_items: int = 5  # a node with this many children, most of them alike, is a run of items
+    alike: float = 0.6  # the share of a run's items whose first line has one template
+    rare: float = 0.2  # a line template, or a hole's value, in at most this share of the items is rare
+    common: float = 0.5  # when the lines common to more items are at least this share of the run's
+    dominant: float = 0.6  # a hole's value is rare only when one value is on this share of its lines
+    few: int = 6  # a hole holding at most this many values is a field
+    errors: float = 0.1  # a line naming an error is an anomaly in at most this share of the items
+    clip: int = 300  # characters of a line shown, at the roomiest level
+
+
+@dataclass(frozen=True)
 class FoldConfig:
     worth_it: float = 0.9  # a fold that keeps more than this share of the input passes it through instead
     schema: SchemaKnobs = SchemaKnobs()
     tree: TreeKnobs = TreeKnobs()
     json_envelope: JsonEnvelopeKnobs = JsonEnvelopeKnobs()
     log_envelope: LogEnvelopeKnobs = LogEnvelopeKnobs()
+    tree_envelope: TreeEnvelopeKnobs = TreeEnvelopeKnobs()
 
 
 DEFAULT = FoldConfig()
@@ -111,6 +133,7 @@ _SECTIONS = {
     "tree": TreeKnobs,
     "json_envelope": JsonEnvelopeKnobs,
     "log_envelope": LogEnvelopeKnobs,
+    "tree_envelope": TreeEnvelopeKnobs,
 }
 # The knobs that name a producer: the names each takes (each format's `compressors.envelope_*` holds
 # its producers). "" is the view's.
@@ -123,6 +146,10 @@ CHOICES = {
     "log_envelope.anomalies": ("", "rare", "errors", "none"),
     "log_envelope.samples": ("", "matches", "typical", "head-tail", "none"),
     "log_envelope.nav": ("", "grep", "sed", "none"),
+    "tree_envelope.shape": ("", "outline"),
+    "tree_envelope.anomalies": ("", "rare", "errors", "none"),
+    "tree_envelope.samples": ("", "matches", "typical", "head-tail", "none"),
+    "tree_envelope.nav": ("", "grep", "sed", "none"),
 }
 
 

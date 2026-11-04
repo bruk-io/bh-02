@@ -68,10 +68,10 @@ def said(claim: Claim) -> tuple[tuple[str, ...], ...]:
             return tuple((f"{first + k}: {text}",) for k, text in enumerate(lines))
         case Total(lines=lines, templates=templates):
             return ((f"{lines} line", f"{templates} line template"),)  # "1 line template", "2 line templates"
-        case Alike(template=tmpl, n=n, slot=0):
-            return ((tmpl, str(n)),)
+        case Alike(template=tmpl, n=n, slot=0):  # a template is shown without its indentation
+            return ((tmpl.strip(), str(n)),)
         case Alike(template=tmpl, n=n, slot=slot, value=value):
-            return ((tmpl, f"<*>{slot}", value, str(n)),)
+            return ((tmpl.strip(), f"<*>{slot}", value, str(n)),)
         case _ as unreachable:
             raise AssertionError(f"no said form for {unreachable!r}")
 

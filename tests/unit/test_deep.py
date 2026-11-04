@@ -5,7 +5,10 @@ import json
 import pytest
 
 from compressors.cli import fold_text
-from evals.l1 import coverage
+from compressors.common import split_lines
+from compressors.envelope_tree import envelope
+from compressors.tree import indent_tree
+from evals.envelope_check import text_problems
 
 
 def _else_if_chain(branches: int) -> str:
@@ -19,10 +22,12 @@ def test_an_else_if_chain_that_nests_a_level_per_branch_folds_as_code():
 
 
 @pytest.mark.parametrize("budget", [500, 60_000])  # the large budget opens hundreds of levels
-def test_an_outline_1200_levels_deep_folds_and_accounts_for_every_line(budget):
+def test_an_outline_1200_levels_deep_folds_and_every_claim_holds(budget):
     raw = "".join(" " * i + f"- item {i}\n" for i in range(1200))  # failed from 992
     r = fold_text(raw, budget=budget, quiet=True)
-    assert r.branch == "outline" and coverage(raw, r.text, numbered=False) == []
+    lines = tuple(split_lines(raw))
+    env = envelope(lines, indent_tree(list(lines)), frozenset(), budget)
+    assert r.branch == "outline" and r.text == env.text() and text_problems(raw, env, run_tools=False) == []
 
 
 def test_xml_1200_elements_deep_folds_as_xml_one_per_line_or_packed():
