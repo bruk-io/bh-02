@@ -1,7 +1,7 @@
 ---
 id: TASK-0191
 title: Two tests failed once under the full scripts/check and pass alone
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-11-04T13:57:00Z'
@@ -37,4 +37,6 @@ No repro: those two failures are a race in the tests themselves, shown by the lo
 NOT fixed: test_real_launch.py::test_keys_typed_as_the_modal_comes_up_do_not_answer_it. 30 runs of the file under 8 burners gave 0 failures; under 12 burners (4 workers) it failed 2 of 6, then 1 of 2 again, at: assert "denied" not in app.text()[asked:] (the n pressed as the modal came up answered it). Cause: ApprovalScreen arms on a wall-clock timer (GRACE 0.4 s, set_timer from mount) and the y/n/escape are bindings judged when processed, not when typed. A loaded machine delays either the test or the app past the window; the app can have the timer due and the keys queued, and then the timer wins. A test-side attempt (measure the time from seeing the modal to the keys, retry the launch if it was over GRACE/4) still failed once, so the app-side stall is real and the attempt was reverted. The fix is in the product: judge a key by when it arrived (the key event's time), or make the grace overridable at launch. That is a design choice, not done here. Criterion 2 is not met for this test. Finding: after I killed pytest runs mid-way, real-launch app processes were orphaned (the lead stopped 8); I did not see one left after a run that exited normally.
 
 Lead, 2026-11-04: finish moved by me. The second of this task's two tests (test_keys_typed_as_the_modal_comes_up_do_not_answer_it) fails because of a product bug, not a test race: ApprovalScreen judges keys when processed, not when typed, so queued keys can answer it after a stall. That is TASK-0193 now, with its own repro and fix; criterion 2 is restated so this task closes on the agent-records races it fixed.
+
+Reviewed: closed. Both stop tests now await an event set when the tool runs / approve() is entered (after stepped.advance), so the cancel lands where the asserts expect; asserts unchanged; no sleep(0.01) remains in the file. Full check green (recorded on TASK-0192). The No repro note is fair. Restated criterion 2 is honest: it names the move, and the finish-moved label and the lead's note explain it. TASK-0193 exists on the main branch, not on this one until it merges. Minor, not filed: the task carries two size labels (size-1, size-2), and the board rule wants one.
 <!-- SECTION:NOTES:END -->
