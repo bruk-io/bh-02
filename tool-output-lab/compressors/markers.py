@@ -102,4 +102,5 @@ def schema_exceptions(rows: int) -> str:
 
 
 SCHEMA_EXCEPTIONS = re.compile(r"(?m)^ *exceptions in \d+ rows:$")
+ENVELOPE_ANOMALIES = re.compile(r"(?m)^anomalies: [1-9]")  # an envelope's anomalies part names some
 JSONL_NOTE = re.compile(r"\AJSONL shown as one array of (?P<records>\d+) records; (?P<where>[^;]+);[^\n]*\n")

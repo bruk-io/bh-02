@@ -27,12 +27,13 @@ from pathlib import Path
 
 from compressors import markers
 from compressors.cli import fold_text
-from compressors.common import estimate_tokens, split_lines
+from compressors.common import estimate_tokens, query_words, split_lines
 from compressors.config import DEFAULT, FoldConfig, load, with_sets
+from compressors.envelope_json import envelope
 from compressors.json_fold import parse_json_or_jsonl
 from compressors.recovery import RecoveryError, resolve
 from compressors.route import VIEWS
-from evals import schema_check
+from evals import envelope_check, schema_check
 from evals.tasks import BANDS, BUDGET, FORMATS, Task, skipped, tasks
 from evals.truth import score_fold
 
@@ -194,6 +195,15 @@ def check(task: Task, budget: int, query_on: bool, view: str = "sample", config:
             body = out[note.end() :] if (note := markers.JSONL_NOTE.match(out)) else out
             violations += schema_check.claims(parsed[0], body, config.schema)
             violations += schema_check.query_runs(raw, parsed[0], body, config.schema)
+        elif branch in ("json-envelope", "jsonl-envelope"):
+            parsed = parse_json_or_jsonl(raw)
+            assert parsed is not None
+            body = out[note.end() :] if (note := markers.JSONL_NOTE.match(out)) else out
+            slurp = branch == "jsonl-envelope"
+            env = envelope(parsed[0], query_words(query), budget, slurp=slurp, config=config)
+            if env.text() != body:
+                violations.append("the envelope made again from the same input differs from the fold")
+            violations += envelope_check.problems(raw, parsed[0], env, config.schema)
         elif branch in ("xml", "outline", "lines") or branch.startswith("code-"):
             source = result.source if result.source is not None else raw
             violations += coverage(source, out, numbered=branch.startswith("code-"))
