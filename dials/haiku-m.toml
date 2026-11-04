@@ -1,0 +1,33 @@
+# How much the fold changes, and what each dial does, on one model: Haiku 5.5, the 52 MCP tasks at
+# size M (where the default, inline folding, acts), twice each, every setting against native.
+name = "haiku-m"
+model = "claude-haiku-5-5"
+bands = ["M"]
+formats = ["json", "log", "a11y", "figma"]
+reps = 2
+max_cost = 6
+
+[[setting]]   # the hook as shipped: inline, 2,000 tokens, samples
+name = "default"
+
+[[setting]]
+name = "budget-500"
+budget = 500
+
+[[setting]]
+name = "budget-1000"
+budget = 1000
+
+[[setting]]
+name = "budget-4000"
+budget = 4000
+
+[[setting]]   # data as its schema; it changes only JSON
+name = "schema-view"
+view = "schema"
+formats = ["json"]
+
+[[setting]]   # the layer-1 sweep's biggest lever; it changes only trees
+name = "tree-cap-25"
+set = ["tree.max_promoted=25", "tree.rare_share=0.2"]
+formats = ["a11y", "figma"]
