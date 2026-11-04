@@ -27,3 +27,14 @@
 {"tool": "mcp__fixture__list_pods", "tool_use_id": "toolu_01JdoEVt8rPo66LoTEkVZZwD", "spilled": true, "raw_tokens": 33942, "branch": "json", "out_tokens": 1498}
 {"tool": "mcp__fixture__list_pods", "tool_use_id": "toolu_011rQYKxr9kMDcuL8xegKLcx", "spilled": true, "raw_tokens": 33942, "branch": "json-schema", "out_tokens": 708}
 {"tool": "mcp__fixture__get_logs", "tool_use_id": "toolu_019i9od1J1nDn5sWUqVkv8sV", "spilled": true, "raw_tokens": 41190, "branch": "lines", "out_tokens": 1308}
+{"tool": "mcp__fixture__get_logs", "tool_use_id": "toolu_01A3XPcz8bxuYyTmng6kRhKE", "spilled": true, "raw_tokens": 41210, "branch": "lines", "out_tokens": 1890}
+{"tool": "mcp__fixture__get_logs", "tool_use_id": "toolu_019TYthtBFzm9fVJWnDM3rNF", "spilled": true, "raw_tokens": 41233, "branch": "lines", "out_tokens": 1465}
+{"tool": "mcp__fixture__get_logs", "tool_use_id": "toolu_01YbmPnadQqzgjJZhnacVPWc", "spilled": true, "raw_tokens": 41245, "branch": "lines", "out_tokens": 1484}
+{"tool": "mcp__fixture__browser_snapshot", "tool_use_id": "toolu_01LhZnJrwgzgL8L48impvZXS", "spilled": true, "raw_tokens": 18789, "branch": "outline", "out_tokens": 1740}
+{"tool": "mcp__fixture__browser_snapshot", "tool_use_id": "toolu_01DW58SWkc57y4FL58pprzWt", "spilled": true, "raw_tokens": 18807, "branch": "outline", "out_tokens": 1713}
+{"tool": "mcp__fixture__browser_snapshot", "tool_use_id": "toolu_013c9iaFrfg5oWBsfVKdvJnE", "spilled": true, "raw_tokens": 18821, "branch": "outline", "out_tokens": 1699}
+{"tool": "mcp__fixture__browser_snapshot", "tool_use_id": "toolu_01WTUFs9HprGfpPCXfF4f33E", "spilled": true, "raw_tokens": 18848, "branch": "outline", "out_tokens": 1688}
+{"tool": "mcp__fixture__get_figma_metadata", "tool_use_id": "toolu_01T1xkxoosubZJj82Ey5wK9G", "spilled": true, "raw_tokens": 36734, "branch": "xml", "out_tokens": 1846}
+{"tool": "mcp__fixture__get_figma_metadata", "tool_use_id": "toolu_018xBM1V3M582h3PFDzJyqMx", "spilled": true, "raw_tokens": 36758, "branch": "xml", "out_tokens": 1843}
+{"tool": "mcp__fixture__get_figma_metadata", "tool_use_id": "toolu_01PwQK9Ntc1wNWCPruhbdte5", "spilled": true, "raw_tokens": 36773, "branch": "xml", "out_tokens": 1849}
+{"tool": "mcp__fixture__get_figma_metadata", "tool_use_id": "toolu_01NDLJTSLiPLG5bxqy5P2v44", "spilled": true, "raw_tokens": 36794, "branch": "xml", "out_tokens": 1848}
