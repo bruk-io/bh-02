@@ -67,7 +67,8 @@ that queued it says (`failed`). The chat row reads its next line only once nothi
 (`settled`), so the restart reloads it while it waits, holding no line, and a line typed
 meanwhile reaches the new loop. Every command that restarts rows queues there: `/restart`,
 `/clear` and `/compact` (the conversation row), `/model NAME` (the switch row). The jobs row
-depends on `output` alone, which never reloads, so no restart it runs reloads it.
+depends on `output`, which the ui row binds, so restarting the ui, `jobs` or any row `jobs` depends on
+would reload it and cancel the restart it runs: `/restart` refuses those rows, and says why.
 
 `/model` is the models plugin's (`models:switch`), beside the catalog it reads; `/clear` and
 `/compact` are the agent plugin's conversation row's (`agent:conversation`), beside the

@@ -47,8 +47,12 @@ async def test_restarting_the_ui_or_jobs_never_leaves_a_row_unmounted() -> None:
     every_row_up = {rid: "active" for rid in ("commands", "ui", "jobs", "operator")}
     assert await _settled(loader.status, every_row_up) == every_row_up
     for line in ("/restart ui", "/restart jobs"):
-        await rt.root.get("commands").run(line)
+        answer = await rt.root.get("commands").run(line)
+        assert isinstance(answer, str) and "is refused" in answer, line
         await asyncio.sleep(0.2)
         assert await _settled(loader.status, every_row_up) == every_row_up, line
         assert rt.root.get("output") is not None, line
+    await rt.root.get("commands").run("/restart operator")  # a row nothing in jobs' chain needs restarts
+    await asyncio.sleep(0.2)
+    assert await _settled(loader.status, every_row_up) == every_row_up
     await rt.shutdown()
