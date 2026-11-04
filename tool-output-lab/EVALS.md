@@ -79,8 +79,11 @@ confident is the harm, so it is reported separately from wrong and hedged.
 - **Sizes:**
   - S: under the budget;
   - M: between the budget and Claude Code's spill threshold (MCP 50k characters, Bash 30k);
-  - L: over the threshold.
-  A/B 1 and 2 showed the answer turns on this, so every L2 cell reports it.
+  - L: over the threshold;
+  - XL and XXL: 4 and 16 times L (to ~660k tokens), synthetic only, for how the fold scales; built
+    only when asked for (`--bands XL XXL`, a sweep's or dials spec's `bands`).
+  A/B 1 and 2 showed the answer turns on this, so every L2 cell reports it. Sizes are in estimated
+  tokens (characters / 4), which undercount the synthetic payloads by 1.5 to 2 times (FINDINGS 57).
 - **Models:** Haiku (sensitive and cheap), Sonnet (the default), Opus as a spot check.
 
 ## Metrics per run
@@ -134,12 +137,14 @@ message, so it cannot invalidate what is cached. What it changes is what comes a
 ## Running
 
 ```
-./lab evals l1 [--budget 2000] [--only json log ...] [--name l1-x]   # layer 1, free, ~15 s
+./lab evals l1 [--budget 2000] [--only json log ...] [--name l1-x]   # layer 1, free, ~15 s (S to L)
+./lab evals l1 --bands XL XXL --only json log a11y figma            # the larger bands, ~80 s
 ./lab check                                                         # includes a layer-1 sample
 ./lab evals l2 --dry-run [--bands M L] [--reps N]                   # layer 2: the plan and its cost
 ./lab evals l2 --bands M L --name l2-x [--first-rep N]              # run it (headless Claude Code)
 ./lab evals l2 --merge l2-x l2-y --name l2-xy                       # report runs together, rescored
 ./lab evals sweep sweeps/schema-rare.toml                           # layer 1 over a grid of knobs (free)
+./lab evals dials dials/haiku-m.toml --dry-run                      # layer 2 over dial settings, one model
 ```
 
 Every entry point takes the same knobs (`compressors/config.py`): `--config FILE.toml` and
