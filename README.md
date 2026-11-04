@@ -113,6 +113,8 @@ The model acts in Python, at a REPL of its own that persists for this run of bh-
 code runs without asking: it can write inside
 the project, but it can't reach the network, read credentials, or touch what could run code later
 (`.git/hooks`, shell rc files, bh-02's own layers). With `--no-jail`, every input asks first.
+The jail can be given more, one grant at a time, only when you say so (once, always or no):
+[Grants](docs/bh-02/using/jail.md#grants).
 Ctrl-C stops a reply, Ctrl-P opens the command palette, `bh-02 --resume` continues a session.
 
 bh-02 has no models built in: name yours in `~/.config/bh-02/models.toml`, one table per endpoint
@@ -190,7 +192,7 @@ enforces less than you asked for is worse than none; brig says exactly what you 
 brig is a separate repository, which bh-02 depends on at a pinned commit (the runner plugin's
 `pyproject.toml`). bh-02 reaches it through one plugin, the runner's `runner:confined`, which turns
 bh-02's rules into a jail: the project writable, bh-02's own files and the sessions' state not, no
-network. bh-02's status bar shows the grades it got (`jail: jailed fs_write ✓ network ✓ ...`).
+network but the destinations you grant, through its egress proxy. bh-02's status bar shows the grades it got (`jail: jailed fs_write ✓ network ✓ ...`).
 brig's jail is bubblewrap, on Linux only for now; its contract is in its own repository
 (`docs/spec/index.md`).
 

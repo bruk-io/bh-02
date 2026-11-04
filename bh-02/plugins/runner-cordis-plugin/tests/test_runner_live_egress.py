@@ -1,8 +1,13 @@
-"""Live egress in real jails (decision-0012 items 4 and 6, TASK-0181.07): what a jail's proxy refuses
-is asked while the program runs and, on yes, the program's next connection is reached with no restart;
-a revoke refuses the next connection and leaves an open one open. The names resolve from a table
-(`egress_hosts`, the seam brig gives a test) to the host's loopback, which is a private address, so
-each destination is granted twice: the name, then the address."""
+"""The grants battery, in real jails (decision-0012 items 4, 6 and 8, TASK-0181.07 and .09): what a
+jail's proxy refuses is asked while the program runs and, on yes, the program's next connection is
+reached with no restart; a declined one stays refused; a revoke refuses the next connection and
+leaves an open one open; a grant already kept as always is reached by the first connection with
+nothing asked; a program that ignores the proxy reaches nothing, granted or not; and the grades are
+honest about it (`network` best-effort and never enforced, `egress` proxied, still confined).
+The names resolve from a table (`egress_hosts`, the seam brig gives a test) to the host's loopback,
+which is a private address, so each destination is granted twice: the name, then the address.
+
+They run only in a real jail, so they skip on the host; `scripts/linux-jail-check` proves them."""
 
 import asyncio
 import socket
@@ -16,7 +21,7 @@ from pathlib import Path
 
 import pytest
 
-from runner_cordis_plugin import BrigConfig, BrigJail, Broker, store
+from runner_cordis_plugin import BrigConfig, BrigJail, Broker, Unjailed, is_confined, store
 from runner_cordis_plugin.commands import grants_command
 from runner_cordis_plugin.grants import Answer, Asker, Grant, Kind, Request, Source
 from runner_cordis_plugin.prompting import question
@@ -73,6 +78,51 @@ while True:
     with open(log, "a") as out:
         out.write(f"new {status} tunnel {held} pid {os.getpid()}\\n")
     time.sleep(0.2)
+"""
+
+
+# Listens (the jail sees it ready), then connects to the host server's port on 127.0.0.1 twice and
+# logs what each came to: first directly, ignoring the proxy settings, then through the proxy
+# (127.0.0.1:3128, CONNECT), where it sends `ping` down the tunnel and logs the answer.
+_IGNORE_THE_PROXY = """
+import socket, sys, time
+server = socket.socket(socket.AF_UNIX)
+server.bind(sys.argv[1])
+server.listen(4)
+server.accept()
+port, log = int(sys.argv[2]), sys.argv[3]
+try:
+    socket.create_connection(("127.0.0.1", port), timeout=5).close()
+    direct = "reached"
+except OSError as error:
+    direct = "failed " + type(error).__name__
+try:
+    link = socket.create_connection(("127.0.0.1", 3128), timeout=10)
+    link.sendall(f"CONNECT 127.0.0.1:{port} HTTP/1.1\\r\\nHost: 127.0.0.1:{port}\\r\\n\\r\\n".encode())
+    head = b""
+    while b"\\r\\n\\r\\n" not in head:
+        head += link.recv(1)
+    status = head.split(b"\\r\\n")[0].decode().split(" ", 2)[1]
+    answer = ""
+    if status == "200":
+        link.sendall(b"ping")
+        answer = link.recv(4).decode()
+    proxied = f"{status} {answer}"
+except OSError as error:
+    proxied = "failed " + type(error).__name__
+with open(log, "w") as out:
+    out.write(f"direct {direct}\\nproxied {proxied}\\n")
+time.sleep(60)
+"""
+
+# Listens (the jail sees it ready) and does nothing else.
+_LISTEN_ONLY = """
+import socket, sys, time
+server = socket.socket(socket.AF_UNIX)
+server.bind(sys.argv[1])
+server.listen(4)
+server.accept()
+time.sleep(60)
 """
 
 
@@ -245,3 +295,122 @@ async def test_a_revoke_refuses_the_next_connection_and_leaves_an_open_one_open_
     assert "connections already open" in said and "stay open" in said
     refused = [line for line in after[mark:] if line.startswith("new 403")]
     assert refused and all("tunnel pong" in line for line in refused)  # the open one was not cut
+
+
+def _listen_only(endpoint: str) -> list[str]:
+    return [sys.executable, "-I", "-c", _LISTEN_ONLY, endpoint]
+
+
+async def test_a_program_that_ignores_the_proxy_reaches_nothing_though_the_destination_is_granted(
+    tmp_path: Path,
+) -> None:
+    """`net 127.0.0.1:PORT` stands as an always-grant for a listener on the host's loopback. From
+    inside the jail a direct `socket.create_connection` to it fails (the jail's loopback is its own,
+    and nothing listens there), while the same destination through the proxy is reached and carries
+    `ping`/`pong`: a grant opens the proxy's door and no other."""
+    project = tmp_path / "project"
+    project.mkdir()
+    log = project / "log"
+    directory = tmp_path / "state" / "grants"
+    directory.mkdir(parents=True, mode=0o700)
+    with _a_host_server() as port:
+        address = Grant(Kind.NET, "127.0.0.1", port)
+        store.write(directory, [Request(address, Asker(Source.ROW, "test"), "it fetches")])
+        one = BrigJail(BrigConfig(), _Host(grants=str(directory)), grants=Broker(directory))
+
+        def argv(endpoint: str) -> list[str]:
+            return [sys.executable, "-I", "-c", _IGNORE_THE_PROXY, endpoint, str(port), str(log)]
+
+        started = await one.start(argv, cwd=str(project), owner="python")
+        try:
+            lines = await _lines(log, lambda each: len(each) == 2, what="both connections")
+        finally:
+            await started.stop()
+    assert lines[0].startswith("direct failed "), lines
+    assert lines[1] == "proxied 200 pong"
+
+
+async def test_a_declined_destination_is_asked_once_and_stays_refused(tmp_path: Path) -> None:
+    """The person says no: the program is refused again and again, and the question is asked once
+    (a no is kept for the session)."""
+    project = tmp_path / "project"
+    project.mkdir()
+    log = project / "log"
+    with _a_host_server() as port:
+        broker = Broker(None)
+        person = _Person(Answer.NO)
+        broker.serve(person)
+        one = BrigJail(BrigConfig(), _Host(), egress_hosts={"svc.test": ("127.0.0.1",)}, grants=broker)
+        started = await one.start(_argv(f"svc.test:{port}", log), cwd=str(project), owner="python")
+        try:
+            lines = await _lines(log, lambda each: len(each) >= 6, what="refused again and again")
+        finally:
+            await started.stop()
+    assert all(line.startswith("new 403") for line in lines)
+    assert [request.grant for request in person.asked] == [Grant(Kind.NET, "svc.test", port)]
+
+
+async def test_a_grant_kept_as_always_is_reached_by_the_first_connection_with_nothing_asked(
+    tmp_path: Path,
+) -> None:
+    """The name and its address are always-grants in `grants.toml` before the start: the program's
+    first connection is let through, and the person was never asked."""
+    project = tmp_path / "project"
+    project.mkdir()
+    log = project / "log"
+    directory = tmp_path / "state" / "grants"
+    directory.mkdir(parents=True, mode=0o700)
+    with _a_host_server() as port:
+        asker = Asker(Source.ROW, "test")
+        name, address = Grant(Kind.NET, "svc.test", port), Grant(Kind.NET, "127.0.0.1", port)
+        store.write(directory, [Request(name, asker, "it fetches"), Request(address, asker, "it fetches")])
+        broker = Broker(directory)
+        person = _Person()
+        broker.serve(person)
+        one = BrigJail(
+            BrigConfig(),
+            _Host(grants=str(directory)),
+            egress_hosts={"svc.test": ("127.0.0.1",)},
+            grants=broker,
+        )
+        started = await one.start(_argv(f"svc.test:{port}", log), cwd=str(project), owner="python")
+        try:
+            lines = await _lines(log, lambda each: bool(each), what="a first connection")
+        finally:
+            await started.stop()
+    assert lines[0].startswith("new 200"), lines
+    assert person.asked == []
+
+
+async def test_a_real_start_grades_the_network_best_effort_and_proxied_and_approval_counts_it_confined(
+    tmp_path: Path,
+) -> None:
+    """The grades are honest: brig cannot vouch for more than best effort on `network`, so it is never
+    `enforced`, and `egress` says the only route is the proxy's; `approval` counts that as confined.
+    A start with a destination granted grades the same."""
+    project = tmp_path / "project"
+    project.mkdir()
+    directory = tmp_path / "state" / "grants"
+    directory.mkdir(parents=True, mode=0o700)
+    grant = Grant(Kind.NET, "svc.test", 443)
+    store.write(directory, [Request(grant, Asker(Source.ROW, "test"), "it fetches")])
+    for broker in (Broker(None), Broker(directory)):
+        one = BrigJail(BrigConfig(), _Host(grants=str(directory)), grants=broker)
+        started = await one.start(_listen_only, cwd=str(project), owner="python")
+        try:
+            report = started.report()
+        finally:
+            await started.stop()
+        assert report["network"] == "best_effort" and report["egress"] == "proxied", report
+        assert is_confined(report)
+
+
+async def test_an_unconfined_start_grades_every_part_unenforced_and_is_not_confined(tmp_path: Path) -> None:
+    """`--no-jail`: nothing is graded better than unenforced, and approval asks."""
+    started = await Unjailed().start(_listen_only, cwd=str(tmp_path), owner="python")
+    try:
+        report = started.report()
+    finally:
+        await started.stop()
+    assert set(report.values()) == {"unenforced"}
+    assert not is_confined(report)
