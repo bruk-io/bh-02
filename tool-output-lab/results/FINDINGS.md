@@ -124,3 +124,41 @@ sample recipe and as the schema recipe. Native answers 53% right.
   on average: the requests that fetch from the saved output, each reading the prefix from the
   cache) and still cost 3 to 5% less, since cache reads are cheap and the context they re-read is
   smaller. The schema recipe's sessions take longer (+4.8 s), the sample recipe's about as long.
+
+## 4. The synthetic tasks on Haiku: both recipes keep every answer, and cut the final context by 7k and the cost by 23%
+
+Run: `results/dials-haiku-synthetic.md`, 312 sessions, $2.04, none failed: the synthetic MCP tasks
+of every format (JSON pods, request logs, accessibility snapshots, Figma XML; 13 of each at M and
+13 at L), once each, native against the hook folding every result (mode `all`) as the sample and
+the schema recipe. The envelope acted in every folded session.
+
+- **Answers.** Native answers 103 of 104; each recipe 104 of 104, one pair won and none lost.
+  Over the 104 pairs the change is +1% [-2.7%, +5.2%]; per band, 52 pairs bound it only to 7
+  points either way. These tasks are easy for Haiku, so they can show a loss but hardly a gain,
+  and they showed no loss.
+- **Context, cost and time**, paired against native (means, with 95% intervals for the context):
+
+  | Band | Recipe | final context | cost | time |
+  |---|---|---|---|---|
+  | M | sample | -9,522 [-10,552, -8,298] | -18% | +2.1 s |
+  | M | schema | -8,488 [-9,946, -6,717] | -17% | +1.5 s |
+  | L | sample | -5,258 [-8,383, -2,538] | -27% | -5.0 s |
+  | L | schema | -4,888 [-7,693, -2,535] | -28% | -4.8 s |
+  | both | sample | -7,390 [-9,043, -5,797] | -23% | -1.4 s |
+  | both | schema | -6,688 [-8,375, -5,111] | -23% | -1.7 s |
+
+- **Against the kill criteria**, pooled over the 104 pairs, both recipes pass both: the accuracy
+  change's lower bound is above -3 points and the final context's interval is below zero. Per
+  band the accuracy criterion is undecided.
+- **How the sessions read.** At M, where native holds the raw result, the folded sessions still
+  read the saved raw in 87% (sample) and 73% (schema) of sessions, about one call more than native,
+  and take 1.5 to 2 s longer. At L, where native always reads the file Claude Code saved, the
+  folded sessions read it less often (81% and 65%), make two calls fewer and finish 5 s sooner;
+  the context falls less, since native holds only a preview, but the cost falls most.
+- **The exception: Figma XML at M.** The folded sessions read the saved XML whole (25 of 26), so
+  their final context stayed about native's (the schema recipe's median +1.1k). At about 7k
+  tokens the raw is small enough to read in one go.
+
+With FINDINGS 3, M4 is done: on the synthetic tasks both recipes pass; on MCP-Atlas, where they
+acted, the context criterion passes and accuracy is undecided at about 60 pairs. Sonnet (M6) and
+the sample question (M5) are next; neither recipe is cut.
