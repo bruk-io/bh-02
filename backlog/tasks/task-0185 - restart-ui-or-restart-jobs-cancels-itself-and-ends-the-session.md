@@ -142,4 +142,6 @@ INFO    -  Documentation built in 6.26 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+Reviewer, 2026-11-04: NOT closed: close-task refused because the repro test bh-02/plugins/commands-cordis-plugin/tests/test_restart.py changed after 2aa4b7d (c7e8e27 adds an 'is refused' assertion on each answer and a /restart operator step). Both ACs are met and ticked, and the full check (scripts/check) exited 0. The edit tightens the test rather than loosening it, but the rule asks for a repro recorded again: record-check the test, unchanged, on the pre-fix commit (or explain why the old repro stands), then close again. Other findings: (medium) /model's loader.reload and /clear and /compact's conversation restart run in jobs' task with no refusal, filed as DRAFT-0026. (low) a provider whose use does not resolve is silently left out of the refused set; acceptable, since the loader reports that row. (low) cordis Loader.restart has no cancellation guard, the owner's question. The refused set is computed live, transitively, and is exactly the rows whose restart reloads jobs. A refusal returns before jobs.put, so loader status is unchanged.
 <!-- SECTION:NOTES:END -->
