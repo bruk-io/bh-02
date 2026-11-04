@@ -145,6 +145,28 @@ class _StatusSink(Protocol):
     def status(self, field: str, text: str, *shorter: str) -> Callable[[], None]: ...
 
 
+def _agents_config(raw: Mapping[str, Any] | AgentsConfig) -> AgentsConfig:
+    """The agents row's config, built here and not by cordis (which would name only the missing
+    keyword): a config without `rows`, as a patch's `config = { start = 60 }` leaves it (a patch's
+    config replaces the row's whole), says what to write and where the shipped list is.
+
+    Raises:
+        TypeError: the config names no `rows`, or a key `AgentsConfig` has not.
+    """
+    if isinstance(raw, AgentsConfig):
+        return raw
+    if "rows" not in raw:
+        raise TypeError(
+            "the agents row's config has no `rows`: list the child's rows in the agents row's `rows` "
+            "(a layer's or patch's config replaces the shipped one whole); bh-02.toml's agents row "
+            "has the shipped list to copy"
+        )
+    try:
+        return AgentsConfig(**raw)
+    except TypeError as e:
+        raise TypeError(f"invalid config for AgentsConfig: {e}") from e
+
+
 @component(provides=("asker", "roster"))
 async def parent(
     *,
@@ -155,7 +177,7 @@ async def parent(
     host: _Trusted,
     commands: _Commands,
     model: object,
-    config: AgentsConfig,
+    config: Mapping[str, Any] | AgentsConfig,
 ) -> Effects:
     """Fills an `agents` row: `use = "subagents:parent"`. Binds `asker` (a confirm-only view of the
     parent's `output`, for its children) and `roster` (how many children run, for the status bar),
@@ -167,6 +189,7 @@ async def parent(
     drives its reply and retires it; unloading this row cancels every background run and retires
     every child still up. It consumes `model` for its lifetime alone: a model switch (`/model`) reloads
     it, ending the children, whose reports would land in another conversation."""
+    config = _agents_config(config)
     performing: Performer = yield performer()
     yield bind("asker", Asker(output))
     types = partial(read_types, host.trusted, config.tools)
