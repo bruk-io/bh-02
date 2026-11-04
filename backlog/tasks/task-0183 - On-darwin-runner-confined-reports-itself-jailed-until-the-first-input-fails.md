@@ -1,10 +1,11 @@
 ---
 id: TASK-0183
 title: On darwin runner:confined reports itself jailed until the first input fails
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@claude'
 created_date: '2026-11-03T17:47:00Z'
-updated_date: '2026-11-04T12:39:00Z'
+updated_date: '2026-11-04T12:40:00Z'
 labels:
   - runner
   - size-1
