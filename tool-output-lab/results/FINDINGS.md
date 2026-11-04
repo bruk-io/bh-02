@@ -552,6 +552,29 @@ condition (192 of 192 a band), so these kinds measure cost, not accuracy.
     saved file reliably; the spot tasks, where the fold won answers past the threshold (60), are not
     among them.
 
+## The envelope, layer 1 (`l1-21-*.md`, `sweep-envelopes.md`, PLAN.md "The envelope")
+
+67. **The two JSON views come apart into parts and go back together.** As envelopes, the schema
+    view's parts (fields, exceptions, matches, jq) are sufficient on exactly the tasks the schema
+    view is (41 of 47, task by task) at 29 more tokens median, for the part titles and a line on
+    reading any path; the sample fold's (summary, standouts, head-tail, rows) on 37 of the fold's
+    38, the one short being a PyPI enumeration the fold answers by keeping every key that matches
+    the query, where the parts show three matching rows. Every claim of every envelope held against
+    the data, `jq` run on each command; both views stayed byte-identical over 1,376 folds. Two
+    scorer and claim gaps turned up and were fixed: PyPI's release count was accepted only in the
+    sample fold's wording, and the stand-out rules said "none" of items they cannot read.
+68. **Mixing the parts: the anomalies matter most, then the query's rows; a typical sample adds
+    nothing layer 1 can see.** Over 16 recipes at budgets 500 and 2000 (no violations anywhere),
+    exceptions beat stand-outs on spot tasks (12 of 12 against 9 or 10) and on the quiet anomalies
+    (3 of 3 against 0 or 1) at every shape and sample; showing the rows that match the query adds 5
+    or 6 tasks, all lookups with the query on. The fuller shape (fields) answers more enumerations
+    than the summary (6 of 7 against 4 at 2000, by listing a keyed collection's keys), and the
+    summary is about 70 tokens smaller: at 500 tokens summary, exceptions and matches is the most
+    sufficient recipe (35 of 47 at 168 tokens). A typical sample or head and tail leave every count
+    as it was and cost 65 and 190 tokens: what a sample is for (the row's literal form, so a query
+    is written right, and trust) is not something layer 1 measures, so whether it earns its tokens
+    is a layer-2 question (PLAN.md E6).
+
 ## Where the design stands
 
 | Piece | Evidence | Leaning |
