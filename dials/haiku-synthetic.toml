@@ -1,0 +1,19 @@
+# Envelope compositions on the synthetic MCP tasks of every format: pod lists as JSON, request logs,
+# accessibility snapshots and Figma XML, each with planted answers, at M (under Claude Code's spill
+# threshold) and L (over it). Haiku 5.5, native against the hook folding every result (mode "all":
+# at L it folds the output Claude Code saved) as each recipe.
+name = "haiku-synthetic"
+model = "claude-haiku-5-5"
+bands = ["M", "L"]
+formats = ["json", "log", "a11y", "figma"]
+reps = 1
+max_cost = 4
+
+[[setting]]   # samples from the ends, how to read any part
+name = "sample"
+mode = "all"
+
+[[setting]]   # every field, the query's rows or lines, a ready command for the anomalies
+name = "schema"
+mode = "all"
+view = "schema"
