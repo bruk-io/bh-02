@@ -355,26 +355,15 @@ class AgentsConfig:
     `transcript_row` and `model_row`: which of them is the transcript and the model; `start`:
     how long, in seconds, a child's loop has to come up; `max_running`: how many children run at
     once (a further one waits for a slot); `session_agents`: how many children start before
-    each further start is put to the person. `rows` default to the loop's and the project's
-    guidance (`memory`, `on-touch`), never auto memory.
+    each further start is put to the person. `rows` has no default: the layer names them beside
+    the rows they are (bh-02.toml), the loop's dependencies and the project's guidance, never
+    auto memory.
 
     Raises:
         ValueError: `max_running` is not at least 1, or `session_agents` is negative.
     """
 
-    rows: Sequence[str] = (
-        "loop",
-        "tools",
-        "transcript",
-        "model",
-        "system",
-        "asides",
-        "access",
-        "memory",
-        "on-touch",
-        "executor",
-        "python",
-    )
+    rows: Sequence[str]
     tools: Sequence[str] = ("python",)
     transcript_row: str = "transcript"
     model_row: str = "model"

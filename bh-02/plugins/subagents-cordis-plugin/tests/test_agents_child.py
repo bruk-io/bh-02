@@ -234,12 +234,12 @@ def test_a_commands_row_the_layer_gave_the_child_is_the_only_one() -> None:
     assert [r.id for r in rows if r.use == "commands:registry"] == ["agents/general-1/commands"]
 
 
-def test_the_default_rows_give_a_child_the_guidance_and_never_auto_memory() -> None:
-    """The shipped layer's child has `memory:files` and `memory:on_touch`; the rows a child is made
-    of by default name no auto memory row, so none is copied."""
-    kept = AgentsConfig().rows
-    assert "memory" in kept and "on-touch" in kept and "memory-auto" not in kept
-    uses = [r.use for r in _guided(kept=kept)]
+def test_the_agents_row_has_no_rows_of_its_own_to_fall_back_on() -> None:
+    """No row list is kept in this plugin: a layer's agents row names them (bh-02.toml keeps the
+    shipped list beside the rows), and one that names none is refused, not given a child of nothing."""
+    with pytest.raises(TypeError, match="rows"):
+        AgentsConfig()  # type: ignore[call-arg]
+    uses = [r.use for r in _guided(kept=_GUIDED)]
     assert "memory:files" in uses and "memory:on_touch" in uses and "commands:registry" in uses
     assert "memory:auto" not in uses
 

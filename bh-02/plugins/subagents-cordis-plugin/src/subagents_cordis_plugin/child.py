@@ -3,9 +3,9 @@ the person, the label on its questions, the steps it has taken, and the report i
 Pure: nothing here opens a file, starts a process or touches the runtime; `agents.py` acts on
 what these decide.
 
-A child's rows are the parent's own, as its loader mounted them (`loop`, `tools`, `transcript`,
-`model`, `system`, `asides`, `access`, `executor`, `python`, and the project's guidance: `memory`
-and `on-touch`), each under an id prefixed `agents/NAME/`, so a model row a `--patch` replaced
+A child's rows are the parent's own, as its loader mounted them: the ones the agents row's `rows`
+names (the layer keeps that list beside the rows, bh-02.toml), each under an id prefixed
+`agents/NAME/`, so a model row a `--patch` replaced
 with a fake is the child's too. Of the tool rows a type may grant (the agents row's `tools`),
 only those its type grants. The agents row writes what is the child's own: its transcript in its
 own state directory, the model's Claude Code state beside it, and the model its type (or the

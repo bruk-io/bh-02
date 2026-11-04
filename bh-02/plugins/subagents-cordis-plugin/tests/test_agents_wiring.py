@@ -261,7 +261,7 @@ def _rows(model: _Model, screen: _Screen, path: Path | None = None, /, **more: A
         "approval": Row("approval", f"{__name__}:fake_rule", {"unasked": True}),
         "host": Row("host", f"{__name__}:trusted_host"),
         "commands": Row("commands", "commands:registry"),
-        "agents": Row("agents", "subagents:parent"),
+        "agents": Row("agents", "subagents:parent", {"rows": _KEPT}),
     }
     for rid, row in more.items():
         if row is None:
@@ -797,7 +797,7 @@ def _child_requests(model: _Model) -> list[list[Json]]:
 async def test_a_child_s_prompt_holds_the_project_s_guidance_and_its_input_is_told_what_loads_on_demand(
     tmp_path: Path,
 ) -> None:
-    """The agents row's default rows: the child's prompt has the project's CLAUDE.md as the parent's
+    """The layer's rows: the child's prompt has the project's CLAUDE.md as the parent's
     does, and its python input that opens a file under `sub/` is told `sub/CLAUDE.md` with its
     result, in its own conversation (the parent opened nothing, and is told nothing)."""
     project = _project(tmp_path)
@@ -812,6 +812,7 @@ async def test_a_child_s_prompt_holds_the_project_s_guidance_and_its_input_is_to
         runner=Row("runner", "runner:unconfined"),
         approval=Row("approval", "runner:approval"),
         python=Row("python", "python:tool", {"root": str(project), "startup": []}),
+        agents=Row("agents", "subagents:parent", {"rows": [*_KEPT, "python", "memory", "on-touch"]}),
         **_guidance(project),
     )
     booted = await _booted(rows)
@@ -867,7 +868,10 @@ async def test_no_child_composition_includes_auto_memory_though_the_parent_has_i
     memory = tmp_path / "memory"
     memory.mkdir()
     host = Row("host", f"{__name__}:trusted_host", {"memory": str(memory)})
-    booted = await _booted(_rows(model, _Screen(), host=host, **_guidance(_project(tmp_path), **auto)))
+    agents = Row("agents", "subagents:parent", {"rows": [*_KEPT, "memory", "on-touch"]})
+    booted = await _booted(
+        _rows(model, _Screen(), host=host, agents=agents, **_guidance(_project(tmp_path), **auto))
+    )
     rt = booted.runtime
     assert any(row.entry.use == "memory:auto" for row in booted.loader.rows.values())  # the parent's
     assert rt.root.get("tools").get("memory") is not None
@@ -1021,7 +1025,7 @@ async def test_a_background_that_is_not_a_boolean_is_refused_before_anything_sta
         parent=[[_call("1", "agent", prompt="p", type="general", background="true")], _text("ok")],
     )
     screen = _Screen()
-    agents = Row("agents", "subagents:parent", {"session_agents": 0})
+    agents = Row("agents", "subagents:parent", {"rows": _KEPT, "session_agents": 0})
     booted = await _booted(_rows(model, screen, agents=agents))
     rt = booted.runtime
     [by_the_loop] = _results(await _bounded(_reply(rt, "go"), 10))
@@ -1083,7 +1087,9 @@ async def test_past_max_running_a_child_waits_for_a_slot_and_a_note_says_so() ->
         child={"general-1": [(gate, _text("one"))], "general-2": [_text("two")], "general-3": [_HANG]},
     )
     screen = _Screen()
-    booted = await _booted(_rows(model, screen, agents=Row("agents", "subagents:parent", {"max_running": 1})))
+    booted = await _booted(
+        _rows(model, screen, agents=Row("agents", "subagents:parent", {"rows": _KEPT, "max_running": 1}))
+    )
     rt = booted.runtime
     tools = rt.root.get("tools")
     agent, wait = tools.get("agent"), tools.get("agent_wait")
@@ -1148,7 +1154,7 @@ async def test_past_the_session_budget_each_start_is_asked_and_a_no_refuses_it()
         child=[_text("fine")],
     )
     screen = _Screen(answer=_start_asked)  # yes to a call, no to a start
-    agents = Row("agents", "subagents:parent", {"session_agents": 1})
+    agents = Row("agents", "subagents:parent", {"rows": _KEPT, "session_agents": 1})
     booted = await _booted(_rows(model, screen, agents=agents))
     first, second = _results(await _bounded(_reply(booted.runtime, "go")))
     assert first.startswith("Report from agent general-1 (general)")
@@ -1170,7 +1176,7 @@ async def test_two_calls_at_once_cannot_both_pass_the_last_of_the_budget(tmp_pat
     with one start left, the first is under the budget and the second is asked."""
     model = _Model(parent=[], child=[_text("one"), _text("two")])
     screen = _Screen(answer=False)
-    agents = Row("agents", "subagents:parent", {"session_agents": 1})
+    agents = Row("agents", "subagents:parent", {"rows": _KEPT, "session_agents": 1})
     booted = await _booted(_rows(model, screen, tmp_path / "transcript.jsonl", agents=agents))
     rt = booted.runtime
     agent = rt.root.get("tools").get("agent")
@@ -1200,7 +1206,7 @@ async def test_a_start_cancelled_while_its_claim_waits_gives_back_its_count_and_
     monkeypatch.setattr(Path, "mkdir", held)
     model = _Model(parent=[], child=[_HANG])
     screen = _Screen()
-    agents = Row("agents", "subagents:parent", {"session_agents": 1})
+    agents = Row("agents", "subagents:parent", {"rows": _KEPT, "session_agents": 1})
     booted = await _booted(_rows(model, screen, tmp_path / "transcript.jsonl", agents=agents))
     rt = booted.runtime
     agent = rt.root.get("tools").get("agent")
@@ -1240,7 +1246,7 @@ async def test_a_start_whose_directory_can_not_be_made_gives_back_its_count_and_
     monkeypatch.setattr(Path, "mkdir", failing)
     model = _Model(parent=[], child=[_text("fine")])
     screen = _Screen()
-    agents = Row("agents", "subagents:parent", {"session_agents": 1})
+    agents = Row("agents", "subagents:parent", {"rows": _KEPT, "session_agents": 1})
     booted = await _booted(_rows(model, screen, tmp_path / "transcript.jsonl", agents=agents))
     rt = booted.runtime
     agent = rt.root.get("tools").get("agent")
@@ -1258,7 +1264,7 @@ async def test_past_the_session_budget_a_yes_starts_the_child() -> None:
     )
     screen = _Screen()
     booted = await _booted(
-        _rows(model, screen, agents=Row("agents", "subagents:parent", {"session_agents": 0}))
+        _rows(model, screen, agents=Row("agents", "subagents:parent", {"rows": _KEPT, "session_agents": 0}))
     )
     [report] = _results(await _bounded(_reply(booted.runtime, "go")))
     assert report.startswith("Report from agent general-1 (general)")

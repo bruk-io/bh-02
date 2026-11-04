@@ -13,9 +13,15 @@ use = "agent:tools"
 
 # Sub-agents: the `agent` tool, each child a conversation of its own in a sealed realm, its rows
 # copied from these (`rows`), its questions labelled; `start`: how long a child has to come up (30 s).
+# `rows` is kept here, beside the rows it names: what `loop` depends on (`model`, `tools`,
+# `transcript`, `system`, `asides`, `executor`; `approval` and `output` are the realm's own),
+# `python` (the loop's `requires`), and the project's guidance (`memory`, `on-touch`, `access`);
+# never `agents` or `memory-auto`. A new dependency of `loop` or tool row for children goes here;
+# bh-02's tests/test_child_boot.py fails when a dependency of `loop` is missing.
 [[plugin]]
 id = "agents"
 use = "subagents:parent"
+config = { rows = ["loop", "tools", "transcript", "model", "system", "asides", "access", "memory", "on-touch", "executor", "python"] }
 
 # The status bar's agents field, `agents: N running`, while a sub-agent runs (absent at none).
 [[plugin]]

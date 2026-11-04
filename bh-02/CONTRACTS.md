@@ -103,6 +103,22 @@ checks this: a fiber that declares a key and does not bind it fails at activatio
 Adding or removing a binding here means updating that component's `provides=` to match, or
 the check starts lying.
 
+## Fields one plugin reads or rewrites in another's row
+
+The agents row (`subagents:parent`) copies the parent's rows into each child's realm and rewrites
+these config fields of two of them, by name; it cannot import the plugins that own them
+(`plugin-layering`), so the names are this contract. The row ids are the agents row's config
+`transcript_row` and `model_row` (`transcript` and `model`).
+
+| Row (component) | Field | Read or rewritten | Why |
+|---|---|---|---|
+| transcript (`agent:transcript`) | `path` | read from the parent's, rewritten in the child's | the session's `agents/` directory is beside the parent's transcript file; the child's own transcript is `agents/NAME/transcript.jsonl` (in memory when the parent's `path` is none) |
+| model (`models:model`) | `default` | read from the parent's, rewritten in the child's | the session's model, to ask when a call names another; a type's model replaces it in the child |
+| model (`models:model`) | `state` | rewritten in the child's, when the parent's has one | the child's Claude Code state directory, `agents/NAME/claude` |
+
+`tests/test_child_boot.py` (bh-02's app) fails when a component stops having one of these fields,
+or this section stops naming it.
+
 ## Errors
 
 A `loop` or `model` signals a failure the person should see and can recover from by raising any
