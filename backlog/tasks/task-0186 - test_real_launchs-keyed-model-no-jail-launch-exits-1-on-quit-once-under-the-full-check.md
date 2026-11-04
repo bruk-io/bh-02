@@ -102,4 +102,6 @@ INFO    -  Documentation built in 6.20 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+No repro: the failure was seen once (the TASK-0179 full run on 1e0b11b). It did not recur in 3 member runs or in the reviewer's full run, and it can't be triggered on demand. The new message shows the screen if it recurs.
 <!-- SECTION:NOTES:END -->
