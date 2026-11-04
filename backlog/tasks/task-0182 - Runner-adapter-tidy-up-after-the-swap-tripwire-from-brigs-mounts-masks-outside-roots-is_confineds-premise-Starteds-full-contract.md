@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-03T17:47:00Z'
-updated_date: '2026-11-04T04:04:00Z'
+updated_date: '2026-11-04T04:16:00Z'
 labels:
   - runner
   - size-3
@@ -29,7 +29,7 @@ Architecture review 2026-11-03 of the runner's seam with brig. (1) mounts.tripwi
 - [x] #3 is_confined accepts fs_write best_effort only when the runner's report also carries bh-02's own host_undo: tripwired (set by the confined runner that arms one); a report without it is not confined, with a test
 - [x] #4 runner.Started declares the whole contract CONTRACTS.md promises (interrupt, ended, reads, writes and the rest), and mypy holds both runners to it
 - [x] #5 Dead and duplicated code is gone: _WHOLE_HOST (use brig's WHOLE_HOST_READ_ONLY), the darwin denylist model and its notice branch, and the test that parses brig's private placeholder records; README's channel_exclusivity and endpoint lines, client.py's 'brig's trusted', and the stale brig commit in a test comment are corrected; tui shows a glyph for violated
-- [ ] #6 scripts/check and scripts/linux-jail-check (both modes) pass
+- [x] #6 scripts/check and scripts/linux-jail-check (both modes) pass
 <!-- AC:END -->
 
 ## Implementation Plan
