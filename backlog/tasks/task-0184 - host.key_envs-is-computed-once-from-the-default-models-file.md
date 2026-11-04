@@ -1,7 +1,7 @@
 ---
-id: DRAFT-0025
+id: TASK-0184
 title: host.key_envs is computed once from the default models file
-status: Draft
+status: To Do
 assignee: []
 created_date: '2026-11-03T17:47:00Z'
 labels:
