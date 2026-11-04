@@ -126,8 +126,10 @@ def main(argv: list[str] | None = None) -> int:
         choices=VIEWS,
         default="sample",
         help="the envelope's recipe, for any format: sample (samples from the ends, how to read any "
-        "part) or schema (for JSON every field's values and counts; the rows or lines the query names, "
-        "a ready command for the anomalies); a knob swaps one part (--set log_envelope.samples=typical)",
+        "part), schema (for JSON every field's values and counts; the rows or lines the query names, "
+        "a ready command for the anomalies), full (every part filled, a typical item among the samples), "
+        "lean (a terse shape, the anomalies, a command; no samples) or index (a command for every group "
+        "in the output); a knob swaps one part (--set log_envelope.samples=typical)",
     )
     ns = parser.parse_args(argv)
     try:

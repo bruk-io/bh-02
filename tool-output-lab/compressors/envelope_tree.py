@@ -474,6 +474,53 @@ def _reads(data: TreeData) -> tuple[str, ...]:
     return (SED, _CUT) if any(len(line) > 300 for line in data.lines) else (SED,)
 
 
+_INDEX_LEVELS = ((12, 10, 3), (6, 4, 2), (2, 2, 1))  # runs, anomalous items, greps at each level
+
+
+def _odd_items(data: TreeData, anomalies: Part) -> list[Node]:
+    """The items the anomalies part shows, by the item each shown line falls in, in order."""
+    out: dict[int, Node] = {}
+    for c in anomalies.levels[0].claims:
+        if isinstance(c, Shows) and (found := _item_at(data, c.first - 1)) is not None:
+            item = found[0].items[found[1]]
+            out.setdefault(item.first, item)
+    return [out[k] for k in sorted(out)]
+
+
+def index(data: TreeData, _shape: Part, anomalies: Part, _samples: Part, /) -> Part:
+    """An address and a command for every group: each run's lines, with its items counted; each item
+    the anomalies show, by its lines; a grep for each anomaly's template; and sed for any range. A
+    range's end is where the parser closes the node, which no claim checks; its first line is."""
+    runs: list[tuple[str, Claim]] = []
+    for r in data.runs:
+        tmpl, k = Counter(template(data.lines[n.first], _QUOTED) for n in r.items).most_common(1)[0]
+        where = "the top level" if r.parent < 0 else f"line {r.parent + 1}"
+        a, b = r.first + 1, r.last + 1
+        like = f"{_lines(k, 'item')} like: {tmpl.strip()}"
+        text = f"sed -n '{a},{b}p' FILE  ({len(r.items)} items of {where}; {like})"
+        runs.append((text, Alike(tmpl, k, a, b, quoted=_QUOTED)))
+    items: list[tuple[str, Claim]] = []
+    for n in _odd_items(data, anomalies):
+        _, shows = numbered(data.lines, (n.first,), 120)
+        items.append(
+            (f"sed -n '{n.first + 1},{n.last + 1}p' FILE  ({n.first + 1}: {shows[0].lines[0]})", shows[0])
+        )
+    by = {g.template: g.rows for g in groups(data.lines, range(len(data.lines)), _QUOTED)}
+    greps: list[tuple[str, Claim]] = []
+    for c in anomalies.levels[0].claims:
+        if not isinstance(c, Alike) or c.slot or c.template not in by:
+            continue
+        if (cmd := grep_for(data.lines, by[c.template], c.template)) is not None:
+            greps.append((f"{cmd.command}  (the {_lines(len(cmd.lines))} like it)", cmd))
+    reads = _reads(data)
+    levels = []
+    for r_cap, i_cap, g_cap in _INDEX_LEVELS:
+        picked = [*runs[:r_cap], *items[:i_cap], *greps[:g_cap]]
+        levels.append(Level("", (*(t for t, _ in picked), *reads), tuple(c for _, c in picked)))
+    levels.append(Level("", reads))
+    return Part(Role.NAV, tuple(levels))
+
+
 def sed(data: TreeData, _shape: Part, _anomalies: Part, _samples: Part, /) -> Part:
     """How to read any lines."""
     return Part(Role.NAV, (Level("", _reads(data)),))
@@ -491,12 +538,15 @@ SAMPLES: Mapping[str, Sampler[TreeData]] = {
     "head-tail": head_tail,
     "none": no_samples,
 }
-NAVS: Mapping[str, Navigator[TreeData]] = {"grep": grep, "sed": sed, "none": no_nav}
+NAVS: Mapping[str, Navigator[TreeData]] = {"grep": grep, "sed": sed, "index": index, "none": no_nav}
 _PRODUCERS = Producers(SHAPES, ANOMALIES, SAMPLES, NAVS)
 
 PRESETS = {
     "sample": TreeEnvelopeKnobs(shape="outline", anomalies="rare", samples="head-tail", nav="sed"),
     "schema": TreeEnvelopeKnobs(shape="outline", anomalies="rare", samples="matches", nav="grep"),
+    "full": TreeEnvelopeKnobs(shape="outline", anomalies="rare", samples="typical", nav="grep"),
+    "lean": TreeEnvelopeKnobs(shape="outline", anomalies="rare", samples="none", nav="grep"),
+    "index": TreeEnvelopeKnobs(shape="outline", anomalies="rare", samples="matches", nav="index"),
 }
 
 

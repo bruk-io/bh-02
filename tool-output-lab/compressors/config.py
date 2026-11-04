@@ -122,15 +122,15 @@ CHOICES = {
     "json_envelope.shape": ("", "fields", "summary"),
     "json_envelope.anomalies": ("", "exceptions", "standouts", "none"),
     "json_envelope.samples": ("", "matches", "typical", "head-tail", "none"),
-    "json_envelope.nav": ("", "jq", "rows", "none"),
+    "json_envelope.nav": ("", "jq", "rows", "index", "none"),
     "log_envelope.shape": ("", "templates", "count"),
     "log_envelope.anomalies": ("", "rare", "errors", "none"),
     "log_envelope.samples": ("", "matches", "typical", "head-tail", "none"),
-    "log_envelope.nav": ("", "grep", "sed", "none"),
+    "log_envelope.nav": ("", "grep", "sed", "index", "none"),
     "tree_envelope.shape": ("", "outline"),
     "tree_envelope.anomalies": ("", "rare", "errors", "none"),
     "tree_envelope.samples": ("", "matches", "typical", "head-tail", "none"),
-    "tree_envelope.nav": ("", "grep", "sed", "none"),
+    "tree_envelope.nav": ("", "grep", "sed", "index", "none"),
 }
 
 

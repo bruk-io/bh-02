@@ -100,6 +100,19 @@ class Fetches:
     pick: str
 
 
+@dataclass(frozen=True)
+class Selects:
+    """`command`, run on the input, prints `pick` of every row at `at` whose `field` is `value` (as
+    JSON), and there are `n` of them."""
+
+    command: str
+    at: Address
+    field: str
+    value: str
+    pick: str
+    n: int
+
+
 # Line-addressed claims, for every format read as lines (logs, trees, code, documents). Lines are
 # numbered from 1 in the source: the text the commands read (the raw output, or a copy of it
 # pretty-printed or converted to text). A template is a line with every token (letters, digits, `_`
@@ -147,7 +160,7 @@ class Prints:
     lines: tuple[int, ...]
 
 
-type Claim = Count | Values | Breaks | Lists | Verbatim | Fetches | Shows | Total | Alike | Prints
+type Claim = Count | Values | Breaks | Lists | Verbatim | Fetches | Selects | Shows | Total | Alike | Prints
 
 
 # --- parts ------------------------------------------------------------------------------------------

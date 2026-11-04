@@ -300,6 +300,27 @@ def _rows_of(data: LogData, tmpl: str) -> frozenset[int]:
     return next((frozenset(g.rows) for g in data.groups if g.template == tmpl), frozenset())
 
 
+_INDEX_GROUPS = (20, 8, 3)  # templates given a command, at each level
+
+
+def index(data: LogData, _shape: Part, anomalies: Part, _samples: Part, /) -> Part:
+    """A grep for every template said more than once and every anomaly's, each printing exactly its
+    lines (most said first, the anomalies' first of all), and sed for any range."""
+    odd = [c.template for c in anomalies.levels[0].claims if isinstance(c, Alike) and not c.slot]
+    order = [*odd, *(g.template for g in data.groups if len(g.rows) > 1 and g.template not in odd)]
+    found = []
+    for tmpl in order[: _INDEX_GROUPS[0] * 2]:
+        rows = tuple(sorted(_rows_of(data, tmpl)))
+        if (cmd := grep_for(data.lines, rows, tmpl)) is not None:
+            found.append((f"{cmd.command}  (the {_lines(len(rows))} like it)", cmd))
+    levels = []
+    for cap in _INDEX_GROUPS:
+        picked = found[:cap]
+        levels.append(Level("", (*(t for t, _ in picked), SED), tuple(c for _, c in picked)))
+    levels.append(Level("", (SED,)))
+    return Part(Role.NAV, tuple(levels))
+
+
 def sed(_data: LogData, _shape: Part, _anomalies: Part, _samples: Part, /) -> Part:
     """How to read any lines."""
     return Part(Role.NAV, (Level("", (SED,)),))
@@ -317,7 +338,7 @@ SAMPLES: Mapping[str, Sampler[LogData]] = {
     "head-tail": head_tail,
     "none": no_samples,
 }
-NAVS: Mapping[str, Navigator[LogData]] = {"grep": grep, "sed": sed, "none": no_nav}
+NAVS: Mapping[str, Navigator[LogData]] = {"grep": grep, "sed": sed, "index": index, "none": no_nav}
 _PRODUCERS = Producers(SHAPES, ANOMALIES, SAMPLES, NAVS)
 
 # The views, as for JSON: sample shows samples from the ends and how to read any lines; schema the
@@ -325,6 +346,9 @@ _PRODUCERS = Producers(SHAPES, ANOMALIES, SAMPLES, NAVS)
 PRESETS = {
     "sample": LogEnvelopeKnobs(shape="templates", anomalies="rare", samples="head-tail", nav="sed"),
     "schema": LogEnvelopeKnobs(shape="templates", anomalies="rare", samples="matches", nav="grep"),
+    "full": LogEnvelopeKnobs(shape="templates", anomalies="rare", samples="typical", nav="grep"),
+    "lean": LogEnvelopeKnobs(shape="count", anomalies="rare", samples="none", nav="grep"),
+    "index": LogEnvelopeKnobs(shape="templates", anomalies="rare", samples="matches", nav="index"),
 }
 
 

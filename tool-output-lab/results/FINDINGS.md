@@ -162,3 +162,40 @@ the schema recipe. The envelope acted in every folded session.
 With FINDINGS 3, M4 is done: on the synthetic tasks both recipes pass; on MCP-Atlas, where they
 acted, the context criterion passes and accuracy is undecided at about 60 pairs. Sonnet (M6) and
 the sample question (M5) are next; neither recipe is cut.
+
+## 5. Three envelope patterns in layer 1: full, lean and index
+
+Runs: `results/l1-2-full.md`, `l1-2-lean.md`, `l1-2-index.md`, beside FINDINGS 1's schema run;
+budget 2,000 tokens, sizes S to L, all 251 tasks. Each pattern is a recipe in every format:
+
+| Pattern | JSON | Logs | Trees |
+|---|---|---|---|
+| full: every part filled | fields, exceptions, typical, jq | templates, rare, typical, grep | outline, rare, typical, grep |
+| lean: the least that keeps the anomalies | summary, exceptions, none, jq | count, rare, none, grep | outline, rare, none, grep |
+| index: a command for every group | fields, exceptions, matches, index | templates, rare, matches, index | outline, rare, matches, index |
+
+`index` is a new get-more producer. For JSON it gives each collection's row commands, the query
+for the rows that break a dominant value, a `jq select` for every value but the commonest of each
+few-valued field (a new claim, `Selects`: the command prints exactly the rows holding that value,
+this many of them), and a command per listed row. For logs it gives a grep for every template
+said more than once, the anomalies' first, each printing exactly its lines. For trees it gives
+each run's line range with its items counted, each anomalous item's lines, and a grep per
+anomaly's template.
+
+- **Claims.** No fold under any pattern makes a claim the data does not bear out, with every jq
+  and grep command run.
+- **Sufficiency and size** on the synthetic tasks at M and L (104 folds without the query; 16
+  lookups with it) and every folded task:
+
+  | Pattern | synthetic, no query | lookups with the query | every folded task | median tokens (JSON, logs, snapshots, Figma) |
+  |---|---|---|---|---|
+  | schema | 85/104 | 16/16 | 155/235 | 225, 187, 212, 197 |
+  | full | 85/104 | 16/16 | 156/235 | 292, 256, 258, 285 |
+  | lean | 85/104 | 0/16 | 125/235 | 168, 112, 212, 197 |
+  | index | 85/104 | 16/16 | 155/235 | 378, 255, 251, 330 |
+
+- Full and index answer in layer 1 what schema does, at 45 to 150 tokens more. Lean is the
+  smallest, but with the samples go the rows and lines the query matches, so it answers none of
+  the lookups a tool call's query would name, and its model must fetch them. That is the bet the
+  pattern makes, and its prediction stands as set before the run: lean keeps schema's answers at
+  a smaller final context.
