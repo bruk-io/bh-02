@@ -1,10 +1,11 @@
 ---
 id: TASK-0191
 title: Two tests failed once under the full scripts/check and pass alone
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@claude'
 created_date: '2026-11-04T13:57:00Z'
-updated_date: '2026-11-04T15:01:00Z'
+updated_date: '2026-11-04T16:58:00Z'
 labels:
   - tests
   - size-1
@@ -24,3 +25,13 @@ Seen in the reviewer's full scripts/check for TASK-0186 (2026-11-04, on 16fb291)
 - [ ] #1 Each test's failure under load is reproduced or its timing dependence is named
 - [ ] #2 Both pass in a stated number of full scripts/check runs, or the cause is fixed
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Plugin half fixed. Unfixed, under the load runs of TASK-0192: test_a_call_whose_question_the_stop_withdrew_has_the_time_alone failed at line 565 (ValueError, entries(transcript,'tool') empty) and test_calls_a_stopped_reply_never_reached_have_the_time_alone_and_the_one_it_stopped_is_timed at line 541 (same, found by the same shape). Cause: cancel after asyncio.sleep(0.01) before the tool started / the question was asked. All three sleeps in test_agent_records.py now wait on an event set when the tool starts or approve() is entered. 50 of 50 runs passed under the same load.
+
+No repro: those two failures are a race in the tests themselves, shown by the load runs above.
+
+NOT fixed: test_real_launch.py::test_keys_typed_as_the_modal_comes_up_do_not_answer_it. 30 runs of the file under 8 burners gave 0 failures; under 12 burners (4 workers) it failed 2 of 6, then 1 of 2 again, at: assert "denied" not in app.text()[asked:] (the n pressed as the modal came up answered it). Cause: ApprovalScreen arms on a wall-clock timer (GRACE 0.4 s, set_timer from mount) and the y/n/escape are bindings judged when processed, not when typed. A loaded machine delays either the test or the app past the window; the app can have the timer due and the keys queued, and then the timer wins. A test-side attempt (measure the time from seeing the modal to the keys, retry the launch if it was over GRACE/4) still failed once, so the app-side stall is real and the attempt was reverted. The fix is in the product: judge a key by when it arrived (the key event's time), or make the grace overridable at launch. That is a design choice, not done here. Criterion 2 is not met for this test. Finding: after I killed pytest runs mid-way, real-launch app processes were orphaned (the lead stopped 8); I did not see one left after a run that exited normally.
+<!-- SECTION:NOTES:END -->

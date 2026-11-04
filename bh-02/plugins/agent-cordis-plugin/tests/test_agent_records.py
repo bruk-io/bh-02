@@ -520,9 +520,11 @@ async def test_calls_a_stopped_reply_never_reached_have_the_time_alone_and_the_o
     stepped = Stepped()
     transcript = MemoryTranscript()
     hanging = ToolBroker()
+    running = asyncio.Event()
 
     async def hang(input: Json) -> Json:
         stepped.advance(3.0)
+        running.set()
         await asyncio.Event().wait()
         return {"content": "never"}  # pragma: no cover
 
@@ -538,7 +540,7 @@ async def test_calls_a_stopped_reply_never_reached_have_the_time_alone_and_the_o
             "go",
         )
     )
-    await asyncio.sleep(0.01)
+    await running.wait()
     task.cancel()
     await asyncio.gather(task, return_exceptions=True)
     interrupted, not_run = entries(transcript, "tool")
@@ -552,9 +554,12 @@ async def test_a_call_whose_question_the_stop_withdrew_has_the_time_alone() -> N
     stepped = Stepped()
     transcript = MemoryTranscript()
 
+    asked = asyncio.Event()
+
     class Waiting:
         async def approve(self, question: Json) -> Answer:
             stepped.advance(1.0)
+            asked.set()
             await asyncio.Event().wait()
             return Answer.YES  # pragma: no cover
 
@@ -562,7 +567,7 @@ async def test_a_call_whose_question_the_stop_withdrew_has_the_time_alone() -> N
     task = asyncio.create_task(
         reply(LoopModel(model, slow_tools(stepped, []), transcript, Waiting(), clock=stepped.clock), "go")
     )
-    await asyncio.sleep(0.01)
+    await asked.wait()
     task.cancel()
     await asyncio.gather(task, return_exceptions=True)
     (result,) = entries(transcript, "tool")
