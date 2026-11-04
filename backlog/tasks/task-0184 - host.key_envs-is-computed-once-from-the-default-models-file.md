@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-03T17:47:00Z'
-updated_date: '2026-11-04T13:26:00Z'
+updated_date: '2026-11-04T13:27:00Z'
 labels:
   - models
   - credentials
@@ -153,4 +153,30 @@ INFO    -  Documentation built in 2.85 seconds
 ```
 
 Reviewer, 2026-11-04: verdict closes on the criteria, but close-task refused: the repro file bh-02/app/tests/test_host_values.py changed since 7d921d4. The repro function itself is unchanged; the file lost the tests of the removed key_variables/models_keys/host.key_envs and one assertion that the refusal names the models file. Status left In Progress; the lead decides whether to record a new repro (record-check --repro) or accept. Full check (scripts/check) exit 0, first line a uv UV_NATIVE_TLS deprecation warning, nothing reformatted; 2594 passed. AC1, AC2 met and ticked (repro test; catalog per-call read; runner re-check per program start; ! per command). AC3 met: DRAFT-0024, DRAFT-0025. Fail closed: a bad cwd's ModelsError propagates out of runner start and the ! run, so neither starts. Empty sets come only from a row that is not models:model, a file not read, and an invalid key table (DRAFT-0027). A project models file adds nothing, as before: the model row refuses to read it, so none of its keys is used, and the variable is in runner.toml by the person's own choice; accepted, not filed. No test uses a real credential. Findings: CONTRACTS.md host row still lists key_envs and models_file -> DRAFT-0026. key_envs() skips an env key whose table has another problem (ttl_ms, unknown field), against its docstring and the old parser -> DRAFT-0027. Minor, not filed: the refusal no longer names which models file; key_envs reads the file synchronously on the event loop at each start and ! command.
+
+Repro at 7bb38121388e, test files: bh-02/app/tests/test_host_values.py; command: `uv run pytest -q -p no:cacheprovider bh-02/app/tests/test_host_values.py::test_the_runner_refuses_a_variable_a_key_reads_in_the_models_file_another_layer_names` exited 1
+
+(61 earlier lines omitted)
+```text
+        work = tmp_path / "work"
+        work.mkdir()
+        monkeypatch.chdir(work)
+        patch = composition(
+            '[[plugin]]\nid = "loop"\nuse = "fragile:echo_model"\n'
+            '[[plugin]]\nid = "ui"\nuse = "fragile:one_message_recorded_ui"\n'
+            f'[[plugin]]\nid = "model"\nconfig = {{ models = "{other}" }}\n'
+            '[[plugin]]\nid = "runner"\nuse = "runner:confined"\n'
+        )
+        result = CliRunner().invoke(main, ["--patch", str(patch)])
+>       assert result.exit_code == 1, result.output
+E       AssertionError: session 20261104-132743-e6b2  (uv run bh-02 --resume to continue it)
+E         
+E       assert 0 == 1
+E        +  where 0 = <Result okay>.exit_code
+
+/tmp/claude-0/-home-user/7dec37d1-076c-5962-8fb9-06b7b63080b7/scratchpad/repro184/bh-02/app/tests/test_host_values.py:197: AssertionError
+=========================== short test summary info ============================
+FAILED bh-02/app/tests/test_host_values.py::test_the_runner_refuses_a_variable_a_key_reads_in_the_models_file_another_layer_names
+1 failed in 3.66s
+```
 <!-- SECTION:NOTES:END -->
