@@ -3,7 +3,8 @@ id: DRAFT-0018
 title: pyproject lists src paths for three plugins that are not in the repo
 status: Draft
 assignee: []
-created_date: '2026-10-25 19:05'
+created_date: 2026-10-25 19:05
+updated_date: '2026-11-04T12:39:00Z'
 labels: []
 dependencies: []
 type: bug
@@ -20,3 +21,9 @@ TASK-0169.03's commit 0bb97d4 added bh-02/plugins/{brig,context,kernel}-cordis-p
 - [ ] #1 The root pyproject.toml's [tool.pypeeker].src names only paths that exist in a fresh checkout
 - [ ] #2 uv run mypy and scripts/check run over the whole workspace without failing on a directory that holds no .py files
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Review 2026-11-04: fixed by 444aaa3 (the stale src entries are gone from [tool.pypeeker].src).
+<!-- SECTION:NOTES:END -->
