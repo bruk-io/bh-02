@@ -2,15 +2,17 @@
 
 Run by path (``python -I worker.py SOCKET``) by the `runner`, so it is confined as the
 Python process's inputs are: the model's code runs here, never in bh-02's own process. What it
-reaches of bh-02 is four keys, bound per extension, each of which only adds: `commands.register`,
+reaches of bh-02 is five keys, bound per extension, each of which only adds: `commands.register`,
 a slash command for the person; `frame.status`, a status-bar field; `system.add`, text in the
-model's own prompt; `tools.register`, a tool offered to the model, whose calls run here. Each
+model's own prompt; `tools.register`, a tool offered to the model, whose calls run here; and
+`grants.ask`, a question to the person (a path, variable or destination for the jail, put as this
+extension's), whose answer is the person's and never the extension's to give. Each of the first four
 sends what it added to the host and returns the remover that takes it back, so `acquire` makes a
 registration last exactly as long as the component.
 
 An extension is a module: its source arrives in a `load`, runs as a module of its own, and
 every component it defines is mounted as a child of one fiber per extension, the one that binds
-the four keys (isolated, so each extension's registrations carry its name). An extension may
+the five keys (isolated, so each extension's registrations carry its name). An extension may
 `bind` keys of its own for another to depend on: those are shared, as in any composition.
 
 Wire: newline-delimited JSON. The host sends ``{"op": "hello"}`` once (a readiness probe
@@ -23,10 +25,14 @@ connects and closes without a word, so the worker keeps accepting until one spea
 - ``{"op": "run", "call", "command", "args"}``, answered ``{"op": "ran", "call", "answer"}``.
 - ``{"op": "call", "call", "tool", "input"}`` (a call to a tool, `input` its arguments),
   answered ``{"op": "ran", "call", "answer"}``, `answer` the text the model reads.
+- ``{"op": "granted", "call", "answer"|"error"}``: the person's answer to a ``grant`` the worker sent
+  (`once`, `always`, `no` or `standing`), or why the request was not one.
 
 and the worker sends, whenever an extension adds or takes back an entry,
 ``{"op": "add", "id", "extension", "kind", ...}`` (`command` with `spec`, `status` with `field`
-and `forms`, `context` with `text`, `tool` with `spec`) and ``{"op": "remove", "id"}``. A
+and `forms`, `context` with `text`, `tool` with `spec`) and ``{"op": "remove", "id"}``; and
+``{"op": "grant", "call", "extension", "kind", "target", "port", "reason"}`` when an extension asks for a
+grant. A
 worker nobody says hello to exits once its parent is gone or after `_HELLO_S`; one whose host
 disconnects exits too.
 """
@@ -51,7 +57,7 @@ __all__ = ["main"]
 
 type Run = Callable[[Any], Awaitable[object]]  # a command's (its argument text) or a tool's (its input)
 
-_OFFERED = ("commands", "frame", "system", "tools")  # the keys an extension reaches bh-02 through
+_OFFERED = ("commands", "frame", "grants", "system", "tools")  # the keys an extension reaches bh-02 through
 _COMMAND = re.compile(r"[a-z][a-z-]*")  # a name the `commands` broker can parse back out of a line
 _MAX_TEXT = 20_000  # an answer, a field or a section: the host reads one line per message
 _HELLO_S = 60.0
@@ -69,6 +75,8 @@ class _Bridge:
         self._ids = itertools.count(1)
         self._live: dict[int, str] = {}  # entry: the extension that added it
         self.runs: dict[int, Run] = {}
+        self._asks = itertools.count(1)
+        self.asked: dict[int, asyncio.Future[Mapping[str, Any]]] = {}  # grants asked, awaiting the person
 
     def send(self, message: Mapping[str, Any]) -> None:
         self._writer.write((json.dumps(message) + "\n").encode("utf-8"))
@@ -89,6 +97,17 @@ class _Bridge:
                 self.send({"op": "remove", "id": entry})
 
         return remove
+
+    async def ask(self, extension: str, fields: Mapping[str, Any]) -> Mapping[str, Any]:
+        """Send a request for a grant and wait for the person's answer (the host's `granted`)."""
+        call = next(self._asks)
+        answer: asyncio.Future[Mapping[str, Any]] = asyncio.get_running_loop().create_future()
+        self.asked[call] = answer
+        try:
+            self.send({"op": "grant", "call": call, "extension": extension, **fields})
+            return await answer
+        finally:
+            self.asked.pop(call, None)
 
     def clear(self, extension: str) -> None:
         """Take back whatever `extension` added and never removed (a field pushed from
@@ -169,6 +188,32 @@ class _System:
         return self._bridge.add(self._extension, "context", {"text": _text(text, "a prompt section")})
 
 
+class _Grants:
+    """`grants` as an extension sees it: it can only ask the person, and be told what they said."""
+
+    def __init__(self, bridge: _Bridge, extension: str) -> None:
+        self._bridge = bridge
+        self._extension = extension
+
+    async def ask(self, kind: str, target: str, reason: str, port: int = 0) -> str:
+        """Ask the person to let the jail do `kind` (`read` or `write` an absolute path, `env` a
+        variable, `net` a host, with `port`) on `target`, for `reason` (what they decide on). Returns
+        `once`, `always`, `no` or `standing` (already granted). A path or variable grant holds only
+        once this extension's process starts again, which it does at once, so the extension is loaded
+        again too; a destination holds now.
+
+        Raises:
+            ValueError: the request is not one (the message says what to write instead).
+        """
+        fields: dict[str, Any] = {"kind": kind, "target": target, "reason": reason}
+        if port:
+            fields["port"] = port
+        answer = await self._bridge.ask(self._extension, fields)
+        if (error := answer.get("error")) is not None:
+            raise ValueError(str(error))
+        return str(answer.get("answer", "no"))
+
+
 class _Tools:
     """`tools` as an extension sees it: it can only offer the model a tool, whose calls run here."""
 
@@ -208,10 +253,11 @@ class _Loaded:
 
 
 async def _extension(*, config: _Loaded) -> Effects:
-    """One extension's fiber: binds its own `commands`, `frame`, `system` and `tools` (isolated,
+    """One extension's fiber: binds its own `commands`, `frame`, `grants`, `system` and `tools` (isolated,
     so each is the extension's alone and tagged with its name), then mounts its components."""
     yield bind("commands", _Commands(config.bridge, config.name))
     yield bind("frame", _Frame(config.bridge, config.name))
+    yield bind("grants", _Grants(config.bridge, config.name))
     yield bind("system", _System(config.bridge, config.name))
     yield bind("tools", _Tools(config.bridge, config.name))
     for made in config.components:
@@ -341,6 +387,9 @@ async def _serve(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> 
             case "run":
                 said = await extensions.run(int(message["command"]), str(message.get("args", "")))
                 bridge.send({"op": "ran", "call": message["call"], "answer": said})
+            case "granted":
+                if (waiting := bridge.asked.get(int(message["call"]))) is not None and not waiting.done():
+                    waiting.set_result(message)
             case "call":
                 given = message.get("input")
                 said = await extensions.call(

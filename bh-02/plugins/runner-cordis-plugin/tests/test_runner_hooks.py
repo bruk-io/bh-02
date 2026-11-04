@@ -45,7 +45,9 @@ class _Mechanism:
     def notice(self) -> str:
         return ""
 
-    async def start(self, argv_for: Callable[[str], Sequence[str]], *, cwd: str, owner: str) -> _Start:
+    async def start(
+        self, argv_for: Callable[[str], Sequence[str]], *, cwd: str, owner: str, agent: str = ""
+    ) -> _Start:
         started = _Start(len(self.starts) + 1)
         self.starts.append(started)
         self.argvs.append(list(argv_for(started.endpoint)))

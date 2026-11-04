@@ -13,6 +13,7 @@ import socket
 from collections.abc import Mapping
 from pathlib import Path
 
+from runner_cordis_plugin.grants import Grant
 from runner_cordis_plugin.runner import ArgvFor, reserved_endpoint, unreserve_endpoint
 
 __all__ = ["Unjailed", "UNENFORCED"]
@@ -140,8 +141,12 @@ class Unjailed:
         """Nothing: no jail holds anything on the host."""
         return ""
 
-    async def start(self, argv_for: ArgvFor, *, cwd: str, owner: str) -> _Process:
-        """Start the program; `owner` is the runner's (nothing here asks for a destination)."""
+    def refusal(self, grant: Grant) -> str:
+        """Nothing: no jail applies a grant, so there is nothing for one to be refused."""
+        return ""
+
+    async def start(self, argv_for: ArgvFor, *, cwd: str, owner: str, agent: str = "") -> _Process:
+        """Start the program; `owner` and `agent` are the runner's (nothing here asks for a destination)."""
         endpoint = reserved_endpoint()
         log = Path(endpoint).with_name("stderr.log")
         try:

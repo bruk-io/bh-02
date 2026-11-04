@@ -28,7 +28,7 @@ from python_cordis_plugin import (
     tool,
     worker_argv,
 )
-from runner_cordis_plugin import UNENFORCED, Approval, Mechanism, Runner, Unjailed
+from runner_cordis_plugin import UNENFORCED, Approval, Broker, Mechanism, Runner, Unjailed
 
 
 def _process(
@@ -1315,7 +1315,9 @@ class Confined(Unjailed):
     def report(self) -> Mapping[str, str]:
         return _CONFINED
 
-    async def start(self, argv_for: Callable[[str], Sequence[str]], *, cwd: str, owner: str) -> Any:
+    async def start(
+        self, argv_for: Callable[[str], Sequence[str]], *, cwd: str, owner: str, agent: str = ""
+    ) -> Any:
         started = await super().start(argv_for, cwd=cwd, owner=owner)
         return Told(started, report=_CONFINED, writes=self.writable)
 
@@ -1342,7 +1344,9 @@ class Hiding(Confined):
     def __init__(self, hidden: str) -> None:
         self._hidden = hidden
 
-    async def start(self, argv_for: Callable[[str], Sequence[str]], *, cwd: str, owner: str) -> Any:
+    async def start(
+        self, argv_for: Callable[[str], Sequence[str]], *, cwd: str, owner: str, agent: str = ""
+    ) -> Any:
         def hidden(endpoint: str) -> list[str]:
             executable, isolated, *worker = argv_for(endpoint)
             return [executable, isolated, "-c", _HIDING, self._hidden, *worker]
@@ -1389,7 +1393,9 @@ class Tripping(Confined):
     def __init__(self) -> None:
         self.started: list[_Tripped] = []
 
-    async def start(self, argv_for: Callable[[str], Sequence[str]], *, cwd: str, owner: str) -> _Tripped:
+    async def start(
+        self, argv_for: Callable[[str], Sequence[str]], *, cwd: str, owner: str, agent: str = ""
+    ) -> _Tripped:
         started = _Tripped(await super().start(argv_for, cwd=cwd, owner=owner))
         self.started.append(started)
         return started
@@ -1486,7 +1492,9 @@ async def test_the_python_process_builds_its_command_from_the_endpoint_the_runne
             self.argvs: list[list[str]] = []
             self.started: list[Any] = []
 
-        async def start(self, argv_for: Callable[[str], Sequence[str]], *, cwd: str, owner: str) -> Any:
+        async def start(
+            self, argv_for: Callable[[str], Sequence[str]], *, cwd: str, owner: str, agent: str = ""
+        ) -> Any:
             def recorded(endpoint: str) -> Sequence[str]:
                 self.argvs.append(list(argv_for(endpoint)))
                 return self.argvs[-1]
@@ -1517,7 +1525,9 @@ async def test_the_python_process_uses_the_runners_connection_and_never_dials_th
     server = await asyncio.start_unix_server(decoy_connected, path=str(short / "decoy.sock"))
 
     class Swapping(Unjailed):
-        async def start(self, argv_for: Callable[[str], Sequence[str]], *, cwd: str, owner: str) -> Any:
+        async def start(
+            self, argv_for: Callable[[str], Sequence[str]], *, cwd: str, owner: str, agent: str = ""
+        ) -> Any:
             started = await super().start(argv_for, cwd=cwd, owner=owner)
             Path(started.endpoint).unlink()
             Path(started.endpoint).symlink_to(short / "decoy.sock")
@@ -1540,7 +1550,9 @@ async def test_a_python_process_that_cannot_start_again_says_so_as_the_input_and
             super().__init__()
             self.refuse = False
 
-        async def start(self, argv_for: Callable[[str], Sequence[str]], *, cwd: str, owner: str) -> Any:
+        async def start(
+            self, argv_for: Callable[[str], Sequence[str]], *, cwd: str, owner: str, agent: str = ""
+        ) -> Any:
             if self.refuse:
                 raise RuntimeError("the jail is broken")
             return await super().start(argv_for, cwd=cwd, owner=owner)
@@ -1607,7 +1619,9 @@ class Ending(Unjailed):
         super().__init__()
         self.why = ""
 
-    async def start(self, argv_for: Callable[[str], Sequence[str]], *, cwd: str, owner: str) -> Any:
+    async def start(
+        self, argv_for: Callable[[str], Sequence[str]], *, cwd: str, owner: str, agent: str = ""
+    ) -> Any:
         started = await super().start(argv_for, cwd=cwd, owner=owner)
         jail = self
 
@@ -1697,13 +1711,14 @@ async def test_the_row_starts_the_worker_registers_python_and_leaving_stops_it()
     brokers = _Brokers(refusing="not here")
     runner = Runner(Unjailed())
 
-    @component(provides=("runner", "approval", "tools", "system", "access"))
+    @component(provides=("runner", "approval", "tools", "system", "access", "grants"))
     async def around() -> Effects:
         yield bind("runner", runner)
         yield bind("approval", Approval(runner))
         yield bind("tools", brokers)
         yield bind("system", brokers)
         yield bind("access", brokers)
+        yield bind("grants", Broker(None))
 
     rt = Runtime()
     rt.mount(around, id="around")
@@ -1860,7 +1875,9 @@ class Counting(Confined):
     def __init__(self) -> None:
         self.starts = 0
 
-    async def start(self, argv_for: Callable[[str], Sequence[str]], *, cwd: str, owner: str) -> Any:
+    async def start(
+        self, argv_for: Callable[[str], Sequence[str]], *, cwd: str, owner: str, agent: str = ""
+    ) -> Any:
         self.starts += 1
         n = self.starts
         started = await Unjailed.start(self, argv_for, cwd=cwd, owner=owner)
@@ -2162,3 +2179,57 @@ def test_mypy_cache_is_a_config_key_and_a_directory_name() -> None:
     for bad in ("", None, 3, [".bh-02"]):
         with pytest.raises(TypeError, match="`mypy_cache` must be a directory name"):
             PythonProcessConfig(mypy_cache=bad)  # type: ignore[arg-type]
+
+
+class _Grants:
+    """The `grants` value as the Python process reads it: a number the test moves, and an answer to
+    wait for before the first start (`gate`), in which case `ready` says it was asked."""
+
+    def __init__(self, *, gate: asyncio.Event | None = None) -> None:
+        self.number = 0
+        self.gate = gate
+        self.waited = False
+
+    def generation(self) -> int:
+        return self.number
+
+    async def ready(self) -> None:
+        if self.gate is not None:
+            self.waited = True
+            await self.gate.wait()
+
+
+async def test_a_change_of_grants_starts_the_worker_again_before_the_next_input_and_says_why() -> None:
+    grants = _Grants()
+    runner = Runner(Unjailed())
+    async with PythonProcess(
+        runner, PythonProcessConfig(startup=[]), rule=Approval(runner), grants=grants
+    ) as k:
+        first = await k.run("x = 7\nimport os\nos.getpid()")
+        assert (await k.run("x")) == "7"  # nothing changed: the namespace stays
+        grants.number += 1  # the person granted a path
+        out = await k.run("print(x if 'x' in globals() else 'x is gone')")
+        assert out.startswith("(the REPL was started again, because what the person granted the jail changed")
+        assert out.endswith("x is gone")
+        assert "started again" not in await k.run("print(1)")  # one restart for one change
+        assert first  # the first input ran
+
+
+async def test_the_first_worker_starts_only_once_the_grants_are_ready() -> None:
+    gate = asyncio.Event()
+    grants = _Grants(gate=gate)
+    runner = Runner(Unjailed())
+    started: list[object] = []
+    runner.on_start(started.append)
+    entering = asyncio.ensure_future(
+        PythonProcess(
+            runner, PythonProcessConfig(startup=[]), rule=Approval(runner), grants=grants
+        ).__aenter__()
+    )
+    await asyncio.sleep(0.3)
+    assert grants.waited and started == []  # waiting for the person; no program yet
+    gate.set()
+    process = await asyncio.wait_for(entering, 30)
+    assert len(started) == 1
+    assert "started again" not in await process.run("print(1)")  # answered before it existed: no restart
+    await process.__aexit__(None, None, None)

@@ -78,14 +78,16 @@ from brig import (
 from host_paths import state_home
 from runner_cordis_plugin.brig_spec import report_of, to_brig
 from runner_cordis_plugin.broker import Broker, Outcome
-from runner_cordis_plugin.egress import Decision, Egress, Ended
+from runner_cordis_plugin.egress import Decision, Egress, Ended, asked_as
 from runner_cordis_plugin.facts import git_identity, instead, interpreter_files, links_on_the_way
 from runner_cordis_plugin.grants import NO_GRANTS, Grant, Grants, Kind, Request
 from runner_cordis_plugin.mounts import mountable, notice_for, released_for, tripwired
 from runner_cordis_plugin.policy import (
     BrigConfig,
     Policy,
+    admitted,
     allowlisted,
+    floor_of,
     git_author,
     readable_roots,
     socket_refusal,
@@ -486,12 +488,30 @@ class BrigJail:
         self._live = [started for started in self._live if not started.stopped]
         return released_for(running=bool(self._live))
 
-    async def start(self, argv_for: ArgvFor, *, cwd: str, owner: str) -> _Jailed:
+    def refusal(self, grant: Grant) -> str:
+        """Why `grant` is never granted: what `spec_for` would refuse at a start, from the same
+        floor (`policy.floor_of`) and the host as it is now, so a request is refused when it is made
+        and the person is not asked what would only be dropped; "" when it may be asked."""
+        names = (host_executable, str(Path(base_prefix, "bin", "python3")))
+        floor = floor_of(
+            home=str(Path.home()),
+            layers=self._host.paths,
+            secrets=self._host.secrets,
+            trusted=self._host.trusted,
+            code=self._host.code,
+            interpreters=interpreter_files(names),
+            links=[link.entry for link in links_on_the_way(names)],
+            store=self._host.grants,
+            key_envs=self._key_envs(),
+        )
+        return " ".join(admitted(Grants((grant,)), floor)[1])
+
+    async def start(self, argv_for: ArgvFor, *, cwd: str, owner: str, agent: str = "") -> _Jailed:
         """Start the program `argv_for(endpoint)` in `cwd`, in a jail of its own made from the
         policy, listening on the endpoint brig reserved for this start (`started.endpoint`, for argv
         alone) and connected to it by brig's verified connect (`started.connection`). While it runs,
-        the destinations granted reach its proxy and each it refuses is asked, as `owner`'s input
-        (`egress.Egress`).
+        the destinations granted reach its proxy and each it refuses is asked, as `owner`'s input,
+        or as the sub-agent `agent` names when the program is its (`egress.Egress`).
 
         Raises:
             RuntimeError: this is not Linux, or there is no bubblewrap, or a root of the jail (the
@@ -502,7 +522,7 @@ class BrigJail:
         starting: asyncio.Future[None] = asyncio.get_running_loop().create_future()
         self._starting.add(starting)
         try:
-            started = await self._launched(argv_for, cwd=cwd, owner=owner)
+            started = await self._launched(argv_for, cwd=cwd, owner=owner, agent=agent)
             self._live = [*(each for each in self._live if not each.stopped), started]
             return started
         finally:
@@ -510,7 +530,7 @@ class BrigJail:
             if not starting.done():  # a `release` cancelled as it waited cancels it
                 starting.set_result(None)
 
-    async def _launched(self, argv_for: ArgvFor, *, cwd: str, owner: str) -> _Jailed:
+    async def _launched(self, argv_for: ArgvFor, *, cwd: str, owner: str, agent: str) -> _Jailed:
         if self._cannot:
             raise RuntimeError(self._cannot)
         root = _jails_root()
@@ -583,7 +603,7 @@ class BrigJail:
         egress = Egress(
             _BrigWire(jail, gone.is_set),
             self._grants,
-            owner=owner,
+            asker=asked_as(owner, agent),
             held=grants.of(Kind.NET),
         )
         started = _Jailed(

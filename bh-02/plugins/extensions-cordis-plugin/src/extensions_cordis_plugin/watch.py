@@ -177,7 +177,8 @@ def instructions(
         "Annotate a parameter with a typing Protocol and cordis checks the value against it "
         "before the component starts.",
         "",
-        "What an extension reaches of bh-02, each only to add to it, each call returning its remover:",
+        "What an extension reaches of bh-02, each only to add to it or ask (all but `grants.ask` "
+        "return a remover):",
         "- `commands.register(spec, run)`: a slash command for the person. `spec` has `name` "
         "(lowercase, no slash), `help` and `usage`; `run` is async, the command's argument text "
         "in, the text to show the person out. What a command shows reaches the person, not you.",
@@ -193,6 +194,12 @@ def instructions(
         "is added, changed or removed; whether a tool added mid-conversation can be called "
         "before the next conversation (/clear, /compact) is your model's, and the aside says. "
         "One bh-02 refuses is in status.json's `problems`, saying why.",
+        "- `await grants.ask(kind, target, reason, port=0)`: ask the person to let the jail read or "
+        "write a path (`read`, `write`: absolute), see a variable (`env`) or reach a destination "
+        "(`net`, with `port`). It returns `once`, `always`, `no` or `standing` (already granted), and "
+        "raises ValueError for a request that is not one. A path or variable grant holds only once "
+        "the extensions process starts again, which it does at once: every extension loads again, so "
+        "ask in a component that asks again when it loads.",
         "Whatever an extension added leaves with it, through `acquire` or not.",
         "",
         "Try a component in your REPL before you write its file: cordis is importable there "

@@ -64,7 +64,12 @@ class PlainJail:
     async def release(self) -> str:
         return ""
 
-    async def start(self, argv_for: Callable[[str], Sequence[str]], *, cwd: str, owner: str) -> _Started:
+    def refusal(self, grant: object) -> str:
+        return ""
+
+    async def start(
+        self, argv_for: Callable[[str], Sequence[str]], *, cwd: str, owner: str, agent: str = ""
+    ) -> _Started:
         # A Unix socket path must fit in about 100 bytes, so it lives in a short directory of its own.
         endpoint = str(Path(tempfile.mkdtemp(prefix="bh-t-", dir="/tmp"), "k.sock"))
         with Path(endpoint).with_name("stderr.log").open("wb") as stderr:

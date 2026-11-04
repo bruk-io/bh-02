@@ -18,13 +18,23 @@ need waits for one. Whether a request is already inside the current policy is no
 import asyncio
 import hashlib
 from collections import deque
-from collections.abc import Awaitable, Callable, Iterable
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
 from runner_cordis_plugin import store
-from runner_cordis_plugin.grants import NO_GRANTS, Answer, Grant, Grants, Request
+from runner_cordis_plugin.grants import (
+    NO_GRANTS,
+    Answer,
+    Asker,
+    Grant,
+    Grants,
+    Kind,
+    Request,
+    Source,
+    need_request,
+)
 
 __all__ = ["Broker", "Entry", "Outcome", "Prompt", "Scope", "Unknown"]
 
@@ -119,6 +129,8 @@ class Broker:
         self._background: set[asyncio.Task[None]] = set()
         self._listeners: dict[int, Callable[[], None]] = {}
         self._told: deque[str] = deque(maxlen=64)
+        self._generation = 0
+        self._applied: frozenset[Grant] = frozenset()  # the session's path and variable grants, as last seen
 
     def need(self, request: Request) -> Callable[[], None]:
         """Hold `request` as a standing need, for `acquire`: asked once, as soon as a prompt is
@@ -134,6 +146,28 @@ class Broker:
                 self._changed()
 
         return release
+
+    def needing(self, spec: Mapping[str, object], source: str, name: str) -> Callable[[], None]:
+        """`need` of the request a layer's `spec` writes (`{kind, target, port?, reason}`), asked as
+        `source` (`row` or `agent`) `name`: for a row that cannot import `Request`, since no plugin
+        imports another.
+
+        Raises:
+            Invalid: `spec` is not a need (the message says what to write instead).
+            ValueError: `source` is not a kind of asker.
+        """
+        return self.need(need_request(spec, Asker(Source(source), name)))
+
+    async def asking(self, spec: Mapping[str, object], source: str, name: str) -> Outcome:
+        """`ask` of the request a requester's `spec` writes (`{kind, target, port?, reason}`) as
+        `source` (`extension`) `name`: for a host that cannot import `Request`, since no plugin imports
+        another.
+
+        Raises:
+            Invalid: `spec` is not a request (the message says what to write instead).
+            ValueError: `source` is not a kind of asker.
+        """
+        return await self.ask(need_request(spec, Asker(Source(source), name)))
 
     async def ask(self, request: Request) -> Outcome:
         """The answer to `request`: `standing` when it is already granted, `no` when the session
@@ -154,6 +188,24 @@ class Broker:
         if outcome is Outcome.ONCE:
             self._pin(grant)
         return outcome
+
+    def generation(self) -> int:
+        """A number that differs whenever what the next start applies of the program's read, write and
+        environment grants may differ from what a program started before it was given: an answer that
+        applies, a revoke, a need held or released, an always-grant kept or taken back. A destination
+        never changes it, since a destination is applied to a running program. A program records it as
+        it starts and compares it before it takes an input: a different number is the cue to start
+        again first (a path or variable is fixed when the jail is created)."""
+        return self._generation
+
+    async def ready(self) -> None:
+        """Return once every need a row holds has an answer (the person's, or one the session or the
+        project already had), so a program started next starts with it: a standing need costs no
+        restart, since it is answered before the process exists. At once when no prompt is served (a
+        need waits for one, and a program started meanwhile restarts when it is answered); a question
+        withdrawn (Ctrl-C, the prompt released) counts as answered, with no answer recorded."""
+        if self._prompt is not None:
+            await self._ask_held()
 
     async def granted(self) -> Grants:
         """What the next start applies: the store, read now, then the session's once-answers that
@@ -246,6 +298,7 @@ class Broker:
             raise Unknown(
                 f"no grant has id {id!r}; the ids there are: {there} (`/grants` lists them){unread}"
             )
+        stored: list[Grant] = []
         for entry in found:
             grant = entry.request.grant
             if entry.scope is Scope.SESSION:
@@ -253,7 +306,8 @@ class Broker:
                 self._pinned.discard(grant)
             else:
                 await self._remove(grant)
-        self._changed()
+                stored.append(grant)
+        self._changed(*stored)
         held = {need.grant for need in self._needs.values()}
         if any(entry.scope is Scope.SESSION and entry.request.grant in held for entry in found):
             self._settle()  # a row still holds what the person took back: it is asked again
@@ -328,7 +382,7 @@ class Broker:
                 answer = Answer.ONCE  # the store can't hold it: this session still has it
             if answer is not Answer.ALWAYS:
                 self._answers[grant] = (request, answer)
-            self._changed()
+            self._changed(*([grant] if answer is Answer.ALWAYS else []))
             return Outcome(answer.value)
 
     def _settle(self) -> None:
@@ -344,8 +398,26 @@ class Broker:
             if self._prompt is None:
                 return
             if request.grant in {need.grant for need in self._needs.values()}:  # still held
-                await self._question(request)
+                await asyncio.shield(self._question(request))  # a caller leaving leaves the question
 
-    def _changed(self) -> None:
+    def _session(self) -> frozenset[Grant]:
+        """The session's once-answers a start would apply that are not destinations: pinned or held."""
+        held = {need.grant for need in self._needs.values()}
+        return frozenset(
+            grant
+            for grant, (_, answer) in self._answers.items()
+            if answer is Answer.ONCE
+            and grant.kind is not Kind.NET
+            and (grant in self._pinned or grant in held)
+        )
+
+    def _changed(self, *stored: Grant) -> None:
+        """What is granted may have changed: `generation` moves when the session's applied path and
+        variable grants differ from last time, or `stored` (the project's grants just kept or taken
+        back) names one; then every listener is told."""
+        applied = self._session()
+        if applied != self._applied or any(grant.kind is not Kind.NET for grant in stored):
+            self._applied = applied
+            self._generation += 1
         for fn in list(self._listeners.values()):
             fn()

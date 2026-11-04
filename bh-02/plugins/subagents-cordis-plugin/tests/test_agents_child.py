@@ -69,6 +69,7 @@ def _rows(kind: AgentType = GENERAL, place: PurePath | None = _PLACE, kept: Any 
         place=place,
         hand="the hand",
         commands_row="commands",
+        python_row="python",
         refused=("memory:auto",),
         wants_commands=_wants_commands,
     )
@@ -191,6 +192,7 @@ def test_a_child_never_gets_an_agents_row_whatever_the_layer_names() -> None:
                 place=_PLACE,
                 hand="the hand",
                 commands_row="commands",
+                python_row="python",
                 refused=("memory:auto",),
                 wants_commands=_wants_commands,
             )
@@ -219,6 +221,7 @@ def _guided(kept: Any = _GUIDED, parent: Any = _SHIPPED) -> Any:
         place=_PLACE,
         hand="the hand",
         commands_row="commands",
+        python_row="python",
         refused=("memory:auto",),
         wants_commands=_wants_commands,
     )

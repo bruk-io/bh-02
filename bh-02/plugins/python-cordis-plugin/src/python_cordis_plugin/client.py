@@ -79,7 +79,16 @@ from host_paths import config_home, walked
 from python_cordis_plugin.python import PYTHON, instructions_for
 from python_cordis_plugin.startup_check import CODES, ELSEWHERE
 
-__all__ = ["Access", "Jailed", "PythonProcess", "PythonProcessConfig", "Rule", "Runner", "worker_argv"]
+__all__ = [
+    "Access",
+    "Generations",
+    "Jailed",
+    "PythonProcess",
+    "PythonProcessConfig",
+    "Rule",
+    "Runner",
+    "worker_argv",
+]
 
 _WORKER = Path(__file__).with_name("worker.py")
 # the docstring and type check: a program of its own, run by path in the jail like the worker
@@ -91,6 +100,11 @@ _CHECK_S = 120.0
 # each, and JSON escapes a character to at most 12 bytes (a surrogate pair, `\ud83d\ude00`),
 # so a `done` is under 500 KB. asyncio's default of 64 KiB would fail on 20,000 emoji.
 _LINE_LIMIT = 1 << 20
+# why a worker is started again for what the person granted or took back, as the model is told
+_REGRANTED = (
+    "what the person granted the jail changed (a path or variable is fixed when a jail is made, so "
+    "it holds only in a new process)"
+)
 _CONFIG_HOME = "$XDG_CONFIG_HOME/"  # a startup file in the person's config directory
 _CUT = 160  # the longest signature, in characters, the model is told of a function
 _READ = 4 * _CUT  # how much of one the Python process sends: the host cleans it, then cuts it at `_CUT`
@@ -138,8 +152,22 @@ class Runner(Protocol):
     """What the Python process needs of the `runner` value (CONTRACTS.md: runner): its start,
     and the runner's own grades before any."""
 
-    async def start(self, argv_for: Callable[[str], Sequence[str]], *, cwd: str, owner: str) -> Jailed: ...
+    async def start(
+        self, argv_for: Callable[[str], Sequence[str]], *, cwd: str, owner: str, agent: str = ""
+    ) -> Jailed: ...
     def report(self) -> Mapping[str, str]: ...
+
+
+@runtime_checkable
+class Generations(Protocol):
+    """What the Python process needs of the `grants` value (CONTRACTS.md: grants): `generation()`, a
+    number that differs when what the program's path and variable grants are has changed since it was
+    read, so a worker started before it is started again before it takes an input; and `ready()`,
+    which returns once every need a row holds has an answer, so a worker starts with them (at once
+    when no prompt is served)."""
+
+    def generation(self) -> int: ...
+    async def ready(self) -> None: ...
 
 
 @runtime_checkable
@@ -171,12 +199,18 @@ class PythonProcessConfig:
     one file. `mypy_cache` is the directory (from `root`, or absolute) where mypy keeps its cache for
     the type check of those files at each start: in the project because that is where a jail can
     write that outlives it (mypy puts a `.gitignore` of `*` in it, so git ignores it), and a cache is
-    what makes the check take a fraction of a second, not seconds."""
+    what makes the check take a fraction of a second, not seconds. `needs` are what the row itself needs of
+    the jail, each `{kind, target, port?, reason}` (CONTRACTS.md: python): asked before the first worker
+    starts, so they cost no restart. `agent` is the label of the sub-agent whose row this is ("" for the
+    session's own), so its needs and the connections its program makes that are refused are asked as
+    that agent."""
 
     root: str = "."
     grace: float = 5.0
     startup: Sequence[str] = ("$XDG_CONFIG_HOME/bh-02/startup.py", ".bh-02/startup.py")
     mypy_cache: str = ".bh-02/mypy_cache"
+    needs: Sequence[Mapping[str, Any]] = ()
+    agent: str = ""
 
     def __post_init__(self) -> None:
         names = (self.startup,) if isinstance(self.startup, str) else self.startup
@@ -191,6 +225,14 @@ class PythonProcessConfig:
                 "`mypy_cache` must be a directory name, from the root or absolute, as in "
                 f'`mypy_cache = ".bh-02/mypy_cache"`, not {self.mypy_cache!r}'
             )
+        if not isinstance(self.needs, Sequence) or isinstance(self.needs, str):
+            raise TypeError(
+                "`needs` must be a list of what the row needs of the jail, as in "
+                '`needs = [{ kind = "net", target = "pypi.org", port = 443, reason = "installs" }]`, '
+                f"not {self.needs!r}"
+            )
+        if not isinstance(self.agent, str):
+            raise TypeError(f"`agent` must be the sub-agent's label, as text, not {self.agent!r}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -530,8 +572,11 @@ class PythonProcess:
         *,
         rule: Rule,
         tools: Calls | None = None,
+        grants: Generations | None = None,
     ) -> None:
         self._runner = runner
+        self._grants = grants  # its generation, recorded at each worker start and compared before each input
+        self._generation = 0
         self._rule = rule
         self._tools = tools  # bh-02's other tools, offered to an input as functions
         self._told_tools: dict[str, str] | None = None  # what the model was last told of them
@@ -643,6 +688,11 @@ class PythonProcess:
                 # The jail may say so before the socket's end has reached this event loop, and an
                 # input sent then would go to the worker that ended
                 self._why = self._ended()
+                await self._stop()
+            elif self._reader is not None and self._regranted():
+                # a path or variable was granted or taken back since this worker started: a jail
+                # fixes both when it is made, so this input (the first since) runs in a new one
+                self._why = _REGRANTED
                 await self._stop()
             if self._writer is None:
                 try:
@@ -821,6 +871,10 @@ class PythonProcess:
                 ready.append(_Ready(startup.name, str(startup.path), source))
         return ready
 
+    def _regranted(self) -> bool:
+        """Whether what is granted differs from what the running worker was started with."""
+        return self._grants is not None and self._grants.generation() != self._generation
+
     def _ended(self) -> str:
         """Why the jail ended the worker itself, or ""."""
         return self._process.ended() if self._process is not None else ""
@@ -936,7 +990,12 @@ class PythonProcess:
 
     async def _start(self) -> None:
         root = str(Path(self._config.root).resolve())
-        self._process = self._worker = await self._runner.start(worker_argv, cwd=root, owner="python")
+        if self._grants is not None:
+            await self._grants.ready()  # what rows need is answered before the process exists
+            self._generation = self._grants.generation()  # before the start reads what is granted
+        self._process = self._worker = await self._runner.start(
+            worker_argv, cwd=root, owner="python", agent=self._config.agent
+        )
         self._reader, self._writer = await asyncio.open_unix_connection(
             sock=self._process.connection, limit=_LINE_LIMIT
         )

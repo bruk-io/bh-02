@@ -135,13 +135,13 @@ runner:confined         binds Runner                       depends on Host
 runner:unconfined       binds Runner                       depends on nothing
 runner:approval         binds Approval                     depends on Runner
 runner:release          registers /release                 depends on Runner, Commands
-python:tool             registers python, its stop         depends on Runner, Approval, Tools, System, Access
+python:tool             registers python, its stop         depends on Runner, Approval, Tools, System, Access, Grants
 tui:ui                  binds Input, Output, Frame         depends on nothing (its config)
 tui:status              pushes session and model fields    depends on Loader, Models, Session, Frame
 tui:grades              pushes the jail field              depends on Runner, Approval, Frame, Output
 tui:palette             pushes the palette's commands      depends on Commands, Frame
 chat:converse           runs the chat, binds Done          depends on Loop, Input, Output, Commands, Jobs
-extensions:process   loads the model's own plugins      depends on Runner, Commands, Frame, System, Tools, Approval, Output
+extensions:process   loads the model's own plugins      depends on Runner, Commands, Frame, System, Tools, Approval, Output, Grants
 subagents:status        pushes the agents field            depends on Roster, Frame
 subagents:parent        binds Asker, Roster, registers agent tools depends on Tools, System, Output, Loader, Host, Commands, Model (each call mounts a child; /agents; a Model reload ends them; see below)
 ```

@@ -22,7 +22,7 @@ from runner_cordis_plugin import prompting
 from runner_cordis_plugin.broker import Outcome
 from runner_cordis_plugin.grants import Asker, Grant, Grants, Invalid, Kind, Request, Source
 
-__all__ = ["PERIOD_S", "Decision", "Egress", "Ended"]
+__all__ = ["PERIOD_S", "Decision", "Egress", "Ended", "asked_as"]
 
 #: How often a jail's decisions are drained.
 PERIOD_S = 0.2
@@ -92,6 +92,12 @@ class _Brokered(Protocol):
     def on_change(self, fn: Callable[[], None]) -> Callable[[], None]: ...
 
 
+def asked_as(owner: str, agent: str) -> Asker:
+    """Who asks for a destination a program's jail refused: the sub-agent whose program it is, by its
+    label, else the row that started it (`owner`), as its input."""
+    return Asker(Source.AGENT, agent) if agent else Asker(Source.INPUT, owner)
+
+
 @dataclass(frozen=True, slots=True)
 class _Ask:
     """A refusal that is put to the person."""
@@ -106,10 +112,11 @@ class _Tell:
     text: str
 
 
-def _judged(decision: Decision, owner: str) -> _Ask | _Tell | None:
+def _judged(decision: Decision, asker: Asker) -> _Ask | _Tell | None:
     """What a decision of the proxy comes to: nothing when it allowed, an ask for a destination
     that was not granted (as the name) or one that resolved to a private address (as that address
-    alone, the name is never offered), else a tell. `owner` is the row that started the program."""
+    alone, the name is never offered), else a tell. `asker` is who is asking: the row that started
+    the program, as its input, or the sub-agent whose program it is."""
     if decision.verdict != "refused":
         return None
     host, port = decision.destination.host, decision.destination.port
@@ -125,7 +132,7 @@ def _judged(decision: Decision, owner: str) -> _Ask | _Tell | None:
     except Invalid as error:
         return _Tell(prompting.ungrantable(host, port, str(error)))
     why = prompting.refusal_reason(host, port, decision.reason, decision.address)
-    return _Ask(Request(grant, Asker(Source.INPUT, owner), why))
+    return _Ask(Request(grant, asker, why))
 
 
 class Egress:
@@ -138,13 +145,13 @@ class Egress:
         wire: _Wire,
         grants: _Brokered,
         *,
-        owner: str,
+        asker: Asker,
         held: Iterable[Grant],
         period: float = PERIOD_S,
     ) -> None:
         self._wire = wire
         self._grants = grants
-        self._owner = owner
+        self._asker = asker
         self._held = set(held)
         self._period = period
         self._unsubscribe: Callable[[], None] | None = None
@@ -211,7 +218,7 @@ class Egress:
         self._asks.pop(grant, None)
 
     def _refused(self, decision: Decision) -> None:
-        match _judged(decision, self._owner):
+        match _judged(decision, self._asker):
             case None:
                 return
             case _Tell(text=text):

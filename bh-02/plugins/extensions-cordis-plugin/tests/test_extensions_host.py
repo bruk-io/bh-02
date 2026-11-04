@@ -119,6 +119,7 @@ class _Harness:
     tools: ToolBroker
     approval: _Approval
     extensions: Extensions
+    grants: _Grants
 
     def write(self, name: str, source: str) -> None:
         self.root.joinpath(".bh-02", "plugins").mkdir(parents=True, exist_ok=True)
@@ -141,6 +142,7 @@ async def _running(
     answer: bool = True,
     tools: ToolBroker | None = None,
     jail: PlainJail | None = None,
+    grants: _Grants | None = None,
 ) -> AsyncIterator[_Harness]:
     jail, commands, frame, system, approval = (
         jail if jail is not None else PlainJail(),
@@ -152,9 +154,33 @@ async def _running(
     broker = tools if tools is not None else ToolBroker()
     runner = Runner(jail)
     config = ExtensionsConfig(root=str(root), watch=3600)  # the test looks itself
-    async with Extensions(runner, commands, frame, system, broker, approval, approval, config) as running:
+    grants = grants if grants is not None else _Grants()
+    async with Extensions(
+        runner, commands, frame, system, broker, approval, approval, config, grants
+    ) as running:
         runner.on_release(running.stopped)  # as the row does
-        yield _Harness(root, runner, jail, commands, frame, system, broker, approval, running)
+        yield _Harness(root, runner, jail, commands, frame, system, broker, approval, running, grants)
+
+
+class _Grants:
+    """A `grants` that grants nothing and changes nothing, unless a test moves `number`."""
+
+    def __init__(self) -> None:
+        self.number = 0
+        self.heard: list[Callable[[], None]] = []
+        self.asked: list[tuple[Mapping[str, Any], str, str]] = []
+        self.answer = "once"
+
+    def generation(self) -> int:
+        return self.number
+
+    def on_change(self, fn: Callable[[], None]) -> Callable[[], None]:
+        self.heard.append(fn)
+        return lambda: self.heard.remove(fn)
+
+    async def asking(self, spec: Mapping[str, Any], source: str, name: str) -> str:
+        self.asked.append((spec, source, name))
+        return self.answer
 
 
 async def test_the_extensions_dial_the_endpoint_the_runner_chose_for_their_worker(tmp_path: Path) -> None:
@@ -183,7 +209,9 @@ async def test_the_extensions_use_the_runners_connection_and_never_dial_the_endp
     server = await asyncio.start_unix_server(decoy_connected, path=str(short / "decoy.sock"))
 
     class Swapping(PlainJail):
-        async def start(self, argv_for: Callable[[str], Sequence[str]], *, cwd: str, owner: str) -> Any:
+        async def start(
+            self, argv_for: Callable[[str], Sequence[str]], *, cwd: str, owner: str, agent: str = ""
+        ) -> Any:
             started = await super().start(argv_for, cwd=cwd, owner=owner)
             Path(started.endpoint).unlink()
             Path(started.endpoint).symlink_to(short / "decoy.sock")
@@ -283,7 +311,7 @@ async def test_an_extension_that_asks_for_the_transcript_gets_nothing_and_waits(
         await h.extensions.look()
         row = h.status()["reader"]["rows"]["reader.reads"]
         assert row.startswith("waiting on: transcript")
-        assert row.endswith("bh-02 offers commands, frame, system, tools)")
+        assert row.endswith("bh-02 offers commands, frame, grants, system, tools)")
 
 
 async def test_background_work_updates_a_field_and_what_it_pushed_leaves_with_it(tmp_path: Path) -> None:
@@ -585,14 +613,16 @@ async def test_the_row_enters_the_extensions_and_adds_what_the_model_is_told() -
             tools=ToolBroker(),
             approval=_Approval(),
             output=_Approval(),
+            grants=_Grants(),
             config=ExtensionsConfig(),
         ),
-        [SimpleNamespace(section=lambda: "told", stopped=None)],  # what entering would have given back
+        [SimpleNamespace(section=lambda: "told", stopped=None, regranted=None)],  # what entering gives back
     )
-    assert [effect.name for effect in effects] == ["enter", "acquire", "acquire"]
+    assert [effect.name for effect in effects] == ["enter", "acquire", "acquire", "acquire"]
     assert isinstance(effects[0].args[0], Extensions)
-    assert effects[1].args[1] is None  # its worker's stop, for /release (`runner.on_release`)
-    assert effects[2].args[1] == "extensions" and effects[2].args[2]() == "told"
+    assert effects[1].args[1] is None  # a change of grants, for the restart at once (`grants.on_change`)
+    assert effects[2].args[1] is None  # its worker's stop, for /release (`runner.on_release`)
+    assert effects[3].args[1] == "extensions" and effects[3].args[2]() == "told"
 
 
 _LOUD = """
@@ -716,3 +746,59 @@ async def test_unjailed_a_call_to_an_extension_s_tool_is_put_to_the_person_as_an
         question = {"name": "shout", "input": {"text": "hi"}, "runs": tool.runs, **tool.show({"text": "hi"})}
         assert not h.approval.unasked(question)  # unconfined: the loop asks the person, so shown
         assert question["title"] == "Run shout, a tool of the extension loud, with these arguments?"
+
+
+_ASKS = """
+from cordis import Effects, acquire, component
+
+@component
+async def asks(*, frame, grants) -> Effects:
+    answer = await grants.ask("net", "example.com", "fetches the docs", 443)
+    yield acquire(frame.status, "answer", f"asked: {answer}")
+"""
+
+
+async def test_an_extension_asks_for_a_grant_as_an_extension_and_is_told_the_answer(tmp_path: Path) -> None:
+    """`grants.ask` in an extension's code is put to the broker as `extension NAME`, and the answer
+    comes back to the code that asked."""
+    async with _running(tmp_path) as h:
+        h.write("asks", _ASKS)
+        await h.extensions.look()
+        assert h.extensions.statuses["asks"].ok, h.extensions.statuses["asks"]
+        assert h.frame.fields()["asks:answer"] == "asked: once"
+        ((spec, source, name),) = h.grants.asked
+        assert (source, name) == ("extension", "asks")
+        assert spec == {"kind": "net", "target": "example.com", "port": 443, "reason": "fetches the docs"}
+
+
+async def test_an_extension_s_request_that_is_not_one_raises_in_its_code_with_why(tmp_path: Path) -> None:
+    class Refusing(_Grants):
+        async def asking(self, spec: Mapping[str, Any], source: str, name: str) -> str:
+            raise ValueError("a read grant takes an absolute path, got 'data'")
+
+    source = _ASKS.replace('"net", "example.com", "fetches the docs", 443', '"read", "data", "x"')
+    async with _running(tmp_path, grants=Refusing()) as h:
+        h.write("asks", source)
+        await h.extensions.look()
+        assert "a read grant takes an absolute path" in str(h.extensions.statuses["asks"].rows)
+
+
+async def test_a_path_or_variable_grant_replaces_the_worker_at_once_and_loads_every_extension_again(
+    tmp_path: Path,
+) -> None:
+    """The extensions process is started again as soon as what is granted changes (`look`, which the
+    watcher runs when the broker says so); a change that is not a new generation (a destination) leaves
+    it as it is."""
+    async with _running(tmp_path) as h:
+        h.write("todo", _TODO)
+        await h.extensions.look()
+        assert len(h.jail.started) == 1 and h.extensions.statuses["todo"].ok
+        await h.extensions.look()
+        assert len(h.jail.started) == 1  # nothing changed
+
+        h.grants.number += 1
+        await h.extensions.look()
+        assert len(h.jail.started) == 2 and h.extensions.statuses["todo"].ok  # a new worker, loaded again
+        assert h.frame.fields()["todo:count"] == "todo: 0" and list(h.commands.runs) == ["todo"]
+        await h.extensions.look()
+        assert len(h.jail.started) == 2  # once for one change

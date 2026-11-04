@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 from cordis_helpers import Hooks
+from runner_cordis_plugin.grants import Grant
 
 __all__ = ["Mechanism", "Runner", "Started", "reserved_endpoint", "unreserve_endpoint"]
 
@@ -78,7 +79,8 @@ class Mechanism(Protocol):
 
     def report(self) -> Mapping[str, str]: ...
     def notice(self) -> str: ...
-    async def start(self, argv_for: ArgvFor, *, cwd: str, owner: str) -> Started: ...
+    async def start(self, argv_for: ArgvFor, *, cwd: str, owner: str, agent: str = "") -> Started: ...
+    def refusal(self, grant: Grant) -> str: ...
     async def release(self) -> str: ...
 
 
@@ -110,14 +112,21 @@ class Runner:
         """Whether `/release` has stopped what runs and nothing has started since."""
         return self._released
 
-    async def start(self, argv_for: ArgvFor, *, cwd: str, owner: str) -> Started:
+    def refusal(self, grant: Grant) -> str:
+        """Why `grant` is never granted to what this runner starts (the floor: what the host reads,
+        trusts or keeps secret; a variable a model's key reads), in words that say what to do; "" when
+        it may be asked. A runner that confines nothing has nothing to refuse."""
+        return self._mechanism.refusal(grant)
+
+    async def start(self, argv_for: ArgvFor, *, cwd: str, owner: str, agent: str = "") -> Started:
         """Start the program `argv_for(endpoint)` in `cwd`, listening on the endpoint the runner
         chose for it (`started.endpoint`, handed to `argv_for` before anything starts); tell each
         watcher (`on_start`). `owner` is the row that starts it (`python`, `extensions`): a
-        connection the program makes that is refused is asked as its input. A start ends a release,
-        before anything waits."""
+        connection the program makes that is refused is asked as its input; `agent`, the label of the
+        sub-agent whose program it is ("" for none), has it asked as that agent. A start ends a
+        release, before anything waits."""
         self._released = False
-        started = await self._mechanism.start(argv_for, cwd=cwd, owner=owner)
+        started = await self._mechanism.start(argv_for, cwd=cwd, owner=owner, agent=agent)
         self._last = started
         for watch in tuple(self._starts):
             watch(started)

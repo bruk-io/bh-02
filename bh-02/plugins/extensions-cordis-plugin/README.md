@@ -6,7 +6,7 @@ restart; what keeps that safe is where the code runs, not who reads it first.
 
 | Row | Binds | Consumes |
 |---|---|---|
-| `extensions:process` | nothing: what extensions add goes into `commands`, `frame`, `system` and `tools`; its own `system` section tells the model how; registers the extensions process's stop with the runner (`/release`) | `runner` (`start`, `released`, `on_release`), `commands`, `frame`, `system`, `tools` (`register`, `specs`), `approval` (`confined`, `unasked`), `output` (`confirm`) |
+| `extensions:process` | nothing: what extensions add goes into `commands`, `frame`, `system` and `tools`; its own `system` section tells the model how; registers the extensions process's stop with the runner (`/release`) | `runner` (`start`, `released`, `on_release`), `commands`, `frame`, `system`, `tools` (`register`, `specs`), `approval` (`confined`, `unasked`), `output` (`confirm`), `grants` (`generation`, `on_change`, `asking`) |
 
 Config (`ExtensionsConfig`): `root` (the project, `.`), `path` (the extensions directory under
 it, `.bh-02/plugins`), `watch` (how often it is looked at, 0.5 s).
@@ -71,7 +71,7 @@ What the model is told (`watch.instructions`, the row's `system` section) is eno
 write one and no more, since it goes out with every request: the lifecycle rule (a component
 runs while what it needs is bound, starts again when that is replaced, and is undone in reverse
 when it leaves), the effects it uses (`acquire`, `bind`, `enter`, `background`), Protocol
-contracts, the four keys, and how to try a component in an input before writing its file
+contracts, the keys it reaches, and how to try a component in an input before writing its file
 (`asyncio.run(cordis.testing.drive(todo(commands=fake, system=fake)))`, cordis being importable
 there). The rest it can read: cordis's README, whose path it is given when bh-02 runs from the
 workspace (an editable install), and `help(cordis.background)` and the like.
