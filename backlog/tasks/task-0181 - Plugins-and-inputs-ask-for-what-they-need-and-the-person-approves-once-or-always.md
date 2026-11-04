@@ -3,7 +3,7 @@ id: TASK-0181
 title: >-
   Plugins and inputs ask for what they need, and the person approves once or
   always
-status: To Do
+status: Done
 assignee:
   - '@bruk'
 created_date: '2026-11-03T18:22:00Z'
@@ -121,4 +121,6 @@ INFO    -  Documentation built in 2.37 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+Closed by review against the intent's own six criteria. Full check (scripts/check) exit 0, 2790 passed, bwrap present so real-jail tests ran; tree clean after. AC1: Kind read/write/env/net with reason and Asker; inputs raise via grant() and egress refusals become prompts. AC2: test_runner_broker once/always/no tests, test_a_declined_destination_is_asked_once_and_stays_refused, test_a_grant_kept_as_always_..._with_nothing_asked. AC3: to_brig/spec_for at each start, test_what_the_broker_says_is_granted_is_what_the_next_start_applies; grades honest in test_a_real_start_grades_the_network_best_effort_and_proxied_... AC4: real-jail tests test_a_jailed_program_reaches_no_network_and_one_that_ignores_the_proxy_settings_reaches_nothing, test_a_program_that_ignores_the_proxy_reaches_nothing_though_the_destination_is_granted, test_a_destination_granted_is_reached_through_the_proxy_and_nothing_ungranted_is (seen failing with the egress policy emptied). AC5: test_a_linux_jail_keeps_the_grants_store_from_being_read_or_written_where_the_project_holds_it (real jail: list empty, read ENOENT, writes EROFS, file unchanged); floor refusals tested in test_runner_grants_policy and test_a_refused_grant_in_the_store_never_reaches_the_jail; every grant passes through the broker's prompt, none is applied unasked. AC6: test_a_confined_runner_that_cannot_jail_here_is_not_confined_before_any_start, test_a_host_with_no_bubblewrap_is_refused_..., test_an_unconfined_start_grades_every_part_unenforced_and_is_not_confined. Known limits (extension grants.ask not floor-checked up front, restart cost for a late grant-prompt mount, sub-agent has no grant tool DRAFT-0029) narrow convenience, not the criteria: nothing in them widens what runs unasked beyond what the person granted. No new findings filed.
 <!-- SECTION:NOTES:END -->
