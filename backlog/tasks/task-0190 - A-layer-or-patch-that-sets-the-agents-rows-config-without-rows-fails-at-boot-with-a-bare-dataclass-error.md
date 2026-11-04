@@ -162,4 +162,6 @@ bh-02/plugins/subagents-cordis-plugin/tests/test_agents_wiring.py:1918: Assertio
 FAILED bh-02/plugins/subagents-cordis-plugin/tests/test_agents_wiring.py::test_an_agents_row_whose_config_names_no_rows_is_refused_saying_where_the_list_is
 1 failed, 59 deselected in 15.32s
 ```
+
+Lead, 2026-11-04: the repro file changed after its recording only through TASK-0189's commit (63d6f38) and the floor fix (d957d98), which edit other tests in it. A new repro is recorded above: the file as it now stands, run on the code before the fix (4057a84) in a throwaway local worktree; it fails on the bare dataclass error lacking the message.
 <!-- SECTION:NOTES:END -->
