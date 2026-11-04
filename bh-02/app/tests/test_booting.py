@@ -250,6 +250,7 @@ async def test_stopping_replies_with_a_clear_or_a_model_switch_between_leaves_on
     patch = composition(
         '[[plugin]]\nid = "model"\nuse = "fragile:counting_model"\n'
         '[[plugin]]\nid = "system"\nuse = "fragile:held_system"\n'
+        '[[plugin]]\nid = "host"\nuse = "fragile:plain_host"\n'
         '[[plugin]]\nid = "ui"\nuse = "fragile:silent_ui"\n'
     )
     booted = await boot([*(str(x) for x in layers()), patch], watch=None)

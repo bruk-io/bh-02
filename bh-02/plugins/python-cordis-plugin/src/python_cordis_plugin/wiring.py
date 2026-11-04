@@ -6,7 +6,15 @@ from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, Protocol, runtime_checkable
 
 from cordis import Effects, acquire, component, enter
-from python_cordis_plugin.client import Access, Calls, PythonProcess, PythonProcessConfig, Rule, Runner
+from python_cordis_plugin.client import (
+    Access,
+    Calls,
+    Generations,
+    PythonProcess,
+    PythonProcessConfig,
+    Rule,
+    Runner,
+)
 from python_cordis_plugin.python import PYTHON, shown_call
 
 __all__ = ["tool"]
@@ -48,6 +56,15 @@ class _Sections(Protocol):
     def add(self, name: str, section: Callable[[], str]) -> Callable[[], None]: ...
 
 
+@runtime_checkable
+class _Needing(Generations, Protocol):
+    """The `grants` value as the python row uses it (CONTRACTS.md: grants): its generation and when its
+    needs are answered (`Generations`), and a standing need held, with its remover back, as `source`
+    (`row` or `agent`) `name` asks."""
+
+    def needing(self, spec: Mapping[str, Any], source: str, name: str) -> Callable[[], None]: ...
+
+
 @component
 async def tool(
     *,
@@ -56,6 +73,7 @@ async def tool(
     tools: _Tools,
     system: _Sections,
     access: Access,
+    grants: _Needing,
     config: PythonProcessConfig,
 ) -> Effects:
     """Fills a `python` row: `use = "python:tool"`. Starts a persistent Python process in the
@@ -71,8 +89,17 @@ async def tool(
     Depends on the runner, the rule and the three brokers, none of which reload, so swapping the
     model or the ui keeps the namespace, and so does a reload of the loop; swapping the runner
     starts a new process, which is the honest thing for a new runner to mean. A restart
-    (`/clear`) registers the same tool again, so the loop reloads with nothing."""
-    started = yield enter(PythonProcess(runner, config, access, rule=approval, tools=tools))
+    (`/clear`) registers the same tool again, so the loop reloads with nothing.
+
+    The `grants` broker is the same kind of dependency: the row's config `needs` are held with it while
+    the row is up (`grants.needing`, acquired, so they leave with the row), the first worker starts
+    only once they are answered, and before an input the worker is started again when a path or
+    variable grant changed since it started (`grants.generation()`), the input told why. The row
+    depends on the broker's binding, which never reloads, so a grant never reloads the row."""
+    asker = ("agent", config.agent) if config.agent else ("row", "python")
+    for need in config.needs:  # held before the process starts, so its start waits for the answers
+        yield acquire(grants.needing, need, *asker)
+    started = yield enter(PythonProcess(runner, config, access, rule=approval, tools=tools, grants=grants))
     yield acquire(runner.on_release, started.stopped)
     yield acquire(tools.register, PYTHON, started.call, show=shown_call)
     yield acquire(system.add, "python", started.instructions)

@@ -7,7 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from runner_cordis_plugin.broker import Broker
-from runner_cordis_plugin.egress import Egress, Ended
+from runner_cordis_plugin.egress import Egress, Ended, asked_as
 from runner_cordis_plugin.grants import Answer, Asker, Grant, Kind, Request, Source
 
 PERIOD = 0.01
@@ -80,8 +80,8 @@ async def _until(condition: Callable[[], bool]) -> None:
             await asyncio.sleep(0.005)
 
 
-async def _running(wire: _Wire, broker: Broker, held: tuple[Grant, ...] = ()) -> Egress:
-    running = Egress(wire, broker, owner="python", held=held, period=PERIOD)
+async def _running(wire: _Wire, broker: Broker, held: tuple[Grant, ...] = (), *, agent: str = "") -> Egress:
+    running = Egress(wire, broker, asker=asked_as("python", agent), held=held, period=PERIOD)
     running.begin()
     return running
 
@@ -237,3 +237,19 @@ async def test_the_poller_ends_with_the_jail_and_end_leaves_no_task_and_no_liste
     person.release.set()
     await asyncio.sleep(0.05)
     assert {task for task in asyncio.all_tasks() - before if not task.done()} == set()
+
+
+async def test_a_sub_agent_s_program_s_refusal_is_asked_as_the_agent_by_its_label() -> None:
+    broker = Broker(None)
+    person = _Person()
+    broker.serve(person)
+    wire = _Wire(queued=[_refused("svc.test")])
+    running = await _running(wire, broker, agent="scout-1 (explore)")
+    try:
+        await _until(lambda: wire.allowed == [SVC])
+    finally:
+        await running.end()
+    (request,) = person.asked
+    assert request.asker == Asker(Source.AGENT, "scout-1 (explore)")
+    assert str(request.asker) == "agent scout-1 (explore)"  # the person sees which agent asks
+    assert asked_as("python", "") == Asker(Source.INPUT, "python")

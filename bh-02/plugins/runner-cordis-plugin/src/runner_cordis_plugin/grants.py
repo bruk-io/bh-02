@@ -36,6 +36,7 @@ __all__ = [
     "Kind",
     "Request",
     "Source",
+    "need_request",
     "refusal",
 ]
 
@@ -187,6 +188,39 @@ class Request:
                 f"a request for {self.grant} says it is from a {self.asker.source} but not which; "
                 "name the row, tool, extension or agent that asks"
             )
+
+
+def need_request(spec: Mapping[str, object], asker: Asker) -> Request:
+    """The `Request` a row's standing need names: `spec` is `{kind, target, port?, reason}` as a layer
+    writes it (`needs = [{ kind = "net", target = "pypi.org", port = 443, reason = "..." }]`), `asker`
+    the row, or the agent whose row it is.
+
+    Raises:
+        Invalid: `spec` is not of that shape, or its grant is not of its kind's shape; the message
+            says what to write instead.
+    """
+    unknown = sorted(set(spec) - {"kind", "target", "port", "reason"})
+    if unknown:
+        raise Invalid(
+            f"a need has `kind`, `target`, `port` (net only) and `reason`, not {', '.join(unknown)}; "
+            'write it as { kind = "net", target = "pypi.org", port = 443, reason = "installs packages" }'
+        )
+    kind, target, port, reason = (spec.get(key) for key in ("kind", "target", "port", "reason"))
+    try:
+        which = Kind(kind) if isinstance(kind, str) else None
+    except ValueError:
+        which = None
+    if which is None:
+        raise Invalid(f"a need's `kind` is one of {', '.join(k.value for k in Kind)}, not {kind!r}")
+    if not isinstance(target, str) or not isinstance(reason, str):
+        raise Invalid(
+            "a need's `target` and `reason` are text: the path, variable or host, and why it is needed"
+        )
+    if port is None:
+        port = 0
+    if isinstance(port, bool) or not isinstance(port, int):
+        raise Invalid(f"a need's `port` is a number, not {port!r}")
+    return Request(Grant(which, target, port), asker, reason)
 
 
 def _check_path(kind: Kind, path: str) -> None:

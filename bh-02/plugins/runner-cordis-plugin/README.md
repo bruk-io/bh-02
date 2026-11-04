@@ -10,8 +10,8 @@ over it; and `/release`. The only package in the workspace that imports brig (th
 | `runner:confined` | `runner` over a brig jail (bruk-io/brig's `create_bwrap_jail`, bubblewrap: Linux only for now, darwin, or Linux with no `bwrap`, reports every grade `unenforced` from the start and says before the first input to use `runner:unconfined`, and refuses each start), a jail per start; config: `write` (default `["."]`), `deny`, `hide` (files in the project inputs may not read; none by default), `env` (the names that survive the scrub; unset, they are the baseline `PATH`, `HOME`, `LANG`, `LC_ALL`, `TERM` plus the names in the person's `runner.toml`, below) | `host`, `models` (`key_envs()`, below) |
 | `runner:unconfined` | `runner`: each program as a plain subprocess (`--no-jail`), every axis reported `unenforced`, its environment without `CLAUDE*` (`CLAUDE_CODE_OAUTH_TOKEN`, and what a Claude Code that launched bh-02 leaves, a messaging token among them), `ANTHROPIC_*`, `TMUX` or `TMUX_PANE` (hygiene, not a boundary: an input without a jail can find the tmux socket itself; the confined runner's `env` allowlist never passes them, `tests/test_runner_tmux.py` shows both) | |
 | `runner:approval` | `approval`: `confined` (whether the runner confines what runs in it), `unasked(question) -> bool` (whether it runs without asking the person) | `runner` (`report`) |
-| `runner:grants` | `grants`: the broker of what the person granted the jail (`need`, `ask`, `granted`, `on_change`, `serve`, `list`, `revoke`) | `host` |
-| `runner:grant_prompt` | (nothing: serves the grants prompt, tells the model each answer through an aside, and registers `/grants`, which lists and revokes) | `grants` (`serve`, `list`, `revoke`), `output` (`choose`), `asides` (`add`), `commands` (`register`) |
+| `runner:grants` | `grants`: the broker of what the person granted the jail (`need`, `ask`, `granted`, `generation`, `ready`, `on_change`, `serve`, `list`, `revoke`) | `host` |
+| `runner:grant_prompt` | (nothing: serves the grants prompt, tells the model each answer through an aside, registers `/grants`, which lists and revokes, and the `grant` tool with its `system` section) | `grants` (`serve`, `list`, `revoke`, `ask`), `output` (`choose`), `asides` (`add`), `commands` (`register`), `tools` (`register`: `grant`), `system` (`add`: `grants`), `runner` (`refusal`), `approval` (`confined`) |
 | `runner:release` | (nothing: registers `/release`) | `runner` (`release`), `commands` (`register`) |
 
 `runner.py`'s `Runner` is the `runner` value both rows bind, over a mechanism (`BrigJail` in
@@ -339,7 +339,7 @@ never blocks) and, for each refusal:
   takes no dependency on `asides` or `output`: that would reload the Python process.
 
 The poller never awaits a question, and a destination under question is one question however often the
-program retries. A sub-agent's label on a refusal is TASK-0181.08's. brig never cuts an open connection on
+program retries. When the program is a sub-agent's, the refusal is asked as `Asker(agent, label)` (`runner.start(..., agent=)`, `egress.asked_as`), the label the agents row wrote into its python row. brig never cuts an open connection on
 a revoke, and nothing here tries: `/grants revoke` of a `net` grant says so.
 
 ## The grants broker
@@ -359,7 +359,7 @@ no prompt served `ask` answers `no`, and held needs are asked the moment one is.
 (Ctrl-C) records nothing. An `always` is written by reading the store fresh and writing it whole
 (`store.write`); a store that is refused is never written over, the grant is then kept for the session and
 `problem()` says why. Two processes writing `grants.toml` can lose an update (the next `always` reads again).
-Whether a request is already inside the current policy (decision-0012 item 5's `standing`) is TASK-0181.08's:
+Whether a request is already inside the current policy (decision-0012 item 5's `standing`) is not decided here:
 here `standing` means already granted.
 
 Why `approval` depends on neither `grants` nor a requester: what reloads is what depends. The broker row
@@ -401,3 +401,33 @@ session: the command line boots the `host` and `grants` rows alone, by name, and
 Protocol of its own (`bh_02.granting`), since the app imports no plugin. An id is the first 8 hex digits of the
 SHA-256 of the grant's text, so the two agree. A sub-agent's realm reads `grants` from outside (its rows
 ask the one broker).
+
+## Requesters
+
+Who asks, and how an answer reaches a program (decision-0012 items 4 and 5, TASK-0181.08).
+
+- **`grant`, a tool** (`requesting.py`, registered by `runner:grant_prompt` with `runs="harness"`, so `approval`
+  gains no case: bh-02's own tool acting only on the jail and the broker, unasked exactly when the runner
+  confines). An input calls it across the socket (`tools.grant(kind=..., target=..., reason=...)`, the worker's
+  `op: call`) and the model may call it directly; it is asked as `Asker(input, "python")`. A path is resolved on
+  the host first (a grant holds for what the jail sees); a request the floor refuses (`runner.refusal`, the same
+  `floor_of` and `admitted` the start uses), one with a bad kind, a missing port or a relative path, is answered
+  with why and nobody is asked. Its result says when the answer holds: a destination now, a path or variable from
+  the next input. It tells the model of itself in the `system` section `grants`, never in its spec's description;
+  under `--no-jail` (`approval.confined` false) the section and the call say there is nothing to grant.
+- **Restarts** are before an input, never during one. `Broker.generation()` moves whenever what a start applies
+  of the read, write and environment grants may differ (an answer that applies, a revoke, a need held or
+  released, an always-grant kept; never a destination, which is live); the python client records it before it
+  starts a worker and compares it before an input, starting the worker again first and opening the input's result
+  with why (`the REPL was started again, because what the person granted the jail changed`), so the model and the
+  person both read it. The extensions process is replaced at once instead. Both take `grants` as a dependency, a
+  binding that never reloads, so a grant reloads neither row (`test_runner_grants_wiring.py` and the real-jail test
+  in `test_python_repl.py`).
+- **A standing need** is the python row's config `needs`, held with `grants.needing` before the process is
+  entered. `Broker.ready()` returns once each held need has an answer, so the first worker starts with them and
+  nothing starts again; with no prompt served it returns at once (a prompt that comes later asks, and the answer
+  restarts before the next input), and a withdrawn question counts as answered. A layer's runner `config`
+  (`write`, `env`) stays unasked.
+- **Sub-agents**: the agents row writes the child's label into its python row (`agent`), so a need and a refused
+  connection of that program are asked as `Asker(agent, "general-1 (general)")`; the realm reads the one broker.
+- **Extensions** ask with `grants.ask(...)` in their code, put as `Asker(extension, NAME)`.

@@ -290,6 +290,7 @@ def _with_python(model: _Model, screen: _Screen, where: Path) -> list[Row]:
         runner=Row("runner", "runner:unconfined"),
         approval=Row("approval", "runner:approval"),
         python=Row("python", "python:tool", {"root": str(where), "startup": []}),
+        grants=Row("grants", "runner:grants"),
         agents=Row("agents", "subagents:parent", {"rows": [*_KEPT, "python"]}),
     )
 
@@ -822,6 +823,7 @@ async def test_a_child_s_prompt_holds_the_project_s_guidance_and_its_input_is_to
         runner=Row("runner", "runner:unconfined"),
         approval=Row("approval", "runner:approval"),
         python=Row("python", "python:tool", {"root": str(project), "startup": []}),
+        grants=Row("grants", "runner:grants"),
         agents=Row("agents", "subagents:parent", {"rows": [*_KEPT, "python", "memory", "on-touch"]}),
         **_guidance(project),
     )

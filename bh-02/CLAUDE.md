@@ -119,7 +119,7 @@ What to keep when changing it; the detail is where each line points.
 - **No command restarts rows in the chat row's task**: it queues them in `jobs`, and the chat row
   reads its next line only once `jobs.settled()`.
 - **Only a layer's rows act in bh-02's process**: only they add to `asides` or claim a line prefix
-  (`!` runs in the person's shell). An extension gets four keys that only add, never one that
+  (`!` runs in the person's shell). An extension gets five keys that only add or ask, never one that
   replaces or reaches the composition (the loader, `runner`, `model`) (extensions plugin).
 - **Never read on the host a file the model can write, or follow a link it could make, and hand
   its text to the model**: read it through `host_paths`, or in the jail. Nor write one on the host

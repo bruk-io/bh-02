@@ -110,7 +110,8 @@ use = "runner:approval"
 id = "grants"
 use = "runner:grants"
 
-# `/grants`: lists what is granted and takes a grant back (`bh-02 grants` does the same outside a session).
+# The grants prompt, `/grants` (lists what is granted and takes a grant back; `bh-02 grants` does the same outside a
+# session) and the `grant` tool an input calls to ask for a path, a variable or a destination.
 [[plugin]]
 id = "grant-prompt"
 use = "runner:grant_prompt"

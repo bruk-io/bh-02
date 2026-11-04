@@ -11,11 +11,11 @@ from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 from cordis import Effects, acquire, bind, component
-from runner_cordis_plugin import allowlist
+from runner_cordis_plugin import allowlist, requesting
 from runner_cordis_plugin.approval import Approval, Graded
-from runner_cordis_plugin.broker import Broker, Prompt
+from runner_cordis_plugin.broker import Broker, Outcome, Prompt
 from runner_cordis_plugin.commands import Listing, grants_command
-from runner_cordis_plugin.grants import Answer, Request
+from runner_cordis_plugin.grants import Answer, Grant, Request
 from runner_cordis_plugin.jail import BrigJail, Granting, Host
 from runner_cordis_plugin.policy import SOCKET_PLACES, BrigConfig
 from runner_cordis_plugin.prompting import answer_of, decided, question
@@ -57,6 +57,7 @@ class _Serving(Listing, Protocol):
 
     def serve(self, prompt: Prompt) -> Callable[[], None]: ...
     def told(self) -> tuple[str, ...]: ...
+    async def ask(self, request: Request) -> Outcome: ...
 
 
 @runtime_checkable
@@ -64,6 +65,43 @@ class _Choosing(Protocol):
     """What the prompt needs of the `output` value (CONTRACTS.md: output): the person's choice."""
 
     async def choose(self, question: Mapping[str, Any]) -> str: ...
+
+
+@runtime_checkable
+class _Registering(Protocol):
+    """What the grant tool needs of the `tools` value (CONTRACTS.md: tools): a tool registered."""
+
+    def register(
+        self,
+        spec: Mapping[str, Any],
+        run: Callable[[Mapping[str, Any]], Awaitable[Mapping[str, Any]]],
+        *,
+        runs: str = ...,
+    ) -> Callable[[], None]: ...
+
+
+@runtime_checkable
+class _Sections(Protocol):
+    """What the grant tool needs of the `system` value (CONTRACTS.md: system): a section added."""
+
+    def add(self, name: str, section: Callable[[], str]) -> Callable[[], None]: ...
+
+
+@runtime_checkable
+class _Refusing(Protocol):
+    """What the grant tool needs of the `runner` value (CONTRACTS.md: runner): why a grant is never
+    granted to what it starts."""
+
+    def refusal(self, grant: Grant) -> str: ...
+
+
+@runtime_checkable
+class _Confining(Protocol):
+    """What the grant tool needs of the `approval` value (CONTRACTS.md: approval): whether the runner
+    confines what runs in it, so there is a jail to grant to."""
+
+    @property
+    def confined(self) -> bool: ...
 
 
 @runtime_checkable
@@ -91,9 +129,12 @@ class _Rechecked:
     async def release(self) -> str:
         return await self._jail.release()
 
-    async def start(self, argv_for: ArgvFor, *, cwd: str, owner: str) -> Started:
+    def refusal(self, grant: Grant) -> str:
+        return self._jail.refusal(grant)
+
+    async def start(self, argv_for: ArgvFor, *, cwd: str, owner: str, agent: str = "") -> Started:
         self._refuse()
-        return await self._jail.start(argv_for, cwd=cwd, owner=owner)
+        return await self._jail.start(argv_for, cwd=cwd, owner=owner, agent=agent)
 
 
 @component(provides=("runner",))
@@ -140,7 +181,15 @@ async def grants(*, host: Host) -> Effects:
 
 @component
 async def grant_prompt(
-    *, grants: _Serving, output: _Choosing, asides: _Telling, commands: _Registrar
+    *,
+    grants: _Serving,
+    output: _Choosing,
+    asides: _Telling,
+    commands: _Registrar,
+    tools: _Registering,
+    system: _Sections,
+    runner: _Refusing,
+    approval: _Confining,
 ) -> Effects:
     """Fills a `grant-prompt` row: `use = "runner:grant_prompt"`. Puts what the broker asks to the
     person through `output.choose` (once, always or no: the words are `prompting.question`), tells
@@ -148,7 +197,14 @@ async def grant_prompt(
     `/grants`, which lists what is granted (id, kind, target, answer, scope, who asked and why)
     and, as `/grants revoke ID`, takes one back, for the session or, for an always-grant, the
     project: the next start no longer applies it. A question under way when the row reloads or
-    leaves is withdrawn: its asker is answered no and nothing is recorded."""
+    leaves is withdrawn: its asker is answered no and nothing is recorded.
+
+    It also registers the `grant` tool (`requesting`, `runs="harness"`, so `approval` asks nothing
+    more of it than of any tool in the jail: its only effect is a question to the person, put by the
+    broker) and tells the model of it in the `system` section `grants`. A call is a request from the
+    python tool's input: a request the floor refuses (`runner.refusal`) is answered, with why, before
+    anyone is asked, and under `--no-jail` (`approval.confined` false) it says there is nothing to
+    grant and asks nothing. It depends on `runner` and `approval` besides, so it reloads with them."""
     told: deque[str] = deque()  # the answers decided since the last call, as lines for the model
 
     async def prompt(request: Request) -> Answer | None:
@@ -166,6 +222,16 @@ async def grant_prompt(
         lines.extend(grants.told())
         return "\n".join(lines)
 
+    async def grant(call: Mapping[str, Any]) -> dict[str, Any]:
+        if not approval.confined:
+            return {"content": requesting.NOTHING}
+        made = requesting.requested(call, requesting.ASKER, lambda path: str(Path(path).resolve()))
+        if isinstance(made, str):
+            return {"content": made}
+        if why := runner.refusal(made.grant):
+            return {"content": requesting.refused(made, why)}
+        return {"content": requesting.answered(made, await grants.ask(made))}
+
     spec = {
         "name": "grants",
         "help": "list what is granted to the jail, or `revoke ID` to take one back",
@@ -174,6 +240,8 @@ async def grant_prompt(
     yield acquire(grants.serve, prompt)
     yield acquire(asides.add, aside)
     yield acquire(commands.register, spec, partial(grants_command, grants))
+    yield acquire(tools.register, requesting.GRANT, grant, runs="harness")
+    yield acquire(system.add, "grants", lambda: requesting.section(approval.confined))
 
 
 @component(provides=("approval",))

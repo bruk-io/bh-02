@@ -37,13 +37,17 @@ _CHOICES: tuple[tuple[str, Answer, str], ...] = (
 
 def applies(grant: Grant) -> str:
     """When `grant`, once approved, takes effect in this build: a destination now, on every running
-    program (a connection already open is not affected); the rest from the next start of the
-    program it is for (`/clear` starts the Python process again)."""
+    program (a connection already open is not affected); a path or variable from the next input,
+    after the program it is for starts again (the Python process loses its variables then, the
+    extensions process starts again at once)."""
     match grant.kind:
         case Kind.NET:
             return "now, on every running program; connections already open are not affected"
         case Kind.READ | Kind.WRITE | Kind.ENV:
-            return "from the program's next start (`/clear` starts the Python process again)"
+            return (
+                "from the next input, after the program starts again (the Python process loses its "
+                "variables; the extensions process restarts at once)"
+            )
 
 
 def question(request: Request, *, places: Sequence[str], runtime_dir: str) -> dict[str, Any]:

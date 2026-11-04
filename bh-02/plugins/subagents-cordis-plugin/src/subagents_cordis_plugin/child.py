@@ -150,6 +150,7 @@ def child_rows(
     place: PurePath | None,
     hand: object,
     commands_row: str,
+    python_row: str,
     refused: Collection[str],
     wants_commands: Callable[[str], bool],
 ) -> tuple[ChildRow, ...]:
@@ -159,7 +160,8 @@ def child_rows(
     `place`), its model's Claude Code state beside it (when the parent's model row keeps one)
     and its type's model (when the type names one); then, beside a row that injects `commands`
     (`wants_commands(use)`), a registry of the child's own, of the same component as the parent's
-    `commands_row` (a layer that already gave the child one is not given a second), its
+    `commands_row` (a layer that already gave the child one is not given a second), the row named
+    `python_row` given the child's label as its `agent`, its
     `output` and the row that hands its `loop` to the agents row (`hand`) and tells it its type.
 
     Raises:
@@ -188,6 +190,8 @@ def child_rows(
         config = dict(entry.config)
         if rid == transcript_row:
             config["path"] = str(place / "transcript.jsonl") if place is not None else None
+        if rid == python_row:
+            config["agent"] = _agent_label(name, kind.name)
         if rid == model_row:
             if "state" in config:
                 config["state"] = str(place / "claude") if place is not None else None
@@ -253,6 +257,13 @@ def denied(kind: str, why: Sequence[str]) -> str:
         f"denied: the person said no to starting a {kind} sub-agent ({'; '.join(why)}), so none "
         "started; ask them what they want instead"
     )
+
+
+def _agent_label(name: str, kind: str) -> str:
+    """Who asks for a grant on a child's behalf, as the person reads it (`general-1 (general)`): the
+    child's python row is given it (`agent`), so its needs and the connections its program makes that
+    are refused are asked as this agent."""
+    return f"{name} ({kind})"
 
 
 def label(name: str, kind: str) -> dict[str, str]:

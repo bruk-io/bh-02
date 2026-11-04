@@ -42,6 +42,7 @@ from runner_cordis_plugin import (
     Approval,
     BrigConfig,
     BrigJail,
+    Broker,
     Runner,
 )
 from subagents_cordis_plugin import EventLog
@@ -706,7 +707,7 @@ async def test_on_linux_the_extensions_worker_imports_cordis_from_an_editable_in
     jail = BrigJail(BrigConfig(), _Host(code=_code()))
     config = ExtensionsConfig(root=str(project), watch=3600)  # entering looks once
     async with Extensions(
-        Runner(jail), added, added, added, ToolBroker(), added, added, config
+        Runner(jail), added, added, added, ToolBroker(), added, added, config, Broker(None)
     ) as extensions:
         status = json.loads((plugins / "status.json").read_text())
         assert extensions.statuses["hello"].ok, status
@@ -1636,3 +1637,190 @@ async def test_a_resumed_session_reads_what_its_inputs_were_told_from_the_asides
     assert resumed["asides"] == [trimmed, other]
     for entry in (first, resumed):
         assert entry["content"] == "\n\n".join(["6", *entry["asides"]])  # what the model reads, as before
+
+
+# -- grant requesters (decision-0012 items 4 and 5): `grant` from an input, a row's needs -------------------
+
+
+class _Person:
+    """The person at the grants prompt: answers each question with the next of `answers` ('once' when
+    they run out) and keeps what was asked, and how many jails had been made by then (`state` is where
+    each start keeps its scratch directory: none yet means no program had started). It is also every other
+    key the rows around it take, doing nothing."""
+
+    confined = True
+
+    def __init__(self, state: Path, *answers: str) -> None:
+        self.jails = state / "bh-02" / "jails"
+        self.answers = list(answers)
+        self.asked: list[Mapping[str, Any]] = []
+        self.jails_when_asked: list[int] = []
+
+    async def choose(self, question: Mapping[str, Any]) -> str:
+        self.asked.append(question)
+        self.jails_when_asked.append(len(list(self.jails.glob("bh-j-*"))))
+        return self.answers.pop(0) if self.answers else "once"
+
+    def add(self, *args: Any) -> Callable[[], None]:  # `asides.add(fn)` and `system.add(name, fn)`
+        return lambda: None
+
+    def register(self, *args: Any, **how: Any) -> Callable[[], None]:  # `commands.register`
+        return lambda: None
+
+    def asking(self) -> tuple[str, ...]:  # `access`: nothing is asked about a file
+        return ()
+
+    def refusal(self, kind: str, path: str) -> str | None:
+        return None
+
+
+@cordis.component(provides=("host",))
+async def _grant_host(*, config: Mapping[str, Any]) -> cordis.Effects:
+    yield cordis.bind("host", _Host(code=_code(), secrets=tuple(config["secrets"])))
+
+
+class _NoKeys:
+    def key_envs(self) -> Mapping[str, list[str]]:
+        return {}
+
+
+@cordis.component(provides=("models",))
+async def _grant_models() -> cordis.Effects:
+    yield cordis.bind("models", _NoKeys())
+
+
+@cordis.component(provides=("output", "asides", "commands", "system", "access"))
+async def _grant_person(*, config: Mapping[str, Any]) -> cordis.Effects:
+    person = config["person"]
+    for key in ("output", "asides", "commands", "system", "access"):
+        yield cordis.bind(key, person)
+
+
+async def _granting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *answers: str, python: Mapping[str, Any] | None = None
+) -> tuple[Any, _Person, Path]:
+    """A session of the real rows (a confined runner, the broker and its prompt, the python tool and
+    `tools`) over a person who answers `answers`, with a project, and a directory beside it with a file
+    the jail can't read. Calls to bh-02's tools from an input are served as the loop serves them."""
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    project, data = tmp_path / "project", tmp_path / "data"
+    project.mkdir()
+    (tmp_path / "secrets").mkdir()
+    data.mkdir(exist_ok=True)
+    (data / "secret.txt").write_text("the data")
+    person = _Person(tmp_path / "state", *answers)
+    here = f"{__name__}:"
+    booted = await boot(
+        [],
+        [
+            Row("host", f"{here}_grant_host", {"secrets": [str(tmp_path / "secrets")]}),
+            Row("models", f"{here}_grant_models"),
+            Row("person", f"{here}_grant_person", {"person": person}),
+            Row("tools", "agent:tools"),
+            Row("grants", "runner:grants"),
+            Row("runner", "runner:confined"),
+            Row("approval", "runner:approval"),
+            Row("grant-prompt", "runner:grant_prompt"),
+            Row("python", "python:tool", {"root": str(project), "startup": [], **(python or {})}),
+        ],
+        watch=None,
+    )
+    async with asyncio.timeout(60):
+        await booted.runtime.settle()
+    tools = booted.runtime.root.get("tools")
+
+    async def call(name: str, given: Mapping[str, Any]) -> Mapping[str, Any]:
+        answer = await tools.get(name).run(given)
+        return {"content": answer["content"], "failed": False}
+
+    tools.serve(call)
+    return booted, person, data
+
+
+async def _input(booted: Any, code: str) -> str:
+    async with asyncio.timeout(120):
+        answer = await booted.runtime.root.get("tools").get("python").run({"code": code})
+    return str(answer["content"])
+
+
+@pytest.mark.usefixtures("_needs_a_jail")
+async def test_an_input_asks_for_a_path_and_holds_it_from_the_next_input_after_a_restart_that_says_so(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The proof of TASK-0181.08: an input calls `tools.grant(kind="read", ...)` across the socket, the
+    person answers once, and the variable the input set is still there to the end of that input; the next
+    input starts after a restart whose words reach the model, reads the directory, and the variable is
+    gone."""
+    booted, person, data = await _granting(tmp_path, monkeypatch)
+    reloaded: list[str] = []  # a grant changes what the broker holds, never a row's dependencies
+    booted.runtime.listeners.append(
+        lambda event: reloaded.append(event.fiber) if event.kind == "reload" else None
+    )
+    secret = str(data / "secret.txt")
+    before = await _input(booted, f"x = 41\nprint(open({secret!r}).read())")
+    assert "Error" in before and "the data" not in before  # the jail does not hold it yet
+
+    asked = await _input(
+        booted,
+        f"x = 42\nprint(tools.grant(kind='read', target={str(data)!r}, reason='reads the data'))\nprint(x)",
+    )
+    assert "Granted for this session: read: " in asked and "from the next input" in asked
+    assert asked.rstrip().endswith("42")  # the process was not replaced under the input
+    (question,) = person.asked
+    assert question["title"] == f"Allow read {data}?"
+    assert question["lines"][1] == "Asked by: input python, because: reads the data"
+
+    after = await _input(
+        booted,
+        f"print(open({secret!r}).read())\ntry:\n    print(x)\nexcept NameError:\n    print('x is gone')",
+    )
+    assert after.startswith("(the REPL was started again, because what the person granted the jail changed")
+    assert "the data" in after and "x is gone" in after  # held in the new process, the variable is not
+    assert "started again" not in await _input(booted, "print(1)")  # one restart for one change
+    assert reloaded == []  # no row reloaded: the python row kept its binding, and restarted its process
+    await booted.runtime.shutdown()
+
+
+@pytest.mark.usefixtures("_needs_a_jail")
+async def test_a_request_the_floor_refuses_or_one_that_is_not_one_asks_nobody_and_a_no_holds_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    booted, person, data = await _granting(tmp_path, monkeypatch, "no")
+    secrets = str(tmp_path / "secrets")  # what the host names as a secret: never granted
+    refused = await _input(
+        booted, f"print(tools.grant(kind='write', target={secrets!r}, reason='edit the sessions'))"
+    )
+    assert "Not granted, and nobody was asked" in refused
+    wrong = await _input(booted, "print(tools.grant(kind='sudo', target='/', reason='x'))")
+    assert "`kind` is one of" in wrong
+    relative = await _input(booted, "print(tools.grant(kind='read', target='data', reason='x'))")
+    assert "absolute path" in relative
+    assert person.asked == []  # nobody was asked about any of them
+
+    declined = await _input(
+        booted, f"print(tools.grant(kind='read', target={str(data)!r}, reason='reads the data'))"
+    )
+    assert "Not granted: the person did not allow" in declined and len(person.asked) == 1
+    assert "started again" not in await _input(booted, "print(2)")  # a no restarts nothing
+    await booted.runtime.shutdown()
+
+
+@pytest.mark.usefixtures("_needs_a_jail")
+@pytest.mark.parametrize("agent", ["", "general-1 (general)"])
+async def test_a_row_s_standing_need_is_asked_before_the_first_start_and_costs_no_restart(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, agent: str
+) -> None:
+    """`needs` in the python row's config is asked as the row (or the sub-agent whose row it is) before its
+    first worker starts, so the first input already holds it and nothing starts again."""
+    data = tmp_path / "data"
+    data.mkdir()
+    need = {"kind": "read", "target": str(data), "reason": "the project reads its fixtures"}
+    config: dict[str, Any] = {"needs": [need], **({"agent": agent} if agent else {})}
+    booted, person, _ = await _granting(tmp_path, monkeypatch, python=config)
+    (question,) = person.asked
+    who = f"agent {agent}" if agent else "row python"
+    assert question["lines"][1] == f"Asked by: {who}, because: the project reads its fixtures"
+    assert person.jails_when_asked == [0]  # asked before any program had started
+    out = await _input(booted, f"print(open({str(data / 'secret.txt')!r}).read())")
+    assert out.strip().endswith("\nthe data") and "started again" not in out  # answered before it existed
+    await booted.runtime.shutdown()

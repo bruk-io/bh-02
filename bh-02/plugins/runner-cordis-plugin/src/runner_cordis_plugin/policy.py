@@ -51,6 +51,7 @@ __all__ = [
     "Policy",
     "admitted",
     "allowlisted",
+    "floor_of",
     "git_author",
     "link_directories",
     "readable_roots",
@@ -158,6 +159,35 @@ class BrigConfig:
     env: Sequence[str] | None = None
 
 
+def floor_of(
+    *,
+    home: str,
+    layers: Sequence[str],
+    secrets: Sequence[str] = (),
+    trusted: Sequence[str] = (),
+    code: Sequence[str] = (),
+    interpreters: Sequence[str] = (),
+    links: Sequence[str] = (),
+    store: str = "",
+    key_envs: Mapping[str, Sequence[str]] | None = None,
+) -> Floor:
+    """What no grant may touch (`grants.Floor`), from what `spec_for` is given: the one place the
+    floor is built, so a request refused when it is made (`admitted`) is refused on the same
+    grounds `spec_for` refuses it at a start. `links` are the links on the way to the interpreter,
+    each as the host found it; the floor holds the directory of each."""
+    return Floor(
+        secrets=tuple(secrets),
+        grants=store,
+        credentials=tuple(str(Path(home, name)) for name in CREDENTIALS),
+        layers=tuple(layers),
+        code=tuple(code),
+        trusted=tuple(trusted),
+        interpreters=tuple(interpreters),
+        links=tuple(str(PurePosixPath(link).parent) for link in links),
+        key_envs=key_envs,
+    )
+
+
 def spec_for(
     *,
     root: str,
@@ -197,15 +227,15 @@ def spec_for(
     name on the allow-list. A write grant that is a directory outside the project gets the
     self-modification list and the `trusted` and `code` denies a root has; one on exactly a
     self-modifying path under a root lifts that deny. A grant left out is in `Policy.refused`."""
-    floor = Floor(
-        secrets=tuple(secrets),
-        grants=store,
-        credentials=tuple(str(Path(home, name)) for name in CREDENTIALS),
-        layers=tuple(layers),
-        code=tuple(code),
-        trusted=tuple(trusted),
-        interpreters=tuple(interpreters),
-        links=tuple(str(PurePosixPath(link).parent) for link in links),
+    floor = floor_of(
+        home=home,
+        layers=layers,
+        secrets=secrets,
+        trusted=trusted,
+        code=code,
+        interpreters=interpreters,
+        links=links,
+        store=store,
         key_envs=key_envs,
     )
     allowed, refused = admitted(grants, floor)

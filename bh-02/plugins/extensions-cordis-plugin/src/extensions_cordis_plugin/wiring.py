@@ -10,6 +10,7 @@ from extensions_cordis_plugin.host import (
     Extensions,
     ExtensionsConfig,
     Frame,
+    Granting,
     Rule,
     Runner,
     System,
@@ -37,6 +38,7 @@ async def process(
     tools: Tools,
     approval: Rule,
     output: Confirm,
+    grants: Granting,
     config: ExtensionsConfig,
 ) -> Effects:
     """Fills an `extensions` row: `use = "extensions:process"`. Watches the project's
@@ -46,7 +48,14 @@ async def process(
     `/release` it stops its own worker (`runner.on_release`). Binds nothing: what the extensions
     add goes into `commands`, `frame`, `system` and `tools` (a tool's calls run in the worker,
     each decided by the `approval` rule as an input is), each entry with its remover, so the row
-    leaving takes every one of them back."""
-    running = yield enter(Extensions(runner, commands, frame, system, tools, approval, output, config))
+    leaving takes every one of them back. An extension may also ask the person for a grant
+    (`grants.ask(...)` in its code), put through the `grants` broker as that extension's; and when a
+    path or variable grant changes (`grants.generation()`, followed through `grants.on_change`) its
+    worker is replaced at once, every extension loading again. Depends on the broker's binding, which
+    never reloads, so a grant never reloads the row."""
+    running = yield enter(
+        Extensions(runner, commands, frame, system, tools, approval, output, config, grants)
+    )
+    yield acquire(grants.on_change, running.regranted)
     yield acquire(runner.on_release, running.stopped)
     yield acquire(system.add, "extensions", running.section)

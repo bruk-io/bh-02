@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from agent_cordis_plugin import ToolBroker
 from cordis import Booted, Effects, acquire, bind, boot, component
 from cordis.composition import Row
 from cordis.loader import resolve
@@ -87,6 +88,25 @@ async def _output(*, config: _Said) -> Effects:
     yield bind("output", _Output(config.values, config.holding))
 
 
+class _Sections:
+    def __init__(self) -> None:
+        self.added: dict[str, Callable[[], str]] = {}
+
+    def add(self, name: str, section: Callable[[], str]) -> Callable[[], None]:
+        self.added[name] = section
+        return lambda: self.added.pop(name)
+
+
+@component(provides=("tools",))
+async def _tools() -> Effects:
+    yield bind("tools", ToolBroker())
+
+
+@component(provides=("system",))
+async def _system() -> Effects:
+    yield bind("system", _Sections())
+
+
 @component(provides=("asides",))
 async def _asides() -> Effects:
     yield bind("asides", _Asides())
@@ -122,7 +142,7 @@ async def _settled() -> None:
     await asyncio.sleep(0.3)
 
 
-async def _booted(store: Path, *values: str, holding: bool = False) -> Booted:
+async def _booted(store: Path, *values: str, holding: bool = False, runner: str = "confined") -> Booted:
     """The rows over a store; the person answers `values` in turn (the first is the answer to a
     row's need, asked as the prompt is served), or holds each question open."""
     booted = await boot(
@@ -133,10 +153,12 @@ async def _booted(store: Path, *values: str, holding: bool = False) -> Booted:
             _row("models", "_models"),
             _row("output", "_output", values=values, holding=holding),
             _row("asides", "_asides"),
+            _row("tools", "_tools"),
+            _row("system", "_system"),
             _row("requester", "_requester"),
             Row("grants", "runner_cordis_plugin.wiring:grants"),
             Row("grant-prompt", "runner_cordis_plugin.wiring:grant_prompt"),
-            Row("runner", "runner_cordis_plugin.wiring:confined"),
+            Row("runner", f"runner_cordis_plugin.wiring:{runner}"),
             Row("approval", "runner_cordis_plugin.wiring:approval"),
         ],
         watch=None,
@@ -233,7 +255,11 @@ def test_the_broker_depends_on_host_alone_and_approval_on_neither_it_nor_a_reque
     binding, reloads no row (the tests above watch it not)."""
     assert resolve("runner:grants").inject == frozenset({"host"})
     assert resolve("runner:approval").inject == frozenset({"runner"})
-    assert resolve("runner:grant_prompt").inject == frozenset({"grants", "output", "asides", "commands"})
+    assert resolve("runner:grant_prompt").inject == frozenset(
+        {"grants", "output", "asides", "commands", "tools", "system", "runner", "approval"}
+    )
+    # the rows that take `grants` for a need or a restart take the binding, which never reloads
+    assert "grants" in resolve("python:tool").inject and "grants" in resolve("extensions:process").inject
     # what the prompt reads is not what approval or the runner read, so none of it reloads them
     assert not {"output", "asides", "grant-prompt"} & resolve("runner:approval").inject
     assert not {"output", "asides", "grant-prompt"} & resolve("runner_cordis_plugin.wiring:confined").inject
@@ -392,4 +418,89 @@ async def test_revoking_a_net_grant_through_the_command_says_open_connections_st
     (entry,) = [each for each in await grants.list() if each.request.grant == NET.grant]
     said = await commands.registered["grants"](f"revoke {entry.id}")
     assert said.startswith("revoked: ") and "connections already open" in said
+    await rt.shutdown()
+
+
+async def _grant_tool(rt: Any) -> Any:
+    registered = rt.root.get("tools").get("grant")
+    assert registered is not None
+    return registered
+
+
+async def test_grant_is_a_harness_tool_that_tells_the_model_of_itself_in_a_system_section_only(
+    tmp_path: Path,
+) -> None:
+    store = tmp_path / "grants"
+    store.mkdir(mode=0o700)
+    booted = await _booted(store)
+    rt = booted.runtime
+    registered = await _grant_tool(rt)
+    assert registered.runs == "harness"  # approval asks exactly what it asks of a call in the jail
+    spec = registered.spec
+    assert spec["name"] == "grant" and spec["parameters"]["required"] == ["kind", "target", "reason"]
+    assert "restart" not in spec["description"] and "once" not in spec["description"]  # the section's words
+    told = rt.root.get("system").added["grants"]()
+    assert "tools.grant(kind=..., target=..., reason=...)" in told and "starts again" in told
+    await rt.shutdown()
+
+
+async def test_a_call_is_asked_as_the_input_and_says_when_each_kind_holds(tmp_path: Path) -> None:
+    store = tmp_path / "grants"
+    store.mkdir(mode=0o700)
+    data = tmp_path / "data"
+    data.mkdir()
+    booted = await _booted(store)
+    rt = booted.runtime
+    grants, output = rt.root.get("grants"), rt.root.get("output")
+    output.asked.clear()
+    run = (await _grant_tool(rt)).run
+
+    output.values[:] = ["once", "always"]
+    before = grants.generation()
+    path = await run({"kind": "read", "target": str(data), "reason": "reads the data"})
+    assert path["content"].startswith(f"Granted for this session: read: {data}; it holds from the next input")
+    assert grants.generation() != before  # the Python process starts again before its next input
+    assert output.asked[0]["lines"][1] == "Asked by: input python, because: reads the data"
+
+    net = await run({"kind": "net", "target": "example.com", "port": 443, "reason": "fetches docs"})
+    assert net["content"].startswith("Granted for this project: net: example.com:443; it holds now")
+    again = await run({"kind": "read", "target": str(data), "reason": "reads the data"})
+    assert "is already granted" in again["content"] and len(output.asked) == 2  # not asked twice
+    await rt.shutdown()
+
+
+async def test_a_call_a_floor_refuses_or_that_is_not_a_request_asks_nobody(tmp_path: Path) -> None:
+    store = tmp_path / "grants"
+    store.mkdir(mode=0o700)
+    booted = await _booted(store)
+    rt = booted.runtime
+    output = rt.root.get("output")
+    output.asked.clear()
+    run = (await _grant_tool(rt)).run
+    refused = await run({"kind": "read", "target": str(store), "reason": "look at the grants"})
+    assert refused["content"].startswith("Not granted, and nobody was asked")  # the store is on the floor
+    for bad in (
+        {"kind": "sudo", "target": "/", "reason": "x"},
+        {"kind": "read", "target": "relative", "reason": "x"},
+        {"kind": "net", "target": "example.com", "reason": "no port"},
+        {"kind": "read", "target": "/d", "port": 80, "reason": "a port on a path"},
+        {"kind": "env", "target": "HTTP_PROXY", "reason": "x"},
+        {"kind": "read", "target": "/d"},
+    ):
+        said = (await run(bad))["content"]
+        assert said.startswith(("error:", "Not granted, and nobody was asked")), said
+    assert output.asked == []
+    await rt.shutdown()
+
+
+async def test_with_nothing_confining_there_is_nothing_to_grant_and_nobody_is_asked(tmp_path: Path) -> None:
+    store = tmp_path / "grants"
+    store.mkdir(mode=0o700)
+    booted = await _booted(store, runner="unconfined")
+    rt = booted.runtime
+    output = rt.root.get("output")
+    output.asked.clear()
+    said = await (await _grant_tool(rt)).run({"kind": "read", "target": "/d", "reason": "x"})
+    assert "nothing to grant" in said["content"] and output.asked == []
+    assert "`--no-jail`" in rt.root.get("system").added["grants"]()
     await rt.shutdown()

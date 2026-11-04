@@ -74,6 +74,7 @@ __all__ = [
     "Extensions",
     "ExtensionsConfig",
     "Frame",
+    "Granting",
     "Rule",
     "Runner",
     "System",
@@ -119,6 +120,19 @@ class Runner(Protocol):
 
     async def start(self, argv_for: Callable[[str], Sequence[str]], *, cwd: str, owner: str) -> _Jailed: ...
     def released(self) -> bool: ...
+
+
+@runtime_checkable
+class Granting(Protocol):
+    """What the extensions need of the `grants` value (CONTRACTS.md: grants): `generation()`, which
+    differs once a path or variable grant has changed since the worker started (so it is started
+    again at once: a jail fixes both when it is made); `on_change`, which says when to look, and
+    `asking`, an extension's request put to the person as that extension's, answered `once`,
+    `always`, `no` or `standing` (the broker's outcome, a string enum)."""
+
+    def generation(self) -> int: ...
+    def on_change(self, fn: Callable[[], None]) -> Callable[[], None]: ...
+    async def asking(self, spec: Mapping[str, Any], source: str, name: str) -> str: ...
 
 
 @runtime_checkable
@@ -229,8 +243,13 @@ class Extensions:
         approval: Rule,
         output: Confirm,
         config: ExtensionsConfig,
+        grants: Granting,
     ) -> None:
         self._runner = runner
+        self._grants = grants
+        self._generation = grants.generation()  # what the running worker was started with
+        self._regrant = asyncio.Event()  # what is granted changed: look at once, not at the next tick
+        self._asking: set[asyncio.Task[None]] = set()  # an extension's requests waiting for the person
         self._tools = tools
         self._output = output
         self._commands = commands
@@ -289,12 +308,21 @@ class Extensions:
         self._watcher = asyncio.ensure_future(self._watch())
         return self
 
+    def regranted(self) -> None:
+        """What is granted may have changed (the broker's `on_change`): the next `look` compares it
+        with what the worker started with, and starts a new worker at once if a path or variable
+        grant is not the same."""
+        self._regrant.set()
+
     async def __aexit__(
         self, kind: type[BaseException] | None, error: BaseException | None, tb: TracebackType | None
     ) -> None:
         if self._watcher is not None:
             self._watcher.cancel()
             await asyncio.gather(self._watcher, return_exceptions=True)
+        for asking in tuple(self._asking):
+            asking.cancel()
+        await asyncio.gather(*self._asking, return_exceptions=True)
         self._leaving = True
         await self._stop()
         if self._field is not None:
@@ -322,6 +350,13 @@ class Extensions:
         gone. The watcher does this every `watch` seconds."""
         self._note_reserved()
         found = self._found()
+        if self._writer is not None and self._grants.generation() != self._generation:
+            # a path or variable was granted or taken back: a jail fixes both when it is made, so the
+            # worker is replaced now (never mid-load: `look` is the one that loads), and every
+            # extension loads again in the new one
+            await self._stop()
+            self._ended, self._halted, self._seen, self._statuses = False, None, {}, {}
+            self._publish()
         if self._ended:
             self._stopped(found)
             return
@@ -365,7 +400,10 @@ class Extensions:
 
     async def _watch(self) -> None:
         while True:
-            await asyncio.sleep(self._config.watch)
+            with contextlib.suppress(TimeoutError):
+                async with asyncio.timeout(self._config.watch):
+                    await self._regrant.wait()
+            self._regrant.clear()
             await self.look()
 
     def _found(self) -> dict[str, tuple[int, int]]:
@@ -521,6 +559,23 @@ class Extensions:
             case "ran":
                 if (call := self._calls.pop(int(message["call"]), None)) and not call.done():
                     call.set_result(str(message.get("answer", "")))
+            case "grant":
+                asking = asyncio.ensure_future(self._granting(message))
+                self._asking.add(asking)
+                asking.add_done_callback(self._asking.discard)
+
+    async def _granting(self, message: Mapping[str, Any]) -> None:
+        """An extension asked for a grant (`grants.ask` in its code): put to the person as that
+        extension's through the broker, and its answer sent back. A request that is not one (a kind
+        that is none, a path that is not absolute) is answered with why."""
+        call, extension = message.get("call"), str(message.get("extension", ""))
+        spec = {key: message[key] for key in ("kind", "target", "port", "reason") if key in message}
+        try:
+            answer = {"answer": str(await self._grants.asking(spec, "extension", extension))}
+        except ValueError as error:  # `Invalid`: the broker's words say what to write instead
+            answer = {"error": str(error)}
+        with contextlib.suppress(_Gone):  # the worker ended (or was replaced) while the person decided
+            self._send({"op": "granted", "call": call, **answer})
 
     def _add(self, message: Mapping[str, Any]) -> None:
         entry, extension, kind = int(message["id"]), str(message["extension"]), message.get("kind")
@@ -635,6 +690,7 @@ class Extensions:
         if self._process is not None:  # what is left of a worker that ended: its jail's teardown
             await self._stop()
         root = str(Path(self._config.root).resolve())
+        self._generation = self._grants.generation()  # before the start reads what is granted
         try:
             self._process = await self._runner.start(worker_argv, cwd=root, owner="extensions")
             reader, self._writer = await asyncio.open_unix_connection(
