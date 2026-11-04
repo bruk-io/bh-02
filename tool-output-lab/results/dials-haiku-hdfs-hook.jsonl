@@ -1,0 +1,9 @@
+{"tool": "mcp__fixture__get_logs", "tool_use_id": "toolu_01NoQRJiqpM1rfuueMfuj1nw", "spilled": false, "raw_tokens": 9205, "branch": "lines", "out_tokens": 1461}
+{"tool": "mcp__fixture__get_logs", "tool_use_id": "toolu_01LoLGrR7UTvuJ1ECqzbVR5b", "spilled": false, "raw_tokens": 8713, "branch": "lines", "out_tokens": 1464}
+{"tool": "mcp__fixture__get_logs", "tool_use_id": "toolu_01AEioinjG51PD43cNDqF7Fo", "spilled": false, "raw_tokens": 8049, "branch": "lines", "out_tokens": 1860}
+{"tool": "mcp__fixture__get_logs", "tool_use_id": "toolu_01RRXaR5MHDjCCzBsfT1J4d1", "spilled": false, "raw_tokens": 8028, "branch": "lines", "out_tokens": 1504}
+{"tool": "mcp__fixture__get_logs", "tool_use_id": "toolu_01STMTKHHbuLi1QieKgCCKFp", "spilled": false, "raw_tokens": 8714, "branch": "lines", "out_tokens": 1904}
+{"tool": "mcp__fixture__get_logs", "tool_use_id": "toolu_01PwukX1f1R49SutGbNv52YH", "spilled": false, "raw_tokens": 8853, "branch": "lines", "out_tokens": 1965}
+{"tool": "mcp__fixture__get_logs", "tool_use_id": "toolu_01BXKRYcjEUWVetWiucMf6fq", "spilled": false, "raw_tokens": 8535, "branch": "lines", "out_tokens": 1966}
+{"tool": "mcp__fixture__get_logs", "tool_use_id": "toolu_01PW2aboV1JScg6s4S8f5a8r", "spilled": false, "raw_tokens": 8127, "branch": "lines", "out_tokens": 1450}
+{"tool": "mcp__fixture__get_logs", "tool_use_id": "toolu_01W2Rrkb5T1vaYHZ8Ex4XZJX", "spilled": false, "raw_tokens": 8347, "branch": "lines", "out_tokens": 1502}
