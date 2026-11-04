@@ -134,4 +134,6 @@ INFO    -  Documentation built in 5.09 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+Review (reviewer, not the worker): every criterion met and ticked; close-task refused. scripts/check full tier exit 0 (2601 passed; first line is uv's UV_NATIVE_TLS deprecation warning, then '== format', nothing reformatted). #1: _agents_config raises at the generator's first line, before any effect, so the row fails and /explain carries the message; the repro test asserts both phrases in loader.explain('agents'). #2: that test. The Mapping | AgentsConfig annotation does not weaken the contract: cordis's configure() only builds the dataclass, which _agents_config now does (unknown keys still refused, still before any effect; Row.config defaults to {}). Criteria clean: #1 and #2 only. close-task refusal: 'the repro test file changed since 4057a84'. The repro test itself is unchanged from 4057a84 through 3cff21d; the file changed only in 63d6f38 (TASK-0189, another test in the same file). Status left In Progress for the lead: close by hand-off once the script accepts, or record a new repro on HEAD.
 <!-- SECTION:NOTES:END -->
