@@ -3,7 +3,7 @@ id: TASK-0192
 title: >-
   test_agent_records' stopped-step test races a 10 ms sleep and fails under the
   full suite's load
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-11-04T14:55:00Z'
@@ -99,4 +99,6 @@ INFO    -  Documentation built in 4.21 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+Reviewed: closed. Silent.complete sets an event on entry and the test awaits it before cancelling, which is the precondition the test means (a step has started); asserts unchanged. Full scripts/check green (2603 passed, gates, docs ok). The No repro note is fair: the load runs show the race is in the test. No findings.
 <!-- SECTION:NOTES:END -->
