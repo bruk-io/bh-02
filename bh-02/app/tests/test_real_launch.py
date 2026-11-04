@@ -238,7 +238,7 @@ def test_a_message_gets_its_reply_ctrl_c_only_explains_and_ctrl_q_leaves(launch:
     app.wait_for("Nothing is running.", after=replied)
     assert app.process.poll() is None
     app.press(b"\x11")  # Ctrl-Q
-    assert app.exit_code() == 0
+    assert app.exit_code() == 0, f"exit code was not 0; the screen said:\n{app.text()[-3000:]}"
     assert "(uv run bh-02 --resume to continue it)" in app.text()
 
 
@@ -265,7 +265,7 @@ def test_a_bang_line_runs_in_the_shell_and_the_model_reads_its_output_with_the_n
     assert "[fake-2] echo:" in replied and "SHELLSAID" in replied  # the output, in front of it
     assert re.search(r"\(message\s+1\)", replied), replied[-3000:]  # the `!` line was no message
     app.press(b"\x11")
-    assert app.exit_code() == 0
+    assert app.exit_code() == 0, f"exit code was not 0; the screen said:\n{app.text()[-3000:]}"
 
 
 def test_ctrl_c_says_a_bang_command_runs_on_and_ctrl_q_leaves_at_once_ending_it(
@@ -286,7 +286,7 @@ def test_ctrl_c_says_a_bang_command_runs_on_and_ctrl_q_leaves_at_once_ending_it(
     assert _alive(shell)  # Ctrl-C did not stop it
     left = time.monotonic()
     app.press(b"\x11")
-    assert app.exit_code(15) == 0
+    assert app.exit_code(15) == 0, f"exit code was not 0; the screen said:\n{app.text()[-3000:]}"
     assert time.monotonic() - left < 10, "bh-02 waited for the command"
     assert "ended-42" not in app.text()[ready:]
     assert not _alive(shell)  # the command ended with bh-02
@@ -307,7 +307,7 @@ def test_a_bang_command_that_runs_for_seconds_shows_the_working_line_until_it_an
     app.settle(2.5)  # long enough for two more ticks, if it were still running
     assert "Working" not in app.text()[answered:]
     app.press(b"\x11")
-    assert app.exit_code() == 0
+    assert app.exit_code() == 0, f"exit code was not 0; the screen said:\n{app.text()[-3000:]}"
 
 
 def test_the_transcript_draws_every_kind_of_event_and_a_long_reply(launch: Launch) -> None:
@@ -330,7 +330,7 @@ def test_the_transcript_draws_every_kind_of_event_and_a_long_reply(launch: Launc
     app.type("lines 2000")
     app.wait_for("line 1999 of the long reply", 60, after=stopped)
     app.type("/exit")  # and it still answers the keyboard
-    assert app.exit_code() == 0
+    assert app.exit_code() == 0, f"exit code was not 0; the screen said:\n{app.text()[-3000:]}"
     assert time.monotonic() - started < 60
 
 
@@ -340,14 +340,14 @@ def test_a_resumed_session_shows_what_was_said(launch: Launch) -> None:
     first.type("hello there")
     first.wait_for("echo: HELLO THERE", after=ready)
     first.press(b"\x11")
-    assert first.exit_code() == 0
+    assert first.exit_code() == 0, f"exit code was not 0; the screen said:\n{first.text()[-3000:]}"
     again = launch("echo", "--resume")
     ready = again.wait_for(_READY, 60)
     before = again.text()[:ready]  # drawn before the app said how to leave: the history
     assert "hello there" in before and "echo: HELLO THERE" in before
     assert "the session so far" in before
     again.type("/exit")
-    assert again.exit_code() == 0
+    assert again.exit_code() == 0, f"exit code was not 0; the screen said:\n{again.text()[-3000:]}"
 
 
 def test_a_running_bh_02_holds_its_session_and_a_second_resume_of_it_is_refused_until_it_ends(
@@ -359,7 +359,7 @@ def test_a_running_bh_02_holds_its_session_and_a_second_resume_of_it_is_refused_
     first = launch("echo")
     first.wait_for(_READY, 60)
     second = launch("echo", "--resume")
-    assert second.exit_code() == 1
+    assert second.exit_code() == 1, f"exit code was not 1; the screen said:\n{second.text()[-3000:]}"
     said = second.text()
     assert "error: session " in said and f"is held by bh-02 process {first.process.pid}" in said
     assert "Leave that bh-02 first" in said
@@ -369,7 +369,7 @@ def test_a_running_bh_02_holds_its_session_and_a_second_resume_of_it_is_refused_
     third = launch("echo", "--resume")
     third.wait_for(_READY, 60)
     third.type("/exit")
-    assert third.exit_code() == 0
+    assert third.exit_code() == 0, f"exit code was not 0; the screen said:\n{third.text()[-3000:]}"
 
 
 def _children(pid: int) -> list[int]:
@@ -421,14 +421,14 @@ def test_exit_in_the_composer_leaves_cleanly(launch: Launch) -> None:
     app = launch("echo")
     app.wait_for(_READY, 60)
     app.type("/exit")
-    assert app.exit_code() == 0
+    assert app.exit_code() == 0, f"exit code was not 0; the screen said:\n{app.text()[-3000:]}"
 
 
 def test_a_crash_in_the_app_is_reported_after_the_terminal_is_restored(launch: Launch) -> None:
     app = launch("bomb")
     ready = app.wait_for(_READY, 60)
     app.type("boom")
-    assert app.exit_code() == 1
+    assert app.exit_code() == 1, f"exit code was not 1; the screen said:\n{app.text()[-3000:]}"
     after = app.text()[ready:]
     assert "RuntimeError" in after and "cannot be drawn" in after  # Textual's traceback
     assert "error: the app crashed (exit code 1)" in after  # and bh-02's one line, after it
@@ -448,7 +448,7 @@ def test_an_input_asks_in_a_modal_and_its_output_comes_back(launch: Launch) -> N
     app.press(b"\x03")  # Ctrl-C while the input runs: the reply stops, the app stays
     app.wait_for("stopped: interrupted", 10, after=asked)
     app.press(b"\x11")
-    assert app.exit_code() == 0
+    assert app.exit_code() == 0, f"exit code was not 0; the screen said:\n{app.text()[-3000:]}"
 
 
 def test_a_sub_agent_s_question_is_labelled_and_its_report_comes_back(launch: Launch, tmp_path: Path) -> None:
@@ -471,7 +471,7 @@ def test_a_sub_agent_s_question_is_labelled_and_its_report_comes_back(launch: La
     app.wait_for("the input said: 42", 10, after=labelled)
     assert "agents/general-1" not in app.text()  # the child's rows say nothing on the screen
     app.press(b"\x11")
-    assert app.exit_code() == 0
+    assert app.exit_code() == 0, f"exit code was not 0; the screen said:\n{app.text()[-3000:]}"
     traced = trace.read_text()
     assert "agents/general-1/loop" in traced and "agents/general-1/python" in traced
     # the session keeps the child's rows too, in its own file, for `bh-02 trajectory`
@@ -498,7 +498,7 @@ def test_an_unjailed_input_runs_on_a_yes_and_not_at_all_on_a_no(launch: Launch, 
     work = tmp_path / "work"
     assert (work / "y.txt").read_text() == "yes" and not (work / "n.txt").exists()
     app.press(b"\x11")
-    assert app.exit_code() == 0
+    assert app.exit_code() == 0, f"exit code was not 0; the screen said:\n{app.text()[-3000:]}"
 
 
 def test_keys_typed_as_the_modal_comes_up_do_not_answer_it(launch: Launch, tmp_path: Path) -> None:
@@ -522,7 +522,7 @@ def test_keys_typed_as_the_modal_comes_up_do_not_answer_it(launch: Launch, tmp_p
     app.answer(b"y")
     app.wait_for("the input said: next", 10, after=answered)
     app.press(b"\x11")
-    assert app.exit_code() == 0
+    assert app.exit_code() == 0, f"exit code was not 0; the screen said:\n{app.text()[-3000:]}"
 
 
 def test_a_layer_that_cannot_be_reloaded_is_reported_after_the_app_exits(
@@ -539,7 +539,7 @@ def test_a_layer_that_cannot_be_reloaded_is_reported_after_the_app_exits(
         time.sleep(0.1)
     assert "report: reload failed: TOMLDecodeError" in trace.read_text()
     app.press(b"\x11")
-    assert app.exit_code() == 0
+    assert app.exit_code() == 0, f"exit code was not 0; the screen said:\n{app.text()[-3000:]}"
     assert "error: reload failed: TOMLDecodeError" in app.text()
     # everything the terminal was sent: the report shows once, and that is after the app left
     assert app.text().count("reload failed") == 1, app.text()[-2000:]
@@ -554,7 +554,7 @@ def test_the_screen_is_drawn_in_bh_01_s_dark_theme(launch: Launch) -> None:
     assert _sgr("48", "bh-bg") in written  # behind everything
     assert _sgr("38", "bh-ring") in written  # mandarin: the focused composer's border
     app.press(b"\x11")
-    assert app.exit_code() == 0
+    assert app.exit_code() == 0, f"exit code was not 0; the screen said:\n{app.text()[-3000:]}"
 
 
 def test_the_palette_runs_a_command_and_the_status_bar_follows_the_model(launch: Launch) -> None:
@@ -576,7 +576,7 @@ def test_the_palette_runs_a_command_and_the_status_bar_follows_the_model(launch:
     app.type("hello")
     app.wait_for("[fake-2] echo: HELLO", 20, after=offered)
     app.press(b"\x11")
-    assert app.exit_code() == 0
+    assert app.exit_code() == 0, f"exit code was not 0; the screen said:\n{app.text()[-3000:]}"
 
 
 def test_a_models_file_default_that_is_no_name_shows_in_the_status_bar_and_the_first_message(
@@ -609,7 +609,7 @@ def test_a_models_file_default_that_is_no_name_shows_in_the_status_bar_and_the_f
         app.type("again")
         app.wait_for("[fake] echo: AGAIN", 20, after=told)
         app.press(b"\x11")
-        assert app.exit_code() == 0
+        assert app.exit_code() == 0, f"exit code was not 0; the screen said:\n{app.text()[-3000:]}"
     finally:
         app.close()
 
@@ -618,7 +618,7 @@ def test_a_patch_that_cannot_be_read_is_one_line_not_a_traceback(launch: Launch,
     broken = tmp_path / "broken.toml"
     broken.write_text("[[plugin]\n")
     app = launch("echo", "--patch", str(broken))
-    assert app.exit_code() == 1
+    assert app.exit_code() == 1, f"exit code was not 1; the screen said:\n{app.text()[-3000:]}"
     assert f"error: {broken}: Expected ']]'" in app.text() and "fix the file or drop it" in app.text()
     assert "Traceback" not in app.text()
 
@@ -640,7 +640,7 @@ def test_ctrl_c_with_the_modal_up_declines_and_stops_the_reply(launch: Launch, t
     app.answer(b"y")
     app.wait_for("the input said: 42", 10, after=stopped)
     app.press(b"\x11")
-    assert app.exit_code() == 0
+    assert app.exit_code() == 0, f"exit code was not 0; the screen said:\n{app.text()[-3000:]}"
     (transcript,) = (tmp_path / "state").glob("bh-02/sessions/*/transcript.jsonl")
     results = [
         m["content"] for m in map(json.loads, transcript.read_text().splitlines()) if m["role"] == "tool"
@@ -656,7 +656,7 @@ def test_a_narrow_screen_keeps_every_jail_grade_named(launch: Launch) -> None:
     app.wait_for(_READY, 60)
     app.wait_for("jail: unjailed fs_write ✗ network ✗ fs_read ✗ env ✗")  # every grade, named
     app.press(b"\x11")
-    assert app.exit_code() == 0
+    assert app.exit_code() == 0, f"exit code was not 0; the screen said:\n{app.text()[-3000:]}"
 
 
 def test_ctrl_c_stops_a_reply_mid_stream_whether_it_comes_paced_or_all_at_once(launch: Launch) -> None:
@@ -678,7 +678,7 @@ def test_ctrl_c_stops_a_reply_mid_stream_whether_it_comes_paced_or_all_at_once(l
     app.type("tour")  # and the next reply streams as usual
     app.wait_for("stopped: max_tokens", 10, after=stopped)
     app.press(b"\x11")
-    assert app.exit_code() == 0
+    assert app.exit_code() == 0, f"exit code was not 0; the screen said:\n{app.text()[-3000:]}"
 
 
 def test_at_80_columns_the_status_bar_shows_session_model_jail_and_usage(launch: Launch) -> None:
@@ -691,7 +691,7 @@ def test_at_80_columns_the_status_bar_shows_session_model_jail_and_usage(launch:
     last = screen[screen.rfind("session: ") :]
     assert "model: e/fake" in last and "jail: unjailed w✗n✗r✗e✗" in last  # a short model: room for the axes
     app.press(b"\x11")
-    assert app.exit_code() == 0
+    assert app.exit_code() == 0, f"exit code was not 0; the screen said:\n{app.text()[-3000:]}"
 
 
 def test_a_resumed_session_s_usage_adds_to_what_it_had(launch: Launch) -> None:
@@ -700,7 +700,7 @@ def test_a_resumed_session_s_usage_adds_to_what_it_had(launch: Launch) -> None:
     first.type("tour")
     first.wait_for("stopped: max_tokens", 10, after=ready)
     first.press(b"\x11")
-    assert first.exit_code() == 0
+    assert first.exit_code() == 0, f"exit code was not 0; the screen said:\n{first.text()[-3000:]}"
     again = launch("showcase", "--resume")
     ready = again.wait_for(_READY, 60)
     again.wait_for("usage: 1.2k/56 $0.01", 10)  # the session's so far, before any reply
@@ -711,7 +711,7 @@ def test_a_resumed_session_s_usage_adds_to_what_it_had(launch: Launch) -> None:
     assert " ↻ │ model: e/fake" in last  # at 120 columns: resumed, and the grades keep their axes
     assert "jail: unjailed fs_write ✗ network ✗ fs_read ✗ env ✗ │ usage" in last
     again.press(b"\x11")
-    assert again.exit_code() == 0
+    assert again.exit_code() == 0, f"exit code was not 0; the screen said:\n{again.text()[-3000:]}"
 
 
 def test_clear_clears_the_screen_and_model_does_not(launch: Launch) -> None:
@@ -748,7 +748,7 @@ def test_clear_clears_the_screen_and_model_does_not(launch: Launch) -> None:
     app.settle()
     assert "HELLO THERE" not in app.text()[cleared:]
     app.press(b"\x11")
-    assert app.exit_code() == 0
+    assert app.exit_code() == 0, f"exit code was not 0; the screen said:\n{app.text()[-3000:]}"
     again = launch("fake", "--resume")  # a resume draws from the clear on
     ready = again.wait_for(_READY, 60)
     screen = again.text()
@@ -757,7 +757,7 @@ def test_clear_clears_the_screen_and_model_does_not(launch: Launch) -> None:
     again.type("more")  # and sends the model its transcript since the clear: `again`, then this
     again.wait_for("echo: MORE (message 2)", 20, after=ready)
     again.press(b"\x11")
-    assert again.exit_code() == 0
+    assert again.exit_code() == 0, f"exit code was not 0; the screen said:\n{again.text()[-3000:]}"
 
 
 def test_compact_carries_on_from_a_summary_and_a_resume_draws_from_it(launch: Launch, tmp_path: Path) -> None:
@@ -783,7 +783,7 @@ def test_compact_carries_on_from_a_summary_and_a_resume_draws_from_it(launch: La
     app.settle()
     assert "HELLO THERE" not in app.text()[narrowed:]
     app.press(b"\x11")
-    assert app.exit_code() == 0
+    assert app.exit_code() == 0, f"exit code was not 0; the screen said:\n{app.text()[-3000:]}"
     (session,) = (tmp_path / "state" / "bh-02" / "sessions").iterdir()
     assert "hello there" in (session / "transcript.jsonl.bak").read_text()
     assert "hello there" not in (session / "transcript.jsonl").read_text()
@@ -794,7 +794,7 @@ def test_compact_carries_on_from_a_summary_and_a_resume_draws_from_it(launch: La
     again.type("more")  # and sends the model the new conversation: the summary, `again`, this
     again.wait_for("echo: MORE (message 3)", 20, after=ready)
     again.press(b"\x11")
-    assert again.exit_code() == 0
+    assert again.exit_code() == 0, f"exit code was not 0; the screen said:\n{again.text()[-3000:]}"
 
 
 def test_while_the_model_restarts_the_status_bar_says_so_and_a_message_waits_visibly(
@@ -829,7 +829,7 @@ def test_while_the_model_restarts_the_status_bar_says_so_and_a_message_waits_vis
     again = app.wait_for("echo: AGAIN (message 1)", 20, after=replied)
     assert "stopped: interrupted" not in app.text()[replied:again]
     app.press(b"\x11")
-    assert app.exit_code() == 0
+    assert app.exit_code() == 0, f"exit code was not 0; the screen said:\n{app.text()[-3000:]}"
 
 
 def test_a_message_typed_the_moment_after_model_waits_for_the_new_model(launch: Launch) -> None:
@@ -855,7 +855,7 @@ def test_a_message_typed_the_moment_after_model_waits_for_the_new_model(launch: 
     again = app.wait_for("echo: AGAIN", 20, after=waiting)
     assert "stopped: interrupted" not in app.text()[replied:again]
     app.press(b"\x11")
-    assert app.exit_code() == 0
+    assert app.exit_code() == 0, f"exit code was not 0; the screen said:\n{app.text()[-3000:]}"
 
 
 def test_a_line_typed_with_compact_or_restart_loop_reaches_the_new_loop(launch: Launch) -> None:
@@ -876,7 +876,7 @@ def test_a_line_typed_with_compact_or_restart_loop_reaches_the_new_loop(launch: 
     shown = app.text()[replied:nexted]
     assert "stopped: interrupted" not in shown and "AFTER (message 3)" not in shown, shown[-3000:]
     app.press(b"\x11")
-    assert app.exit_code() == 0
+    assert app.exit_code() == 0, f"exit code was not 0; the screen said:\n{app.text()[-3000:]}"
 
 
 def test_model_switches_by_name_between_a_fake_and_an_openai_model_on_a_stub_server(
@@ -916,7 +916,7 @@ def test_model_switches_by_name_between_a_fake_and_an_openai_model_on_a_stub_ser
         app.type("again")
         app.wait_for("[fake] echo: AGAIN (message 4)", 20, after=back)  # one conversation throughout
         app.press(b"\x11")
-        assert app.exit_code() == 0
+        assert app.exit_code() == 0, f"exit code was not 0; the screen said:\n{app.text()[-3000:]}"
     first, *_ = [r["body"]["messages"] for r in stub.requests]
     assert [m["role"] for m in first] == ["system", "user", "assistant", "user"]  # the fake's step, carried
     assert first[2]["content"].startswith("[fake] echo: HELLO")
@@ -935,7 +935,7 @@ def test_a_patch_that_sets_the_model_row_s_config_keeps_its_model_and_says_so(tm
     refused = Launched(["--no-jail", "--model", "e/fake", "--patch", str(pin)], work, state, config=config)
     app = Launched(["--no-jail", "--patch", str(pin)], work, state, config=config)
     try:
-        assert refused.exit_code() == 1
+        assert refused.exit_code() == 1, f"exit code was not 1; the screen said:\n{refused.text()[-3000:]}"
         assert "--model e/fake would not take effect" in " ".join(refused.text().split())
         ready = app.wait_for(_READY, 60)
         app.wait_for("model: e/fake-2", after=0)
@@ -946,7 +946,7 @@ def test_a_patch_that_sets_the_model_row_s_config_keeps_its_model_and_says_so(tm
         app.type("hello")
         app.wait_for("[fake-2] echo: HELLO", 20, after=said)  # still the patch's model
         app.press(b"\x11")
-        assert app.exit_code() == 0
+        assert app.exit_code() == 0, f"exit code was not 0; the screen said:\n{app.text()[-3000:]}"
     finally:
         refused.close()
         app.close()
@@ -977,7 +977,7 @@ def test_a_keyed_model_s_key_never_reaches_an_input_s_environment(tmp_path: Path
             app.answer(b"y")
             app.wait_for("the input said: False False", 20, after=ready)
             app.press(b"\x11")
-            assert app.exit_code() == 0
+            assert app.exit_code() == 0, f"exit code was not 0; the screen said:\n{app.text()[-3000:]}"
         finally:
             app.close()
     assert {r["authorization"] for r in stub.requests} == {"Bearer fake-verify-key"}
@@ -1008,7 +1008,7 @@ def test_a_patch_naming_a_use_no_plugin_provides_fails_at_boot_with_the_loader_s
     stale = tmp_path / "stale.toml"
     stale.write_text('[[plugin]]\nid = "loop"\nuse = "nonesuch:loop"\n')
     app = launch("echo", "--patch", str(stale))
-    assert app.exit_code(60) == 1
+    assert app.exit_code(60) == 1, f"exit code was not 1; the screen said:\n{app.text()[-3000:]}"
     said = _said(app)
     assert "error: could not start:" in said, said
     assert "loop: unresolved:" in said and "use 'nonesuch:loop'" in said, said
@@ -1027,11 +1027,11 @@ def test_a_resumed_session_whose_layer_names_a_use_no_plugin_provides_fails_at_b
     first = launch("echo")
     first.wait_for(_READY, 60)
     first.press(b"\x11")
-    assert first.exit_code() == 0
+    assert first.exit_code() == 0, f"exit code was not 0; the screen said:\n{first.text()[-3000:]}"
     (layer,) = (tmp_path / "state").glob("bh-02/sessions/*/session.toml")
     layer.write_text(layer.read_text() + '\n[[plugin]]\nid = "python"\nuse = "claude-agent-sdk:agent"\n')
     again = launch("echo", "--resume")
-    assert again.exit_code(60) == 1
+    assert again.exit_code(60) == 1, f"exit code was not 1; the screen said:\n{again.text()[-3000:]}"
     said = _said(again)
     assert "error: could not start:" in said, said
     assert "python: unresolved:" in said and "use 'claude-agent-sdk:agent'" in said, said
@@ -1054,7 +1054,7 @@ def test_a_patch_row_with_no_use_that_no_layer_added_is_a_layer_error_naming_the
     mine = tmp_path / "mine.toml"
     mine.write_text('[[plugin]]\nid = "mine"\nconfig = { size = 3 }\n')
     app = launch("echo", "--patch", str(mine))
-    assert app.exit_code(60) == 1
+    assert app.exit_code(60) == 1, f"exit code was not 1; the screen said:\n{app.text()[-3000:]}"
     said = _said(app)
     assert f"error: {mine}: row 'mine' has no `use`" in said, said
     assert 'add use = "plugin:component"' in said, said  # what to add
@@ -1073,11 +1073,11 @@ def test_a_session_layer_row_with_no_use_is_the_same_layer_error_and_the_session
     first = launch("echo")
     first.wait_for(_READY, 60)
     first.press(b"\x11")
-    assert first.exit_code() == 0
+    assert first.exit_code() == 0, f"exit code was not 0; the screen said:\n{first.text()[-3000:]}"
     (layer,) = (tmp_path / "state").glob("bh-02/sessions/*/session.toml")
     layer.write_text(layer.read_text() + '\n[[plugin]]\nid = "mine"\nconfig = { size = 3 }\n')
     again = launch("echo", "--resume")
-    assert again.exit_code(60) == 1
+    assert again.exit_code(60) == 1, f"exit code was not 1; the screen said:\n{again.text()[-3000:]}"
     said = _said(again)
     assert f"error: {layer}: row 'mine' has no `use`" in said, said
     assert 'add use = "plugin:component"' in said, said

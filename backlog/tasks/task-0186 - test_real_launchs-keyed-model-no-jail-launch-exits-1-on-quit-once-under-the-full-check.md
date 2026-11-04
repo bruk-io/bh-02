@@ -3,10 +3,11 @@ id: TASK-0186
 title: >-
   test_real_launch's keyed-model --no-jail launch exits 1 on quit, once, under
   the full check
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@claude'
 created_date: '2026-11-03T03:39:00Z'
-updated_date: '2026-11-04T12:39:00Z'
+updated_date: '2026-11-04T13:49:00Z'
 labels:
   - tests
   - size-1
@@ -33,4 +34,6 @@ Seen once in the reviewer's full scripts/check for TASK-0179 (2026-11-03, on 1e0
 
 <!-- SECTION:NOTES:BEGIN -->
 Lead, 2026-11-04: promoted from a draft review; criteria written right after promotion (finish-moved for that reason only).
+
+Changed: all 43 exit_code() mismatches in bh-02/app/tests/test_real_launch.py (each 'assert X.exit_code(..) == N') now carry f"exit code was not N; the screen said:\n{X.text()[-3000:]}" (same shape as the existing wait_for/exit_code messages). Showing it works: planted '== 7' on the keyed-model launch (line 980); the failure printed 'assert 0 == 7' plus the whole last screen (session line, 'the input said: False False'); plant removed (diff is only the 43 message additions). Recurrence: scripts/check bh-02/app run 3 times (member check, not the whole-repo scripts/check; it includes test_real_launch), all exit 0, first lines were uv's UV_NATIVE_TLS deprecation warning; the keyed-model --no-jail launch failure did NOT recur in 3 runs. No repro: the original failure was seen once (reviewer's full run for TASK-0179 on 1e0b11b) and could not be reproduced on demand; a planted failure is not a repro. Criterion #2 left unticked: no recurrence, so cause is unknown; the new message will show the screen if it recurs. Criteria left unticked for the reviewer; AC#3 includes planted-failure evidence above.
 <!-- SECTION:NOTES:END -->
