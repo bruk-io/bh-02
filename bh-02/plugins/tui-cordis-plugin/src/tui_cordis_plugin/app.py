@@ -75,6 +75,7 @@ from tui_cordis_plugin.widgets import (
     WORKING_EVERY,
     ApprovalScreen,
     ChatView,
+    ChoiceScreen,
     CommandsProvider,
     Completions,
     Composer,
@@ -92,7 +93,7 @@ _COMMAND_RUNS = (
     "ends or its timeout stops it. Ctrl-Q, /exit or /quit leaves, and stops it too."
 )
 
-type _Question = tuple[Mapping[str, Any], asyncio.Future[bool]]
+type _Question = tuple[Mapping[str, Any], asyncio.Future[Any]]
 # A selection of the screen as it was copied: where it is (each widget and its range) and what it
 # reads there (the text under the same range changes as output arrives).
 type _Taken = tuple[tuple[tuple[Widget, Selection], ...], str]
@@ -158,7 +159,7 @@ class BhApp(App[None]):
         self.bridge = Bridge(self.post_message)
         self.frame = Frame(self.post_message)
         self.ready = asyncio.Event()
-        self._asking: tuple[ApprovalScreen, asyncio.Future[bool]] | None = None
+        self._asking: tuple[ApprovalScreen[Any], asyncio.Future[Any]] | None = None
         self._queued: deque[_Question] = deque()
         self._replying = 0  # replies streaming now (started, not yet ended)
         self._handling = False  # a line is being handled (the bridge's word: `Handling`)
@@ -392,17 +393,22 @@ class BhApp(App[None]):
             question, answer = self._queued.popleft()
             if answer.done():
                 continue
-            screen = ApprovalScreen(question, grace=self.grace)
+            screen: ApprovalScreen[Any] = (
+                ChoiceScreen(question, grace=self.grace)
+                if render.is_a_choice(question)
+                else ApprovalScreen(question, grace=self.grace)
+            )
             self._asking = (screen, answer)
             self.query_one(Completions).close()
-            self.push_screen(screen, self._answerer(answer))
+            self.push_screen(screen, self._answerer(question, answer))
 
-    def _answerer(self, answer: asyncio.Future[bool]) -> Any:
-        """The callback a question's modal calls with its answer (None when taken down)."""
+    def _answerer(self, question: Mapping[str, Any], answer: asyncio.Future[Any]) -> Any:
+        """The callback a question's modal calls with its answer (None when taken down: a no, or
+        for a choice, nothing chosen)."""
 
-        def answered(allowed: bool | None) -> None:
+        def answered(chosen: bool | str | None) -> None:
             if not answer.done():
-                answer.set_result(bool(allowed))
+                answer.set_result(render.withdrawn_answer(question) if chosen is None else chosen)
             if self._asking is not None and self._asking[1] is answer:
                 self._asking = None
             self._ask_next()
@@ -415,13 +421,13 @@ class BhApp(App[None]):
         if self._asking is not None and self._asking[1] is message.answer:
             self._take_down(self._asking[0])
 
-    def _take_down(self, screen: ApprovalScreen) -> None:
+    def _take_down(self, screen: ApprovalScreen[Any]) -> None:
         """Dismiss a question's modal, first popping anything shown over it."""
         if screen not in self.screen_stack:
             return
         if screen is not self.screen:
             screen.pop_until_active()
-        screen.dismiss(False)
+        screen.dismiss(None)
 
     def action_interrupt(self) -> None:
         """Ctrl-C: copy the text that is selected and not copied yet, and stop nothing
@@ -531,22 +537,22 @@ class BhApp(App[None]):
         if self.bridge.interrupt_held and not self.bridge.reply_running and not self.bridge.ended:
             self.query_one(ChatView).note(_COMMAND_RUNS)
 
-    def _open_questions(self) -> list[asyncio.Future[bool]]:
-        """Every question not yet answered that Ctrl-C answers no: the one up, then the queued
-        ones, but a sub-agent's."""
+    def _open_questions(self) -> list[_Question]:
+        """Every question not yet answered that Ctrl-C answers no (a choice, nothing chosen): the
+        one up, then the queued ones, but a sub-agent's."""
         shown = [(self._asking[0].question, self._asking[1])] if self._asking is not None else []
         return [
-            answer
+            (question, answer)
             for question, answer in [*shown, *self._queued]
             if not answer.done() and not render.asked_by_a_sub_agent(question)
         ]
 
-    def _decline(self, answers: Sequence[asyncio.Future[bool]]) -> None:
-        """Answer each of `answers` still open no, and take the one up down if it is among them."""
-        for answer in answers:
+    def _decline(self, questions: Sequence[_Question]) -> None:
+        """Answer each of `questions` still open no, and take the one up down if it is among them."""
+        for question, answer in questions:
             if not answer.done():
-                answer.set_result(False)
-        if self._asking is not None and any(a is self._asking[1] for a in answers):
+                answer.set_result(render.withdrawn_answer(question))
+        if self._asking is not None and any(a is self._asking[1] for _, a in questions):
             self._take_down(self._asking[0])
 
 

@@ -80,6 +80,10 @@ class _Screen:
         self.asked.append(question)
         return self.answer(question) if callable(self.answer) else self.answer
 
+    async def choose(self, question: Json) -> str:
+        self.asked.append(question)
+        return ""
+
     async def show(self, events: AsyncIterator[Json]) -> None:
         self.shown += [event async for event in events]
 

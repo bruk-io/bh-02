@@ -10,7 +10,7 @@ with a fake is the child's too. Of the tool rows a type may grant (the agents ro
 only those its type grants. The agents row writes what is the child's own: its transcript in its
 own state directory, the model's Claude Code state beside it, and the model its type (or the
 call, once the person said yes) names. Rows of the sub-agents plugin join them inside the
-realm: `subagents:output`, the child's `output` (a labelled `confirm`, nothing else), and
+realm: `subagents:output`, the child's `output` (a labelled `confirm` and `choose`, nothing else), and
 `subagents:child`, its type's section of the prompt and the hand its `loop` is passed to the
 agents row by; and, beside a row that injects `commands`, a registry of the child's own (the
 component of the parent's row the agents row's `commands_row` names), since the sealed realm reads

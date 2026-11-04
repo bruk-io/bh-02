@@ -2,6 +2,7 @@
 
 from tui_cordis_plugin.widgets.approval import GRACE, ApprovalScreen
 from tui_cordis_plugin.widgets.chat_view import ChatView, Clipped, Stream
+from tui_cordis_plugin.widgets.choice import ChoiceScreen
 from tui_cordis_plugin.widgets.completions import Completions
 from tui_cordis_plugin.widgets.composer import Composer
 from tui_cordis_plugin.widgets.keys import Keys
@@ -14,6 +15,7 @@ __all__ = [
     "WORKING_EVERY",
     "ApprovalScreen",
     "ChatView",
+    "ChoiceScreen",
     "Clipped",
     "CommandsProvider",
     "Completions",

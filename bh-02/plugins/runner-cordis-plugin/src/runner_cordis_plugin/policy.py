@@ -46,6 +46,7 @@ __all__ = [
     "CREDENTIALS",
     "GUIDANCE",
     "SELF_MODIFYING",
+    "SOCKET_PLACES",
     "BrigConfig",
     "Policy",
     "admitted",
@@ -450,15 +451,15 @@ def git_author(name: str, email: str) -> tuple[tuple[str, str], ...]:
 #: Where hosts keep sockets other programs listen on, as brig lists them (`SOCKET_DIRECTORIES`,
 #: which it does not export): a jail that sees one is graded `network` violated, because a socket
 #: it can dial can carry the network for it. `$XDG_RUNTIME_DIR` is one too (`socket_refusal`).
-_SOCKET_PLACES: tuple[str, ...] = ("/run", "/var/run", "/tmp", "/var/tmp", "/dev/shm")
+SOCKET_PLACES: tuple[str, ...] = ("/run", "/var/run", "/tmp", "/var/tmp", "/dev/shm")
 
 
 def socket_refusal(roots: Sequence[tuple[str, str]], runtime_dir: str) -> str:
     """Why a jail can't start with `roots` (each a what and an absolute, resolved path: the
     project, the scratch directory, ...), or "" when none is at or under a place where hosts keep
-    sockets (`_SOCKET_PLACES`, `runtime_dir`: `$XDG_RUNTIME_DIR`, "" when unset). The message
+    sockets (`SOCKET_PLACES`, `runtime_dir`: `$XDG_RUNTIME_DIR`, "" when unset). The message
     says why and what to do."""
-    places = (*_SOCKET_PLACES, *([runtime_dir.rstrip("/")] if runtime_dir.startswith("/") else []))
+    places = (*SOCKET_PLACES, *([runtime_dir.rstrip("/")] if runtime_dir.startswith("/") else []))
     found = [
         (what, path, place)
         for what, path in roots

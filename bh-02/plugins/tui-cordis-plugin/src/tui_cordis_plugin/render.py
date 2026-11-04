@@ -18,6 +18,11 @@ from textual.highlight import highlight
 __all__ = [
     "Clip",
     "approval_language",
+    "choice_heading",
+    "choice_keys",
+    "choices_of",
+    "is_a_choice",
+    "withdrawn_answer",
     "approval_lines",
     "approval_heading",
     "approval_title",
@@ -464,6 +469,49 @@ def approval_lines(question: Event) -> list[str]:
         return [str(line) for line in lines]
     input: Mapping[str, Any] = question.get("input") or {}
     return str(input.get("code") or "").strip("\n").splitlines()
+
+
+def is_a_choice(question: Event) -> bool:
+    """Whether `question` is a choice (CONTRACTS.md: choice: it has `choices`), not a yes or no."""
+    return isinstance(question.get("choices"), list | tuple)
+
+
+def withdrawn_answer(question: Event) -> bool | str:
+    """What a question not answered by the person is answered: '' for a choice (withdrawn:
+    nothing is chosen), no for a call."""
+    return "" if is_a_choice(question) else False
+
+
+def choice_heading(question: Event) -> str:
+    """The title of a choice, after who asks when a sub-agent does (as `approval_heading`)."""
+    title = str(question.get("title") or "Choose")
+    agent = question.get("agent")
+    if isinstance(agent, Mapping) and asked_by_a_sub_agent(question):
+        return f"Agent {agent.get('name')} ({agent.get('type', '?')}) asks:\n{title}"
+    return title
+
+
+def choices_of(question: Event) -> list[tuple[str, str, str]]:
+    """A choice's `(key, value, label)`, in order; an entry with no single-character key is left
+    out (it could not be chosen)."""
+    found = question.get("choices")
+    if not isinstance(found, list | tuple):
+        return []
+    return [
+        (str(each["key"]).lower(), str(each.get("value", "")), str(each.get("label", each["key"])))
+        for each in found
+        if isinstance(each, Mapping) and len(str(each.get("key", ""))) == 1
+    ]
+
+
+def choice_keys(question: Event) -> str:
+    """The keys line of a choice: each key and its label, the escape's with `Esc`, and Ctrl-C."""
+    escape = question.get("escape")
+    shown = [
+        f"{key} / Esc  {label}" if value == escape else f"{key}  {label}"
+        for key, value, label in choices_of(question)
+    ]
+    return "     ".join([*shown, "Ctrl-C  withdraw"])
 
 
 def approval_language(question: Event) -> str:

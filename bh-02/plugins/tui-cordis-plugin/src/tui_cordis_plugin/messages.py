@@ -53,9 +53,9 @@ class Noted(Message):
 
 
 class Asked(Message):
-    """A yes-or-no question about a call; the answer goes in `answer`."""
+    """A question: a yes-or-no one about a call, or a choice; the answer goes in `answer`."""
 
-    def __init__(self, question: Mapping[str, Any], answer: asyncio.Future[bool]) -> None:
+    def __init__(self, question: Mapping[str, Any], answer: asyncio.Future[Any]) -> None:
         super().__init__()
         self.question = question
         self.answer = answer
@@ -74,6 +74,6 @@ class Withdrawn(Message):
     """A question nobody waits for any more (its reply was interrupted): take its modal down,
     or drop it from the queue if it was not shown yet."""
 
-    def __init__(self, answer: asyncio.Future[bool]) -> None:
+    def __init__(self, answer: asyncio.Future[Any]) -> None:
         super().__init__()
         self.answer = answer

@@ -1,7 +1,7 @@
 # tui-cordis-plugin
 
 bh-02's ui: a Textual app bound as `input`, `output` (whose `confirm` asks about the model's code in a
-modal) and `frame` by `tui:ui`, and small rows that push into the app's frame: the status
+modal, and `choose` asks a question with named answers in the same way) and `frame` by `tui:ui`, and small rows that push into the app's frame: the status
 bar's fields (`tui:status`: the session's id and the model; `tui:grades`: the jail's grades)
 and the palette's commands (`tui:palette`). The screen is the conversation (the chat view over the composer),
 the whole width, a line naming the everyday keys under the composer, and the status bar along the bottom. Imports nothing from any other plugin;
@@ -38,7 +38,11 @@ unheard a moment later, it was pressed during a command, which it doesn't stop, 
 says so, and that leaving does. Esc stops a running reply exactly as Ctrl-C does
 (`stop_reply`, a binding that is not priority, so it is the last to want the key: the list of
 commands closes on it, a question is declined by it and the palette closed by it, and only
-that); with no reply running, a command included, it does nothing and says nothing. `confirm()` comes from
+that); with no reply running, a command included, it does nothing and says nothing. `choose()` puts a
+choice (CONTRACTS.md: choice) in `ChoiceScreen`, which is the approval modal with other answers: the same
+layout, the same grace period and dimmed keys line (its arming is `ApprovalScreen`'s, not a copy), its keys
+drawn from the question's `choices`, Escape giving its `escape`; Ctrl-C and a cancelled asker answer ''.
+`confirm()` and `choose()` come from
 plain coroutines (not Textual workers), so the modal is `push_screen` with a callback resolving a future. Questions are
 shown one at a time, the rest queued; an interrupted reply cancels its future and its modal
 comes down wherever it is (anything shown over it is popped first); Ctrl-C with a question up

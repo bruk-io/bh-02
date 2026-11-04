@@ -26,12 +26,15 @@ __all__ = ["GRACE", "ApprovalScreen"]
 GRACE = 0.4
 
 
-class ApprovalScreen(ModalScreen[bool]):
+class ApprovalScreen[T = bool](ModalScreen[T]):
     """Yes or no about one call (CONTRACTS.md: question). `y` allows; `n` or Escape declines,
     once it is `armed`: `grace` seconds after it is shown (`GRACE` unless the app says
     otherwise). Until then its keys line is dimmed and those keys are dropped.
 
     Ctrl-C (the app's priority binding) withdraws it, as a no, and interrupts the reply.
+
+    The arming, the layout and the keys line are shared with `ChoiceScreen`, which answers a
+    choice's value instead of a bool: `T` is what the modal dismisses with.
     """
 
     BINDINGS = [
@@ -76,6 +79,14 @@ class ApprovalScreen(ModalScreen[bool]):
         background: $bh-surface-recessed;
         margin: 1 0 0 0;
         padding: 0 1;
+    }
+    ApprovalScreen .approval-line {
+        padding: 1 0 0 0;
+    }
+    ApprovalScreen #approval-warning {
+        color: $bh-warning;
+        text-style: bold;
+        padding: 1 0 0 0;
     }
     ApprovalScreen #approval-keys {
         color: $bh-text 70%;  /* readable: 5.2:1 on the overlay, where text-muted is 2.2:1 */
@@ -125,7 +136,7 @@ class ApprovalScreen(ModalScreen[bool]):
         self._armed = True
         self.query_one("#approval-keys").remove_class("-arming")
 
-    def action_answer(self, allowed: bool) -> None:
+    def action_answer(self, answer: T) -> None:
         """Answer, unless the modal was shown too recently for the key to be meant for it."""
         if self._armed:
-            self.dismiss(allowed)
+            self.dismiss(answer)

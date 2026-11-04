@@ -179,17 +179,21 @@ def section(types: Sequence[str]) -> str:
 
 @runtime_checkable
 class Confirm(Protocol):
-    """What the asker needs of the parent's `output` (CONTRACTS.md: output): the person's yes or no."""
+    """What the asker needs of the parent's `output` (CONTRACTS.md: output): the person's yes or no,
+    and the choice they make."""
 
     async def confirm(self, question: Json) -> bool: ...
+    async def choose(self, question: Json) -> str: ...
 
 
 @runtime_checkable
 class Output(Protocol):
     """What the agents row needs of the parent's `output` (CONTRACTS.md: output): the person's
-    yes or no, and a few events shown (a note, a child's usage, which joins the session's totals)."""
+    yes or no and choice, and a few events shown (a note, a child's usage, which joins the session's
+    totals)."""
 
     async def confirm(self, question: Json) -> bool: ...
+    async def choose(self, question: Json) -> str: ...
     async def show(self, events: AsyncIterator[Json]) -> None: ...
 
 
@@ -229,20 +233,23 @@ type Types = Callable[[], Awaitable[Mapping[str, AgentType | str]]]
 
 @dataclass(frozen=True, slots=True)
 class Asker:
-    """The `asker` key: a confirm-only view of the parent's `output`, for the children's
-    `subagents:output` rows. A question that does not say which agent asks is a no, never put to the
-    person unlabelled."""
+    """The `asker` key: a confirm-and-choose view of the parent's `output`, for the children's
+    `subagents:output` rows. A question that does not say which agent asks is a no (a choice,
+    nothing chosen: ''), never put to the person unlabelled."""
 
     output: Confirm
 
     async def confirm(self, question: Json) -> bool:
         return labelled(question) and await self.output.confirm(question)
 
+    async def choose(self, question: Json) -> str:
+        return await self.output.choose(question) if labelled(question) else ""
+
 
 @dataclass(frozen=True, slots=True)
 class Labelled:
-    """A child's `output`: its loop's `confirm`, labelled with the agent's name and type, through
-    `asker`. Nothing else of the parent's output: no `show`, no `notice`."""
+    """A child's `output`: its loop's `confirm` and `choose`, labelled with the agent's name and
+    type, through `asker`. Nothing else of the parent's output: no `show`, no `notice`."""
 
     asker: Confirm
     name: str
@@ -250,6 +257,9 @@ class Labelled:
 
     async def confirm(self, question: Json) -> bool:
         return await self.asker.confirm({**question, "agent": label(self.name, self.type)})
+
+    async def choose(self, question: Json) -> str:
+        return await self.asker.choose({**question, "agent": label(self.name, self.type)})
 
 
 @dataclass(frozen=True, slots=True)
