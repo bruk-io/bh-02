@@ -47,7 +47,7 @@ Today approval is one rule (runner:approval) that asks about every call unless b
 - [x] #2 The person answers each request once, always for this project, or no; an always-grant is not asked again in that project, and a no is not re-asked within the session
 - [x] #3 The runner plugin turns the grants into brig's policy at each jail start, and the report still grades the resulting jail honestly
 - [x] #4 Network grants are per hostname and/or IP address plus port, enforced by brig: a program that ignores the proxy reaches nothing, and a destination not granted is refused or asked about
-- [ ] #5 Must not break: the jailed model cannot grant itself anything (always-grants live where no jail can write them), and what runs unasked is never wider than what the person granted
+- [x] #5 Must not break: the jailed model cannot grant itself anything (always-grants live where no jail can write them), and what runs unasked is never wider than what the person granted
 - [ ] #6 Must not break: runner:confined still refuses where it cannot jail, and an unconfined run still asks about every call
 <!-- AC:END -->
 
