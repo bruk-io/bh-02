@@ -15,8 +15,9 @@ over it; and `/release`. The only package in the workspace that imports brig (th
 `runner.py`'s `Runner` is the `runner` value both rows bind, over a mechanism (`BrigJail` in
 `jail.py`, `Unjailed` in `unconfined.py`): what is the same whichever starts the program.
 - `start(argv_for, *, cwd) -> started`: the mechanism chooses the program's socket (`endpoint`: a
-  short path, since a socket path must fit in ~100 bytes, in a `/tmp` directory of its own that the
-  jail may write), builds the command with `argv_for(endpoint)`, starts it listening there and
+  short path, since a socket path must fit in ~100 bytes, in a directory of its own that only this
+  start's program sees: the channel directory brig reserves and binds into the jail, or for an
+  unconfined start one under `/tmp`), builds the command with `argv_for(endpoint)`, starts it listening there and
   waits until it accepts, and hands the owner the connection it made then
   (`started.connection`, a connected socket: brig's verified one for a jail; the owner opens its
   streams over it and never dials `started.endpoint`, which is for argv alone, because a jailed
@@ -84,8 +85,8 @@ The modules:
   readable roots, masks, the environment allowlist and the variables set), and the pure functions
   that make it (`spec_for`, `allowlisted`, `link_directories`, `readable_roots`, `told_reads`,
   `git_author`). No brig.
-- `mounts.py`: what a Linux jail does with mounts, as decisions on a `Policy` (`mountable`, `held`,
-  `tripwired`, the notice). No brig. `facts.py`: what the host is (one walk of the links on the way
+- `mounts.py`: what a Linux jail does with mounts, as decisions on a `Policy` (`mountable`, `tripwired`,
+  the notice). No brig. `facts.py`: what the host is (one walk of the links on the way
   to the interpreter, the git identity). No brig.
 - `brig_spec.py`: `to_brig`, the one function from a `Policy` to brig's `FsPolicy`, `EnvPolicy`
   and `Stdio` (and the candidate environment), and `report_of`, brig's report as the runner's.
@@ -249,17 +250,25 @@ it ends, the jail's namespace goes with it, a program in a session of its own in
 directory entry, and the kernel detaches that mount inside the jail when the host replaces the
 entry (a `git config` renames a new `.git/config` over the old one; editors save by rename), renames
 it away or removes it. From then on an input could write or read the path. bh-02 watches every path
-the jail holds (`mounts.tripwired`, `tripwire.Tripwire`: inotify, armed once brig has made the jail)
+the jail holds,
+read off the mounts brig made (`Jail.mounts`, `mounts.tripwired`, `tripwire.Tripwire`: inotify,
+armed once brig has made the jail): every read-only mount beneath a writable one, and every pin (a
+directory brig binds writable over itself between a root and a deny, so the command can't rename
+it; the host renaming one takes the mounts beneath it)
 and, at the first such change, ends the jail with brig's `destroy_jail`; the next input's jail holds
 the path again and the input says why (`ended()`). A program already running can get one write or
-read in before it ends, so brig grades `fs_write` and `fs_read` `best_effort` while the jail holds
-such a path, and `approval` counts best-effort writes as confined (`is_confined`). `notice()` names
-the secrets held. A host change in the moments between bubblewrap mounting a path and the watch
+read in before it ends, so brig grades `fs_write` `best_effort` while the jail holds such a path
+(and `fs_read` when it masks one that is there), and `approval` counts best-effort writes as
+confined only with bh-02's own report axis `host_undo: tripwired` (`jail.HOST_UNDO`), which the
+confined runner sets on each start that arms the tripwire and brig does not grade (`is_confined`).
+`notice()` names the secrets held. A host change in the moments between bubblewrap mounting a path and the watch
 being set is not seen.
 
 **The grades** are brig's: each start's `report()` is `report_of(jail.report)` (`fs_read`,
-`fs_write`, `network`, `env`, `channel_exclusivity`, lower case). Before anything starts, `report()` is
-`PLANNED`, no stronger than any start can earn. `channel_exclusivity` is `violated` when a root
-shows `/run`, `/tmp` and the like (brig's rule), as a project under `/tmp` does.
+`fs_write`, `network`, `env`, `channel_exclusivity`, lower case) and bh-02's `host_undo`
+(`tripwired`). Before anything starts, `report()` is `PLANNED`, no stronger than any start can
+earn. `channel_exclusivity` is `violated` when the jail can write a host path that is not a declared
+channel, which brig counts any writable root as (so for any project), or can see where the host
+keeps sockets (`/run`, `/tmp` and the like); the status bar shows it `!`.
 
 **Known gap**: darwin has no jail (above).

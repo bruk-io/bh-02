@@ -23,13 +23,26 @@ class _Runner:
 def test_confined_means_writes_and_network_are_enforced() -> None:
     assert is_confined({"fs_write": "enforced", "network": "enforced", "fs_read": "unenforced"})
     assert not is_confined({"fs_write": "enforced", "network": "best_effort"})
-    # brig grades writes best-effort while the jail holds a path with a mount the host can undo (the
-    # tripwire ends the jail then): confined; one it could not hold at all is not
-    assert is_confined({"fs_write": "best_effort", "network": "enforced"})
-    assert not is_confined({"fs_write": "unenforced", "network": "enforced"})
+    # brig grades writes best-effort while the jail holds a path with a mount the host can undo; that
+    # is confined only for a runner that says it armed a tripwire (bh-02's `host_undo`), which ends the
+    # jail then; one it could not hold at all is not
+    assert is_confined({"fs_write": "best_effort", "network": "enforced", "host_undo": "tripwired"})
+    assert is_confined({"fs_write": "enforced", "network": "enforced"})  # nothing to undo: no axis needed
+    assert not is_confined({"fs_write": "unenforced", "network": "enforced", "host_undo": "tripwired"})
     assert not is_confined({"fs_write": "violated", "network": "enforced"})
     assert not is_confined(UNENFORCED)
     assert not is_confined({})
+
+
+def test_best_effort_writes_are_not_confined_without_the_runner_s_word_that_a_tripwire_is_armed() -> None:
+    """The premise of counting best-effort writes as confined is the tripwire, which brig does not
+    grade: a report without `host_undo: tripwired` (any other runner's, or a start that armed none)
+    is not confined, however brig graded the rest."""
+    best_effort = {"fs_write": "best_effort", "network": "enforced"}
+    assert not is_confined(best_effort)
+    assert not is_confined({**best_effort, "host_undo": "none"})
+    assert not Approval(_Runner(best_effort)).unasked(_QUESTION)
+    assert Approval(_Runner({**best_effort, "host_undo": "tripwired"})).unasked(_QUESTION)
 
 
 def test_confined_code_runs_unasked_and_unconfined_code_does_not() -> None:

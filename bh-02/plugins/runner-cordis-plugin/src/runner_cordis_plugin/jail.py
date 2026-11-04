@@ -18,14 +18,17 @@ directory brig makes there for the jail's life (and removes with it).
 
 bubblewrap holds each of those paths with a mount on the host's own directory entry, and a mount
 can be undone from the host (a file renamed over a denied or masked one, as a host `git config`
-does to `.git/config`; a placeholder removed), and from then on an input could write or read that
-path. So the jail watches every path it holds (`mounts.tripwired`, `tripwire.Tripwire`) and ends
-itself at the first such change: the next input's jail holds the path again, and the input says
-why (`ended`). Until it has ended (a few milliseconds; measured in the README) a program already
-running in it can get one write or read in, so brig grades `fs_write` and `fs_read` best-effort
-while the jail holds such a path, and `notice()` says which secrets (`mounts.held`,
-`mounts.notice_for`). The tripwire is armed once brig has made the jail, so a host change in the
-moments between bubblewrap mounting a path and the watch being set is not seen.
+does to `.git/config`; a placeholder removed; a directory brig pinned renamed away), and from then on
+an input could write or read that path. So the jail watches every path it holds, read off the
+mounts brig made (`Jail.mounts`, `mounts.tripwired`, `tripwire.Tripwire`): each read-only mount
+beneath a writable one, and each writable pin. It ends itself at the first such change: the next
+input's jail holds the path again, and the input says why (`ended`). Until it has ended (a few
+milliseconds; measured in the README) a program already running in it can get one write or read in,
+so brig grades `fs_write` best-effort while the jail holds such a path, and `approval` counts that
+as confined only on the strength of this tripwire: a start that arms one reports `host_undo`
+`tripwired`, bh-02's own axis (`HOST_UNDO`), which brig does not grade. `notice()` says which
+secrets (`mounts.notice_for`). The tripwire is armed once brig has made the jail, so a host change in
+the moments between bubblewrap mounting a path and the watch being set is not seen.
 
 The jail ends with bh-02, however it ends: brig starts bubblewrap with `--die-with-parent`.
 """
@@ -64,7 +67,7 @@ from brig import (
 from host_paths import state_home
 from runner_cordis_plugin.brig_spec import report_of, to_brig
 from runner_cordis_plugin.facts import git_identity, instead, interpreter_files, links_on_the_way
-from runner_cordis_plugin.mounts import held, mountable, notice_for, released_for, tripwired
+from runner_cordis_plugin.mounts import mountable, notice_for, released_for, tripwired
 from runner_cordis_plugin.policy import (
     BrigConfig,
     Policy,
@@ -77,7 +80,7 @@ from runner_cordis_plugin.policy import (
 from runner_cordis_plugin.runner import ArgvFor
 from runner_cordis_plugin.tripwire import Tripwire
 
-__all__ = ["CHANNEL", "PLANNED", "SYSTEM_READABLE", "BrigJail", "Host", "planned"]
+__all__ = ["CHANNEL", "HOST_UNDO", "PLANNED", "SYSTEM_READABLE", "BrigJail", "Host", "planned"]
 
 #: The name of the one channel a program listens on: the socket its owner dials.
 CHANNEL = "program"
@@ -89,16 +92,22 @@ _READY_TIMEOUT_S = 10.0
 #: `git`, ...). Entries that do not exist on a host (`/lib64` on arm64) are dropped at start.
 SYSTEM_READABLE: tuple[str, ...] = ("/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc")
 
+#: bh-02's own axis of a start's report, beside brig's claims: `tripwired` when this runner armed a
+#: tripwire over every mount the host can undo (`mounts.tripwired`), which is what makes a
+#: best-effort `fs_write` count as confined (`approval.is_confined`). Brig does not grade it.
+HOST_UNDO = "host_undo"
+
 #: The grades a start of the jail can earn at most, known before anything starts (what `approval`
-#: reads): `fs_write` and `fs_read` are best-effort because bh-02's policy always holds write
-#: denies under the project (the layer files, `.git/hooks`, ...), and may hold a secret there, with a
-#: mount the host can undo; brig grades each start itself (`BrigJail.start`), which can only be
-#: stronger for `fs_read`.
+#: reads): `fs_write` is best-effort because bh-02's policy always holds write denies under the
+#: project (the layer files, `.git/hooks`, ...) with a mount the host can undo, and `fs_read` is
+#: best-effort in case it holds a secret there; brig grades each start itself (`BrigJail.start`),
+#: which can only be stronger for `fs_read`.
 PLANNED: Mapping[str, str] = {
     "fs_read": "best_effort",
     "fs_write": "best_effort",
     "network": "enforced",
     "env": "enforced",
+    HOST_UNDO: "tripwired",
 }
 
 
@@ -197,7 +206,7 @@ class _Jailed:
         return self._wire.tripped
 
     def report(self) -> Mapping[str, str]:
-        """This start's grades, brig's own."""
+        """This start's grades: brig's own, and bh-02's `host_undo` (`HOST_UNDO`)."""
         return self._facts.report
 
     def notice(self) -> str:
@@ -416,8 +425,9 @@ class BrigJail:
                 with contextlib.suppress(Exception):
                     await asyncio.to_thread(destroy_jail, await launching)
                 raise
+            armed = tripwired(jail.mounts)
             try:
-                wire = Tripwire(tripwired(policy))
+                wire = Tripwire(armed)
             except BaseException:
                 await asyncio.to_thread(destroy_jail, jail)
                 raise
@@ -426,7 +436,7 @@ class BrigJail:
                 shutil.rmtree(directory, ignore_errors=True)
             raise
         started = _Jailed(
-            jail, reservation.endpoint, self._facts(policy, jail, scratch_root), directories, wire
+            jail, reservation.endpoint, self._facts(policy, jail, scratch_root, armed), directories, wire
         )
         wire.arm(started.end, fallback=started.kill)
         try:
@@ -446,13 +456,15 @@ class BrigJail:
             raise
         return started
 
-    def _facts(self, policy: Policy, jail: Jail, scratch_root: str) -> _Facts:
-        """What a start of `policy` is, for whoever started it: brig's grades of the jail, its
-        notice, the trees it reads and the roots it may write but its scratch."""
+    def _facts(self, policy: Policy, jail: Jail, scratch_root: str, armed: Sequence[str]) -> _Facts:
+        """What a start of `policy` is, for whoever started it: brig's grades of the jail and the
+        tripwire's `host_undo`, its notice (the masks among the `armed` paths), the trees it reads
+        and the roots it may write but its scratch."""
         writes = tuple(w for w in policy.writable if not Path(w).is_relative_to(scratch_root))
+        armed = tripwired(jail.mounts)
         return _Facts(
-            report_of(jail.report),
-            "\n".join(filter(None, (self._note, notice_for(self._platform, held(policy))))),
+            {**report_of(jail.report), HOST_UNDO: "tripwired"},
+            "\n".join(filter(None, (self._note, notice_for([m for m in policy.masks if m in armed])))),
             told_reads((*policy.readable, *policy.writable), (scratch_root,)),
             writes,
         )

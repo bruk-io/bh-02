@@ -41,7 +41,7 @@ jail: jailed fs_write ✓ network ✓ fs_read ~ env ✓
 ```
 
 Each part is graded as brig can enforce it: `✓` enforced, `~` best effort, `?` cooperative, `✗`
-unenforced. On a narrow terminal the field shortens to initials (`w✓ n✓ r~ e✓`), then to the
+unenforced, `!` violated (brig finds the claim broken). On a narrow terminal the field shortens to initials (`w✓ n✓ r~ e✓`), then to the
 marks alone. It is never cut. What a start says you should know (on Linux, the paths its jail
 holds with a mount the host can undo) is shown once, as a note in the conversation.
 

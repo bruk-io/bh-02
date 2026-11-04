@@ -24,13 +24,12 @@ short allowlist: brig is handed bh-02's environment as the candidate and lets th
 the policy lists (`brig_spec.to_brig`), so a variable of the launching shell (a `CLAUDE_*` of a Claude
 Code that launched bh-02, a key the person exports for a model) reaches no worker unless `env` lists it.
 
-One policy, two platforms; only the read model differs: darwin reads by denylist (everything but
-the secrets, `spec_for` as it is), Linux by allowlist (`allowlisted`).
+`spec_for` is what bh-02 means; the jail reads by allowlist (`allowlisted`), and a Linux jail is the
+only one there is.
 """
 
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
-from enum import Enum
 from pathlib import Path, PurePosixPath
 
 __all__ = [
@@ -39,7 +38,6 @@ __all__ = [
     "SELF_MODIFYING",
     "BrigConfig",
     "Policy",
-    "ReadModel",
     "allowlisted",
     "git_author",
     "link_directories",
@@ -48,14 +46,6 @@ __all__ = [
     "spec_for",
     "told_reads",
 ]
-
-
-class ReadModel(Enum):
-    """How a jail's reads are judged: by what is kept from it (`DENYLIST`: everything but the
-    masks) or by what is given it (`ALLOWLIST`: the readable roots, less the masks)."""
-
-    DENYLIST = "denylist"
-    ALLOWLIST = "allowlist"
 
 
 def _paths(paths: Sequence[str]) -> tuple[str, ...]:
@@ -74,8 +64,8 @@ class Policy:
     """What bh-02 means a jail to do, as values: not how any jail does it. Paths are absolute.
 
     `writable`: the roots the program may write. `write_denies`: paths in or under them it may not.
-    `read_model` and `readable`: by denylist (`readable` empty) or allowlist (the trees it may
-    read). `masks`: what it may not read, whichever model (the secrets). `env_allow`: the names
+    `readable`: the trees it may read (none until `allowlisted`). `masks`: what it may not read
+    (the secrets). `env_allow`: the names
     of bh-02's own environment that survive; `env_set`: the variables it sets besides (`TMPDIR`,
     the git author).
 
@@ -87,15 +77,9 @@ class Policy:
     masks: tuple[str, ...]
     env_allow: tuple[str, ...]
     env_set: tuple[tuple[str, str], ...]
-    read_model: ReadModel = ReadModel.DENYLIST
     readable: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        if self.read_model is ReadModel.DENYLIST and self.readable:
-            raise ValueError(
-                "a denylist policy reads everything but its masks, so it names no readable roots: "
-                f"got {self.readable!r}"
-            )
         object.__setattr__(self, "writable", _roots(self.writable))
         object.__setattr__(self, "write_denies", _paths(self.write_denies))
         object.__setattr__(self, "masks", _paths(self.masks))
@@ -266,17 +250,21 @@ def link_directories(links: Sequence[str], writable: Sequence[str]) -> tuple[str
 
 def allowlisted(policy: Policy, readable: Sequence[str]) -> Policy:
     """`policy`, reading by allowlist: `readable` is the tree an input may read, and the policy's
-    masks become the carve-outs inside it. The environment is the policy's,
-    unchanged, and so are the writes but one kind: a path denied both reading and writing (a
-    secret under the project) keeps only its mask. bubblewrap masks an existing one with a
-    read-only `/dev/null`, which refuses writes and removal too (a write deny as well would be a
-    bind of the real file, under the mask). An absent one has nothing to mask, so an input could
-    create it; it is left alone: a directory there would be in the person's way, and nothing of
-    bh-02's reads one."""
+    masks inside it become the carve-outs. A mask under no readable or writable root is dropped:
+    nothing there is in the jail to keep from the input, and brig would mount one over a path that
+    is there and so cap `fs_read` at best-effort for good (a mount the host can undo). The
+    environment is the policy's, unchanged, and so are the writes but one kind: a path denied both
+    reading and writing (a secret under the project) keeps only its mask. bubblewrap masks an
+    existing one with a read-only `/dev/null`, which refuses writes and removal too (a write deny as
+    well would be a bind of the real file, under the mask). An absent one has nothing to mask, so an
+    input could create it; it is left alone: a directory there would be in the person's way, and
+    nothing of bh-02's reads one."""
+    roots = (*readable, *policy.writable)
+    masks = tuple(m for m in policy.masks if any(m == r or m.startswith(r.rstrip("/") + "/") for r in roots))
     return replace(
         policy,
         write_denies=tuple(d for d in policy.write_denies if d not in policy.masks),
-        read_model=ReadModel.ALLOWLIST,
+        masks=masks,
         readable=tuple(readable),
     )
 

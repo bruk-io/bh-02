@@ -1338,8 +1338,11 @@ async def test_a_jailed_input_cannot_read_under_the_sessions_state_directory(
     patch = _inputs(
         composition,
         attempt(f"open({str(token)!r}).read()"),
-        # a masked directory is an empty one: nothing to list is nothing readable
-        f"import os\nprint('READ' if os.listdir({str(state)!r}) else 'DENIED')",
+        # outside every root the jail has it is not there at all (brig is not handed a mask for it):
+        # nothing to list, or an empty directory, is nothing readable
+        "import os\ntry:\n"
+        f"    print('READ' if os.listdir({str(state)!r}) else 'DENIED')\n"
+        "except OSError:\n    print('DENIED')",
         attempt(f"open({str(beside / 'notes.txt')!r}).read()"),
         "import subprocess\n"
         f"r = subprocess.run(['/bin/cat', {str(token)!r}], capture_output=True, text=True)\n"

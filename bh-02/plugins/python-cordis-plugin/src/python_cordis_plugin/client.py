@@ -36,7 +36,7 @@ One that is there, or whose way passes through there, the worker reads, as it do
 project's, and if that fails the aside says why the host did not; it is still the person's, not
 the model's to edit, which is what the model is told. (The jail also keeps an input from
 writing in the person's config directory, so a session run from the home directory can't
-choose what a later one reads there: brig's `trusted`.) A startup file that ends the worker is
+choose what a later one reads there: the policy denies `host.trusted`.) A startup file that ends the worker is
 passed over by the workers after it, until `/restart python`, and the input it cut short says
 which it was, after what the opening had to tell by then (that the worker was started again,
 and why).

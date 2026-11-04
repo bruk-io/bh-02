@@ -47,8 +47,27 @@ class Started(Protocol):
         another one. A second connection means a new start."""
         ...
 
+    def interrupt(self) -> bool:
+        """Ask the program to stop what it is running (an input); whether it was running."""
+        ...
+
+    def ended(self) -> str:
+        """Why the jail ended the program itself, for the person; "" when it did not."""
+        ...
+
     def report(self) -> Mapping[str, str]: ...
     def notice(self) -> str: ...
+
+    def reads(self) -> tuple[str, ...]:
+        """The trees it can read when that is all it can read; empty when it reads everything
+        but what it hides, or is no jail."""
+        ...
+
+    def writes(self) -> tuple[str, ...]:
+        """The directories it may write but a scratch directory of its own; empty when it
+        confines no writes."""
+        ...
+
     async def stop(self) -> None: ...
 
 

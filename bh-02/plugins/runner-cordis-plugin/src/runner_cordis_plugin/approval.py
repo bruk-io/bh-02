@@ -27,10 +27,15 @@ from typing import Any, Protocol, runtime_checkable
 __all__ = ["Approval", "Graded", "is_confined"]
 
 # The grades each axis a runner must hold for what runs in it to count as confined may have.
-# `fs_write` may be best-effort: brig grades it so while the jail holds a path with a mount the
-# host can undo, which the jail's tripwire ends the jail for (`runner_cordis_plugin.tripwire`), and
-# bh-02's policy always holds some (the layer files, `.git/hooks`).
+# `fs_write` may be best-effort, but only with bh-02's own `host_undo` axis at `tripwired`: brig
+# grades it best-effort while the jail holds a path with a mount the host can undo, and bh-02's
+# policy always holds some (the layer files, `.git/hooks`); what makes that count is that the
+# runner armed a tripwire over every such mount, which ends the jail when the host undoes one
+# (`runner_cordis_plugin.tripwire`). Brig does not grade that, so a report from a runner that
+# did not say it (any other, or a start that armed none) is not confined on best-effort writes.
 _CONFINING = {"fs_write": ("enforced", "best_effort"), "network": ("enforced",)}
+_HOST_UNDO = "host_undo"  # the report's axis for it (`jail.HOST_UNDO`)
+_TRIPWIRED = "tripwired"
 _JAIL = "jail"  # where a call runs when its question says nothing (CONTRACTS.md: tools, `runs`)
 # bh-02's own tool that reaches only the jail and bh-02's own state: asked exactly as the jail's are
 _HARNESS = "harness"
@@ -49,8 +54,10 @@ class Graded(Protocol):
 
 def is_confined(report: Mapping[str, str]) -> bool:
     """Whether a runner's report says what runs in it can write only where it was allowed
-    (`fs_write` enforced, or best-effort: unless the host undoes a mount, which ends the jail) and
-    reach no network (`network` enforced)."""
+    (`fs_write` enforced, or best-effort with `host_undo` `tripwired`: the host undoing a mount
+    ends the jail) and reach no network (`network` enforced)."""
+    if report.get("fs_write") == "best_effort" and report.get(_HOST_UNDO) != _TRIPWIRED:
+        return False
     return all(report.get(axis) in grades for axis, grades in _CONFINING.items())
 
 

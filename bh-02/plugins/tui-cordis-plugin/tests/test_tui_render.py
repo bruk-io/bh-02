@@ -231,6 +231,9 @@ def test_the_jail_in_a_status_bar() -> None:
     )
     assert render.jail_forms(False, {"fs_write": "unenforced"})[0] == "unjailed fs_write ✗"
     assert render.jail_forms(False, {}) == ("unjailed",)
+    assert (
+        render.jail_forms(True, {"fs_write": "enforced", "env": "violated"})[0] == "jailed fs_write ✓ env !"
+    )
 
 
 def test_the_session_field_s_short_form_is_the_id_s_last_part_which_resume_takes() -> None:

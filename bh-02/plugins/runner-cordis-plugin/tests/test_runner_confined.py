@@ -30,14 +30,13 @@ from runner_cordis_plugin import (
     BrigConfig,
     BrigJail,
     Policy,
-    ReadModel,
     Runner,
+    Started,
     Tripwire,
     allowlisted,
     confined,
     decoded,
     git_author,
-    held,
     is_confined,
     lifted,
     link_directories,
@@ -359,9 +358,10 @@ async def test_the_row_binds_a_runner_over_a_brig_jail_over_the_layers_it_was_gi
 
 
 def test_on_linux_the_policy_reads_by_allowlist_and_keeps_every_deny() -> None:
-    """The same policy, one read model over: what is readable is named, and every read deny
-    (the credential paths, `hide`, `secrets`) is a carve-out inside it; writes and env are
-    untouched, but for a secret under the project, whose read mask refuses writes by itself."""
+    """What is readable is named, and every read deny inside a root (`hide`, a secret under the
+    project) is a carve-out in it; the credential paths and secrets under no root are dropped
+    (nothing of them is in the jail); writes and env are untouched, but for a secret under the
+    project, whose read mask refuses writes by itself."""
     policy = spec_for(
         root="/w/app",
         scratch="/tmp/j/tmp",
@@ -373,13 +373,24 @@ def test_on_linux_the_policy_reads_by_allowlist_and_keeps_every_deny() -> None:
     )
     linux = allowlisted(policy, ("/usr", "/etc", "/opt/py"))
     assert linux.readable == ("/etc", "/opt/py", "/usr")
-    assert linux.masks == policy.masks
-    assert {"/w/app/private.txt", "/src/bh/private.txt", "/home/me/.ssh"} <= set(linux.masks)
+    assert linux.masks == ("/w/app/private.txt",)  # not ~/.ssh nor /src/bh/private.txt: under no root
+    assert {"/w/app/private.txt", "/src/bh/private.txt", "/home/me/.ssh"} <= set(policy.masks)
     assert "/w/app/private.txt" in policy.write_denies and "/w/app/private.txt" not in linux.write_denies
     kept = tuple(d for d in policy.write_denies if d != "/w/app/private.txt")
     assert (linux.writable, linux.write_denies) == (policy.writable, kept)
     assert (linux.env_allow, linux.env_set) == (policy.env_allow, policy.env_set)
-    assert linux.read_model is ReadModel.ALLOWLIST and policy.read_model is ReadModel.DENYLIST
+    assert linux.readable == ("/etc", "/opt/py", "/usr") and policy.readable == ()
+
+
+def test_a_mask_inside_a_readable_root_is_kept_and_one_beside_every_root_is_dropped() -> None:
+    policy = spec_for(
+        root="/w/app", scratch="/tmp/j/tmp", home="/home/me", config=BrigConfig(), layers=(), host=()
+    )
+    assert "/home/me/.ssh" in policy.masks
+    assert allowlisted(policy, ("/usr",)).masks == ()  # a typical project: nothing to carve out
+    assert allowlisted(policy, ("/usr", "/home/me")).masks == tuple(
+        sorted(m for m in policy.masks if m.startswith("/home/me/"))
+    )  # a root that holds the home directory carves the credentials out of it
 
 
 def test_a_linux_jail_reads_the_system_the_interpreter_and_what_the_command_names() -> None:
@@ -396,8 +407,7 @@ def test_a_linux_jail_reads_the_system_the_interpreter_and_what_the_command_name
 
 def test_a_linux_jail_holds_the_secrets_under_a_writable_root_and_says_so() -> None:
     """What the jail holds with a mount (a secret under the project) can be undone by the host:
-    brig's grade says best-effort, and the person is told which paths at the start of a session.
-    darwin's seatbelt matches paths, so there is nothing to say there."""
+    brig's grade says best-effort, and the person is told which paths at the start of a session."""
     spec = spec_for(
         root="/w/app",
         scratch="/tmp/j/tmp",
@@ -407,12 +417,12 @@ def test_a_linux_jail_holds_the_secrets_under_a_writable_root_and_says_so() -> N
         host=(),
         secrets=("/w/app/pkg/private.txt", "/src/bh/private.txt"),
     )
-    holds = held(spec)  # present or not, each is mounted over (brig makes a directory at an absent one)
-    assert holds == ("/w/app/pkg/private.txt", "/w/app/private.txt")  # not ~/.ssh, not /src/bh
-    notice = notice_for("linux", holds)
+    holds = [m for m in allowlisted(spec, ("/usr",)).masks]  # the masks left: those under a root
+    assert holds == ["/w/app/pkg/private.txt", "/w/app/private.txt"]  # not ~/.ssh, not /src/bh
+    notice = notice_for(holds)
     assert "/w/app/pkg/private.txt, /w/app/private.txt" in notice and "renaming a new file over it" in notice
     assert "bh-02 ends the jail at once" in notice and "credential" not in notice
-    assert notice_for("darwin", holds) == "" and notice_for("linux", ()) == ""
+    assert notice_for(()) == ""
 
 
 def test_release_says_only_that_a_program_still_runs() -> None:
@@ -952,18 +962,24 @@ def test_inotify_records_are_read_as_descriptor_mask_and_name() -> None:
     assert decoded(record + bare) == [(3, 0x80, "config"), (1, 0x400, "")]
 
 
-def test_a_linux_jail_trips_on_every_write_deny_under_a_writable_root_and_every_held_secret() -> None:
-    policy = spec_for(
-        root="/w/app",
-        scratch="/tmp/j/tmp",
-        home="/home/me",
-        config=BrigConfig(hide=("private.txt",)),
-        layers=("/w/app/mine.toml", "/elsewhere/chat.toml"),
-        host=(),
-    )
-    paths = tripwired(policy)
-    assert {"/w/app/mine.toml", "/w/app/.git/config", "/w/app/private.txt"} <= set(paths)
-    assert "/elsewhere/chat.toml" not in paths  # outside every writable root: nothing is mounted
+def _mount(kind: str, target: str) -> Any:  # brig's `Mount`, which `tripwired` reads two fields of
+    return SimpleNamespace(kind=SimpleNamespace(name=kind), target=target)
+
+
+def test_the_tripwire_is_armed_from_every_read_only_mount_beneath_a_writable_one_and_every_pin() -> None:
+    mounts = [
+        _mount("READ_ONLY", "/usr"),  # a readable root: beside no writable one
+        _mount("WRITABLE", "/w/app"),  # a root: beneath none
+        _mount("WRITABLE", "/w/app/a"),  # a pin
+        _mount("WRITABLE", "/w/app/a/b"),  # a pin beneath a pin
+        _mount("READ_ONLY", "/w/app/a/b/c"),  # a deny
+        _mount("READ_ONLY", "/w/app/private.txt"),  # a mask
+        _mount("READ_ONLY", "/w/app2/x"),  # beside the root, not beneath it
+        _mount("TMPFS", "/w/app/state"),  # brig's own, not a mount the host can undo
+        _mount("REMOUNT_READ_ONLY", "/w/app/state"),
+    ]
+    assert tripwired(mounts) == ("/w/app/a", "/w/app/a/b", "/w/app/a/b/c", "/w/app/private.txt")
+    assert tripwired([]) == ()
 
 
 # A bh-02 killed while its Python process runs an input's background program, which keeps trying to write
@@ -1009,9 +1025,10 @@ asyncio.run(main())
 """
 
 
-async def _killed_with_a_background_input(project: Path, how: str) -> None:
+async def _killed_with_a_background_input(project: Path, how: str) -> list[int]:
     """Run `_KILLED_WITH_A_BACKGROUND_INPUT` in `project`, see the program write, then `SIGKILL`
-    the stand-in bh-02, as a crash or `kill -9` would end it."""
+    the stand-in bh-02, as a crash or `kill -9` would end it. The process groups of the jail
+    (bubblewrap's command line names the project), seen before the kill."""
     killed = await asyncio.create_subprocess_exec(
         sys.executable,
         "-c",
@@ -1028,8 +1045,10 @@ async def _killed_with_a_background_input(project: Path, how: str) -> None:
         if alive.exists():
             break
         await asyncio.sleep(0.1)
+    groups = [g for g in _marked_groups(str(project)) if g != os.getpgrp()]  # not the stand-in's: ours
     killed.kill()
     assert await killed.wait() == -signal.SIGKILL
+    return groups
 
 
 async def _still_writing(alive: Path) -> bool:
@@ -1355,6 +1374,54 @@ async def test_a_linux_jail_ends_when_the_host_renames_over_a_write_deny_and_a_n
         await started.stop()
 
 
+async def test_a_linux_jail_ends_when_the_host_renames_a_directory_brig_pinned_on_the_way_to_a_deny(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """brig pins each directory between a writable root and a deny (`a`, `a/b` above `a/b/c`): bound
+    writable over itself so the command can't rename it. The host renaming `a` is a change inside
+    the watched directory of `a/b/c`'s parent no more than a name's: the kernel sends that
+    directory nothing, and the denies beneath `a` move with it. The tripwire is armed from brig's
+    mounts, the pins among them, so it watches the project for `a` and ends the jail. The control:
+    until the host does, the jail runs, and `a` can't be renamed from inside."""
+    _needs_bwrap()
+    project = tmp_path / "project"
+    (project / "a" / "b").mkdir(parents=True)
+    one = BrigJail(BrigConfig(deny=("a/b/c",)), Host())
+    started = await one.start(_listening, cwd=str(project))
+    try:
+        await asyncio.sleep(0.5)
+        assert started.ended() == "" and (project / "a" / "b" / "c").is_dir()  # held
+        group = started.group
+        (project / "a").rename(project / "moved")  # the host renames a pinned directory
+        assert await _gone(group), "the jail outlived the host renaming a directory it pinned"
+        assert str(project / "a") in started.ended()
+    finally:
+        await started.stop()
+
+
+async def test_a_jail_for_a_typical_project_is_graded_enforced_for_reads_and_says_it_is_tripwired(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The credential paths under the home directory are under no root the jail has, so they are
+    not passed to brig, which would mount one that is there and cap `fs_read` at best-effort for
+    good. The start's report carries `host_undo: tripwired` beside brig's grades, and is confined."""
+    _needs_bwrap()
+    project = tmp_path / "project"
+    project.mkdir()
+    home = tmp_path / "home"
+    (home / ".ssh").mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    started = await BrigJail(BrigConfig(), Host()).start(_listening, cwd=str(project))
+    try:
+        report = started.report()
+        assert report["fs_read"] == "enforced" and report["fs_write"] == "best_effort", report
+        assert report["host_undo"] == "tripwired" and is_confined(report)
+        assert isinstance(started, Started)  # the whole contract CONTRACTS.md promises
+    finally:
+        await started.stop()
+    assert PLANNED["host_undo"] == "tripwired" and is_confined(BrigJail(BrigConfig(), Host()).report())
+
+
 async def test_git_init_on_the_host_works_while_a_jail_runs_in_a_project_that_is_no_repository(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1505,7 +1572,7 @@ async def test_an_atomic_save_over_a_file_works_beside_the_file_in_the_project_a
     strict=True,
     raises=AssertionError,
     reason="a pin makes `.git` its own mount: renaming a file from the project into it, or out of "
-    "it, is EXDEV (measured against bruk-io/brig 0237986; TASK-0176.07)",
+    "it, is EXDEV (measured against bruk-io/brig 1c7c8d4; TASK-0176.07)",
 )
 async def test_a_file_renamed_between_the_project_and_dot_git_moves(tmp_path: Path) -> None:
     _needs_bwrap()
@@ -1522,7 +1589,7 @@ async def test_a_file_renamed_between_the_project_and_dot_git_moves(tmp_path: Pa
 
 def test_a_policy_becomes_brig_s_policies_and_nothing_else_reaches_the_program() -> None:
     """`to_brig` is the one converter: the policy's roots, denies and masks as brig's `FsPolicy`
-    (readable roots by allowlist, the whole host by denylist), an allow-list that names the policy's
+    (the readable roots), an allow-list that names the policy's
     own variables beside the baseline, a candidate environment holding both the host's and the
     policy's values, and the program's streams (stdin from /dev/null, the others to the files
     named)."""
@@ -1553,8 +1620,6 @@ def test_a_policy_becomes_brig_s_policies_and_nothing_else_reaches_the_program()
         "/tmp/l/stdout.log",
         "/tmp/l/stderr.log",
     )
-    by_denylist = to_brig(policy, environ={}, stdout="/o", stderr="/e")
-    assert by_denylist.fs.readable == ("/",)  # everything but the masks
 
 
 def test_brig_s_report_is_the_runner_s_in_lower_case_and_the_planned_one_is_no_stronger() -> None:
@@ -1725,14 +1790,16 @@ async def test_a_start_s_grades_are_brig_s_and_the_planned_ones_are_no_stronger(
     started = await one.start(_listening, cwd=str(project))
     try:
         report = dict(started.report())
+        assert report.pop("host_undo") == "tripwired"  # bh-02's own axis, which brig does not grade
         order = ["violated", "unenforced", "best_effort", "enforced"]
         assert set(report.values()) <= set(order), report
         assert report["network"] == report["env"] == "enforced" and report["fs_write"] == "best_effort"
         assert all(
             order.index(planned_grade) <= order.index(report[axis])
             for axis, planned_grade in one.report().items()
+            if axis != "host_undo"
         )
-        assert is_confined(report)
+        assert is_confined(started.report())
     finally:
         await started.stop()
 
@@ -2040,16 +2107,12 @@ async def test_a_killed_bh_02_s_jail_ends_with_it_and_the_next_jail_removes_what
     _needs_bwrap()
     project = tmp_path / "project"
     project.mkdir()
-    await _killed_with_a_background_input(project, "setsid")
+    groups = await _killed_with_a_background_input(project, "setsid")
+    assert groups, "CONTROL failed: no process of the jail was running"
     await asyncio.sleep(1.0)
     assert not await _still_writing(project / "alive")  # the program is gone
-    (record,) = (
-        found
-        for found in Path(os.environ["BRIG_HOME"], "placeholders").glob("*.json")
-        if str(project) in found.read_text()  # this test's: every test of the process shares brig's directory
-    )
-    group = json.loads(record.read_text())["jail"][0]  # bubblewrap's pid, which leads the jail's group
-    assert await _gone(group, within=10.0), "the jail outlived the bh-02 that started it"
+    for group in groups:
+        assert await _gone(group, within=10.0), "the jail outlived the bh-02 that started it"
     assert (project / ".claude").is_dir() and not list((project / ".claude").iterdir())
     one = BrigJail(BrigConfig(), Host())
     await (await one.start(_listening, cwd=str(project))).stop()  # brig swept

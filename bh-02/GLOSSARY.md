@@ -90,7 +90,7 @@ As [cordis's README](../libs/cordis/README.md) defines them (its "Concepts").
 - **runner** (row and key): what starts the Python process and the extensions process, each in a brig jail (`runner:confined`) or in none (`runner:unconfined`, `--no-jail`); not part of CodeAct, but what bh-02 runs it in.
 - **jail**: brig's sandbox around one program the confined runner started; its grades say what it enforces.
 - **confined**, **unconfined**: whether the runner enforces writes and network, so the model's code runs without asking (`jailed` in the status bar), or not, so each input is put to you first (`unjailed`).
-- **grades**: how well each part of the jail holds (`enforced`, `best_effort`, `cooperative`, `unenforced`), shown in the status bar as ✓, ~, ? and ✗.
+- **grades**: how well each part of the jail holds (`enforced`, `best_effort`, `cooperative`, `unenforced`, and `violated` for a claim brig finds broken), shown in the status bar as ✓, ~, ?, ✗ and !.
 - **placeholder** (Linux): an empty directory the jail makes in the project to hold a path an input may not create (`.envrc/`, `.claude/`), made and removed by brig, removed when the last jail holding it ends ([The jail](../docs/bh-02/using/jail.md#on-linux)).
 - **tripwire** (Linux): the jail ending itself at once when the host replaces, moves or removes a path it holds with a mount ([The jail](../docs/bh-02/using/jail.md#on-linux)).
 - **release** (row): `runner:release`: `/release`, which stops the Python process and the extensions process until the next input and frees the placeholders their jails held.

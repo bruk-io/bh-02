@@ -1,16 +1,13 @@
-"""What a Linux jail does with mounts, as decisions on a `Policy`: bubblewrap holds a deny or a
-mask with a mount on the host's own directory entry, so which denies it can mount (`mountable`),
-which masks it holds under a root an input may write (`held`), which paths the host undoing would
-let an input in (`tripwired`), and what the person is told (`notice_for`, `released_for`). Pure;
-what they read of the host is handed in (`facts`).
+"""What a Linux jail does with mounts, as decisions: bubblewrap holds a deny or a mask with a mount
+on the host's own directory entry, so which denies it can mount (`mountable`), which of the mounts
+brig made the host undoing would let an input in (`tripwired`), and what the person is told
+(`notice_for`, `released_for`). Pure; what they read of the host is handed in (`facts`).
 """
 
-from collections.abc import Mapping, Sequence
-
-from runner_cordis_plugin.policy import Policy
+from collections.abc import Iterable, Mapping, Sequence
+from typing import Protocol
 
 __all__ = [
-    "held",
     "mountable",
     "notice_for",
     "released_for",
@@ -18,41 +15,47 @@ __all__ = [
 ]
 
 
-def held(policy: Policy) -> tuple[str, ...]:
-    """The masks a Linux jail (`policy`, `allowlisted`) holds at or under a root an input may
-    write. bubblewrap masks each with a mount on the path itself (an absent one first gets a
-    directory brig makes there, so no input can create it), and a mount is on the host's directory
-    entry: replacing that entry on the host (an editor saves by renaming a new file over it) or
-    removing it detaches the mount inside the jail, and an input can then read and rewrite what is
-    there (measured). A mask under another is hidden already and mounted by nothing. The rest are
-    outside every writable root, where the allowlist alone keeps them out of the jail."""
-    roots, masks = policy.writable, policy.masks
+class _Kind(Protocol):
+    @property
+    def name(self) -> str: ...
+
+
+class _Mount(Protocol):
+    """What the tripwire reads of one of brig's mounts (`Jail.mounts`): how it is mounted and where."""
+
+    @property
+    def kind(self) -> _Kind: ...
+    @property
+    def target(self) -> str: ...
+
+
+def tripwired(mounts: Iterable[_Mount]) -> tuple[str, ...]:
+    """The paths a Linux jail holds with a mount the host can undo, read off the mounts brig made
+    (`Jail.mounts`, never a plan of bh-02's own): every read-only mount beneath a writable one (a
+    write deny, a masked secret, a placeholder, a readable tree nested in a root) and every
+    writable one beneath another (brig's rename pins: a directory between a root and a deny, bound
+    writable over itself so the command can't rename it). Replacing, moving or removing one on the
+    host ends the jail (`Tripwire`): the kernel detaches a mount inside the jail when the host
+    does that to its entry, and a pin renamed away takes the mounts beneath it along. A mount at or
+    outside every writable one is not here: nothing in the jail can write there."""
+    held = [(mount.kind.name, mount.target) for mount in mounts]
+    writable = [target for kind, target in held if kind == "WRITABLE"]
     return tuple(
-        m
-        for m in masks
-        if any(m == r or m.startswith(r + "/") for r in roots)
-        and not any(o != m and m.startswith(o + "/") for o in masks)
+        dict.fromkeys(
+            target
+            for kind, target in held
+            if kind in ("READ_ONLY", "WRITABLE") and any(target.startswith(w + "/") for w in writable)
+        )
     )
 
 
-def tripwired(policy: Policy) -> tuple[str, ...]:
-    """The paths a Linux jail holds with a mount that the host can undo: every write deny under
-    a root an input may write (an existing path bound read-only over itself, or a placeholder) and
-    every secret held there (`held`). Replacing, moving or removing one on the host ends the jail
-    (`Tripwire`); a deny outside every writable root is not mounted at all."""
-    roots = policy.writable
-    under = [d for d in policy.write_denies if any(d.startswith(r + "/") for r in roots)]
-    return tuple(dict.fromkeys([*under, *held(policy)]))
-
-
-def notice_for(platform: str, holds: Sequence[str]) -> str:
-    """What the person should know at the start of a session about the secrets under a root an
-    input may write (`held`), or nothing: on darwin seatbelt matches paths, so nothing the host
-    does to them lets an input in."""
-    if platform != "linux" or not holds:
+def notice_for(holds: Sequence[str]) -> str:
+    """What the person should know at the start of a session about the secrets a jail holds with a
+    mount the host can undo (`holds`), or nothing."""
+    if not holds:
         return ""
     return (
-        f"The jail keeps inputs from reading {', '.join(holds)}. On Linux it does that with a mount "
+        f"The jail keeps inputs from reading {', '.join(holds)}. It does that with a mount "
         "on each path that is there. The host can undo a mount: when a file at one of these paths "
         "is replaced (an editor saves by renaming a new file over it) or removed while the Python "
         "process runs, bh-02 ends the jail at once (a running input with it) and the next input's "
