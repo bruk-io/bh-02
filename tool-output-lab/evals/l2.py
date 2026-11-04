@@ -35,7 +35,7 @@ import subprocess
 import sys
 import tempfile
 from collections import Counter, defaultdict
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, replace
 from functools import partial
@@ -236,6 +236,24 @@ def bash_channel(t: Task, condition: str, w: Path, log: Path, dials: Dials = _DI
     return ["--strict-mcp-config", "--settings", "settings.json", "--allowedTools", "Bash,Read,Grep"]
 
 
+def mcp_channel(t: Task, condition: str, w: Path, log: Path, dials: Dials = _DIALS) -> list[str]:
+    """The flags (and files in the run's folder) for a synthetic task on the MCP channel: the fixture
+    server's tool returns the task's payload, and the hook, when the condition has one, folds it."""
+    server = {
+        "command": "sh",
+        "args": ["-c", f"cd {_LAB} && exec {_UV} -m claude_code.fixture_mcp"],
+        "env": {"TOOL_OUTPUT_LAB_TASK": t.task_id},
+    }
+    (w / "mcp.json").write_text(json.dumps({"mcpServers": {"fixture": server}}))
+    mode = dials.mode_for(condition)
+    settings = (
+        _hook_settings(mode, log, view=dials.view, config=dials.config, budget=dials.budget) if mode else {}
+    )
+    (w / "settings.json").write_text(json.dumps(settings))
+    flags = ["--mcp-config", "mcp.json", "--strict-mcp-config", "--settings", "settings.json"]
+    return [*flags, "--allowedTools", f"mcp__fixture__{TOOLS[t.fmt]},Bash,Read,Grep"]
+
+
 def _fold_shim(bin_dir: Path, view: str = "sample", config: FoldConfig = DEFAULT) -> None:
     bin_dir.mkdir()
     shim = bin_dir / "lab-fold"  # not `fold`, which would shadow coreutils fold
@@ -295,22 +313,7 @@ def run_one(
                 copy.write_text(t.payload(), encoding="utf-8")
                 guarded = original.read_bytes()
         else:
-            server = {
-                "command": "sh",
-                "args": ["-c", f"cd {_LAB} && exec {_UV} -m claude_code.fixture_mcp"],
-                "env": {"TOOL_OUTPUT_LAB_TASK": t.task_id},
-            }
-            (w / "mcp.json").write_text(json.dumps({"mcpServers": {"fixture": server}}))
-            mode = dials.mode_for(condition)
-            (w / "settings.json").write_text(
-                json.dumps(
-                    _hook_settings(mode, log, view=dials.view, config=dials.config, budget=dials.budget)
-                    if mode
-                    else {}
-                )
-            )
-            command += ["--mcp-config", "mcp.json", "--strict-mcp-config", "--settings", "settings.json"]
-            command += ["--allowedTools", f"mcp__fixture__{TOOLS[t.fmt]},Bash,Read,Grep"]
+            command += mcp_channel(t, condition, w, log, dials)
         try:
             proc = subprocess.run(
                 command, cwd=w, env=env, capture_output=True, text=True, timeout=900, check=False
@@ -729,35 +732,51 @@ def _merge(names: list[str], name: str) -> int:
     return 0
 
 
+type Run = Callable[[Path], list[dict[str, Any]]]  # one session, given the hook's log: its rows
+
+
 def run_jobs(
     jobs: list[tuple[Task, str, int, Dials]], model: str, name: str, workers: int, max_cost: float | None
 ) -> list[dict[str, Any]]:
-    """Run the sessions in parallel, writing each row to results/NAME.jsonl as it comes, and stop
-    starting new ones after five failures in a row (a usage limit or an outage) or once `max_cost`
-    is spent."""
+    """Run the sessions in parallel (see `run_all`), one row each."""
+    runs: list[Run] = [partial(_one_row, t, c, model, rep, d) for t, c, rep, d in jobs]
+    return run_all(runs, len(jobs), name, workers, max_cost)
+
+
+def _one_row(t: Task, condition: str, model: str, rep: int, dials: Dials, log: Path) -> list[dict[str, Any]]:
+    return [run_one(t, condition, model, rep, log, dials)]
+
+
+def run_all(
+    runs: list[Run], expected: int, name: str, workers: int, max_cost: float | None
+) -> list[dict[str, Any]]:
+    """Run the sessions in parallel, writing each row to results/NAME.jsonl as it comes (`expected`
+    rows in all), and stop starting new ones after five failures in a row (a usage limit or an
+    outage) or once `max_cost` is spent."""
     results = _LAB / "results"
     log = results / f"{name}-hook.jsonl"
     rows: list[dict[str, Any]] = []
     with ThreadPoolExecutor(workers) as pool, (results / f"{name}.jsonl").open("w", encoding="utf-8") as f:
-        pending = [pool.submit(run_one, t, c, model, rep, log, dials) for t, c, rep, dials in jobs]
+        pending = [pool.submit(run, log) for run in runs]
         failed_in_a_row, spent, capped = 0, 0.0, False
         for future in as_completed(pending):
-            row = future.result()
-            f.write(json.dumps(row) + "\n")
-            f.flush()
-            rows.append(row)
-            mark = "FAILED" if row["error"] else "ok" if row["correct"] else "MISS"
-            print(
-                f"{len(rows)}/{len(jobs)} {row['task_id']} {row['condition']}: {mark} ${row['cost_usd']:.4f}",
-                flush=True,
-            )
-            failed_in_a_row = failed_in_a_row + 1 if row["error"] else 0
-            spent += row["cost_usd"]
+            for row in future.result():
+                f.write(json.dumps(row) + "\n")
+                f.flush()
+                rows.append(row)
+                mark = "FAILED" if row["error"] else "ok" if row["correct"] else "MISS"
+                done = f"{len(rows)}/{expected} {row['task_id']} {row['condition']}"
+                print(
+                    f"{done}: {mark} ${row['cost_usd']:.4f}",
+                    flush=True,
+                )
+                spent += row["cost_usd"]
+            failed_in_a_row = failed_in_a_row + 1 if any(r["error"] for r in future.result()) else 0
             stop = None
             if max_cost is not None and spent >= max_cost and not capped:
                 capped, stop = True, f"${spent:.2f} spent, the --max-cost of ${max_cost:.2f}"
             if failed_in_a_row == _STOP_AFTER_FAILURES:
-                stop = f"{failed_in_a_row} runs in a row failed; last: {row['error']}"
+                stop = f"{failed_in_a_row} sessions in a row failed; last: {rows[-1]['error']}"
             if stop:
                 print(f"stopping: {stop}", flush=True)
                 for p in pending:

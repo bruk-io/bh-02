@@ -1,0 +1,3 @@
+{"tool": "mcp__fixture__list_pods", "tool_use_id": "toolu_01D1HXgL1YfTzNo3Sa9J3HpR", "spilled": false, "raw_tokens": 6806, "branch": "json", "out_tokens": 1067}
+{"tool": "mcp__fixture__list_pods", "tool_use_id": "toolu_01WVDixfyxb9dVoQKop9urmi", "spilled": false, "raw_tokens": 6806, "branch": "json-schema", "out_tokens": 360}
+{"tool": "mcp__fixture__get_figma_metadata", "tool_use_id": "toolu_01Vvw2Qf2hSMh1fTt2xeGogT", "spilled": true, "raw_tokens": 36734, "branch": "xml", "out_tokens": 1846}
