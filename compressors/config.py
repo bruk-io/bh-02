@@ -11,6 +11,9 @@ The defaults are the values the findings were measured with. A knob is set in a 
     [tree]
     max_promoted = 5
 
+    [json_envelope]               # the envelope's parts for JSON (`--view envelope`)
+    samples = "typical"
+
 The fold's budget and view are not knobs here: each call names them. `label` names a config by
 what it changes from the defaults, for reports; `sets` turns one back into `--set` arguments.
 """
@@ -19,6 +22,8 @@ import tomllib
 from dataclasses import asdict, dataclass, fields, replace
 from pathlib import Path
 from typing import Any
+
+from compressors.envelope import priority
 
 
 @dataclass(frozen=True)
@@ -55,14 +60,38 @@ class TreeKnobs:
 
 
 @dataclass(frozen=True)
+class JsonEnvelopeKnobs:
+    """Which producer makes each part of a JSON envelope (`compressors.envelope_json`), and the order
+    the parts claim the budget in. The defaults are the schema view's parts."""
+
+    shape: str = (
+        "fields"  # fields: every field with its values and counts; summary: types and few-valued counts
+    )
+    anomalies: str = "exceptions"  # exceptions: every row that breaks the shape; standouts: the fold's rules
+    samples: str = (
+        "matches"  # matches: rows holding the query; typical: and one ordinary row; head-tail; none
+    )
+    nav: str = "jq"  # jq: a ready query for the broken rows; rows: how to fetch any row; none
+    priority: str = "shape,anomalies,nav,samples"
+
+
+@dataclass(frozen=True)
 class FoldConfig:
     worth_it: float = 0.9  # a fold that keeps more than this share of the input passes it through instead
     schema: SchemaKnobs = SchemaKnobs()
     tree: TreeKnobs = TreeKnobs()
+    json_envelope: JsonEnvelopeKnobs = JsonEnvelopeKnobs()
 
 
 DEFAULT = FoldConfig()
-_SECTIONS = {"schema": SchemaKnobs, "tree": TreeKnobs}
+_SECTIONS = {"schema": SchemaKnobs, "tree": TreeKnobs, "json_envelope": JsonEnvelopeKnobs}
+# The knobs that name a producer: the names each takes (`compressors.envelope_json` holds the producers).
+CHOICES = {
+    "json_envelope.shape": ("fields", "summary"),
+    "json_envelope.anomalies": ("exceptions", "standouts", "none"),
+    "json_envelope.samples": ("matches", "typical", "head-tail", "none"),
+    "json_envelope.nav": ("jq", "rows", "none"),
+}
 
 
 def _knob_names() -> list[str]:
@@ -77,6 +106,10 @@ def _typed(name: str, default: Any, value: Any) -> Any:
         ValueError: it is not a value of that type.
     """
     kind = type(default)
+    if name in CHOICES and value not in CHOICES[name]:
+        raise ValueError(f"{name} is one of {', '.join(CHOICES[name])}; not {value!r}")
+    if name == "json_envelope.priority":
+        priority(str(value))  # names each part once, or raises
     if isinstance(value, str):
         try:
             value = kind(value)

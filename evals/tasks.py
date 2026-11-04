@@ -425,7 +425,11 @@ def _pypi() -> list[Task]:
             "count",
             real.PYPI_CLICK,
             "{path} is PyPI's JSON for the package click. How many releases does it list?",
-            Number(len(versions), versions, (f"of {len(versions)} keys of $.releases",)),
+            Number(  # the sample fold's marker states it, and so does a schema's or an envelope's header
+                len(versions),
+                versions,
+                (f"of {len(versions)} keys of $.releases", f".releases: object of {len(versions)} keys"),
+            ),
         ),
         _file_task(
             "pypi-L-enumerate-2023",

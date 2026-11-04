@@ -85,6 +85,8 @@ def fold_text(
         return result
     if branch.endswith("-schema"):
         where = "paths are jq paths into the input, which FILE in the query stands for"
+    elif branch.endswith("-envelope"):
+        where = "paths are jq paths into the input, which FILE in a command stands for"
     elif source is not None:
         where = "line numbers refer to the pretty-printed copy"
     else:
@@ -124,8 +126,9 @@ def main(argv: list[str] | None = None) -> int:
         "--view",
         choices=VIEWS,
         default="sample",
-        help="data (JSON) shown by samples, or by its schema: fields, values and counts, and the rows that "
-        "break the pattern",
+        help="data (JSON) shown by samples; by its schema: fields, values and counts, and the rows that "
+        "break the pattern; or as an envelope of shape, anomalies, samples and how to get more, whose parts "
+        "the json_envelope knobs name (--set json_envelope.samples=typical)",
     )
     ns = parser.parse_args(argv)
     try:

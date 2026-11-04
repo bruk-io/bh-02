@@ -26,7 +26,7 @@ from typing import Any
 from compressors import markers
 from compressors.config import DEFAULT, SchemaKnobs
 
-_MISSING = object()
+MISSING = object()
 _SEGMENT = re.compile(r'\.([A-Za-z_][A-Za-z0-9_]*)|\[("(?:[^"\\]|\\.)*")\]|\[(\d+)\]|(\[\])')
 _HEADER = re.compile(
     r"^(?P<ind> *)(?P<path>\S+): (?:array\[(?P<n>\d+)\] of \S+|object of (?P<keys>\d+) keys)"
@@ -89,9 +89,9 @@ def walk(value: Any, path: str) -> list[Any]:
     return found
 
 
-def _get(row: Any, rel: str) -> Any:
+def get(row: Any, rel: str) -> Any:
     got = walk(row, rel)
-    return got[0] if got else _MISSING
+    return got[0] if got else MISSING
 
 
 def _values_then_counts(text: str) -> list[tuple[Any, int]] | None:
@@ -112,7 +112,7 @@ def _values_then_counts(text: str) -> list[tuple[Any, int]] | None:
 
 def _field_claims(path: str, rows: list[Any], rel: str, desc: str) -> list[str]:
     where = f"{path} {rel}"
-    present = [v for v in (_get(r, rel) for r in rows) if v is not _MISSING]
+    present = [v for v in (get(r, rel) for r in rows) if v is not MISSING]
     problems = []
     for part in desc.split("; "):
         if markers.CLIPPED.search(part) or "...[+" in part:
@@ -157,18 +157,18 @@ def _field_claims(path: str, rows: list[Any], rel: str, desc: str) -> list[str]:
     return problems
 
 
-def _note_claims(row_path: str, row: Any, note: str) -> tuple[list[str], str | None]:
+def note_claims(row_path: str, row: Any, note: str) -> tuple[list[str], str | None]:
     """A note's problems, and the field it is about (for completeness)."""
     if m := re.fullmatch(r"lacks (\S+)", note):
-        return ([] if _get(row, m[1]) is _MISSING else [f"{row_path}: says it lacks {m[1]}, it has it"]), None
+        return ([] if get(row, m[1]) is MISSING else [f"{row_path}: says it lacks {m[1]}, it has it"]), None
     if m := re.fullmatch(r"has (\S+) (.+)", note):
         return (
-            [] if _get(row, m[1]) is not _MISSING else [f"{row_path}: says it has {m[1]}, it does not"]
+            [] if get(row, m[1]) is not MISSING else [f"{row_path}: says it has {m[1]}, it does not"]
         ), None
     if m := re.fullmatch(r"(\S+) is (\w+) (.+)", note):
-        got = _get(row, m[1])
+        got = get(row, m[1])
         return (
-            [] if got is not _MISSING and _type(got) == m[2] else [f"{row_path}: {m[1]} is not {m[2]}"]
+            [] if got is not MISSING and _type(got) == m[2] else [f"{row_path}: {m[1]} is not {m[2]}"]
         ), None
     if m := re.fullmatch(r"(\S+) (.+?)( \(outlier\))?", note):
         if markers.CLIPPED.search(m[2]) or "...[+" in m[2]:
@@ -177,7 +177,7 @@ def _note_claims(row_path: str, row: Any, note: str) -> tuple[list[str], str | N
             value = json.loads(m[2])
         except ValueError:
             return [f"{row_path}: cannot read the note {note!r}"], None
-        got = _get(row, m[1])
+        got = get(row, m[1])
         return ([] if got == value else [f"{row_path}: says {m[1]} {m[2]}, it is {json.dumps(got)}"]), m[1]
     return [f"{row_path}: cannot read the note {note!r}"], None
 
@@ -202,8 +202,12 @@ def _notes(text: str) -> list[str]:
     return out
 
 
-def claims(raw_value: Any, view: str, knobs: SchemaKnobs = DEFAULT.schema) -> list[str]:
-    """Every claim of the view that the data does not bear out (judged by the knobs it was made with)."""
+def claims(
+    raw_value: Any, view: str, knobs: SchemaKnobs = DEFAULT.schema, complete: bool = True
+) -> list[str]:
+    """Every claim of the view that the data does not bear out (judged by the knobs it was made with).
+    `complete` False skips completeness, for a text with no exception rows of its own (an envelope's
+    shape, whose anomalies are listed in a part of their own)."""
     problems: list[str] = []
     rows: list[Any] = []
     path = ""
@@ -212,7 +216,7 @@ def claims(raw_value: Any, view: str, knobs: SchemaKnobs = DEFAULT.schema) -> li
     cut = False
 
     def close() -> None:  # completeness, once a collection's lines are all read
-        if not path or cut or path.endswith("[]"):  # rows inside rows are not named by one index
+        if not complete or not path or cut or path.endswith("[]"):  # rows inside rows: not one index
             return
         for rel, desc in fields.items():
             counts = _values_then_counts(desc.split("; ")[-1])
@@ -220,9 +224,9 @@ def claims(raw_value: Any, view: str, knobs: SchemaKnobs = DEFAULT.schema) -> li
                 continue
             rare = {json.dumps(v) for v, n in counts[1:] if n / len(rows) <= knobs.rare}
             for i, r in enumerate(rows):
-                v = _get(r, rel)
+                v = get(r, rel)
                 if (
-                    v is not _MISSING
+                    v is not MISSING
                     and json.dumps(v) in rare
                     and not any(row.endswith(f"[{i}]") or row in walk_keys.get(i, ()) for row in listed)
                 ):
@@ -261,7 +265,7 @@ def claims(raw_value: Any, view: str, knobs: SchemaKnobs = DEFAULT.schema) -> li
                 continue
             listed.add(m["row"])
             for note in _notes(m["notes"]):
-                problems += _note_claims(m["row"], got[0], note)[0]
+                problems += note_claims(m["row"], got[0], note)[0]
     close()
     return problems
 
@@ -285,11 +289,11 @@ def query_runs(raw: str, raw_value: Any, view: str, knobs: SchemaKnobs = DEFAULT
         return []
     value = json.loads(sel["value"])
     rows = walk(raw_value, sel["base"] + "[]") if sel["base"] not in ("", ".") else walk(raw_value, "[]")
-    held = sum(1 for r in rows if _get(r, sel["field"]) == value)
+    held = sum(1 for r in rows if get(r, sel["field"]) == value)
     if not rows or held / len(rows) < knobs.dominant:  # it must select the rows that break the dominant value
         said = f"the query selects against {sel['value']}, which {held} of {len(rows)} rows hold"
         return [f"{said}: not the dominant value"]
-    want = [_get(r, sel["pick"]) if sel["pick"] else r for r in rows if _get(r, sel["field"]) != value]
+    want = [get(r, sel["pick"]) if sel["pick"] else r for r in rows if get(r, sel["field"]) != value]
     got = proc.stdout.splitlines()
     expected = [w if isinstance(w, str) else json.dumps(w) for w in want]
     return [] if got == expected else [f"the query returns {len(got)} rows, its select names {len(expected)}"]

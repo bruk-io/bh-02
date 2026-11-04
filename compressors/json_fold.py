@@ -174,7 +174,7 @@ def _text(values: Iterable[Any]) -> str:
     return " ".join(str(v) for v in values if isinstance(v, str | int) and not isinstance(v, bool))
 
 
-def _promote(arr: list[Any], terms: frozenset[str], limit: int, shown: set[int]) -> list[tuple[int, str]]:
+def promote(arr: list[Any], terms: frozenset[str], limit: int, shown: set[int]) -> list[tuple[int, str]]:
     """Up to `limit` indices worth showing, strongest first, with why."""
     if all(isinstance(x, Mapping) for x in arr):
         flats = [_flatten(x) for x in arr]
@@ -244,7 +244,7 @@ def _fold_array(arr: list[Any], path: str, terms: frozenset[str], lim: _Limits, 
     if n <= lim.max_items:
         return [_fold(v, child_path(path, i), terms, lim, depth + 1) for i, v in enumerate(arr)]
     shown = set(range(lim.head)) | set(range(max(0, n - lim.tail), n))
-    why = dict(_promote(arr, terms, lim.max_promoted, shown))
+    why = dict(promote(arr, terms, lim.max_promoted, shown))
     out: list[Any] = []
     summarised = False
     prev = -1

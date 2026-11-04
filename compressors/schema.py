@@ -354,6 +354,15 @@ def _show(v: Any, clip: int) -> str:
     return markers.clipped(json.dumps(v, ensure_ascii=False), clip)
 
 
+def lists_values(f: Field, values: int) -> bool:
+    """Whether a field's line lists every value it holds, with counts (or its one value, "(all N)")."""
+    if f.unique:
+        return False
+    if len(f.counts) == 1 and f.counts[0][1] == f.present:
+        return True
+    return bool(f.counts) and len(f.counts) <= values and sum(c for _, c in f.counts) == f.present - f.objects
+
+
 def describe(f: Field, rows: int, values: int = 8, clip: int = 60) -> str:
     """One field's line: where it is, what types, and what values it takes."""
     parts = []
@@ -368,7 +377,7 @@ def describe(f: Field, rows: int, values: int = 8, clip: int = 60) -> str:
         parts.append(f"{kind}, unique{like}{span}")
     elif len(f.counts) == 1 and f.counts[0][1] == f.present:
         parts.append(f"{markers.clipped(f.counts[0][0], clip)} (all {f.present})")
-    elif f.counts and len(f.counts) <= values and sum(c for _, c in f.counts) == f.present - f.objects:
+    elif lists_values(f, values):
         parts.append(", ".join(f"{markers.clipped(v, clip)} {c}" for v, c in f.counts))
     elif f.low is not None and f.high is not None and f.median is not None:
         parts.append(f"{kind} {_number(f.low)}..{_number(f.high)}, median {_number(f.median)}")
@@ -389,7 +398,7 @@ def describe(f: Field, rows: int, values: int = 8, clip: int = 60) -> str:
     return "; ".join(parts)
 
 
-def _render(c: Collection, indent: str, lim: _Limits) -> list[str]:
+def _render(c: Collection, indent: str, lim: _Limits, shape_only: bool = False) -> list[str]:
     if c.keyed:
         like = f" like {c.key_shape[0]}" if c.key_shape and c.key_shape[1] >= 0.5 else ""
         each = "an object" if c.of == "object" else c.of
@@ -411,35 +420,46 @@ def _render(c: Collection, indent: str, lim: _Limits) -> list[str]:
         rest = ", ".join(f.path for f in c.fields[lim.fields : lim.fields + 12])
         more = ", ..." if len(c.fields) > lim.fields + 12 else ""
         out.append(f"{indent}  [... {len(c.fields) - lim.fields} more fields: {rest}{more}]")
-    if c.exceptions:
+    if c.exceptions and not shape_only:
         out.append(f"{indent}  {markers.schema_exceptions(len(c.exceptions))}")
         for e in c.exceptions[: lim.rows]:
             who = f" {markers.clipped(e.ident, lim.clip)}" if e.ident else ""
             out.append(f"{indent}    {e.row}{who}: {', '.join(e.notes)}")
         if len(c.exceptions) > lim.rows:
             out.append(f"{indent}    [... {len(c.exceptions) - lim.rows} more exception rows]")
-    for row, text in c.matched:
+    for row, text in () if shape_only else c.matched:
         # a row that holds the query is likely the answer: shown near whole
         out.append(f"{indent}  matches the query: {row} {markers.clipped(text, 25 * lim.clip)}")
     for sub in c.inner:
-        out += _render(sub, indent + "  ", lim)
+        out += _render(sub, indent + "  ", lim, shape_only)
     return out
 
 
 def _outline(
-    path: str, value: Any, terms: frozenset[str], lim: _Limits, found: list[Collection]
+    path: str,
+    value: Any,
+    terms: frozenset[str],
+    lim: _Limits,
+    found: list[Collection],
+    known: Mapping[str, Collection] | None = None,
+    shape_only: bool = False,
 ) -> list[str]:
-    """The unique structure as an outline, and every collection in it as its schema."""
+    """The unique structure as an outline, and every collection in it as its schema (`known` holds
+    collections already made, by path; `shape_only` leaves out the exceptions and the query's rows)."""
     if (rows := _rows_of(path, value, lim.knobs)) is not None:
-        c = collection(path, *rows, terms, 0, lim.knobs)
+        c = known[path] if known and path in known else collection(path, *rows, terms, 0, lim.knobs)
         found.append(c)
-        return _render(c, "", lim)
+        return _render(c, "", lim, shape_only)
     if isinstance(value, Mapping) and value:
         out = []
         for k, v in list(value.items())[: lim.fields]:
             p = _key(path, k)
             nested = (isinstance(v, Mapping) and v) or _rows_of(p, v, lim.knobs) is not None
-            out += _outline(p, v, terms, lim, found) if nested else [f"{p}  {_show(v, lim.clip)}"]
+            out += (
+                _outline(p, v, terms, lim, found, known, shape_only)
+                if nested
+                else [f"{p}  {_show(v, lim.clip)}"]
+            )
         if len(value) > lim.fields:
             rest = ", ".join(str(k) for k in list(value)[lim.fields : lim.fields + 12])
             out.append(f"[... {len(value) - lim.fields} more keys of {path or '.'}: {rest}, ...]")
@@ -447,9 +467,25 @@ def _outline(
     return [f"{path or '.'}  {_show(value, 4 * lim.clip)}"]
 
 
-def _query(found: list[Collection], slurp: bool, k: SchemaKnobs) -> str | None:
-    """A ready jq query: the rows of the first collection whose dominant value some rows break."""
-    jq = "jq -s" if slurp else "jq"
+@dataclass(frozen=True)
+class Query:
+    """A ready jq query: the rows at `at` whose `field` is not `usual` (JSON), and of each its `pick`."""
+
+    at: str
+    field: str
+    usual: str
+    pick: str  # the naming field, or "" for the whole row
+    slurp: bool
+
+    @property
+    def command(self) -> str:
+        jq = "jq -s" if self.slurp else "jq"
+        pick = f" | {self.pick}" if self.pick else ""
+        return f"{jq} '{self.at or '.'}[] | select({self.field} != {self.usual}){pick}' FILE"
+
+
+def query(found: list[Collection] | tuple[Collection, ...], slurp: bool, k: SchemaKnobs) -> Query | None:
+    """The rows of the first collection whose dominant value some rows break."""
     for c in found:
         for sub in (c, *c.inner):
             if sub.keyed or sub.of != "object":
@@ -458,9 +494,65 @@ def _query(found: list[Collection], slurp: bool, k: SchemaKnobs) -> str | None:
             for f in sub.fields:
                 dominant = len(f.counts) > 1 and f.counts[0][1] / sub.rows >= k.dominant
                 if f.path in broken and f.present == sub.rows and dominant:
-                    pick = f" | {sub.ident}" if sub.ident else ""
-                    return f"{jq} '{sub.path or '.'}[] | select({f.path} != {f.counts[0][0]}){pick}' FILE"
+                    return Query(sub.path, f.path, f.counts[0][0], sub.ident or "", slurp)
     return None
+
+
+@dataclass(frozen=True)
+class Found:
+    """A collection, with its rows and each row's jq path."""
+
+    collection: Collection
+    paths: tuple[str, ...]
+    items: tuple[Any, ...]
+
+
+def collections(value: Any, terms: frozenset[str], knobs: SchemaKnobs = DEFAULT.schema) -> tuple[Found, ...]:
+    """Every collection the outline would show, outermost first, however wide the objects above them."""
+    out: list[Found] = []
+
+    def visit(path: str, v: Any) -> None:
+        if (rows := _rows_of(path, v, knobs)) is not None:
+            paths, items, keys = rows
+            out.append(
+                Found(collection(path, paths, items, keys, terms, 0, knobs), tuple(paths), tuple(items))
+            )
+        elif isinstance(v, Mapping):
+            for k, x in v.items():
+                p = _key(path, k)
+                if (isinstance(x, Mapping) and x) or _rows_of(p, x, knobs) is not None:
+                    visit(p, x)
+
+    visit("", value)
+    return tuple(out)
+
+
+@dataclass(frozen=True)
+class ShapeLevel:
+    """The outline at one level, without exceptions: its lines, and what it shows of each collection."""
+
+    lines: tuple[str, ...]
+    shown: tuple[tuple[Collection, int], ...]  # each collection shown (inner ones too) and its fields shown
+    values: int  # values listed for a field with few of them
+    clip: int  # characters of a value shown
+
+
+def shape_levels(
+    value: Any, terms: frozenset[str], known: tuple[Found, ...], knobs: SchemaKnobs = DEFAULT.schema
+) -> tuple[ShapeLevel, ...]:
+    """The outline of the unique structure and each collection's fields, roomiest first."""
+    by_path = {f.collection.path: f.collection for f in known}
+    out = []
+    for lim in _levels(knobs):
+        found: list[Collection] = []
+        lines = _outline("", value, terms, lim, found, by_path, shape_only=True)
+
+        def every(cs: list[Collection] | tuple[Collection, ...]) -> list[Collection]:
+            return [x for c in cs for x in (c, *every(c.inner))]
+
+        shown = tuple((c, min(len(c.fields), lim.fields)) for c in every(found))
+        out.append(ShapeLevel(tuple(lines), shown, lim.values, lim.clip))
+    return tuple(out)
 
 
 def schema_view(
@@ -476,8 +568,8 @@ def schema_view(
     for lim in _levels(knobs):
         found: list[Collection] = []
         lines = _outline("", value, terms, lim, found)
-        if (q := _query(found, slurp, knobs)) is not None:
-            lines.append(f"query: {q}")
+        if (q := query(found, slurp, knobs)) is not None:
+            lines.append(f"query: {q.command}")
         text = "\n".join(lines)
         if estimate_tokens(text) <= budget_tokens:
             return text

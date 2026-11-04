@@ -196,6 +196,11 @@ def render(folded: Folded, path: str, raw_path: str = "") -> str:
                 "This is the data's schema: its fields, their values and counts, and the rows that break the "
                 f"pattern, by jq path. FILE in the query is {quoted}"
             )
+        case "json-envelope" | "jsonl-envelope":
+            how = (
+                "This is the data's envelope: its shape (fields, values and counts), the rows that break it, "
+                f"samples, and how to get more, by jq path. FILE in a command is {quoted}"
+            )
         case _:
             how = f"Markers give the character offsets they hide; read them with python or grep on {quoted}"
     return f"{head}. {how}.]\n{folded.body}"
