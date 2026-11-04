@@ -129,3 +129,25 @@ def test_a_synthetic_id_builds_its_own_band_and_grows_with_it():
     assert sizes[0] * 3.5 < sizes[1] and sizes[1] * 3.5 < sizes[2]  # 4 and 16 times L
     with pytest.raises(KeyError, match="no eval task 'json-XL-spot-at51'"):
         task("json-XL-spot-at51")
+
+
+def test_an_hdfs_log_is_whole_blocks_in_the_original_order_and_its_truths_come_from_the_labels():
+    from evals.tasks import hdfs_index
+
+    if "hdfs" in skipped():
+        pytest.skip("no corpus/real/hdfs/blocks.jsonl: ./lab fetch hdfs")
+    index = hdfs_index()
+    spot = task("hdfs-M-spot-subtle1")
+    payload = spot.payload()
+    numbers = [int(line.split(" ", 1)[0]) for line in payload.splitlines()]  # dates sort as numbers too
+    assert numbers == sorted(numbers)
+    named = {b for b in index if b in payload}
+    assert all(sum(line.count(b) > 0 for line in payload.splitlines()) == len(index[b].lines) for b in named)
+    assert index[spot.truth.token].anomalous and sum(index[b].anomalous for b in named) == 1
+    absent = task("hdfs-M-absent-none")
+    assert not any(index[b].anomalous for b in absent.truth.candidates)
+    lookup = task("hdfs-L-lookup-a")
+    assert (
+        lookup.query in lookup.payload()
+        and f"allocateBlock: {lookup.truth.value}. {lookup.query}" in lookup.payload()
+    )
