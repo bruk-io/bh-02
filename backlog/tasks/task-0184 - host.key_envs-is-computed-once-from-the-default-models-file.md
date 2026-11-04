@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-03T17:47:00Z'
-updated_date: '2026-11-04T13:27:00Z'
+updated_date: '2026-11-04T13:28:00Z'
 labels:
   - models
   - credentials
@@ -179,4 +179,6 @@ E        +  where 0 = <Result okay>.exit_code
 FAILED bh-02/app/tests/test_host_values.py::test_the_runner_refuses_a_variable_a_key_reads_in_the_models_file_another_layer_names
 1 failed in 3.66s
 ```
+
+Lead, 2026-11-04, after the first review: (1) the repro file changed after it was recorded only by losing the tests of the removed key_variables/models_keys/host.key_envs and one assertion about the refusal naming a models file; the repro test itself is unchanged. A new repro is recorded above: the test file as it now stands, run on the code before the fix (38bdd68), committed in a throwaway local worktree so record-check could name it; it fails on assert 0 == 1 (bh-02 started). (2) The review's DRAFT-0027 (a key table with another problem counted no variable: fails open) and DRAFT-0026 (CONTRACTS still listed host.key_envs and models_file) are fixed here in c14eaf9, with a test that fails without the change; both drafts archived.
 <!-- SECTION:NOTES:END -->
