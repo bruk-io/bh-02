@@ -3,7 +3,7 @@ id: TASK-0186
 title: >-
   test_real_launch's keyed-model --no-jail launch exits 1 on quit, once, under
   the full check
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-11-03T03:39:00Z'
@@ -104,4 +104,6 @@ INFO    -  Documentation built in 6.20 seconds
 ```
 
 No repro: the failure was seen once (the TASK-0179 full run on 1e0b11b). It did not recur in 3 member runs or in the reviewer's full run, and it can't be triggered on demand. The new message shows the screen if it recurs.
+
+Reviewer, 2026-11-04: closed. AC1/AC3: 43 messages in the diff, and the planted failure was shown. AC4: the worker's 3 runs were the member check, which is not the full runs the criterion asks for. The reviewer ran the whole-repo scripts/check once (recorded above), and the keyed-model --no-jail launch passed: no recurrence in 1 full run (plus 3 member runs). AC2 is conditional and it did not recur. The No repro note is fair. The full check exited 1 on two other tests that pass alone and that this change does not touch: filed as DRAFT-0026.
 <!-- SECTION:NOTES:END -->
