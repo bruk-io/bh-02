@@ -18,13 +18,24 @@ from functools import cache, partial
 from pathlib import Path
 
 from compressors.common import estimate_tokens, read_text
-from evals import real, synthetic
-from evals.truth import ANSWER_INSTRUCTION, Absent, Edited, Exact, Items, Location, Needle, Number, Truth
+from evals import atlas, real, synthetic
+from evals.truth import (
+    ANSWER_INSTRUCTION,
+    Absent,
+    Claims,
+    Edited,
+    Exact,
+    Items,
+    Location,
+    Needle,
+    Number,
+    Truth,
+)
 
 BUDGET = 2000
 SPILL_TOKENS = 50_000 // 4
-FORMATS = ("json", "log", "a11y", "figma", "hdfs", "python", "rust", "xml", "pypi")
-KINDS = ("spot", "absent", "lookup", "enumerate", "count", "locate", "edit")
+FORMATS = ("json", "log", "a11y", "figma", "hdfs", "atlas", "python", "rust", "xml", "pypi")
+KINDS = ("spot", "absent", "lookup", "enumerate", "count", "locate", "edit", "claims")
 
 
 @dataclass(frozen=True)
@@ -466,6 +477,8 @@ def task(task_id: str) -> Task:
         pool = _synthetic(fmt, band)
     elif fmt == "hdfs" and "hdfs" not in skipped():
         pool = _hdfs()
+    elif fmt == "atlas" and "atlas" not in skipped():
+        pool = _atlas()
     else:
         pool = tasks()
     found = {t.task_id: t for t in pool}
@@ -637,6 +650,44 @@ def _hdfs_band(
     return out
 
 
+# --- MCP-Atlas: real tasks replayed, scored by the facts their claims state ------------------------------
+
+
+def _atlas() -> list[Task]:
+    return list(_atlas_tasks())
+
+
+def _atlas_payload(task: str) -> str:
+    return atlas.large(atlas.record_for(f"atlas-x-{task}"))[0].output
+
+
+@cache
+def _atlas_tasks() -> tuple[Task, ...]:
+    """MCP-Atlas tasks a replay can answer and a program can score (`evals.atlas.usable`). The payload
+    is the one large tool output, the band its size; the prompt is the task's own, and the answer is
+    read whole for its claims' facts."""
+    out = []
+    for r in atlas.records(_read(atlas.ATLAS)):
+        if not atlas.usable(r):
+            continue
+        band = band_of(estimate_tokens(atlas.large(r)[0].output))
+        out.append(
+            Task(
+                task_id=atlas.task_id(r, band),
+                fmt="atlas",
+                kind="claims",
+                band=band,
+                path="",
+                prompt=r.prompt,
+                truth=Claims(atlas.claim_facts(r), atlas.in_payload(r)),
+                query="",
+                load=partial(_atlas_payload, r.task),
+                question=r.prompt,
+            )
+        )
+    return tuple(out)
+
+
 # Each real source: the files its tasks are built from, and the function that builds them.
 _REAL: dict[str, tuple[tuple[Path, ...], Callable[[], list[Task]]]] = {
     "python": (_PYTHON_FILES, _python),
@@ -645,6 +696,7 @@ _REAL: dict[str, tuple[tuple[Path, ...], Callable[[], list[Task]]]] = {
     "xml": ((real.ISO_3166_2,), _xml),
     "pypi": ((real.PYPI_CLICK,), _pypi),
     "hdfs": ((real.HDFS_BLOCKS,), _hdfs),
+    "atlas": ((atlas.ATLAS,), _atlas),
 }
 
 

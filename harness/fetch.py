@@ -1,6 +1,7 @@
 """Fetch a real corpus into corpus/real/ (untracked: the data keeps its own licence).
 
     ./lab fetch hdfs
+    ./lab fetch mcp-atlas
 
 hdfs: Loghub's HDFS_v1 from Hugging Face (logfit-project/HDFS_v1: a Hadoop cluster's log over two
 days, 11.2M lines, each block labelled anomalous or not by the people who ran it; free for research
@@ -12,7 +13,14 @@ shards are read one at a time and deleted after. Each line is rendered as HDFS.l
 
     {"block": "blk_-1608999687919862906", "anomaly": 0, "lines": [[1, "081109 203518 ..."], ...]}
 
-The eval tasks (`evals.tasks`) are built from that file. Runs on Python 3.13 with pyarrow, which
+mcp-atlas: ScaleAI/MCP-Atlas from Hugging Face (CC-BY-4.0): 500 tasks run against real MCP servers,
+each with its prompt, the claims a right answer makes, and the recorded trajectory. Reduced to
+corpus/real/mcp-atlas/tasks.jsonl, one record per task, every tool call joined to its output:
+
+    {"task": "689f4d...", "prompt": "...", "claims": ["...", ...],
+     "calls": [{"tool": "github_search_repositories", "args": {"query": "assaultcube"}, "output": "..."}]}
+
+The eval tasks (`evals.tasks`) are built from these files. Runs on Python 3.13 with pyarrow, which
 has no build for 3.15 yet; the rest of the lab never imports this module.
 """
 
@@ -75,13 +83,65 @@ def hdfs() -> int:
     return 0
 
 
+_ATLAS = _LAB / "corpus" / "real" / "mcp-atlas"
+_ATLAS_SHARD = "https://huggingface.co/api/datasets/ScaleAI/MCP-Atlas/parquet/default/train/0.parquet"
+
+
+def _text(content: Any) -> str:
+    """A tool message's content as text: its text items joined, or the string itself."""
+    if isinstance(content, str):
+        return content
+    return "\n".join(str(c.get("text", "")) for c in content if isinstance(c, dict))
+
+
+def mcp_atlas() -> int:
+    import ast
+
+    import pyarrow.parquet as pq  # only this command needs it
+
+    shard = _ATLAS / "train-0.parquet"
+    _download(_ATLAS_SHARD, shard)
+    out = _ATLAS / "tasks.jsonl"
+    n = skipped = 0
+    with out.open("w", encoding="utf-8") as f:
+        for row in pq.read_table(shard).to_pylist():
+            trajectory = json.loads(row["TRAJECTORY"])
+            asked = {}
+            for m in trajectory:
+                for call in m.get("tool_calls") or []:
+                    try:
+                        args = json.loads(call["function"]["arguments"] or "{}")
+                    except ValueError:
+                        args = {"_raw": call["function"]["arguments"]}
+                    asked[call["id"]] = (call["function"]["name"], args)
+            calls = [
+                {
+                    "tool": asked[m["tool_call_id"]][0],
+                    "args": asked[m["tool_call_id"]][1],
+                    "output": _text(m["content"]),
+                }
+                for m in trajectory
+                if m.get("role") == "tool" and m.get("tool_call_id") in asked
+            ]
+            try:  # a Python list literal; some claims hold raw line breaks, which it cannot
+                claims = ast.literal_eval(row["GTFA_CLAIMS"].replace("\r", "\\r").replace("\n", "\\n"))
+            except (ValueError, SyntaxError):
+                skipped += 1
+                continue
+            record = {"task": row["TASK"], "prompt": row["PROMPT"], "claims": list(claims), "calls": calls}
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+            n += 1
+    print(f"{out}: {n} tasks ({skipped} with claims that do not parse, left out)")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("source", choices=("hdfs",))
+    parser.add_argument("source", choices=("hdfs", "mcp-atlas"))
     ns = parser.parse_args(argv)
-    return {"hdfs": hdfs}[ns.source]()
+    return {"hdfs": hdfs, "mcp-atlas": mcp_atlas}[ns.source]()
 
 
 if __name__ == "__main__":

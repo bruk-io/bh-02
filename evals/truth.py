@@ -68,7 +68,64 @@ class Edited:
     check: Callable[[str, str], str | None]
 
 
-type Truth = Needle | Absent | Exact | Items | Number | Location | Edited
+@dataclass(frozen=True)
+class Fact:
+    """One thing a claim states that a right answer must say: a number (`value`; an integer matched
+    exactly, a decimal within 1%), a quoted title, or a name (matched as words, case and curly quotes
+    aside)."""
+
+    kind: str  # number | quote | name
+    text: str
+    value: float | None = None
+
+
+@dataclass(frozen=True)
+class Claims:
+    """What a right answer claims (MCP-Atlas), each claim as its facts. A claim holds when the answer
+    states all its numbers and quoted titles and at least two thirds of its names; the answer is
+    right when every claim holds."""
+
+    claims: tuple[tuple[Fact, ...], ...]
+    in_payload: tuple[Fact, ...] = ()  # the facts the large tool output holds: what a fold must keep
+
+
+type Truth = Needle | Absent | Exact | Items | Number | Location | Edited | Claims
+
+
+_CURLY = str.maketrans({"\u2018": "'", "\u2019": "'", "\u201c": '"', "\u201d": '"', "\u00a0": " "})
+_NUMBER = re.compile(r"(?<![\w.])-?\d[\d,]*(?:\.\d+)?(?!\w)")
+
+
+def plain(text: str) -> str:
+    """Text as facts are matched in it: lower case, straight quotes, one space between words."""
+    return re.sub(r"\s+", " ", text.translate(_CURLY)).lower()
+
+
+def numbers_in(text: str) -> list[float]:
+    out = []
+    for m in _NUMBER.finditer(text):
+        try:
+            out.append(float(m[0].replace(",", "")))
+        except ValueError:
+            continue
+    return out
+
+
+def fact_holds(fact: Fact, text: str, numbers: list[float] | None = None) -> bool:
+    """Whether `text` (already `plain`) states the fact; `numbers` are the text's, when known."""
+    if fact.value is not None:
+        found = numbers_in(text) if numbers is None else numbers
+        if "." not in fact.text:
+            return fact.value in found
+        return any(abs(n - fact.value) <= max(0.01, 0.01 * abs(fact.value)) for n in found)
+    return mentions(text, plain(fact.text))
+
+
+def claim_holds(facts: tuple[Fact, ...], text: str, numbers: list[float] | None = None) -> bool:
+    names = [f for f in facts if f.kind == "name"]
+    if not all(fact_holds(f, text, numbers) for f in facts if f.kind != "name"):
+        return False
+    return sum(fact_holds(f, text, numbers) for f in names) * 3 >= len(names) * 2
 
 
 @dataclass(frozen=True)
@@ -142,6 +199,11 @@ def score_answer(truth: Truth, answer: str) -> Score:
     """
     if isinstance(truth, Edited):
         raise ValueError("an edit is scored from the edited file: use score_edit(truth, original, edited)")
+    if isinstance(truth, Claims):  # a free answer, read whole: there is no ANSWER line to ask for
+        text = plain(answer)
+        found = numbers_in(text)
+        held = [claim_holds(c, text, found) for c in truth.claims]
+        return Score(all(held), sum(held) / len(held) if held else 1.0)
     line = answer_line(answer)
     if line is None:
         return _score_prose(truth, answer)
@@ -229,6 +291,11 @@ def score_fold(truth: Truth, fold: str) -> Score:
             return Score(re.search(rf"(?m)^{n}\t.*{re.escape(t)}", fold) is not None)
         case Edited(target=t):  # where to start: the definition shown with its line number
             return Score(re.search(rf"(?m)^\d+\t.*{re.escape(t)}\b", fold) is not None)
+        case Claims(in_payload=facts):  # the answer's facts the large output holds must survive the fold
+            text = plain(fold)
+            found = numbers_in(text)
+            kept = [fact_holds(f, text, found) for f in facts]
+            return Score(all(kept), sum(kept) / len(kept) if kept else 1.0)
         case _ as unreachable:
             raise AssertionError(f"no scorer for {unreachable!r}")
 

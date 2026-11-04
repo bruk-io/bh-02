@@ -105,3 +105,10 @@ def test_each_part_knob_names_exactly_the_producers_there_are():
         _config("json_envelope.samples=some")
     with pytest.raises(ValueError, match="names each part once"):
         _config("json_envelope.priority=shape,shape,nav,samples")
+
+
+def test_a_summary_claims_no_counts_for_values_its_line_cut_short():
+    long = [f"https://example.com/{'x' * 80}/{i % 2}.ico" for i in range(40)]
+    value = {"results": [{"id": f"r{i}", "favicon": long[i]} for i in range(40)]}
+    env = envelope(value, frozenset(), 2000)  # the sample view: its summary shape
+    assert "...[+" in env.text() and problems("", value, env, run_jq=False) == []

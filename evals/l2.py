@@ -45,6 +45,7 @@ from typing import Any
 from compressors.common import read_text
 from compressors.config import DEFAULT, FoldConfig, label, load, sets, with_sets
 from compressors.envelope_json import VIEWS
+from evals import atlas
 from evals.stats import bootstrap, paired, paired_accuracy, wilson
 from evals.tasks import BANDS, FORMATS, KINDS, TOOLS, Task, bash_prompt, size_order, skipped, task, tasks
 from evals.truth import Edited, Truth, answer_line, score_answer, score_edit
@@ -203,6 +204,8 @@ def _run_error(result: dict[str, Any]) -> str | None:
 
 
 def conditions_for(t: Task) -> tuple[str, ...]:
+    if t.fmt == "atlas":  # replayed MCP tools: there is no command that prints them
+        return MCP_CONDITIONS
     return FILE_CONDITIONS if t.path else MCP_CONDITIONS + BASH_CONDITIONS
 
 
@@ -239,18 +242,23 @@ def bash_channel(t: Task, condition: str, w: Path, log: Path, dials: Dials = _DI
 def mcp_channel(t: Task, condition: str, w: Path, log: Path, dials: Dials = _DIALS) -> list[str]:
     """The flags (and files in the run's folder) for a synthetic task on the MCP channel: the fixture
     server's tool returns the task's payload, and the hook, when the condition has one, folds it."""
+    replay = t.fmt == "atlas"  # an MCP-Atlas task: its recorded tools, replayed, under a short server name
+    module = "claude_code.replay_mcp" if replay else "claude_code.fixture_mcp"
     server = {
         "command": "sh",
-        "args": ["-c", f"cd {_LAB} && exec {_UV} -m claude_code.fixture_mcp"],
+        "args": ["-c", f"cd {_LAB} && exec {_UV} -m {module}"],
         "env": {"TOOL_OUTPUT_LAB_TASK": t.task_id},
     }
-    (w / "mcp.json").write_text(json.dumps({"mcpServers": {"fixture": server}}))
+    (w / "mcp.json").write_text(json.dumps({"mcpServers": {"r" if replay else "fixture": server}}))
     mode = dials.mode_for(condition)
     settings = (
         _hook_settings(mode, log, view=dials.view, config=dials.config, budget=dials.budget) if mode else {}
     )
     (w / "settings.json").write_text(json.dumps(settings))
     flags = ["--mcp-config", "mcp.json", "--strict-mcp-config", "--settings", "settings.json"]
+    if replay:
+        offered = ",".join(f"mcp__r__{tool['name']}" for tool in atlas.tools(atlas.record_for(t.task_id)))
+        return [*flags, "--allowedTools", f"{offered},Bash,Read,Grep"]
     return [*flags, "--allowedTools", f"mcp__fixture__{TOOLS[t.fmt]},Bash,Read,Grep"]
 
 
