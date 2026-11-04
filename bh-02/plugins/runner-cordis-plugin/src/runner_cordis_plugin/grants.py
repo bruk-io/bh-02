@@ -19,17 +19,19 @@ proxy variables brig sets itself.
 
 import posixpath
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from ipaddress import IPv6Address, ip_address
 
 __all__ = [
+    "NO_GRANTS",
     "PROXY_VARIABLES",
     "Answer",
     "Asker",
     "Floor",
     "Grant",
+    "Grants",
     "Invalid",
     "Kind",
     "Request",
@@ -122,6 +124,32 @@ class Grant:
             if self.kind is Kind.NET
             else f"{self.kind}: {self.target}"
         )
+
+
+@dataclass(frozen=True, slots=True)
+class Grants:
+    """The grants a start applies: a frozen collection, each grant once, in the order given. What
+    `spec_for` and `to_brig` take. It holds no answer and no asker: whoever collects the grants
+    (the store's always-grants, the session's) has already decided they are granted."""
+
+    items: tuple[Grant, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "items", tuple(dict.fromkeys(self.items)))
+
+    def of(self, kind: Kind) -> tuple[Grant, ...]:
+        """The grants of `kind`, in order."""
+        return tuple(grant for grant in self.items if grant.kind is kind)
+
+    def __iter__(self) -> Iterator[Grant]:
+        return iter(self.items)
+
+    def __len__(self) -> int:
+        return len(self.items)
+
+
+#: No grants: what a start applies when nothing was granted.
+NO_GRANTS = Grants()
 
 
 @dataclass(frozen=True, slots=True)

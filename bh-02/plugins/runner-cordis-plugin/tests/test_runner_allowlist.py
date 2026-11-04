@@ -137,9 +137,9 @@ def test_a_layer_s_env_replaces_the_file_s_and_the_start_says_so() -> None:
 def test_a_layer_that_omits_env_takes_the_file_s() -> None:
     standing = allowlist.Standing(("GITHUB_TOKEN",))
     config, note = allowlist.effective(
-        BrigConfig(allow=("CLAUDE.md",)), standing, file=Path("/c/runner.toml"), readers={}
+        BrigConfig(deny=("x",)), standing, file=Path("/c/runner.toml"), readers={}
     )
-    assert config.env == (*BASELINE_ENV, "GITHUB_TOKEN") and config.allow == ("CLAUDE.md",) and note == ""
+    assert config.env == (*BASELINE_ENV, "GITHUB_TOKEN") and config.deny == ("x",) and note == ""
 
 
 def test_a_layer_env_over_an_empty_file_has_nothing_to_say() -> None:

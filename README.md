@@ -144,7 +144,7 @@ A layer of your own changes a row, applied with `bh-02 --patch mine.toml`:
 ```toml
 [[plugin]]
 id = "runner"
-config = { allow = ["CLAUDE.md", "AGENTS.md", ".git/config"] }   # let inputs write .git/config too
+config = { env = ["PATH", "HOME", "LANG", "LC_ALL", "TERM", "GITHUB_TOKEN"] }   # let this variable through
 ```
 
 A new part is a plugin: a package with components, registered as a `cordis.plugins` entry point,

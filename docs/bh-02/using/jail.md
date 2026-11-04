@@ -85,24 +85,54 @@ A session keeps the jail it started with: `--resume` refuses `--no-jail`.
 ## Letting the model write more
 
 The `runner` row's config changes what the jail lets through. Put it in a layer of your own and
-start bh-02 with `--patch` ([Layers](layers.md)). This lets inputs write `.git/config` too:
+start bh-02 with `--patch` ([Layers](layers.md)). This lets inputs write `docs/generated` as well
+as the project:
 
 ```toml
 [[plugin]]
 id = "runner"
-config = { allow = ["CLAUDE.md", "AGENTS.md", ".git/config"] }
+config = { write = [".", "docs/generated"] }
 ```
 
 | Setting | What it does |
 |---|---|
-| `allow` | files taken off the list the jail protects. It replaces the default, `["CLAUDE.md", "AGENTS.md"]`, so name every file it should let through. |
 | `write` | where inputs may write, `["."]` (the project) by default |
 | `deny` | more paths inputs may not write |
 | `hide` | files inside the project that inputs may not read, none by default |
 | `env` | the environment variables that survive the scrub; it replaces the list below, baseline included |
 
+There is no `allow`: CLAUDE.md and AGENTS.md are writable by default, and a layer that names `allow`
+fails at boot with the loader's error (`invalid config for BrigConfig`). Any other path the jail
+protects because it can run code outside the jail later (`.git/hooks`, `.git/config`, shell rc
+files, `.envrc`, `.vscode`, `.idea`, `.claude`) is writable only by a write grant on that exact path
+(below); a grant on its parent directory does not lift it.
+
 A `config` in a layer replaces the row's whole config, so give every setting you want. The
 exception is `env`: a layer that leaves it out takes the list from your `runner.toml` (below).
+
+## Grants
+
+A grant is one thing the jail is given beyond its policy: `read` or `write` an absolute path, let an
+`env` variable through, or reach a `net` destination (a hostname, `*.suffix` or an IP address, with a
+port). Every start applies the project's always-grants, kept in `grants.toml` in the project's grants
+directory (`$XDG_STATE_HOME/bh-02/projects/<project>/grants/`; no jail reads or writes it) and the
+session's. For now nothing asks the person: the session's are empty, and the always-grants are the
+file as it stands (the request and the prompt are tasks of their own, in decision-0012).
+
+A start applies a grant as follows:
+
+- `read`: the path joins the trees the jail reads. `write`: it joins the roots the jail writes. A
+  write grant on exactly a self-modifying path (above) lifts that path's protection and nothing else.
+- `env`: the variable joins the allow-list, and reaches the jail if bh-02's own environment has it.
+- `net`: the destination joins the start's egress policy; the proxy lets the program reach exactly
+  that host and port. Nothing else is reachable.
+
+Some grants are refused whoever asks: a path that is or lies under a secret, the grants store, your
+credentials, the layer files, bh-02's configuration (a read as well as a write), and for a write bh-02's
+own code, the interpreter and the directories of the links on the way to it; a variable a model's key
+reads; the proxy variables. Paths are resolved first, so a link to one of those is refused as what it
+leads to. A refused grant is left out of the start, and the start's notice (the line the jail reports
+about itself) says which and why. A read grant for a path that is not there is left out the same way.
 
 ## Which environment variables the model's code sees
 

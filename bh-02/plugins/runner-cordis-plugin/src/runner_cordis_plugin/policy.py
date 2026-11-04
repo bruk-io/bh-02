@@ -12,7 +12,8 @@ file cannot hold: an input could rename the link and plant a Python of its own a
 directory of every package bh-02 runs code from (`code`: bh-02's own, cordis's, brig's and each
 plugin's, as installed; under a writable root when bh-02 works on its own checkout, an editable
 install), whose modules bh-02 imports in its own process, the self-modification list
-(`SELF_MODIFYING`: `.git/hooks`, `.git/config`, shell rc files, CLAUDE.md, ...), any secret below
+(`SELF_MODIFYING`: `.git/hooks`, `.git/config`, shell rc files, `.envrc`, ...; the guidance files,
+`GUIDANCE`, are not on it), any secret below
 under a writable root (it may not replace what it can't read), and bh-02's configuration
 directories under one (`trusted`: the person's `$XDG_CONFIG_HOME/bh-02` and `~/.config/bh-02`,
 when bh-02 runs from the home directory), whose models file and startup file a later session
@@ -24,25 +25,34 @@ short allowlist: brig is handed bh-02's environment as the candidate and lets th
 the policy lists (`brig_spec.to_brig`), so a variable of the launching shell (a `CLAUDE_*` of a Claude
 Code that launched bh-02, a key the person exports for a model) reaches no worker unless `env` lists it.
 
+What the person grants (`grants.Grants`: decision-0012) adds to that, after the floor: a read grant is
+a readable root, a write grant a writable root (the one way past the self-modification list is a
+write grant on that exact path), an env grant a name on the allow-list. `spec_for` checks each
+against the floor first, with the path resolved, and what it refuses it says (`Policy.refused`); a
+net grant is `brig_spec.to_brig`'s.
+
 `spec_for` is what bh-02 means; the jail reads by allowlist (`allowlisted`), and a Linux jail is the
 only one there is.
 """
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
+
+from runner_cordis_plugin.grants import NO_GRANTS, Floor, Grant, Grants, Invalid, Kind, refusal
 
 __all__ = [
     "BASELINE_ENV",
     "CREDENTIALS",
+    "GUIDANCE",
     "SELF_MODIFYING",
     "BrigConfig",
     "Policy",
+    "admitted",
     "allowlisted",
     "git_author",
     "link_directories",
     "readable_roots",
-    "self_modify_denied",
     "socket_refusal",
     "spec_for",
     "told_reads",
@@ -79,6 +89,7 @@ class Policy:
     env_allow: tuple[str, ...]
     env_set: tuple[tuple[str, str], ...]
     readable: tuple[str, ...] = ()
+    refused: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "writable", _roots(self.writable))
@@ -89,9 +100,9 @@ class Policy:
         object.__setattr__(self, "env_set", tuple(sorted(dict(self.env_set).items())))
 
 
-#: What under a root an input may write it may not, unless the row's `allow` names it: a path that
-#: runs code outside the jail later (git hooks and config, shell rc files, an `.envrc`, editor and
-#: Claude settings) or steers the next session (its guidance files). Relative to each root.
+#: What under a root an input may write it may not, unless a write grant names that exact path: a
+#: path that runs code outside the jail later (git hooks and config, shell rc files, an `.envrc`,
+#: editor and Claude settings). Relative to each root.
 SELF_MODIFYING: tuple[str, ...] = (
     ".git/hooks",
     ".git/config",
@@ -101,10 +112,12 @@ SELF_MODIFYING: tuple[str, ...] = (
     ".envrc",
     ".vscode",
     ".idea",
-    "AGENTS.md",
-    "CLAUDE.md",
     ".claude",
 )
+
+#: The project's guidance files: editing them is ordinary work, so an input may write them (they
+#: steer the next session, but only through what the person reads and the model is told).
+GUIDANCE: tuple[str, ...] = ("AGENTS.md", "CLAUDE.md")
 
 
 #: What under the home directory an input may not read: the person's credentials (keys, tokens,
@@ -132,17 +145,14 @@ BASELINE_ENV: tuple[str, ...] = ("PATH", "HOME", "LANG", "LC_ALL", "TERM")
 @dataclass(frozen=True, slots=True)
 class BrigConfig:
     """`write`: where an input may write besides its scratch dir (relative to the python row's root).
-    `deny`: more paths it may not write. `allow`: names from the self-modification list
-    (`SELF_MODIFYING`: `.git/hooks`, `CLAUDE.md`, ...) an input may write after all;
-    by default the project's guidance files, which editing is ordinary work. The rest stay denied:
-    they can run code outside the jail later (hooks, shell rc files, editor and Claude settings).
-    `hide`: paths it may not read (relative to the root; none by default). `env`: the variables that
-    survive the scrub; None (unset) is `BASELINE_ENV` plus the names of the person's `runner.toml`
-    (`allowlist.effective`), a list here replaces that whole list."""
+    `deny`: more paths it may not write. `hide`: paths it may not read (relative to the root; none by
+    default). `env`: the variables that survive the scrub; None (unset) is `BASELINE_ENV` plus the
+    names of the person's `runner.toml` (`allowlist.effective`), a list here replaces that whole
+    list. There is no `allow`: a self-modifying path is writable by a write grant on that exact
+    path (decision-0012 item 10)."""
 
     write: Sequence[str] = (".",)
     deny: Sequence[str] = ()
-    allow: Sequence[str] = ("CLAUDE.md", "AGENTS.md")
     hide: Sequence[str] = ()
     env: Sequence[str] | None = None
 
@@ -161,7 +171,9 @@ def spec_for(
     interpreters: Sequence[str] = (),
     links: Sequence[str] = (),
     memory: str = "",
-    grants: str = "",
+    store: str = "",
+    grants: Grants = NO_GRANTS,
+    key_envs: Mapping[str, Sequence[str]] | None = None,
 ) -> Policy:
     """The jail's `Policy`. `host` is every path the host process loads code from; any under a
     writable root is denied, as are the layer files and the self-modification list.
@@ -173,21 +185,56 @@ def spec_for(
     directory of each of `links` (absolute: the links on the way to them, `facts.links_on_the_way`;
     `link_directories`). `memory` (absolute: the project's auto memory directory, '' for none) may be
     written, as a root of its own outside the project: no self-modification list applies there,
-    since nothing reads it but the memory row, through no link. `grants` (absolute: the grants store,
+    since nothing reads it but the memory row, through no link. `store` (absolute: the grants store,
     `host.grants`, '' for none) may be neither read nor written, wherever it is: it is a secret,
-    since an input that could edit it would grant itself anything."""
+    since an input that could edit it would grant itself anything.
+
+    `grants` add to the policy, each only after `admitted` has checked it against the floor (the
+    secrets, the store, the credentials, the layers, `code`, `trusted`, `interpreters`, the
+    directories of `links`, and `key_envs`: each variable a model's key reads, to its endpoints), its
+    path resolved: a read grant is a readable root, a write grant a writable root, an env grant a
+    name on the allow-list. A write grant that is a directory outside the project gets the
+    self-modification list and the `trusted` and `code` denies a root has; one on exactly a
+    self-modifying path under a root lifts that deny. A grant left out is in `Policy.refused`."""
+    floor = Floor(
+        secrets=tuple(secrets),
+        grants=store,
+        credentials=tuple(str(Path(home, name)) for name in CREDENTIALS),
+        layers=tuple(layers),
+        code=tuple(code),
+        trusted=tuple(trusted),
+        interpreters=tuple(interpreters),
+        links=tuple(str(PurePosixPath(link).parent) for link in links),
+        key_envs=key_envs,
+    )
+    allowed, refused = admitted(grants, floor)
+    given = [Path(g.target) for g in allowed.of(Kind.WRITE)]
     roots = [str(Path(root, w).resolve()) for w in config.write]
-    writable = [*roots, scratch, *([str(Path(memory).resolve())] if memory else [])]
+    # a granted directory beyond the project is a root of its own; one inside a root changes nothing
+    # but its exact self-modifying path, below
+    outside = [str(g) for g in given if g.is_dir() and not any(_within(str(g), r) for r in roots)]
+    writable = [
+        *roots,
+        scratch,
+        *([str(Path(memory).resolve())] if memory else []),
+        *(str(g) for g in given),
+    ]
     # A host import path *inside* a writable root is denied. One that *is* a root (the project
     # itself on sys.path, as under `python -m bh_02`) is not: denying it would make the project
     # read-only. What that leaves: a module an input writes at the project root could shadow one
     # the host has not imported yet. The `bh-02` console script never puts the root on sys.path.
     under = [p for p in host if p not in writable and any(p.startswith(r + "/") for r in writable)]
-    selfmod = [str(Path(r, name)) for r in roots for name in self_modify_denied(config.allow)]
+    lifted = {str(g) for g in given}
+    selfmod = [
+        denied
+        for r in (*roots, *outside)
+        for name in SELF_MODIFYING
+        if (denied := str(Path(r, name))) not in lifted
+    ]
     hidden = [
         *(str(Path(root, name).resolve()) for name in config.hide),
         *secrets,
-        *([str(Path(grants).resolve())] if grants else []),
+        *([str(Path(store).resolve())] if store else []),
     ]
     # A secret an input may not read, it may not overwrite or remove either: one under a writable
     # root (a `hide`n file, a state directory) is denied writing too, or an input could replace
@@ -197,14 +244,15 @@ def spec_for(
     # there could replace a file a later session reads on the host and trusts, the person's
     # startup file with a link to one the jail hides, say. Only strictly under one: a root that is
     # the directory or inside it (bh-02 run in its own config) would be left read-only.
-    configured = [t for t in trusted if any(t.startswith(r + "/") for r in roots)]
+    reach = (*roots, *outside)
+    configured = [t for t in trusted if any(t.startswith(r + "/") for r in reach)]
     # bh-02's own code under a writable root (bh-02 working on its own checkout, an editable
     # install; or run from a home the checkout is in): an input there could write a module bh-02
     # imports later (a plugin a layer names, a module a reload imports), so it would choose code
     # bh-02 runs in its own process. By package, whatever `host` holds: a package an import
     # hook finds is on no `sys.path`, and a `src` that is the project itself is not denied there.
     # Only strictly under a root, as `trusted`: one the project is would leave it read-only.
-    running = [c for c in code if any(c.startswith(r + "/") for r in roots)]
+    running = [c for c in code if any(c.startswith(r + "/") for r in reach)]
     # The interpreter bh-02 itself runs on, under a root an input may write (bh-02 run from a
     # directory that holds the uv-managed Python, the home directory say): the next bh-02 start on
     # the host would run what an input wrote there, outside any jail. `host` denies the standard
@@ -233,8 +281,64 @@ def spec_for(
         writable=allows,
         write_denies=tuple(denies),
         masks=(*(str(Path(home, name)) for name in CREDENTIALS), *hidden),
-        env_allow=tuple(BASELINE_ENV if config.env is None else config.env),
+        env_allow=(
+            *(BASELINE_ENV if config.env is None else config.env),
+            *(g.target for g in allowed.of(Kind.ENV)),
+        ),
         env_set=(("TMPDIR", scratch),),
+        readable=tuple(g.target for g in allowed.of(Kind.READ)),
+        refused=refused,
+    )
+
+
+def _within(path: str, root: str) -> bool:
+    return path == root or path.startswith(root + "/")
+
+
+def admitted(grants: Grants, floor: Floor) -> tuple[Grants, tuple[str, ...]]:
+    """`grants` that are not on `floor`, and the words for each that is (`grants.refusal`), in the
+    order given. The path of a read or write grant is resolved first (`Path.resolve`), as are the
+    floor's paths, so a link to a floor path is refused as the path it leads to; a granted path that
+    resolves to `/`, or a read grant of a path that is not there, is left out too, with the reason.
+    The admitted grant carries the resolved path: what the jail mounts is what was checked."""
+    resolved = _resolved(floor)
+    kept: list[Grant] = []
+    refused: list[str] = []
+    for grant in grants:
+        try:
+            each = _resolving(grant)
+        except Invalid as error:
+            refused.append(f"{grant} is never granted: it resolves to a path that can't be granted ({error})")
+            continue
+        if why := refusal(each, resolved):
+            refused.append(why)
+        elif each.kind is Kind.READ and not Path(each.target).exists():
+            refused.append(f"{each} is not applied: there is nothing at {each.target} to read")
+        else:
+            kept.append(each)
+    return Grants(tuple(kept)), tuple(refused)
+
+
+def _resolving(grant: Grant) -> Grant:
+    if grant.kind in (Kind.READ, Kind.WRITE):
+        return Grant(grant.kind, str(Path(grant.target).resolve()))
+    return grant
+
+
+def _resolved(floor: Floor) -> Floor:
+    def each(paths: Sequence[str]) -> tuple[str, ...]:
+        return tuple(str(Path(p).resolve()) for p in paths)
+
+    return replace(
+        floor,
+        secrets=each(floor.secrets),
+        grants=str(Path(floor.grants).resolve()) if floor.grants else "",
+        credentials=each(floor.credentials),
+        layers=each(floor.layers),
+        code=each(floor.code),
+        trusted=each(floor.trusted),
+        interpreters=each(floor.interpreters),
+        links=each(floor.links),
     )
 
 
@@ -257,23 +361,23 @@ def link_directories(links: Sequence[str], writable: Sequence[str]) -> tuple[str
 
 
 def allowlisted(policy: Policy, readable: Sequence[str]) -> Policy:
-    """`policy`, reading by allowlist: `readable` is the tree an input may read, and the policy's
-    masks inside it become the carve-outs. A mask under no readable or writable root is dropped:
-    nothing there is in the jail to keep from the input, and brig would mount one over a path that
-    is there and so cap `fs_read` at best-effort for good (a mount the host can undo). The
-    environment is the policy's, unchanged, and so are the writes but one kind: a path denied both
-    reading and writing (a secret under the project) keeps only its mask. bubblewrap masks an
-    existing one with a read-only `/dev/null`, which refuses writes and removal too (a write deny as
-    well would be a bind of the real file, under the mask). An absent one has nothing to mask, so an
-    input could create it; it is left alone: a directory there would be in the person's way, and
-    nothing of bh-02's reads one."""
-    roots = (*readable, *policy.writable)
+    """`policy`, reading by allowlist: `readable` is the tree an input may read (besides the policy's
+    own, the read grants), and the policy's masks inside it become the carve-outs. A mask under no
+    readable or writable root is dropped: nothing there is in the jail to keep from the input, and
+    brig would mount one over a path that is there and so cap `fs_read` at best-effort for good (a
+    mount the host can undo). The environment is the policy's, unchanged, and so are the writes but
+    one kind: a path denied both reading and writing (a secret under the project) keeps only its
+    mask. bubblewrap masks an existing one with a read-only `/dev/null`, which refuses writes and
+    removal too (a write deny as well would be a bind of the real file, under the mask). An absent
+    one has nothing to mask, so an input could create it; it is left alone: a directory there would
+    be in the person's way, and nothing of bh-02's reads one."""
+    roots = (*readable, *policy.readable, *policy.writable)
     masks = tuple(m for m in policy.masks if any(m == r or m.startswith(r.rstrip("/") + "/") for r in roots))
     return replace(
         policy,
         write_denies=tuple(d for d in policy.write_denies if d not in policy.masks),
         masks=masks,
-        readable=tuple(readable),
+        readable=(*readable, *policy.readable),
     )
 
 
@@ -316,20 +420,6 @@ def git_author(name: str, email: str) -> tuple[tuple[str, str], ...]:
     return tuple(
         (f"GIT_{who}_{what}", value) for who in ("AUTHOR", "COMMITTER") for what, value in pairs if value
     )
-
-
-def self_modify_denied(allow: Sequence[str]) -> tuple[str, ...]:
-    """The self-modification list (`SELF_MODIFYING`) without the names `allow` lets an input
-    write. A name that is not on the list is a mistake in the row's config, never silently
-    ignored."""
-    unknown = [name for name in allow if name not in SELF_MODIFYING]
-    if unknown:
-        raise ValueError(
-            f"the runner row's `allow` names {', '.join(map(repr, unknown))}, which the jail does not "
-            f"deny in the first place; `allow` takes only names from its self-modification list: "
-            f"{', '.join(SELF_MODIFYING)}. To let an input write another path, use `write`"
-        )
-    return tuple(name for name in SELF_MODIFYING if name not in allow)
 
 
 #: Where hosts keep sockets other programs listen on, as brig lists them (`SOCKET_DIRECTORIES`,
