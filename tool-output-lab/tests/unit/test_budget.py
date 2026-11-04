@@ -5,8 +5,10 @@ import random
 
 import pytest
 
+from compressors import envelope_log
 from compressors.cli import fold_text
 from compressors.common import estimate_tokens
+from evals.envelope_check import text_problems
 from evals.l1 import coverage
 
 
@@ -59,7 +61,10 @@ def _cases():
 def test_the_fold_fits_the_budget_and_accounts_for_every_line(name, text, path, budget):
     result = fold_text(text, budget=budget, path=path, quiet=True)
     assert estimate_tokens(result.text) <= budget * 1.1, name
-    if path or not text.lstrip().startswith(("{", "[")):
+    if result.branch == "lines":  # an envelope of lines: every claim holds against the input
+        env = envelope_log.envelope(text, frozenset(), budget)
+        assert env.text() == result.text and text_problems(text, env, run_tools=False) == []
+    elif path or not text.lstrip().startswith(("{", "[")):
         assert coverage(result.source or text, result.text, numbered=bool(path)) == []
 
 

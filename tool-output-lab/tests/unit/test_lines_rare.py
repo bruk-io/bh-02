@@ -1,4 +1,4 @@
-"""Lines that differ only in numbers collapse into one run, unless a number is the anomaly (R5)."""
+"""Lines that differ only in numbers are one template, unless a number is the anomaly (R5)."""
 
 import random
 
@@ -17,8 +17,8 @@ def _access_log(n: int, odd: dict[int, str]) -> str:
 
 def test_one_500_among_2000_200s_stands_out():
     out = fold_text(_access_log(2000, {1234: "500"}), budget=500, quiet=True).text
-    assert '" 500 ' in out
-    assert "lines 2-1234]" in out  # the run before it ends right there
+    assert "is 500 in 1 line like:" in out
+    assert "1235: 10.0.0." in out and '" 500 ' in out  # the line itself, at its number
 
 
 def test_a_non_zero_failure_count_among_zeros_stands_out():
@@ -34,4 +34,4 @@ def test_numbers_that_always_vary_do_not_split_a_run():
         for i in range(1000)
     ]
     out = fold_text("\n".join(lines), budget=300, quiet=True).text
-    assert "repeated 999 more times, lines 2-1000" in out
+    assert "  1000  <*>:<*>:<*> heartbeat seq=<*> took <*>" in out and "anomalies: none" in out
