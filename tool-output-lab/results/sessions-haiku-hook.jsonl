@@ -24,3 +24,6 @@
 {"tool": "mcp__fixture__list_pods", "tool_use_id": "toolu_01YJykwd4tssQXY3gnCQr41o", "spilled": true, "raw_tokens": 33876, "branch": "json-schema", "out_tokens": 365}
 {"tool": "mcp__fixture__list_pods", "tool_use_id": "toolu_01L76LcG1cXDAmXSKKCnfGCp", "spilled": true, "raw_tokens": 33904, "branch": "json", "out_tokens": 1502}
 {"tool": "mcp__fixture__list_pods", "tool_use_id": "toolu_01KgpNNthJmSBTx9tHYcpgvf", "spilled": true, "raw_tokens": 33904, "branch": "json-schema", "out_tokens": 498}
+{"tool": "mcp__fixture__list_pods", "tool_use_id": "toolu_01JdoEVt8rPo66LoTEkVZZwD", "spilled": true, "raw_tokens": 33942, "branch": "json", "out_tokens": 1498}
+{"tool": "mcp__fixture__list_pods", "tool_use_id": "toolu_011rQYKxr9kMDcuL8xegKLcx", "spilled": true, "raw_tokens": 33942, "branch": "json-schema", "out_tokens": 708}
+{"tool": "mcp__fixture__get_logs", "tool_use_id": "toolu_019i9od1J1nDn5sWUqVkv8sV", "spilled": true, "raw_tokens": 41190, "branch": "lines", "out_tokens": 1308}
