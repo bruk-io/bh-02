@@ -56,6 +56,7 @@ class _Serving(Listing, Protocol):
     `/grants` lists and revokes."""
 
     def serve(self, prompt: Prompt) -> Callable[[], None]: ...
+    def told(self) -> tuple[str, ...]: ...
 
 
 @runtime_checkable
@@ -90,9 +91,9 @@ class _Rechecked:
     async def release(self) -> str:
         return await self._jail.release()
 
-    async def start(self, argv_for: ArgvFor, *, cwd: str) -> Started:
+    async def start(self, argv_for: ArgvFor, *, cwd: str, owner: str) -> Started:
         self._refuse()
-        return await self._jail.start(argv_for, cwd=cwd)
+        return await self._jail.start(argv_for, cwd=cwd, owner=owner)
 
 
 @component(provides=("runner",))
@@ -162,6 +163,7 @@ async def grant_prompt(
         lines: list[str] = []
         while told:
             lines.append(told.popleft())
+        lines.extend(grants.told())
         return "\n".join(lines)
 
     spec = {

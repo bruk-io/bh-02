@@ -320,6 +320,28 @@ start. A store that is wrong (`store.Refused`) grants nothing and does not fail 
 `notice()` carries the words (`Broker.problem()`). `BrigJail(egress_hosts=...)` is brig's table the
 egress proxy resolves names from instead of the host's resolver; only tests pass it.
 
+## Live egress
+
+`egress.py`'s `Egress` is one running jail's (decision-0012 items 4 and 6): `BrigJail` makes one per
+start, beginning once the program is ready and ending in `_Jailed.stop` (or by itself when the jail is
+gone). It follows the broker's `on_change`: it reads `granted()`, takes the `net` grants, and
+`allow_egress`es each the jail lacks and `revoke_egress`es each it holds that is no longer granted, off
+the event loop (what the jail holds is tracked from what the start passed plus its changes; a jail whose
+proxy has ended, `JailEgressEnded`, is skipped). About every 0.2 s a poller drains `egress_decisions` (it
+never blocks) and, for each refusal:
+
+- `not-granted`: `broker.ask` of `net HOST:PORT`, as `Asker(input, owner)`, `owner` being the row that
+  started the program (`runner.start(..., owner=)`: `python`, `extensions`);
+- `private-address`: the same for the IP literal `decision.address` alone, never the name and never a
+  wildcard (the prompt warns that it reaches the person's network);
+- `unresolved`, `address-unparseable`, `authority-unparseable`: not asked (nothing to grant); the model is
+  told through `Broker.tell`, which `grant-prompt`'s aside drains with the decided answers. The runner
+  takes no dependency on `asides` or `output`: that would reload the Python process.
+
+The poller never awaits a question, and a destination under question is one question however often the
+program retries. A sub-agent's label on a refusal is TASK-0181.08's. brig never cuts an open connection on
+a revoke, and nothing here tries: `/grants revoke` of a `net` grant says so.
+
 ## The grants broker
 
 `broker.py`'s `Broker` is the `grants` value, a plain value (no cordis) that `runner:grants` binds once
@@ -354,7 +376,8 @@ order (what is asked for; who asks, and why, in the asker's words; when it appli
 the grades), a `warning` ('' for none) and the choices `o` once (for this session), `a` always (for
 this project) and `n` no, Escape answering no. "When it applies" is `prompting.applies`, the one
 place that says what this build does: a path or environment grant from the program's next start
-(`/clear` starts the Python process again), a destination likewise until egress goes live. A `net`
+(`/clear` starts the Python process again), a destination now, on every running program (a connection
+already open is not affected). A `net`
 grant adds a destination and leaves the network proxied; `env` lets the variable's value reach the
 program; `read` and `write` change no grade, unless the path is, holds or lies under a place hosts
 keep sockets (`policy.SOCKET_PLACES`, the ones a root is refused under, and `$XDG_RUNTIME_DIR`): then

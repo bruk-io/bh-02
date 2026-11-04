@@ -1,9 +1,9 @@
 """The words of the grants prompt: each kind says what, who and why, when and the grade effect, and a
 path at a place where hosts keep sockets warns that network would be violated."""
 
-from runner_cordis_plugin.grants import Asker, Grant, Kind, Request, Source
+from runner_cordis_plugin.grants import Answer, Asker, Grant, Kind, Request, Source
 from runner_cordis_plugin.policy import SOCKET_PLACES
-from runner_cordis_plugin.prompting import applies, question
+from runner_cordis_plugin.prompting import applies, decided, question, revoked
 
 _ASKER = Asker(Source.ROW, "python")
 
@@ -47,7 +47,8 @@ def test_a_net_grant_names_host_and_port_and_keeps_the_network_proxied() -> None
     lines = asked["lines"]
     assert isinstance(lines, list)
     assert lines[0] == "What: net example.com:443"
-    assert "next start" in lines[2]
+    assert "now, on every running program" in lines[2]
+    assert "already open" in lines[2]
     assert "proxied" in lines[3]
     assert asked["warning"] == ""
 
@@ -101,3 +102,28 @@ def test_an_agent_that_asks_is_named() -> None:
     lines = _ask(Grant(Kind.NET, "example.com", 443), asker=Asker(Source.AGENT, "scout"))["lines"]
     assert isinstance(lines, list)
     assert lines[1].startswith("Asked by: agent scout")
+
+
+def test_a_private_ip_literal_net_grant_warns_it_reaches_the_persons_network_a_public_one_does_not() -> None:
+    for target in ("127.0.0.1", "10.1.2.3", "192.168.0.9", "::1"):
+        warning = _ask(Grant(Kind.NET, target, 8080))["warning"]
+        assert isinstance(warning, str)
+        assert target in warning and "on your network" in warning
+    for target in ("93.184.216.34", "example.com"):
+        assert _ask(Grant(Kind.NET, target, 443))["warning"] == ""
+
+
+def test_a_net_grant_answered_yes_tells_the_model_it_applies_now_and_the_call_may_retry() -> None:
+    request = Request(Grant(Kind.NET, "example.com", 443), _ASKER, "refused")
+    for answer in (Answer.ONCE, Answer.ALWAYS):
+        said = decided(request, answer)
+        assert "applies now, on every running program" in said and "may retry it" in said
+    assert "retry" not in decided(request, Answer.NO)
+    other = Request(Grant(Kind.READ, "/d"), _ASKER, "reads")
+    assert "retry" not in decided(other, Answer.ONCE)
+
+
+def test_revoking_a_net_grant_says_connections_already_open_stay_open_and_other_kinds_say_nothing() -> None:
+    assert "already open" in revoked(Grant(Kind.NET, "example.com", 443))
+    assert "restart" in revoked(Grant(Kind.NET, "example.com", 443))
+    assert revoked(Grant(Kind.READ, "/d")) == ""

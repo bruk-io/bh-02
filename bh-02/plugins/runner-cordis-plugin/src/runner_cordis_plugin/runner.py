@@ -78,7 +78,7 @@ class Mechanism(Protocol):
 
     def report(self) -> Mapping[str, str]: ...
     def notice(self) -> str: ...
-    async def start(self, argv_for: ArgvFor, *, cwd: str) -> Started: ...
+    async def start(self, argv_for: ArgvFor, *, cwd: str, owner: str) -> Started: ...
     async def release(self) -> str: ...
 
 
@@ -110,12 +110,14 @@ class Runner:
         """Whether `/release` has stopped what runs and nothing has started since."""
         return self._released
 
-    async def start(self, argv_for: ArgvFor, *, cwd: str) -> Started:
+    async def start(self, argv_for: ArgvFor, *, cwd: str, owner: str) -> Started:
         """Start the program `argv_for(endpoint)` in `cwd`, listening on the endpoint the runner
         chose for it (`started.endpoint`, handed to `argv_for` before anything starts); tell each
-        watcher (`on_start`). A start ends a release, before anything waits."""
+        watcher (`on_start`). `owner` is the row that starts it (`python`, `extensions`): a
+        connection the program makes that is refused is asked as its input. A start ends a release,
+        before anything waits."""
         self._released = False
-        started = await self._mechanism.start(argv_for, cwd=cwd)
+        started = await self._mechanism.start(argv_for, cwd=cwd, owner=owner)
         self._last = started
         for watch in tuple(self._starts):
             watch(started)

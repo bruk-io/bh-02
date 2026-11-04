@@ -138,7 +138,7 @@ class Runner(Protocol):
     """What the Python process needs of the `runner` value (CONTRACTS.md: runner): its start,
     and the runner's own grades before any."""
 
-    async def start(self, argv_for: Callable[[str], Sequence[str]], *, cwd: str) -> Jailed: ...
+    async def start(self, argv_for: Callable[[str], Sequence[str]], *, cwd: str, owner: str) -> Jailed: ...
     def report(self) -> Mapping[str, str]: ...
 
 
@@ -936,7 +936,7 @@ class PythonProcess:
 
     async def _start(self) -> None:
         root = str(Path(self._config.root).resolve())
-        self._process = self._worker = await self._runner.start(worker_argv, cwd=root)
+        self._process = self._worker = await self._runner.start(worker_argv, cwd=root, owner="python")
         self._reader, self._writer = await asyncio.open_unix_connection(
             sock=self._process.connection, limit=_LINE_LIMIT
         )

@@ -125,7 +125,16 @@ A start applies a grant as follows:
   write grant on exactly a self-modifying path (above) lifts that path's protection and nothing else.
 - `env`: the variable joins the allow-list, and reaches the jail if bh-02's own environment has it.
 - `net`: the destination joins the start's egress policy; the proxy lets the program reach exactly
-  that host and port. Nothing else is reachable.
+  that host and port. Nothing else is reachable. A `net` grant also reaches every program running
+  now, at once, with no restart (a connection the program makes after it is let through), and a
+  revoke is refused from the next connection on; a connection already open stays open until the
+  program restarts (`/clear` restarts the Python process), since the proxy judges a connection once.
+
+When a program's connection is refused, you are asked while the call runs: the destination, which
+input asked (`python` or `extensions`), and once, always or no. On a yes the model is told it may
+retry. A name that resolves to a private address (loopback, your network) is asked only as that
+address, with a warning that it lets the program reach it on your network; a name that does not resolve
+is not asked, and the model is told. A refusal never offers a wildcard.
 
 Some grants are refused whoever asks: a path that is or lies under a secret, the grants store, your
 credentials, the layer files, bh-02's configuration (a read as well as a write), and for a write bh-02's

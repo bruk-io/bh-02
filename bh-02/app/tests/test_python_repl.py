@@ -383,7 +383,9 @@ async def test_on_linux_a_host_with_no_interpreter_the_jail_mounts_does_not_star
     project = tmp_path / "project"
     project.mkdir()
     with pytest.raises(Exception, match="add a readable root") as raised:
-        await Runner(BrigJail(BrigConfig(), _Host())).start(lambda endpoint: ["true"], cwd=str(project))
+        await Runner(BrigJail(BrigConfig(), _Host())).start(
+            lambda endpoint: ["true"], cwd=str(project), owner="test"
+        )
     assert "supervisor runs under this interpreter" in str(raised.value)
 
 
@@ -575,7 +577,9 @@ async def test_on_linux_the_python_process_tells_the_model_its_own_worker_s_tree
         own = str(Path(worker_argv("x.sock")[2]).parent)  # the Python process's worker's directory
         assert own in process.reads() and own in told, process.reads()
         other = await jail.start(
-            lambda endpoint: [sys.executable, "-I", str(elsewhere / "worker.py"), endpoint], cwd=str(project)
+            lambda endpoint: [sys.executable, "-I", str(elsewhere / "worker.py"), endpoint],
+            cwd=str(project),
+            owner="test",
         )
         try:
             assert str(elsewhere) not in process.reads(), process.reads()
@@ -609,7 +613,9 @@ async def test_on_linux_release_frees_the_placeholder_while_the_extensions_worke
     async with _python(runner, PythonProcessConfig(root=str(project))) as process:
         runner.on_release(process.stopped)
         extensions = await runner.start(
-            lambda endpoint: [sys.executable, "-I", str(elsewhere / "worker.py"), endpoint], cwd=str(project)
+            lambda endpoint: [sys.executable, "-I", str(elsewhere / "worker.py"), endpoint],
+            cwd=str(project),
+            owner="test",
         )
 
         async def stop() -> str:

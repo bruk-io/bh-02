@@ -17,6 +17,7 @@ need waits for one. Whether a request is already inside the current policy is no
 
 import asyncio
 import hashlib
+from collections import deque
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
 from enum import StrEnum
@@ -117,6 +118,7 @@ class Broker:
         self._asking: dict[Grant, asyncio.Task[Outcome]] = {}
         self._background: set[asyncio.Task[None]] = set()
         self._listeners: dict[int, Callable[[], None]] = {}
+        self._told: deque[str] = deque(maxlen=64)
 
     def need(self, request: Request) -> Callable[[], None]:
         """Hold `request` as a standing need, for `acquire`: asked once, as soon as a prompt is
@@ -181,6 +183,17 @@ class Broker:
             self._listeners.pop(key, None)
 
         return release
+
+    def tell(self, text: str) -> None:
+        """Queue a line for the model that nobody was asked about (a refusal there is nothing to
+        grant for); `told` takes it. At most the last 64 are kept."""
+        self._told.append(text)
+
+    def told(self) -> tuple[str, ...]:
+        """The lines queued by `tell` since the last call, oldest first; taking them empties it."""
+        lines = tuple(self._told)
+        self._told.clear()
+        return lines
 
     def serve(self, prompt: Prompt) -> Callable[[], None]:
         """Put `prompt` in front of the person, and ask what rows already need. One prompt at a
