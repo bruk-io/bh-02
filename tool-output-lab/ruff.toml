@@ -1,5 +1,7 @@
 line-length = 110
 target-version = "py315"
+# harness/fetch.py runs on Python 3.13 (pyarrow has no 3.15 build yet): keep it 3.13 syntax.
+per-file-target-version = { "harness/fetch.py" = "py313" }
 
 [lint]
 preview = true  # DOC501 and DOC502 are preview rules

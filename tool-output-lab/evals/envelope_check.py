@@ -108,12 +108,22 @@ def _fetches(raw: str, value: Any, c: Fetches, knobs: SchemaKnobs, run_jq: bool)
     )
     if proc.returncode != 0:
         return [f"jq rejects {c.command!r}: {proc.stderr.strip()[:200]}"]
-    want = [get(r, c.pick) if c.pick else r for r in rows if get(r, c.field) != usual]
-    expected = [w if isinstance(w, str) else json.dumps(w) for w in want]
-    got = proc.stdout.splitlines()
-    return (
-        [] if got == expected else [f"{c.command}: prints {len(got)} rows, {len(expected)} break {c.usual}"]
-    )
+    want: list[Any] = [get(r, c.pick) if c.pick else r for r in rows if get(r, c.field) != usual]
+    if c.pick:  # one name a line (jq -r)
+        got: list[Any] = proc.stdout.splitlines()
+        want = [w if isinstance(w, str) else json.dumps(w) for w in want]
+    else:  # whole rows, each pretty-printed over many lines: read them back as JSON values
+        got = _values(proc.stdout)
+    return [] if got == want else [f"{c.command}: prints {len(got)} rows, {len(want)} break {c.usual}"]
+
+
+def _values(text: str) -> list[Any]:
+    """The JSON values in a stream of them, as jq prints them."""
+    decoder, out, pos = json.JSONDecoder(), [], 0
+    while (pos := len(text) - len(text[pos:].lstrip())) < len(text):
+        value, pos = decoder.raw_decode(text, pos)
+        out.append(value)
+    return out
 
 
 def wrong(

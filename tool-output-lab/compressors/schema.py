@@ -245,7 +245,10 @@ def _notes(rows: list[dict[str, Any]], fields: tuple[Field, ...], k: SchemaKnobs
                     and _type(v) != main_type
                     and not (_is_number(v) and main_type in ("int", "float"))
                 ):
-                    note(i, f"{f.path} is {_type(v)} {_show(v, 40)}")
+                    shown = (
+                        "{...}" if _opened(v) else _show(v, 40)
+                    )  # an opened object's fields are its own lines
+                    note(i, f"{f.path} is {_type(v)} {shown}")
                     flagged.add(i)
         for i in _outliers([(i, float(v)) for i, v in present if _is_number(v)], k):
             if i not in flagged:

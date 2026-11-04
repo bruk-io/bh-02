@@ -120,8 +120,9 @@ def _field_claims(path: str, rows: list[Any], rel: str, desc: str) -> list[str]:
             nums = [float(v) for v in present if isinstance(v, int | float) and not isinstance(v, bool)]
             want = (float(m[2]), float(m[3]), float(m[4]))
             stats = (min(nums), max(nums), statistics.median(nums)) if nums else None
+            # the shape shows six significant figures (`2.41568` for 2.4156782): true at that precision
             if stats is None or any(
-                abs(a - b) > 1e-6 * max(1.0, abs(b)) for a, b in zip(want, stats, strict=True)
+                abs(a - b) > 5e-6 * max(1.0, abs(b)) for a, b in zip(want, stats, strict=True)
             ):
                 problems.append(f"{where}: says {m[2]}..{m[3]}, median {m[4]}; it is {stats}")
         elif all(p.split(" ")[0] in _TYPES and len(p.split(" ")) == 2 for p in part.split(", ")) and any(

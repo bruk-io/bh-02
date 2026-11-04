@@ -113,3 +113,10 @@ def test_the_views_size_depends_on_the_structure_not_the_number_of_rows():
     small, large = _view({"items": _pods(100)}), _view({"items": _pods(10_000)})
     assert abs(estimate_tokens(large) - estimate_tokens(small)) <= 10
     assert estimate_tokens(json.dumps({"items": _pods(10_000)})) > 100 * estimate_tokens(large)
+
+
+def test_a_row_holding_an_object_where_the_others_hold_a_value_is_noted_by_its_type():
+    rows = [{"name": f"r{i:03d}x", "meta": "none"} for i in range(40)]
+    rows[5]["meta"] = {"source": "manual", "by": "ops"}
+    view = _view({"items": rows})
+    assert ".items[5] r005x: .meta is object {...}" in view

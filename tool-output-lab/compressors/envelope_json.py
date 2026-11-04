@@ -112,6 +112,7 @@ def fields(data: JsonData, /) -> Part:
 
 
 _FEW = 6  # a summary lists the values of a field with at most this many, held by every row
+_CLIP = 60  # characters of a value a summary shows
 
 
 def _brief(c: Collection, cap: int, indent: str) -> tuple[list[str], list[Claim]]:
@@ -125,8 +126,9 @@ def _brief(c: Collection, cap: int, indent: str) -> tuple[list[str], list[Claim]
     for f in shown:
         few = not f.unique and 1 < len(f.counts) <= _FEW and sum(n for _, n in f.counts) == c.rows
         if few:
-            desc = describe(f, c.rows, _FEW, 60)
-            claims.append(Values(c.path, f.path, f.counts))
+            desc = describe(f, c.rows, _FEW, _CLIP)
+            if all(len(v) <= _CLIP for v, _ in f.counts):  # a clipped value is not stated whole
+                claims.append(Values(c.path, f.path, f.counts))
         else:
             desc = ", ".join(f"{t} {n}" for t, n in f.types) if len(f.types) > 1 else f.types[0][0]
         lines.append(f"{indent}  {(f.path or '(each)').ljust(width)}  {desc}")
