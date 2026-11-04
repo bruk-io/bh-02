@@ -461,7 +461,6 @@ class BrigJail:
         tripwire's `host_undo`, its notice (the masks among the `armed` paths), the trees it reads
         and the roots it may write but its scratch."""
         writes = tuple(w for w in policy.writable if not Path(w).is_relative_to(scratch_root))
-        armed = tripwired(jail.mounts)
         return _Facts(
             {**report_of(jail.report), HOST_UNDO: "tripwired"},
             "\n".join(filter(None, (self._note, notice_for([m for m in policy.masks if m in armed])))),

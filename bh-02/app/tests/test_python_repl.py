@@ -1321,9 +1321,10 @@ async def test_a_jailed_input_cannot_read_under_the_sessions_state_directory(
     composition: Callable[..., Path],
     tmp_path: Path,
 ) -> None:
-    """The sessions' state is a directory in `secrets`: an input can't list it nor open a file
-    deep under it (the shape of the Claude Code child's peer-token file), in-process or from a
-    program it starts; a sibling directory stays readable."""
+    """The sessions' state is a directory in `secrets`, under no root the jail reads, so it is
+    absent from the jail, not masked: an input can't list it nor open a file deep under it (the
+    shape of the Claude Code child's peer-token file), in-process or from a program it starts; a
+    sibling directory stays readable. A mask inside a root is the sub-agent event-log test's."""
     project, state, beside = tmp_path / "project", tmp_path / "state", tmp_path / "beside"
     project.mkdir()
     beside.mkdir()

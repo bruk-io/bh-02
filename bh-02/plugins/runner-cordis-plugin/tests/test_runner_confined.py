@@ -1303,10 +1303,16 @@ async def test_a_jail_whose_hold_the_host_lifted_ends_at_once_whatever_its_progr
 
     started = await one.start(argv, cwd=str(project))
     try:
-        assert await _until(stamp.exists, 5.0), "CONTROL failed: the second program never ran"
-        first = stamp.read_text()
-        await asyncio.sleep(0.2)
-        assert stamp.read_text() != first and absent.is_dir() and started.ended() == "", "CONTROL failed"
+        # the program rewrites the stamp (truncate, then write), so a read can land between the two
+        # and see "": wait for a time in it, then for a later one, rather than compare two reads
+        assert await _until(lambda: stamp.exists() and stamp.read_text() != "", 5.0), (
+            "CONTROL failed: the second program never ran"
+        )
+        first = stamp.read_text() or "0"
+        assert await _until(lambda: (stamp.read_text() or first) != first, 5.0), (
+            "CONTROL failed: the stamp stopped changing before the host lifted the hold"
+        )
+        assert absent.is_dir() and started.ended() == "", "CONTROL failed"
         group = started.group
         lifted_at = time.time()
         began = time.monotonic()
@@ -1382,7 +1388,8 @@ async def test_a_linux_jail_ends_when_the_host_renames_a_directory_brig_pinned_o
     the watched directory of `a/b/c`'s parent no more than a name's: the kernel sends that
     directory nothing, and the denies beneath `a` move with it. The tripwire is armed from brig's
     mounts, the pins among them, so it watches the project for `a` and ends the jail. The control:
-    until the host does, the jail runs, and `a` can't be renamed from inside."""
+    until the host does, the jail runs. That `a` can't be renamed from inside is brig's own battery
+    (its TASK-0001.31), not asserted here."""
     _needs_bwrap()
     project = tmp_path / "project"
     (project / "a" / "b").mkdir(parents=True)
