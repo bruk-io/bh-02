@@ -475,11 +475,56 @@ claim of a schema view against the data with its own path walker, and runs the q
     5.7k to 7.4k estimated: hex ids and punctuation tokenize short. Bands and budgets are in
     estimated tokens; the savings in layer-2 reports are real tokens from the API.
 
+## The size ladder (`dials-haiku-sizes.md`, `sweep-sizes.md`, `dials/haiku-sizes.toml`)
+
+The 52 MCP tasks at L, XL (4x L) and XXL (16x L, up to 659k estimated tokens), once each on Haiku:
+native against the hook folding the saved output (mode `all`) at budgets 2000 and 6000, and the
+schema view on JSON. 507 runs, $3.66, none failed.
+
+58. **Layer 1 does not care how large the output is.** From L to XXL the fold stays the same size
+    (median 1,695 tokens at budget 2000, 3,750 at 6000), sufficiency moves by at most one task of
+    60, no fold breaks an invariant, and the largest folds in under a second (Figma, 589k, 0.9 s).
+59. **Past the spill threshold native's context does not grow either, so there is none to save.**
+    Claude Code saves a spilled result to a file and shows a preview; native Haiku then greps and
+    reads the file, in every run, and its final context stays at 48.6k to 49.1k from L to XXL.
+    Folding the saved output at budget 2000 leaves it there: median +669 (L), +85 (XL), +404 (XXL)
+    tokens, each interval spanning zero. Not lower, so by the input criterion still cut, as P2 found
+    at L (34, 37).
+60. **What the fold saves past the threshold is work, and that grows with the output.** At budget
+    2000, 156 pairs: accuracy +6% [+3%, +11%], 10 won and none lost (McNemar p 0.002), every win a
+    spot task in an accessibility tree or Figma file where native grepped, found nothing and said
+    none (it missed 10 of those 18 tasks); 1.1 (L) to 1.6 (XXL) fewer requests and 66k fewer
+    summed input tokens a run; cost -12% to -15% at every size; time -2.2 s at L, -6.2 s at XL,
+    -9.7 s at XXL. Native's time grows with the output (mean 15.8, 19.4, 24.2 s; p90 26, 28, 38 s;
+    its slowest Figma run 138 s at XXL) and the fold's does not (13.6, 13.2, 14.5 s; p90 18 to 21 s).
+    The pairs pool three bands of the same task templates, generated from different seeds.
+61. **Past the threshold the budget dial hurts and the schema view helps.** Budget 6000 changes the
+    trees alone (the JSON and log folds come out the same at any budget, 435 and 1,957 tokens): their
+    folds grow about 3.5k, the model still reads the raw, and the final context grows 2.9k to 4.2k,
+    failing at every band, for the same answers (10 won, 1 lost) and a cost saving of 3%. The schema
+    view on JSON answers 13 of 13 at every band, as native does, with the final context 1.2k to 1.4k
+    lower in every pair, cost -21%, time -6.8 s, and the raw read in 26 of 39 runs against 39 of 39
+    native: the one setting that passes the input criterion past the threshold, indicative at 13
+    pairs a band (39 together leave accuracy at +0% [-9%, +9%]).
+62. **The ladder, at budget 2000** (M is `dials-haiku-m.md`, two repetitions, the hook's default
+    `inline`, which at M folds what `all` would):
+
+    | band | median input (estimated) | native right | accuracy | final context | cost | time |
+    |---|---|---|---|---|---|---|
+    | M | 6.5k | 100% | +0% [-4%, +4%] | -6.8k | -5% | +4.4 s |
+    | L | 35k | 94% | +6% [-2%, +16%] | -1.0k | -12% | -2.2 s |
+    | XL | 141k | 92% | +8% [-1%, +18%] | -0.2k | -15% | -6.2 s |
+    | XXL | 565k | 94% | +6% [-2%, +16%] | +0.1k | -14% | -9.7 s |
+
+    Changes against native, means per run. Under the threshold the fold saves context and costs time;
+    over it, Claude Code's spill already caps the context, and the fold saves answers, requests,
+    cost and time instead, more as the output grows.
+
 ## Where the design stands
 
 | Piece | Evidence | Leaning |
 |---|---|---|
-| Fold MCP results Claude Code spilled | P2 (Haiku, 104 pairs): accuracy +7% [+1%, +14%], 1.2 fewer requests, -9% cost, but the final context +800 tokens (34). P3 (Sonnet, 20 pairs): 20/20 against 18/20, cost -21%, final context -910 [-4.1k, +1.4k] (41) | cut for Haiku by the input criterion (37); open for Sonnet (undecided at 20 pairs); `TOOL_OUTPUT_LAB_MODE=spilled` |
+| Fold MCP results Claude Code spilled | P2 (Haiku, 104 pairs): accuracy +7% [+1%, +14%], 1.2 fewer requests, -9% cost, but the final context +800 tokens (34). P3 (Sonnet, 20 pairs): 20/20 against 18/20, cost -21%, final context -910 [-4.1k, +1.4k] (41). The size ladder (Haiku, L to XXL, 156 pairs): accuracy +6% [+3%, +11%], cost -12% to -15%, time saved growing to 9.7 s, final context unchanged (58-62); the schema view on JSON lowers it 1.2k to 1.4k (61) | cut for Haiku by the input criterion (37), at a price in answers, cost and time the ladder shows; open for Sonnet (undecided at 20 pairs); the schema view is the candidate to pass; `TOOL_OUTPUT_LAB_MODE=spilled` |
 | Fold MCP results under the spill threshold | P2 (Haiku): answers kept, final context -7.1k (35). P3 (Sonnet): 52/52 both, final context -8.8k, cost -20% (40) | keep; the hook's default (`inline`) |
 | Force the fold on Bash (the hook on `Bash`) | 46-48: inline at M: final context -8.1k, cost -10%, +6 s, but 49/52 against 52/52 (undecided) and a regress (91 second looks folded); saved outputs at L: context +1.5k | inline: fix the regress, then decide; saved outputs: cut |
 | JSON folding with promotion | real MCP JSON to 13%; built anomaly kinds survive | keep |
@@ -496,7 +541,10 @@ claim of a schema view against the data with its own path walker, and runs the q
    accuracy (33). About 150 independent tasks a cell, not repetitions, is what a verdict needs:
    more generated tasks per format and band, on Haiku, where a run costs $0.007.
 2. At L the fold is larger than Claude Code's preview and both models read the raw anyway (34, 41):
-   try a fold no larger than the preview, or a banner that says what the fold guarantees.
+   try a fold no larger than the preview, or a banner that says what the fold guarantees. The
+   ladder agrees: a larger fold (budget 6000) fails, and the smallest (the schema view, ~240 tokens)
+   is the one that lowers the final context (61). Next: the schema view on spilled JSON with enough
+   tasks to decide (about 150 pairs), and a smaller tree fold for spills.
 3. Harder edits, where the outline matters: an edit in a method whose name recurs in several
    classes, or in a folded branch; these five were made right everywhere (44).
 4. P4 of EVALS.md: explain tasks with a validated judge; Markdown, CSV and diffs.
