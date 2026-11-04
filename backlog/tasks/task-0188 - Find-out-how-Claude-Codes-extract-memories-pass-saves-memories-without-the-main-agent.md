@@ -1,11 +1,11 @@
 ---
-id: DRAFT-0003
+id: TASK-0188
 title: >-
   Find out how Claude Code's extract-memories pass saves memories without the
   main agent
-status: Draft
+status: To Do
 assignee: []
-created_date: '2026-10-10 12:15'
+created_date: 2026-10-10 12:15
 labels:
   - memory
 dependencies: []
