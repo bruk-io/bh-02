@@ -28,6 +28,12 @@ TASK-0187 made AgentsConfig.rows required. A patch's config replaces the layer's
 - [ ] #2 A test pins that message
 <!-- AC:END -->
 
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Cordis builds a dataclass config before the component runs, so annotate the parent's config as Mapping | AgentsConfig (cordis passes it through) and build AgentsConfig in wiring.py, turning the missing-rows TypeError into a message saying what to write and where bh-02.toml's list is. Proof: the committed repro fails before, passes after; the existing AgentsConfig() test stays.
+<!-- SECTION:PLAN:END -->
+
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
