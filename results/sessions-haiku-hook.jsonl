@@ -1,0 +1,4 @@
+{"tool": "mcp__fixture__list_pods", "tool_use_id": "toolu_01Cpo9ooF4xQuQ1RSstkWV1F", "spilled": false, "raw_tokens": 6806, "branch": "json-schema", "out_tokens": 360}
+{"tool": "mcp__fixture__list_pods", "tool_use_id": "toolu_01PBZmD5oNjgR74pLAeJ5V2H", "spilled": false, "raw_tokens": 6784, "branch": "json", "out_tokens": 664}
+{"tool": "mcp__fixture__list_pods", "tool_use_id": "toolu_01T4hQpnzZ3SQHUxrFj8Ycjo", "spilled": false, "raw_tokens": 6806, "branch": "json", "out_tokens": 1067}
+{"tool": "mcp__fixture__list_pods", "tool_use_id": "toolu_01DtjHboTwvQpLVHvFYhV84o", "spilled": false, "raw_tokens": 6784, "branch": "json-schema", "out_tokens": 255}
