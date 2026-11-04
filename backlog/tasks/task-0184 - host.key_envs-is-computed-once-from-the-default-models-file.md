@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-03T17:47:00Z'
-updated_date: '2026-11-04T13:22:00Z'
+updated_date: '2026-11-04T13:25:00Z'
 labels:
   - models
   - credentials
@@ -85,4 +85,70 @@ FAILED bh-02/app/tests/test_host_values.py::test_the_runner_refuses_a_variable_a
 Fix: models:catalog.key_envs() (catalog.py) reads the model row's models file and extra fresh at each call; runner:confined depends on 'models' (not host.key_envs), refuses at row start and again at each program start (_Rechecked in runner wiring), commands:shell_command asks per command. host.key_envs/models_file, bootstrap.key_variables/models_keys and their cli computation removed (no duplicate parser). Catalog depends on loader only, so no new reloads. Tests: repro test_host_values (seen failing, exit 0 instead of 1, before the fix; recorded with record-check --repro; passes after); catalog key_envs tests; runner re-check test seen failing with the per-start check removed; shell_command mid-session test. A models file in the project adds nothing, its extra still counts; a bad row cwd makes key_envs raise ModelsError (fail closed). Checks: scripts/check for runner (with gates, docs) exit 0; --no-gates --no-docs for commands, models, app, subagents exit 0; arch-check --no-fix exit 0; mypy clean. AC1 and AC2 not ticked (reviewer). AC3: the two side rules (runs=memory/harness from any row; system/asides contributors needing the event loop) are not done here; no draft filed by me, see report.
 
 Lead, 2026-11-04: criterion 3's two side rules filed as drafts (runs=memory/harness honoured from any row; system and asides contributors needing the event loop).
+
+Check `scripts/check` exited 0
+
+(11 earlier lines omitted)
+```text
+bringing up nodes...
+bringing up nodes...
+
+........................................................................ [  2%]
+........................................................................ [  5%]
+...s.................................................................... [  8%]
+.........x.............................................................. [ 11%]
+........................................................................ [ 13%]
+........................................................................ [ 16%]
+........................................................................ [ 19%]
+...................................s.................................... [ 22%]
+........................................................................ [ 24%]
+........................................................................ [ 27%]
+........................................................................ [ 30%]
+........................................................................ [ 33%]
+........................................................................ [ 36%]
+......................ss................................................ [ 38%]
+........................................................................ [ 41%]
+........................................................................ [ 44%]
+........................................................................ [ 47%]
+........................................................................ [ 49%]
+........................................................................ [ 52%]
+........................................................................ [ 55%]
+........................................................................ [ 58%]
+........................................................................ [ 60%]
+........................................................................ [ 63%]
+........................................................................ [ 66%]
+........................................................................ [ 69%]
+........................................................................ [ 72%]
+........................................................................ [ 74%]
+........................................................................ [ 77%]
+........................................................................ [ 80%]
+........................................................................ [ 83%]
+........................................................................ [ 85%]
+........................................................................ [ 88%]
+........................................................................ [ 91%]
+........................................................................ [ 94%]
+........................................................................ [ 96%]
+........................................................................ [ 99%]
+.......                                                                  [100%]
+2594 passed, 6 skipped, 1 xfailed in 142.49s (0:02:22)
+   ok
+== gates
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+== (root)
+   ok
+== libs/cordis
+   ok
+== libs/cordis-helpers
+   ok
+== libs/host-paths
+   ok
+   ok
+== docs
+INFO    -  Cleaning site directory
+INFO    -  Building documentation to directory: /home/user/bh-02-keys/site
+INFO    -  Documentation built in 2.85 seconds
+   ok
+== tokens
+   skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
+```
 <!-- SECTION:NOTES:END -->
