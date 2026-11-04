@@ -112,6 +112,8 @@ def test_the_answers_are_once_always_and_no() -> None:
         (Kind.WRITE, "/home/me/.ssh/id", "credentials"),
         (Kind.READ, "/home/me/.claude.json", "credentials"),
         (Kind.WRITE, "/w/app/mine.toml", "layer file"),
+        (Kind.READ, "/w/app/mine.toml", "layer file"),
+        (Kind.READ, "/home/me/.config/bh-02/models.toml", "configuration"),
         (Kind.WRITE, "/w/app/src/bh_02/x.py", "own code"),
         (Kind.WRITE, "/home/me/.config/bh-02/models.toml", "configuration"),
         (Kind.WRITE, "/opt/py/bin/python3.15", "interpreter"),
@@ -126,7 +128,9 @@ def test_what_the_host_keeps_is_never_granted_and_the_refusal_says_why(
 
 
 def test_the_floor_is_by_kind_reading_what_the_host_runs_is_not_the_danger() -> None:
-    for path in ("/w/app/mine.toml", "/w/app/src/bh_02/x.py", "/opt/py/bin/python3.15"):
+    # code and the interpreter every jail already reads; layer files and `trusted` no jail reads
+    # (decision-0012 item 5: never grantable, read included), so those are refused above
+    for path in ("/w/app/src/bh_02/x.py", "/opt/py/bin/python3.15"):
         assert refusal(Grant(Kind.READ, path), FLOOR) is None
     # only the link's directory itself, not what lies beside it
     assert refusal(Grant(Kind.WRITE, "/home/me/.local/share/uv/python/other"), FLOOR) is None

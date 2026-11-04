@@ -280,7 +280,20 @@ def refusal(grant: Grant, floor: Floor) -> str | None:
     holds a floor path is not refused here: `spec_for` masks or denies the floor path inside it."""
     match grant.kind:
         case Kind.READ:
-            return _path_refusal(grant, [*_untouchable(floor)], ())
+            # decision-0012 item 5: layer files and `trusted` are never grantable, read included
+            # (no jail reads them today); code and interpreters every jail already reads.
+            return _path_refusal(
+                grant,
+                [
+                    *_untouchable(floor),
+                    (floor.layers, "a layer file, which no jail reads: it names the composition"),
+                    (
+                        floor.trusted,
+                        "bh-02's configuration (the models file among it), which no jail reads",
+                    ),
+                ],
+                (),
+            )
         case Kind.WRITE:
             return _path_refusal(
                 grant,
