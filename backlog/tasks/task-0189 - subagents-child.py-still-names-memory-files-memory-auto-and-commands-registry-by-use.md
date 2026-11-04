@@ -3,11 +3,11 @@ id: TASK-0189
 title: >-
   subagents child.py still names memory:files, memory:auto and commands:registry
   by use
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-11-04T14:14:00Z'
-updated_date: '2026-11-04T14:53:00Z'
+updated_date: '2026-11-04T14:55:00Z'
 labels:
   - subagents
   - size-2
@@ -107,4 +107,6 @@ INFO    -  Documentation built in 5.88 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+Re-review (reviewer): closed. The decision-0002 regression is fixed in d957d98: ALWAYS_REFUSED = ('memory:auto',) in agents.py is joined to the config's refused, so no layer can drop it. The new parametrized wiring test (refused unset, refused empty) refuses the call and mounts no child. DRAFT-0028 was archived by the lead. Criteria #1 and #2 are met; child.py still names no other plugin's component, since the floor lives in agents.py. Full check at HEAD 2a306af: first line is uv's UV_NATIVE_TLS deprecation warning; 2602 passed and 1 failed. The one failure is an unrelated timing flake in agent-cordis-plugin (test_agent_records, sleep(0.01) before cancel); it passed 13 reruns and was filed as a draft. Open minor point, no task: the refusal message lists every refused component, not the one the offending row uses.
 <!-- SECTION:NOTES:END -->
