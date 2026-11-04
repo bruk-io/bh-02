@@ -1,0 +1,9 @@
+{"tool": "mcp__fixture__list_pods", "tool_use_id": "toolu_018UQWFN5FPUBkCoFDphnhj4", "spilled": true, "raw_tokens": 541412, "branch": "json", "out_tokens": 435}
+{"tool": "mcp__fixture__list_pods", "tool_use_id": "toolu_01FHLoeK19Yr58XNPmbwyBtp", "spilled": true, "raw_tokens": 541412, "branch": "json-schema", "out_tokens": 213}
+{"tool": "mcp__fixture__list_pods", "tool_use_id": "toolu_01Ut8wBD82keTeePkV13F83C", "spilled": true, "raw_tokens": 541412, "branch": "json", "out_tokens": 435}
+{"tool": "mcp__fixture__get_logs", "tool_use_id": "toolu_018V39HaRtEoXuzVqGYehAbh", "spilled": true, "raw_tokens": 659050, "branch": "lines", "out_tokens": 1957}
+{"tool": "mcp__fixture__get_logs", "tool_use_id": "toolu_01WUufpKq1NjjmaVugvGZ437", "spilled": true, "raw_tokens": 659050, "branch": "lines", "out_tokens": 1957}
+{"tool": "mcp__fixture__browser_snapshot", "tool_use_id": "toolu_01MULwhoiLvuuRHTkLfTuyxz", "spilled": true, "raw_tokens": 74928, "branch": "outline", "out_tokens": 1719}
+{"tool": "mcp__fixture__browser_snapshot", "tool_use_id": "toolu_01AJBa9XEzNhF3QofYNmM2b2", "spilled": true, "raw_tokens": 74928, "branch": "outline", "out_tokens": 5271}
+{"tool": "mcp__fixture__get_figma_metadata", "tool_use_id": "toolu_01DCAuMhm4dA9uRymAH2iqgc", "spilled": true, "raw_tokens": 589457, "branch": "xml", "out_tokens": 1832}
+{"tool": "mcp__fixture__get_figma_metadata", "tool_use_id": "toolu_01AixHWZ2sHCM6YyHxo2tFzt", "spilled": true, "raw_tokens": 589457, "branch": "xml", "out_tokens": 5561}

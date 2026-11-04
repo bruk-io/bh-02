@@ -5,6 +5,7 @@
     name = "schema-rare"
     only = ["json", "pypi"]       # formats (all of them when left out)
     by = "band"                   # a row per point and size band (optional): how a dial scales
+    bands = ["L", "XL", "XXL"]    # the size bands to fold (S, M and L when left out)
     [base]                        # what every point sets: knobs, and budget or view
     view = "schema"
     [grid]                        # each axis's values; the points are every combination
@@ -30,7 +31,7 @@ from typing import Any
 from compressors.config import DEFAULT, FoldConfig, with_values
 from compressors.route import VIEWS
 from evals.l1 import Row, run
-from evals.tasks import BUDGET, FORMATS, KINDS
+from evals.tasks import BANDS, BUDGET, FORMATS, KINDS
 
 _LAB = Path(__file__).resolve().parent.parent
 _CALL = ("budget", "view")  # axes that are the call's, not knobs
@@ -79,9 +80,6 @@ def _share(rows: Sequence[Row]) -> str:
     return f"{sum(r.sufficient for r in rows)}/{len(rows)}" if rows else "-"
 
 
-_BANDS = ("S", "M", "L", "XL", "XXL")
-
-
 def report(name: str, results: list[tuple[Point, list[Row]]], by_band: bool = False) -> str:
     axes = [a for a, _ in results[0][0].axes] if results else []
     kinds = [k for k in KINDS if any(r.kind == k for _, rows in results for r in rows)]
@@ -101,7 +99,7 @@ def report(name: str, results: list[tuple[Point, list[Row]]], by_band: bool = Fa
     groups = [
         (point, b, [r for r in rows if r.band == b])
         for point, rows in results
-        for b in (_BANDS if by_band else ("",))
+        for b in (BANDS if by_band else ("",))
         if not by_band or any(r.band == b for r in rows)
     ]
     for point, b, group in groups:
@@ -128,13 +126,16 @@ def main(argv: list[str] | None = None) -> int:
     spec = tomllib.loads(ns.spec.read_text(encoding="utf-8"))
     name = str(spec.get("name", ns.spec.stem))
     only = tuple(spec.get("only", ()))
+    bands = tuple(spec.get("bands", BANDS[:3]))
+    if unknown := set(bands) - set(BANDS):
+        parser.error(f"bands names no band {', '.join(sorted(unknown))}: the bands are {', '.join(BANDS)}")
     if unknown := set(only) - set(FORMATS):
         parser.error(
             f"only names no format {', '.join(sorted(unknown))}: the formats are {', '.join(FORMATS)}"
         )
     results = []
     for point in points(spec):
-        rows = run(point.budget, only, point.view, point.config)
+        rows = run(point.budget, only, point.view, point.config, bands)
         results.append((point, rows))
         broken = sum(1 for r in rows if r.violations)
         print(

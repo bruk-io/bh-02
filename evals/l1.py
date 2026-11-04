@@ -1,6 +1,6 @@
 """Layer 1: fold every eval task with the `fold` interface itself and check it, with no model.
 
-    ./lab evals l1 [--budget 2000] [--only FORMAT ...] [--name l1-1]
+    ./lab evals l1 [--budget 2000] [--only FORMAT ...] [--bands S M L XL XXL] [--name l1-1]
 
 For each task, fold the payload (with no query, and again with the task's query when it has one)
 through `compressors.cli.fold_text`, then check:
@@ -33,7 +33,7 @@ from compressors.json_fold import parse_json_or_jsonl
 from compressors.recovery import RecoveryError, resolve
 from compressors.route import VIEWS
 from evals import schema_check
-from evals.tasks import BUDGET, FORMATS, Task, skipped, tasks
+from evals.tasks import BANDS, BUDGET, FORMATS, Task, skipped, tasks
 from evals.truth import score_fold
 
 _LAB = Path(__file__).resolve().parent.parent
@@ -215,10 +215,14 @@ def check(task: Task, budget: int, query_on: bool, view: str = "sample", config:
 
 
 def run(
-    budget: int, only: tuple[str, ...] = (), view: str = "sample", config: FoldConfig = DEFAULT
+    budget: int,
+    only: tuple[str, ...] = (),
+    view: str = "sample",
+    config: FoldConfig = DEFAULT,
+    bands: tuple[str, ...] = BANDS[:3],
 ) -> list[Row]:
     rows = []
-    for t in tasks():
+    for t in tasks(bands):
         if only and t.fmt not in only:
             continue
         rows.append(check(t, budget, query_on=False, view=view, config=config))
@@ -252,7 +256,9 @@ def report(rows: list[Row], budget: int) -> str:
     ]
     if not bad:
         out.append("None.")
-    out += ["", "## Sufficiency, query off", "", "| format | kind | S | M | L |", "|---|---|---|---|---|"]
+    sizes = [b for b in BANDS if any(r.band == b for r in rows)]
+    head = ["| format | kind | " + " | ".join(sizes) + " |", "|---|---|" + "---|" * len(sizes)]
+    out += ["", "## Sufficiency, query off", "", *head]
     cells: dict[tuple[str, str, str, bool], list[Row]] = defaultdict(list)
     for r in rows:
         cells[(r.fmt, r.kind, r.band, r.query_on)].append(r)
@@ -263,13 +269,13 @@ def report(rows: list[Row], budget: int) -> str:
         return f"{sum(r.sufficient for r in rs)}/{len(rs)}" if rs else ""
 
     for fmt, kind in kinds:
-        out.append(f"| {fmt} | {kind} | " + " | ".join(cell(fmt, kind, b, False) for b in "SML") + " |")
-    queried = [(fmt, kind) for fmt, kind in kinds if any(cells.get((fmt, kind, b, True)) for b in "SML")]
+        out.append(f"| {fmt} | {kind} | " + " | ".join(cell(fmt, kind, b, False) for b in sizes) + " |")
+    queried = [(fmt, kind) for fmt, kind in kinds if any(cells.get((fmt, kind, b, True)) for b in sizes)]
     if queried:
         out += ["", "## Sufficiency, query on (tasks whose tool call would name what is asked)", ""]
-        out += ["| format | kind | S | M | L |", "|---|---|---|---|---|"]
+        out += head
         for fmt, kind in queried:
-            out.append(f"| {fmt} | {kind} | " + " | ".join(cell(fmt, kind, b, True) for b in "SML") + " |")
+            out.append(f"| {fmt} | {kind} | " + " | ".join(cell(fmt, kind, b, True) for b in sizes) + " |")
     out += [
         "",
         "## Size, query off",
@@ -278,7 +284,7 @@ def report(rows: list[Row], budget: int) -> str:
     ]
     out.append("|---|---|---|---|---|---|---|")
     for fmt in FORMATS:
-        for band in "SML":
+        for band in sizes:
             rs = [r for r in rows if r.fmt == fmt and r.band == band and not r.query_on]
             if rs:
                 kept = statistics.median(r.out_tokens / r.raw_tokens for r in rs)
@@ -296,13 +302,20 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--budget", type=int, default=BUDGET)
     parser.add_argument("--only", nargs="+", choices=FORMATS, default=())
+    parser.add_argument(
+        "--bands",
+        nargs="+",
+        choices=BANDS,
+        default=list(BANDS[:3]),
+        help="size bands (XL and XXL: synthetic)",
+    )
     parser.add_argument("--name", default="l1-1")
     parser.add_argument("--view", choices=VIEWS, default="sample", help="how data (JSON) is shown")
     parser.add_argument("--config", type=Path, help="a TOML file of knobs (compressors/config.py)")
     parser.add_argument("--set", dest="sets", action="append", default=[], metavar="NAME=VALUE")
     ns = parser.parse_args(argv)
     config = with_sets(load(ns.config) if ns.config else DEFAULT, ns.sets)
-    rows = run(ns.budget, tuple(ns.only), ns.view, config)
+    rows = run(ns.budget, tuple(ns.only), ns.view, config, tuple(ns.bands))
     results = _LAB / "results"
     with (results / f"{ns.name}.jsonl").open("w", encoding="utf-8") as f:
         for r in rows:

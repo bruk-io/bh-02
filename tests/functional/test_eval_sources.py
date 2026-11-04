@@ -3,8 +3,11 @@
 import ast
 from pathlib import Path
 
+import pytest
+
+from compressors.common import estimate_tokens
 from evals import real
-from evals.tasks import skipped, tasks
+from evals.tasks import skipped, task, tasks
 
 
 def test_a_source_whose_file_is_missing_is_left_out_and_named_with_the_reason(monkeypatch):
@@ -102,3 +105,19 @@ def test_a_toml_file_of_knobs_loads_and_a_bad_one_says_why(tmp_path):
     bad.write_text("[schema\nrare = 0.2\n")
     with pytest.raises(ValueError, match="not TOML"):
         load(bad)
+
+
+def test_the_larger_bands_are_synthetic_and_built_only_when_asked_for():
+    assert {t.band for t in tasks()} == {"S", "M", "L"}
+    larger = tasks(("XL", "XXL"))
+    assert {t.band for t in larger} == {"XL", "XXL"} and not any(t.path for t in larger)
+    assert {t.fmt for t in larger} == {"json", "log", "a11y", "figma"}
+    with pytest.raises(ValueError, match="no size band XXXL"):
+        tasks(("XXXL",))
+
+
+def test_a_synthetic_id_builds_its_own_band_and_grows_with_it():
+    sizes = [estimate_tokens(task(f"json-{b}-spot-at50").payload()) for b in ("L", "XL", "XXL")]
+    assert sizes[0] * 3.5 < sizes[1] and sizes[1] * 3.5 < sizes[2]  # 4 and 16 times L
+    with pytest.raises(KeyError, match="no eval task 'json-XL-spot-at51'"):
+        task("json-XL-spot-at51")
