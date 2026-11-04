@@ -1,7 +1,7 @@
 ---
-id: DRAFT-0021
+id: TASK-0183
 title: On darwin runner:confined reports itself jailed until the first input fails
-status: Draft
+status: To Do
 assignee: []
 created_date: '2026-11-03T17:47:00Z'
 labels:
