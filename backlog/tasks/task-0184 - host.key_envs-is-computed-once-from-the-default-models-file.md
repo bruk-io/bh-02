@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-03T17:47:00Z'
-updated_date: '2026-11-04T13:20:00Z'
+updated_date: '2026-11-04T13:22:00Z'
 labels:
   - models
   - credentials
@@ -83,4 +83,6 @@ FAILED bh-02/app/tests/test_host_values.py::test_the_runner_refuses_a_variable_a
 ```
 
 Fix: models:catalog.key_envs() (catalog.py) reads the model row's models file and extra fresh at each call; runner:confined depends on 'models' (not host.key_envs), refuses at row start and again at each program start (_Rechecked in runner wiring), commands:shell_command asks per command. host.key_envs/models_file, bootstrap.key_variables/models_keys and their cli computation removed (no duplicate parser). Catalog depends on loader only, so no new reloads. Tests: repro test_host_values (seen failing, exit 0 instead of 1, before the fix; recorded with record-check --repro; passes after); catalog key_envs tests; runner re-check test seen failing with the per-start check removed; shell_command mid-session test. A models file in the project adds nothing, its extra still counts; a bad row cwd makes key_envs raise ModelsError (fail closed). Checks: scripts/check for runner (with gates, docs) exit 0; --no-gates --no-docs for commands, models, app, subagents exit 0; arch-check --no-fix exit 0; mypy clean. AC1 and AC2 not ticked (reviewer). AC3: the two side rules (runs=memory/harness from any row; system/asides contributors needing the event loop) are not done here; no draft filed by me, see report.
+
+Lead, 2026-11-04: criterion 3's two side rules filed as drafts (runs=memory/harness honoured from any row; system and asides contributors needing the event loop).
 <!-- SECTION:NOTES:END -->
