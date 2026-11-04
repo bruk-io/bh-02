@@ -473,3 +473,7 @@
 {"tool": "mcp__r__mongodb_aggregate", "tool_use_id": "toolu_01FRp2ZWmfnaYUzfCSJ2eSoy", "spilled": false, "raw_tokens": 20, "branch": "passthrough", "out_tokens": null}
 {"tool": "mcp__r__mongodb_collection-schema", "tool_use_id": "toolu_01LFn6fthPNuFLu1xbiptsVd", "spilled": false, "raw_tokens": 121, "branch": "passthrough", "out_tokens": null}
 {"tool": "mcp__r__mongodb_aggregate", "tool_use_id": "toolu_01G34GLDzhETsgbwUAgQvEVe", "spilled": false, "raw_tokens": 20, "branch": "passthrough", "out_tokens": null}
+{"tool": "mcp__r__google-workspace_list_events", "tool_use_id": "toolu_01U7Uh9UeiQFY8PeJAC1iLFF", "spilled": false, "raw_tokens": 4740, "branch": "json", "out_tokens": 331}
+{"tool": "mcp__r__mongodb_aggregate", "tool_use_id": "toolu_01PKxDAtTdayvJKDGJaHcAYH", "spilled": false, "raw_tokens": 20, "branch": "passthrough", "out_tokens": null}
+{"tool": "mcp__r__mongodb_aggregate", "tool_use_id": "toolu_018t9Fe7oMuzPGUjLC5uB2hM", "spilled": false, "raw_tokens": 20, "branch": "passthrough", "out_tokens": null}
+{"tool": "mcp__r__osm-mcp-server_geocode_address", "tool_use_id": "toolu_012ZY7P2iPb24ABcgokC57RP", "spilled": false, "raw_tokens": 310, "branch": "passthrough", "out_tokens": null}
