@@ -215,3 +215,8 @@
 {"tool": "mcp__fixture__browser_snapshot", "tool_use_id": "toolu_01C8dw831jxJ8XtjNPtKubtj", "spilled": true, "raw_tokens": 18798, "branch": "outline", "out_tokens": 1733}
 {"tool": "mcp__fixture__browser_snapshot", "tool_use_id": "toolu_011btLSUecuKyRF98z7AVQZy", "spilled": true, "raw_tokens": 18819, "branch": "outline", "out_tokens": 1716}
 {"tool": "mcp__fixture__browser_snapshot", "tool_use_id": "toolu_01XCZLXsovNqMLY1dAcCapyG", "spilled": true, "raw_tokens": 18819, "branch": "outline", "out_tokens": 5271}
+{"tool": "mcp__fixture__browser_snapshot", "tool_use_id": "toolu_01DZpJMxuWJMNCCHQdbcLhxe", "spilled": true, "raw_tokens": 18780, "branch": "outline", "out_tokens": 1735}
+{"tool": "mcp__fixture__browser_snapshot", "tool_use_id": "toolu_01EGZHLtieh6qfgsZ5mYgJTk", "spilled": true, "raw_tokens": 18780, "branch": "outline", "out_tokens": 5325}
+{"tool": "mcp__fixture__browser_snapshot", "tool_use_id": "toolu_01JHGuLczwV26aZLUETaHdPu", "spilled": true, "raw_tokens": 18785, "branch": "outline", "out_tokens": 5326}
+{"tool": "mcp__fixture__browser_snapshot", "tool_use_id": "toolu_01Sxtzr1VNp6pcVQYRuYsugJ", "spilled": true, "raw_tokens": 18785, "branch": "outline", "out_tokens": 1734}
+{"tool": "mcp__fixture__browser_snapshot", "tool_use_id": "toolu_013gqpN47rt9WvfW3g7r1W7F", "spilled": true, "raw_tokens": 74924, "branch": "outline", "out_tokens": 1749}
