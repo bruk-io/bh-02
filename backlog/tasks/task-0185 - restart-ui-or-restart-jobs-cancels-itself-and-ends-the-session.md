@@ -144,4 +144,30 @@ INFO    -  Documentation built in 6.26 seconds
 ```
 
 Reviewer, 2026-11-04: NOT closed: close-task refused because the repro test bh-02/plugins/commands-cordis-plugin/tests/test_restart.py changed after 2aa4b7d (c7e8e27 adds an 'is refused' assertion on each answer and a /restart operator step). Both ACs are met and ticked, and the full check (scripts/check) exited 0. The edit tightens the test rather than loosening it, but the rule asks for a repro recorded again: record-check the test, unchanged, on the pre-fix commit (or explain why the old repro stands), then close again. Other findings: (medium) /model's loader.reload and /clear and /compact's conversation restart run in jobs' task with no refusal, filed as DRAFT-0026. (low) a provider whose use does not resolve is silently left out of the refused set; acceptable, since the loader reports that row. (low) cordis Loader.restart has no cancellation guard, the owner's question. The refused set is computed live, transitively, and is exactly the rows whose restart reloads jobs. A refusal returns before jobs.put, so loader status is unchanged.
+
+Repro at c169fe90962e, test files: bh-02/plugins/commands-cordis-plugin/tests/test_restart.py; command: `uv run pytest -q -p no:cacheprovider bh-02/plugins/commands-cordis-plugin/tests/test_restart.py` exited 1
+
+(47 earlier lines omitted)
+```text
+                Row("ui", f"{__name__}:_ui"),
+                Row("jobs", "commands_cordis_plugin.wiring:jobs"),
+                Row("operator", "commands_cordis_plugin.wiring:operator"),
+            ],
+            watch=None,
+        )
+        rt, loader = booted.runtime, booted.loader
+        every_row_up = {rid: "active" for rid in ("commands", "ui", "jobs", "operator")}
+        assert await _settled(loader.status, every_row_up) == every_row_up
+        for line in ("/restart ui", "/restart jobs"):
+            answer = await rt.root.get("commands").run(line)
+>           assert isinstance(answer, str) and "is refused" in answer, line
+E           AssertionError: /restart ui
+E           assert (False)
+E            +  where False = isinstance([{'type': 'note', 'text': 'restarting ui'}, {'type': 'restarting', 'rows': ['ui']}], str)
+
+bh-02/plugins/commands-cordis-plugin/tests/test_restart.py:51: AssertionError
+=========================== short test summary info ============================
+FAILED bh-02/plugins/commands-cordis-plugin/tests/test_restart.py::test_restarting_the_ui_or_jobs_never_leaves_a_row_unmounted
+1 failed in 0.59s
+```
 <!-- SECTION:NOTES:END -->
