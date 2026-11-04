@@ -1,0 +1,26 @@
+---
+id: DRAFT-0028
+title: >-
+  A layer or patch that sets the agents row's config without rows fails at boot
+  with a bare dataclass error
+status: Draft
+assignee: []
+created_date: '2026-11-04T14:18:00Z'
+labels:
+  - subagents
+  - size-1
+dependencies: []
+type: bug
+---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+TASK-0187 made AgentsConfig.rows required. A patch's config replaces the layer's whole, so a user patch such as config = { start = 60 } on the agents row now fails at boot with cordis's generic 'agents: invalid config for AgentsConfig: __init__() missing 1 required keyword-only argument: rows' (component.py:140). That names the field but not what to write or where the shipped list is, against CLAUDE.md's rule that an error says what to do.
+<!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [ ] #1 A layer naming subagents:parent without rows fails with a message that says to list the child's rows in the agents row's config and points to bh-02.toml's list
+- [ ] #2 A test pins that message
+<!-- AC:END -->
