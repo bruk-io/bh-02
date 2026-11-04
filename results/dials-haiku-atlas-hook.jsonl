@@ -1,0 +1,10 @@
+{"tool": "mcp__r__open-library_get_book_by_title", "tool_use_id": "toolu_016Z89AutJKhGb1uGhAp9GmN", "spilled": false, "raw_tokens": 1588, "branch": "passthrough", "out_tokens": null}
+{"tool": "mcp__r__national-parks_findParks", "tool_use_id": "toolu_0196bKYFTH6BuUT41ngMK3oa", "spilled": false, "raw_tokens": 13654, "branch": "json", "out_tokens": 1535}
+{"tool": "mcp__r__national-parks_findParks", "tool_use_id": "toolu_01K6fg4YqBmZZ1yoMQJJRgye", "spilled": false, "raw_tokens": 13654, "branch": "json", "out_tokens": 1156}
+{"tool": "mcp__r__ddg-search_search", "tool_use_id": "toolu_01MjWDQshc9QKLLWxwKBDEW7", "spilled": false, "raw_tokens": 984, "branch": "passthrough", "out_tokens": null}
+{"tool": "mcp__r__ddg-search_search", "tool_use_id": "toolu_01NCM8yXj3MhA7jQj5Uw3PUc", "spilled": false, "raw_tokens": 984, "branch": "passthrough", "out_tokens": null}
+{"tool": "mcp__r__national-parks_getParkDetails", "tool_use_id": "toolu_01AHKUjNqwkZKg44WGUjKDbA", "spilled": false, "raw_tokens": 1281, "branch": "passthrough", "out_tokens": null}
+{"tool": "mcp__r__ddg-search_search", "tool_use_id": "toolu_011kb4K3JbhYZSbCGSMr6Zkt", "spilled": false, "raw_tokens": 984, "branch": "passthrough", "out_tokens": null}
+{"tool": "mcp__r__fetch_fetch", "tool_use_id": "toolu_01YYsbEm3sP4iihCKN1xyx1R", "spilled": false, "raw_tokens": 1074, "branch": "passthrough", "out_tokens": null}
+{"tool": "mcp__r__osm-mcp-server_find_nearby_places", "tool_use_id": "toolu_011qpBENrn7SSxSye5C3y6mj", "spilled": false, "raw_tokens": 127, "branch": "passthrough", "out_tokens": null}
+{"tool": "mcp__r__ddg-search_fetch_content", "tool_use_id": "toolu_01A1eiBMML4ydMd4ei8vaeUn", "spilled": false, "raw_tokens": 1391, "branch": "passthrough", "out_tokens": null}
