@@ -187,7 +187,7 @@ async def parent(
     model: object,
     config: Mapping[str, Any] | AgentsConfig,
 ) -> Effects:
-    """Fills an `agents` row: `use = "subagents:parent"`. Binds `asker` (a confirm-only view of the
+    """Fills an `agents` row: `use = "subagents:parent"`. Binds `asker` (a confirm-and-choose view of the
     parent's `output`, for its children) and `roster` (how many children run, for the status bar),
     registers the `agent`, `agent_wait`, `agent_send` and `agent_stop` tools
     (`runs="harness"`: bh-02's own, unasked exactly when the runner confines) and tells the model
@@ -236,7 +236,7 @@ class OutputConfig:
 @component(provides=("output",))
 async def output(*, asker: Confirm, config: OutputConfig) -> Effects:
     """Fills a child's `output` row (`use = "subagents:output"`, inside its realm): its loop's
-    `confirm` through `asker`, labelled with the agent's name and type. Nothing else."""
+    `confirm` and `choose` through `asker`, labelled with the agent's name and type. Nothing else."""
     yield bind("output", Labelled(asker, config.name, config.type))
 
 

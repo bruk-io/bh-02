@@ -18,6 +18,9 @@ class _Screen:
     async def confirm(self, question: Json) -> bool:
         return True
 
+    async def choose(self, question: Json) -> str:
+        return ""
+
     async def show(self, events: AsyncIterator[Json]) -> None:
         async for _ in events:
             pass

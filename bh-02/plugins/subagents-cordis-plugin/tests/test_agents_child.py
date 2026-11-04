@@ -151,6 +151,10 @@ class _Screen:
         self.asked.append(question)
         return True
 
+    async def choose(self, question: Mapping[str, Any]) -> str:
+        self.asked.append(question)
+        return "once"
+
 
 async def test_the_asker_puts_only_a_labelled_question_to_the_person() -> None:
     """A child's question reaches the person only labelled with who asks; an unlabelled one is a
@@ -327,3 +331,20 @@ def test_the_time_a_log_failed_is_told_in_utc_and_an_error_with_no_text_of_its_o
     )
     said = log_stopped("explore-2", "explore", _LOG, gone)
     assert "(it failed at 2026-10-18T20:11:21.345Z): the file went;" in said
+
+
+async def test_a_child_s_choice_carries_its_label_and_an_unlabelled_one_is_withdrawn() -> None:
+    """`choose` is forwarded as `confirm` is: labelled with the agent, and '' (withdrawn) when the
+    question does not say which agent asks."""
+    screen = _Screen()
+    asker = Asker(screen)
+    assert await asker.choose({"title": "Allow?", "choices": []}) == ""
+    assert screen.asked == []
+    child = Labelled(asker, "general-1", "general")
+    assert (
+        await child.choose({"title": "Allow?", "choices": [], "agent": {"name": "forged", "type": "x"}})
+        == "once"
+    )
+    assert screen.asked == [
+        {"title": "Allow?", "choices": [], "agent": {"name": "general-1", "type": "general"}}
+    ]

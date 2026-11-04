@@ -93,6 +93,9 @@ class Drop:
     async def confirm(self, question: Mapping[str, Any]) -> bool:
         return False
 
+    async def choose(self, question: Mapping[str, Any]) -> str:
+        return ""
+
 
 class OneMessage:
     """One message, then no more input: an interactive session that ends on its own."""
@@ -195,6 +198,9 @@ class Record(Drop):
     async def confirm(self, question: Mapping[str, Any]) -> bool:
         ASKED.append(question)
         return ANSWERS.pop(0) if ANSWERS else False
+
+    async def choose(self, question: Mapping[str, Any]) -> str:
+        return ""
 
 
 class Scripted:

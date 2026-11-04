@@ -4,6 +4,7 @@ what runs unasked, under `approval`; the grants broker, under `grants`, and `/gr
 
 import asyncio
 import os
+from collections import deque
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from functools import partial
 from pathlib import Path
@@ -12,10 +13,12 @@ from typing import Any, Protocol, runtime_checkable
 from cordis import Effects, acquire, bind, component
 from runner_cordis_plugin import allowlist
 from runner_cordis_plugin.approval import Approval, Graded
-from runner_cordis_plugin.broker import Broker
+from runner_cordis_plugin.broker import Broker, Prompt
 from runner_cordis_plugin.commands import Listing, grants_command
+from runner_cordis_plugin.grants import Answer, Request
 from runner_cordis_plugin.jail import BrigJail, Granting, Host
-from runner_cordis_plugin.policy import BrigConfig
+from runner_cordis_plugin.policy import SOCKET_PLACES, BrigConfig
+from runner_cordis_plugin.prompting import answer_of, decided, question
 from runner_cordis_plugin.runner import ArgvFor, Runner, Started
 from runner_cordis_plugin.unconfined import Unjailed
 
@@ -45,6 +48,28 @@ class _KeyReaders(Protocol):
     fresh."""
 
     def key_envs(self) -> Mapping[str, Sequence[str]]: ...
+
+
+@runtime_checkable
+class _Serving(Listing, Protocol):
+    """What the prompt needs of the `grants` value (CONTRACTS.md: grants): `serve`, and what
+    `/grants` lists and revokes."""
+
+    def serve(self, prompt: Prompt) -> Callable[[], None]: ...
+
+
+@runtime_checkable
+class _Choosing(Protocol):
+    """What the prompt needs of the `output` value (CONTRACTS.md: output): the person's choice."""
+
+    async def choose(self, question: Mapping[str, Any]) -> str: ...
+
+
+@runtime_checkable
+class _Telling(Protocol):
+    """What the prompt needs of the `asides` value (CONTRACTS.md: asides)."""
+
+    def add(self, fn: Callable[[Mapping[str, Any]], str]) -> Callable[[], None]: ...
 
 
 class _Rechecked:
@@ -113,15 +138,39 @@ async def grants(*, host: Host) -> Effects:
 
 
 @component
-async def grant_prompt(*, grants: Listing, commands: _Registrar) -> Effects:
-    """Fills a `grant-prompt` row: `use = "runner:grant_prompt"`. `/grants` lists what is granted
-    (id, kind, target, answer, scope, who asked and why) and `/grants revoke ID` takes one back,
-    for the session or, for an always-grant, the project: the next start no longer applies it."""
+async def grant_prompt(
+    *, grants: _Serving, output: _Choosing, asides: _Telling, commands: _Registrar
+) -> Effects:
+    """Fills a `grant-prompt` row: `use = "runner:grant_prompt"`. Puts what the broker asks to the
+    person through `output.choose` (once, always or no: the words are `prompting.question`), tells
+    the model on the next call's result each answer decided since the last, and registers
+    `/grants`, which lists what is granted (id, kind, target, answer, scope, who asked and why)
+    and, as `/grants revoke ID`, takes one back, for the session or, for an always-grant, the
+    project: the next start no longer applies it. A question under way when the row reloads or
+    leaves is withdrawn: its asker is answered no and nothing is recorded."""
+    told: deque[str] = deque()  # the answers decided since the last call, as lines for the model
+
+    async def prompt(request: Request) -> Answer | None:
+        runtime_dir = os.environ.get("XDG_RUNTIME_DIR", "")
+        asked = question(request, places=SOCKET_PLACES, runtime_dir=runtime_dir)
+        answer = answer_of(await output.choose(asked))
+        if answer is not None:
+            told.append(decided(request, answer))
+        return answer
+
+    def aside(call: Mapping[str, Any]) -> str:
+        lines: list[str] = []
+        while told:
+            lines.append(told.popleft())
+        return "\n".join(lines)
+
     spec = {
         "name": "grants",
         "help": "list what is granted to the jail, or `revoke ID` to take one back",
         "usage": "[revoke ID]",
     }
+    yield acquire(grants.serve, prompt)
+    yield acquire(asides.add, aside)
     yield acquire(commands.register, spec, partial(grants_command, grants))
 
 

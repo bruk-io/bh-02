@@ -80,7 +80,7 @@ class Bridge:
         self._lines: deque[str] = deque()
         self._readers: deque[asyncio.Future[str | None]] = deque()
         self._interrupts: set[asyncio.Future[None]] = set()
-        self._questions: set[asyncio.Future[bool]] = set()
+        self._questions: dict[asyncio.Future[Any], bool | str] = {}  # each with its answer when the app ends
         self._ended = False
         self._closed = asyncio.Event()  # set with `_ended`, for those awaiting it (`closed()`)
         self._crash: AppCrashed | None = None
@@ -249,12 +249,21 @@ class Bridge:
         await self._closed.wait()
 
     def question(self) -> asyncio.Future[bool] | None:
-        """A future for the answer to one question, or None when nobody is left to ask."""
+        """A future for the answer to one yes-or-no question (no when the app ends), or None when
+        nobody is left to ask."""
+        return self._ask(False)
+
+    def choice(self) -> asyncio.Future[str] | None:
+        """A future for the answer to one choice ('' when the app ends), or None when nobody is
+        left to ask."""
+        return self._ask("")
+
+    def _ask[T: (bool, str)](self, ended: T) -> asyncio.Future[T] | None:
         if self._ended:
             return None
-        answer: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
-        self._questions.add(answer)
-        answer.add_done_callback(self._questions.discard)
+        answer: asyncio.Future[T] = asyncio.get_running_loop().create_future()
+        self._questions[answer] = ended
+        answer.add_done_callback(self._questions.pop)
         return answer
 
     def draw(self) -> asyncio.Future[None]:
@@ -279,9 +288,9 @@ class Bridge:
             if not reader.done():
                 reader.set_result(None)
         self.interrupt()
-        for answer in list(self._questions):
+        for answer, ended in list(self._questions.items()):
             if not answer.done():
-                answer.set_result(False)
+                answer.set_result(ended)
         for drawn in list(self._draws):
             if not drawn.done():
                 drawn.set_result(None)
@@ -460,6 +469,15 @@ class TuiOutput:
         answer = self._bridge.question()
         if answer is None:
             return False
+        self._post(Asked(question, answer))
+        return await answer
+
+    async def choose(self, question: Mapping[str, Any]) -> str:
+        """Ask a question with named answers in a modal (CONTRACTS.md: choice): the value of the
+        choice made, or '' when it was withdrawn (Ctrl-C) or the app has ended."""
+        answer = self._bridge.choice()
+        if answer is None:
+            return ""
         self._post(Asked(question, answer))
         return await answer
 

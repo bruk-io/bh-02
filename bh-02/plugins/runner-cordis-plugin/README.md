@@ -11,7 +11,7 @@ over it; and `/release`. The only package in the workspace that imports brig (th
 | `runner:unconfined` | `runner`: each program as a plain subprocess (`--no-jail`), every axis reported `unenforced`, its environment without `CLAUDE*` (`CLAUDE_CODE_OAUTH_TOKEN`, and what a Claude Code that launched bh-02 leaves, a messaging token among them), `ANTHROPIC_*`, `TMUX` or `TMUX_PANE` (hygiene, not a boundary: an input without a jail can find the tmux socket itself; the confined runner's `env` allowlist never passes them, `tests/test_runner_tmux.py` shows both) | |
 | `runner:approval` | `approval`: `confined` (whether the runner confines what runs in it), `unasked(question) -> bool` (whether it runs without asking the person) | `runner` (`report`) |
 | `runner:grants` | `grants`: the broker of what the person granted the jail (`need`, `ask`, `granted`, `on_change`, `serve`, `list`, `revoke`) | `host` |
-| `runner:grant_prompt` | (nothing: registers `/grants`, which lists and revokes; TASK-0181.06 adds the prompt) | `grants` (`list`, `revoke`), `commands` (`register`) |
+| `runner:grant_prompt` | (nothing: serves the grants prompt, tells the model each answer through an aside, and registers `/grants`, which lists and revokes) | `grants` (`serve`, `list`, `revoke`), `output` (`choose`), `asides` (`add`), `commands` (`register`) |
 | `runner:release` | (nothing: registers `/release`) | `runner` (`release`), `commands` (`register`) |
 
 `runner.py`'s `Runner` is the `runner` value both rows bind, over a mechanism (`BrigJail` in
@@ -345,6 +345,30 @@ depends on `host`, which the shell pins, so it never reloads, and a grant change
 its binding; `runner:confined` depends on it and reads `granted()` at each start. `approval` depends on
 `runner` alone, so a grant, an `always`, a requester's remount and a requester leaving all leave the rule
 up (`test_runner_grants_wiring.py` watches the loader for it).
+
+### The prompt
+
+`runner:grant_prompt` serves the broker (`Broker.serve`) a prompt that asks the person through
+`output.choose`. The words are one pure function, `prompting.question`: a title, four lines in
+order (what is asked for; who asks, and why, in the asker's words; when it applies; what it does to
+the grades), a `warning` ('' for none) and the choices `o` once (for this session), `a` always (for
+this project) and `n` no, Escape answering no. "When it applies" is `prompting.applies`, the one
+place that says what this build does: a path or environment grant from the program's next start
+(`/clear` starts the Python process again), a destination likewise until egress goes live. A `net`
+grant adds a destination and leaves the network proxied; `env` lets the variable's value reach the
+program; `read` and `write` change no grade, unless the path is, holds or lies under a place hosts
+keep sockets (`policy.SOCKET_PLACES`, the ones a root is refused under, and `$XDG_RUNTIME_DIR`): then
+the warning says the jail's network would be violated and approval would stop counting it as
+confined. A `write` on a path `SELF_MODIFYING` names (a git hook, `.envrc`, a shell rc file) warns that
+it can run code outside the jail later. Ctrl-C answers '' and the broker records nothing, so the
+question is asked again next time; the answer is kept as decided (once for the session, always in the
+store, no for the session). An aside tells the model, on the next call's result, each answer decided
+since the last call (never one for a grant that was `standing`, which is not asked).
+
+`approval` and `runner` do not reload with `grant-prompt`: it depends on `grants`, `output`, `asides`
+and `commands`, and neither of them depends on it (`test_runner_grants_wiring.py` watches the loader
+for it). When the prompt's row reloads or leaves, its question under way is withdrawn as a no for its
+asker, and the next prompt asks what rows still need.
 
 `/grants` (`runner:grant_prompt`) lists one line each (id, kind, target, answer and scope, who asked and
 why) and `/grants revoke ID` takes one back. `bh-02 grants` and `bh-02 grants revoke ID` do the same outside a

@@ -217,7 +217,9 @@ class Broker:
 
     async def revoke(self, id: str) -> Entry:
         """Take back the grant `id` names (`list()`): a session grant leaves the session, an
-        always-grant is removed from the store. Returns what was revoked.
+        always-grant is removed from the store. Returns what was revoked. A session answer that a
+        row's need still holds is asked again once a prompt is served, so the row is not left
+        silently without it.
 
         Raises:
             Unknown: no grant has that id (the message lists the ids there are).
@@ -239,6 +241,9 @@ class Broker:
             else:
                 await self._remove(grant)
         self._changed()
+        held = {need.grant for need in self._needs.values()}
+        if any(entry.scope is Scope.SESSION and entry.request.grant in held for entry in found):
+            self._settle()  # a row still holds what the person took back: it is asked again
         return found[0]
 
     async def _kept(self) -> tuple[Request, ...]:
