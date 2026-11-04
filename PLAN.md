@@ -98,5 +98,26 @@ Rules:
 | S2 | Layer 1 on both views: the claims checked against the data; sufficiency on spot (rule and quiet), count (past the cap), enumerate, absent, and lookup (expected to need the raw) | no | done: schema 41/47, sample 38/47, half the size, 0 false claims (FINDINGS 49-50) |
 | S3 | Repeated siblings in XML and accessibility trees as schemas | no | |
 | S4 | YAML through the same schema (multi-document manifests) | no | |
-| S5 | Layer 2 on Haiku: the schema view against the sample fold and native, M and L | yes, about $2 | |
+| S5 | Layer 2 on Haiku: the schema view against the sample fold and native, M and L | yes, about $2 | in part: as a dial at M, L to XXL and in sessions, never an answer lost, 8 to 39 pairs a cell (FINDINGS 54-66); a deciding run is open |
 | S6 | The second-look regress in forced Bash folding (FINDINGS 48), before any Bash run of S5 | yes, about $0.70 | |
+
+## The envelope (from 2026-11-04)
+
+Every view of a large output answers four questions, and the envelope is that structure: **shape**
+(what the data is, in exact numbers), **anomalies** (what breaks the shape, each with its address),
+**samples** (what items look like, verbatim) and **nav** (how to fetch the rest: addresses and a
+ready command). A recipe names a producer for each part; producers run in that order, each given
+the parts before it, and read one another through what each part claims. Each part offers levels,
+fullest first, with the claims each makes; `compose` starts every part at its tersest and raises
+them in priority order within the budget. Layer 1 checks every claim against the data and that
+the text says it. Code: `compressors/envelope.py` (the core), `compressors/envelope_json.py` (JSON's
+producers), `evals/envelope_check.py`; `--view envelope` with the `json_envelope` knobs.
+
+| # | Stage | Needs a model | Status |
+|---|---|---|---|
+| E1 | The protocols and `compose` | no | done |
+| E2 | JSON's two views split into producers; the schema and sample recipes reproduce them in layer 1 | no | done: schema recipe on exactly the schema view's 41 of 47, sample recipe on 37 of the fold's 38 (FINDINGS 67) |
+| E3 | A layer-1 sweep over mixed recipes | no | done: `sweep-envelopes.md` (FINDINGS 68) |
+| E4 | Trees (S3) as producers on the same protocol, with nested envelopes for repeated siblings | no | |
+| E5 | Logs as templates: shape the templates and counts, anomalies the rare ones | no | |
+| E6 | Layer 2 on recipes that layer 1 cannot tell apart (a typical sample or none) | yes | |
