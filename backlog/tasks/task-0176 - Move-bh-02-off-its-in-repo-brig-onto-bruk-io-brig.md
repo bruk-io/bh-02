@@ -5,10 +5,11 @@ status: To Do
 assignee:
   - '@bruk'
 created_date: '2026-10-31T03:54:00Z'
-updated_date: '2026-11-02T17:24:00Z'
+updated_date: '2026-11-04T02:02:00Z'
 labels:
   - brig
   - size-8
+  - finish-moved
 dependencies: []
 references:
   - >-
@@ -40,11 +41,11 @@ bh-02 still jails the model's code with its own copy of brig (`libs/brig`, the o
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [ ] #1 bh-02's runner jails through brig from bruk-io/brig, a git dependency pinned to one commit, and nothing in the workspace imports, tests, gates or documents the old brig: libs/brig, docs/brig and every line naming them are gone
-- [ ] #2 Must not break: runner:confined confines on darwin and on Linux, and each of the status bar's four axes (fs_write, network, fs_read, env) is graded by brig, with no axis stronger than what a test shows
-- [ ] #3 Must not break: interrupting a running input reaches the program in the jail (SIGINT), as today
-- [ ] #4 Must not break: no jail can reach another jail's channel, another session's included, with a test that plants the attempt
-- [ ] #5 What bh-02 alone knows (the self-modification list, the credential paths) lives in the runner plugin, not in brig
-- [ ] #6 scripts/check and scripts/linux-jail-check pass
+- [ ] #2 Must not break: interrupting a running input reaches the program in the jail (SIGINT), as today
+- [ ] #3 Must not break: no jail can reach another jail's channel, another session's included, with a test that plants the attempt
+- [ ] #4 What bh-02 alone knows (the self-modification list, the credential paths) lives in the runner plugin, not in brig
+- [ ] #5 scripts/check and scripts/linux-jail-check pass
+- [ ] #6 Must not break: runner:confined confines on Linux, and on darwin refuses to start and names runner:unconfined until TASK-0176.05 lands Seatbelt; each of the status bar's four axes (fs_write, network, fs_read, env) is graded by brig, with no axis stronger than what a test shows
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -55,4 +56,6 @@ Accepted 2026-10-31 by Claude under the owner's delegation ("can you handle all 
 decision-0011 accepted by @bruk, 2026-10-31; Seatbelt waits for a Mac run (TASK-0176.05). The owner granted this session push access to bruk-io/brig to file .02, .03 and .04 on its board.
 
 Architecture review, 2026-11-02 (three reviewers: brig's internals, the bh-02/brig seam, brig's security). Where it challenges decision-0011: (1) spec_for producing the new brig's ordered Binds bakes bwrap into bh-02's policy and forces a second rewrite when darwin lands; better, spec_for returns bh-02's own intent type and brig compiles an intent policy per jail type (brig DRAFT-0013); (2) the swap is not the adapter alone: the runner's endpoint contract changes (draft above); (3) the new brig lacks more than the four gaps listed: cwd and stdio (brig DRAFT-0016), cleanup of mountpoints for absent paths (DRAFT-0015, measured), a refusal for an unreachable interpreter (DRAFT-0017), and a runtime report (noted on brig TASK-0021). (4) Critical, measured: the jailed command can forge the supervisor's events and ptrace it (brig TASK-0022); the swap waits on it too. decision-0011 stays as accepted until the owner revisits it.
+
+Owner, 2026-11-04 (relayed by the lead): land the swap without darwin confinement; decision-0011 amended the same day. Criterion 'runner:confined confines on darwin and on Linux' replaced: darwin refuses and names runner:unconfined until TASK-0176.05. Seatbelt (TASK-0176.05) stays under this intent and keeps it open.
 <!-- SECTION:NOTES:END -->
