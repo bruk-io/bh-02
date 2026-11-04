@@ -1,9 +1,9 @@
 ---
-id: DRAFT-0019
+id: TASK-0186
 title: >-
   test_real_launch's keyed-model --no-jail launch exits 1 on quit, once, under
   the full check
-status: Draft
+status: To Do
 assignee: []
 created_date: '2026-11-03T03:39:00Z'
 labels:
