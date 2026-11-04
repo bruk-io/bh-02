@@ -43,6 +43,7 @@ __all__ = [
     "link_directories",
     "readable_roots",
     "self_modify_denied",
+    "socket_refusal",
     "spec_for",
     "told_reads",
 ]
@@ -322,3 +323,33 @@ def self_modify_denied(allow: Sequence[str]) -> tuple[str, ...]:
             f"{', '.join(SELF_MODIFYING)}. To let an input write another path, use `write`"
         )
     return tuple(name for name in SELF_MODIFYING if name not in allow)
+
+
+#: Where hosts keep sockets other programs listen on, as brig lists them (`SOCKET_DIRECTORIES`,
+#: which it does not export): a jail that sees one is graded `network` violated, because a socket
+#: it can dial can carry the network for it. `$XDG_RUNTIME_DIR` is one too (`socket_refusal`).
+_SOCKET_PLACES: tuple[str, ...] = ("/run", "/var/run", "/tmp", "/var/tmp", "/dev/shm")
+
+
+def socket_refusal(roots: Sequence[tuple[str, str]], runtime_dir: str) -> str:
+    """Why a jail can't start with `roots` (each a what and an absolute, resolved path: the
+    project, the scratch directory, ...), or "" when none is at or under a place where hosts keep
+    sockets (`_SOCKET_PLACES`, `runtime_dir`: `$XDG_RUNTIME_DIR`, "" when unset). The message
+    says why and what to do."""
+    places = (*_SOCKET_PLACES, *([runtime_dir.rstrip("/")] if runtime_dir.startswith("/") else []))
+    found = [
+        (what, path, place)
+        for what, path in roots
+        for place in places
+        if place and (path == place or path.startswith(place + "/"))
+    ]
+    if not found:
+        return ""
+    lines = "; ".join(f"{what} {path} is under {place}" for what, path, place in dict.fromkeys(found))
+    return (
+        f"the jail can't start: {lines}. That is where hosts keep sockets, and a jail that can "
+        "see one can dial it, which reaches the network round the jail's proxy, so brig grades "
+        "the network violated and bh-02 would not call it confined. Use a project and a state "
+        "directory (`XDG_STATE_HOME`, where the jail's scratch and the project's memory are kept) "
+        f"outside {', '.join(places)}, or run with `--no-jail`, which confines nothing"
+    )

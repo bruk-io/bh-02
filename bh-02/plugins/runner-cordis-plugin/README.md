@@ -188,7 +188,12 @@ The modules:
   (`$XDG_STATE_HOME/bh-02/sessions`) and the default one (`~/.local/state/bh-02/sessions`),
   where each session's `claude/` holds its Claude Code child's config and messaging peer token.
   A third, of a run with another `XDG_STATE_HOME`, is not known to this one and is not hidden;
-- **network**: none; the program's own socket is the one way in or out. It is a channel brig
+- **network**: none, enforced: every start passes brig an `EgressPolicy` (empty until something is
+  granted), so the jail has loopback only, a proxy on the host is its one route out and it
+  refuses everything, and a program that ignores the proxy settings reaches nothing (the jail has
+  no interface). brig sets the proxy variables itself, so a `runner.toml` or layer `env` naming
+  `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY` or `NO_PROXY` (either case) is refused (`allowlist.effective`).
+  The program's own socket is the one way in or out otherwise. It is a channel brig
   reserves (`reserve_channels`, one named `program`), its endpoint is handed to the owner's command
   (`argv_for`) before anything starts, and the runner waits for it with brig's verified check
   (`await_channel_ready`: the listener must be in the jail's own PID namespace). brig binds the
@@ -268,7 +273,12 @@ being set is not seen.
 
 **The grades** are brig's: each start's `report()` is `report_of(jail.report)` (`fs_read`,
 `fs_write`, `network`, `env`, `channel_exclusivity`, lower case) and bh-02's `host_undo`
-(`tripwired`). Before anything starts, `report()` is `PLANNED`, no stronger than any start can
+(`tripwired`) and `egress` (`proxied`: the start passed an egress policy, `jail.EGRESS`).
+brig grades `network` `best_effort` whenever the jail sees any host root, and `violated` where it
+sees a place hosts keep sockets; `approval` counts `best_effort` as confined only with
+`egress: proxied`, and `violated` never. So a root (the project, a write root, the scratch or memory
+directory) at or under `/tmp`, `/var/tmp`, `/run`, `/var/run`, `/dev/shm` or `$XDG_RUNTIME_DIR` is
+refused at start (`policy.socket_refusal`), with why and what to do. Before anything starts, `report()` is `PLANNED`, no stronger than any start can
 earn. `channel_exclusivity` is `violated` when the jail can write a host path that is not a declared
 channel, which brig counts any writable root as (so for any project), or can see where the host
 keeps sockets (`/run`, `/tmp` and the like); the status bar shows it `!`.

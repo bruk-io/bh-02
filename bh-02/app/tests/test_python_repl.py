@@ -1272,10 +1272,11 @@ async def test_a_linux_jailed_git_commit_carries_the_person_s_own_name_without_t
     # committed as the person; the alias of their config is not there (only the identity is)
     assert "[0] 0 1 Pat Person <pat@example.invalid> / Pat Person <pat@example.invalid>" in out, out
     # the home directory is not there: at most the way to an interpreter installed under it, and
-    # to the project's auto memory, which the jail writes by design (`host.auto_memory`)
+    # to the project's auto memory, which the jail writes by design (`host.auto_memory`), and to the
+    # project itself (pytest's base directory is under the home, not `/tmp`: a jail refuses a root there)
     on_the_way = {
         Path(p).relative_to(home).parts[0]
-        for p in (sys.base_prefix, sys.prefix, memory_directory(project, os.environ, home))
+        for p in (sys.base_prefix, sys.prefix, project, memory_directory(project, os.environ, home))
         if Path(p).is_relative_to(home)
     }
     # (and the credential directories, each an empty directory in the home brig masks it with)

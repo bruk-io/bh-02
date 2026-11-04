@@ -5,7 +5,16 @@ from dataclasses import dataclass
 
 from cordis.loader import resolve
 from cordis.testing import drive
-from runner_cordis_plugin import UNENFORCED, Approval, BrigConfig, BrigJail, Runner, approval, is_confined
+from runner_cordis_plugin import (
+    PLANNED,
+    UNENFORCED,
+    Approval,
+    BrigConfig,
+    BrigJail,
+    Runner,
+    approval,
+    is_confined,
+)
 
 
 @dataclass(frozen=True)
@@ -43,6 +52,27 @@ def test_confined_means_writes_and_network_are_enforced() -> None:
     assert not is_confined({"fs_write": "violated", "network": "enforced"})
     assert not is_confined(UNENFORCED)
     assert not is_confined({})
+
+
+def test_best_effort_network_is_confined_only_on_the_strength_of_an_egress_policy_and_never_violated() -> (
+    None
+):
+    """brig grades `network` best-effort whenever the jail sees any host root, so best-effort counts
+    as confined only when the start passed an egress policy (bh-02's `egress: proxied`); a jail that
+    sees a socket place is `violated`, which never counts, egress policy or not."""
+    base = {"fs_write": "enforced", "network": "best_effort"}
+    assert not is_confined(base)
+    assert not is_confined({**base, "egress": "none"})
+    assert is_confined({**base, "egress": "proxied"})
+    assert not is_confined({**base, "network": "violated", "egress": "proxied"})
+    assert not is_confined({**base, "network": "unenforced", "egress": "proxied"})
+    assert Approval(_Runner({**base, "egress": "proxied"})).unasked(_QUESTION)
+    assert not Approval(_Runner(base)).unasked(_QUESTION)
+
+
+def test_the_planned_grades_are_what_approval_counts_as_confined() -> None:
+    assert PLANNED["network"] == "best_effort" and PLANNED["egress"] == "proxied"
+    assert is_confined(PLANNED)
 
 
 def test_best_effort_writes_are_not_confined_without_the_runner_s_word_that_a_tripwire_is_armed() -> None:
@@ -106,7 +136,7 @@ def test_confined_is_read_from_the_runner_each_time() -> None:
     runner = _Runner(_CONFINED)
     granted = Approval(runner)
     assert granted.unasked(_QUESTION)
-    runner.grades = {**_CONFINED, "network": "best_effort"}
+    runner.grades = {**_CONFINED, "network": "violated"}
     assert not granted.confined and not granted.unasked(_QUESTION)
 
 

@@ -8,6 +8,7 @@ members (a mark in each test file would repeat its name and its reason). A new t
 thing goes into the group, in this table.
 """
 
+import os
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -62,6 +63,21 @@ def _a_brig_home_of_its_own(tmp_path_factory: pytest.TempPathFactory) -> Iterato
     with pytest.MonkeyPatch.context() as patch:
         patch.setenv("BRIG_HOME", str(tmp_path_factory.mktemp("brig")))
         yield
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_configure(config: pytest.Config) -> None:
+    """Every test's `tmp_path` is under `$XDG_CACHE_HOME/bh-02-pytest/<this checkout's name>` (else
+    `~/.cache/...`), not under `/tmp`, unless `--basetemp` says otherwise. A jail refuses a root at or
+    under a place hosts keep sockets (`/tmp`, `/var/tmp`, `/run`, `$XDG_RUNTIME_DIR`:
+    `runner_cordis_plugin.policy.socket_refusal`), and the tests that start real jails make their
+    projects, state and memory under `tmp_path`. Not inside the checkout: a test's project there would
+    be a directory of a git repository, and bh-02's own project. One directory for each checkout, which
+    pytest empties before a run, so two checkouts' runs do not clear each other's."""
+    if config.option.basetemp is None:
+        cache = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
+        config.option.basetemp = cache / "bh-02-pytest" / _ROOT.name
+        config.option.basetemp.parent.mkdir(parents=True, exist_ok=True)  # pytest makes only the last
 
 
 def group_of(module: str) -> str | None:

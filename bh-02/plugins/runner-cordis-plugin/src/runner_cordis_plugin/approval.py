@@ -33,9 +33,17 @@ __all__ = ["Approval", "Graded", "is_confined"]
 # runner armed a tripwire over every such mount, which ends the jail when the host undoes one
 # (`runner_cordis_plugin.tripwire`). Brig does not grade that, so a report from a runner that
 # did not say it (any other, or a start that armed none) is not confined on best-effort writes.
-_CONFINING = {"fs_write": ("enforced", "best_effort"), "network": ("enforced",)}
+#
+# `network` may be best-effort, but only with bh-02's own `egress` axis at `proxied`: brig grades the
+# network best-effort whenever the jail sees any host root, so no jail with a root is ever graded
+# enforced; what makes that count is that the start passed an egress policy (`jail.EGRESS`), which
+# leaves the jail loopback only and a host-side proxy as its one route out. The gap that remains is
+# a socket the host puts under a visible root, and brig grades that `violated`, which never counts.
+_CONFINING = {"fs_write": ("enforced", "best_effort"), "network": ("enforced", "best_effort")}
 _HOST_UNDO = "host_undo"  # the report's axis for it (`jail.HOST_UNDO`)
 _TRIPWIRED = "tripwired"
+_EGRESS = "egress"  # the report's axis for an egress policy (`jail.EGRESS`)
+_PROXIED = "proxied"
 _JAIL = "jail"  # where a call runs when its question says nothing (CONTRACTS.md: tools, `runs`)
 # bh-02's own tool that reaches only the jail and bh-02's own state: asked exactly as the jail's are
 _HARNESS = "harness"
@@ -55,8 +63,11 @@ class Graded(Protocol):
 def is_confined(report: Mapping[str, str]) -> bool:
     """Whether a runner's report says what runs in it can write only where it was allowed
     (`fs_write` enforced, or best-effort with `host_undo` `tripwired`: the host undoing a mount
-    ends the jail) and reach no network (`network` enforced)."""
+    ends the jail) and reach no network (`network` enforced, or best-effort with `egress` `proxied`:
+    the start passed an egress policy, so the only route out is the proxy's; `violated` never)."""
     if report.get("fs_write") == "best_effort" and report.get(_HOST_UNDO) != _TRIPWIRED:
+        return False
+    if report.get("network") == "best_effort" and report.get(_EGRESS) != _PROXIED:
         return False
     return all(report.get(axis) in grades for axis, grades in _CONFINING.items())
 

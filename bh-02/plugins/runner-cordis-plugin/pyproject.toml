@@ -18,7 +18,7 @@ cordis = { workspace = true }
 cordis-helpers = { workspace = true }
 host-paths = { workspace = true }
 # brig (bruk-io/brig), pinned to one commit
-brig = { git = "https://github.com/bruk-io/brig", rev = "1c7c8d4bce836d7bff9c1d4652c37dd55d1c2ce0" }
+brig = { git = "https://github.com/bruk-io/brig", rev = "293a8b5316dda0df6d0244c45240184316070281" }
 
 [build-system]
 requires = ["hatchling"]

@@ -68,7 +68,7 @@ python_version = "3.15"
 # docs/hooks: the documentation site's MkDocs hook
 files = ["bh-02/app/src", "bh-02/plugins/*/src", "libs/cordis/src", "libs/cordis-helpers/src", "libs/host-paths/src", "examples/*/app/src", "examples/*/plugins/*/src", "docs/hooks"]
 
-# bruk-io/brig ships no py.typed marker (at the commit the runner plugin pins), so mypy would skip
+# bruk-io/brig ships no py.typed marker (at brig main, the commit the runner plugin pins), so mypy would skip
 # it as untyped; the runner plugin's jail and brig_spec are the only modules that import it.
 [[tool.mypy.overrides]]
 module = "brig"
