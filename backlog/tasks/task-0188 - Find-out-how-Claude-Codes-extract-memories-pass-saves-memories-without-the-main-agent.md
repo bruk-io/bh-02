@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: 2026-10-10 12:15
-updated_date: '2026-11-04T13:51:00Z'
+updated_date: '2026-11-04T13:57:00Z'
 labels:
   - memory
   - size-1
@@ -25,10 +25,10 @@ The CLI bundled with claude-agent-sdk 0.2.159 (2.1.281) has a background pass th
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 The task's notes say when the pass runs, which model, what it reads, what its prompt asks for, what it may write and its limits, each with where in the CLI's code it was read
-- [ ] #2 The notes say whether bh-02 should do the same, and a follow-up task is logged if so
-- [ ] #3 The notes say how Claude Code's extract-memories pass saves memories without the main agent, naming the bundled CLI version read (SDK 0.2.158)
-- [ ] #4 The notes say what of it DRAFT-0002 would reuse
+- [x] #1 The task's notes say when the pass runs, which model, what it reads, what its prompt asks for, what it may write and its limits, each with where in the CLI's code it was read
+- [x] #2 The notes say whether bh-02 should do the same, and a follow-up task is logged if so
+- [x] #3 The notes say how Claude Code's extract-memories pass saves memories without the main agent, naming the bundled CLI version read (SDK 0.2.158)
+- [x] #4 The notes say what of it DRAFT-0002 would reuse
 <!-- AC:END -->
 
 ## Implementation Notes
