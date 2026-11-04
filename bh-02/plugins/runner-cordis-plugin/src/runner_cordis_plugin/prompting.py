@@ -52,7 +52,7 @@ def question(request: Request, *, places: Sequence[str], runtime_dir: str) -> di
             f"What: {_what(grant)}",
             f"Asked by: {request.asker}, because: {request.reason}",
             f"When: {applies(grant)}",
-            f"Grades: {_effect(grant)}",
+            f"Grades: {_effect(grant, sockets)}",
         ],
         "warning": " ".join(_warnings(grant, sockets)),
         "choices": [{"key": key, "value": answer.value, "label": label} for key, answer, label in _CHOICES],
@@ -87,7 +87,9 @@ def _what(grant: Grant) -> str:
             return f"{grant.kind} {grant.target}"
 
 
-def _effect(grant: Grant) -> str:
+def _effect(grant: Grant, places: Sequence[str]) -> str:
+    if _refused_at_start(grant, places):
+        return "none: the program would not start while this grant stands"
     match grant.kind:
         case Kind.NET:
             return "adds a destination the jail may reach; network stays proxied, only what is granted passes"
@@ -102,18 +104,37 @@ def _effect(grant: Grant) -> str:
 def _warnings(grant: Grant, places: Sequence[str]) -> list[str]:
     if grant.kind not in (Kind.READ, Kind.WRITE):
         return []
-    warnings = [
-        f"{grant.target} {meets} {place}, where hosts keep sockets: the jail's network would be "
-        "violated, and approval would stop counting it as confined"
-        for place in dict.fromkeys(places)
-        if (meets := _relation(grant.target, place))
-    ]
+    if _refused_at_start(grant, places):
+        # A writable root at or under a socket place is refused at every start (`socket_refusal`):
+        # the jail never runs to be graded, so "violated" would be the wrong word.
+        meets = " and ".join(
+            f"{relation} {place}"
+            for place in dict.fromkeys(places)
+            if (relation := _relation(grant.target, place)) in ("is", "is under")
+        )
+        warnings = [
+            f"{grant.target} {meets}, where hosts keep sockets: "
+            "no jail starts with a writable root there, so the program would not start while this "
+            "grant stands (`/grants revoke ID` takes it back)"
+        ]
+    else:
+        warnings = [
+            f"{grant.target} {meets} {place}, where hosts keep sockets: the jail's network would be "
+            "violated, and approval would stop counting it as confined"
+            for place in dict.fromkeys(places)
+            if (meets := _relation(grant.target, place))
+        ]
     if grant.kind is Kind.WRITE and _self_modifying(grant.target):
         warnings.append(
             f"{grant.target} can run code outside the jail later (a git hook, a shell or editor "
             "setting): a write there can run as you, unconfined"
         )
     return warnings
+
+
+def _refused_at_start(grant: Grant, places: Sequence[str]) -> bool:
+    """Whether `grant` is a write root at or under a socket place, which every start refuses."""
+    return grant.kind is Kind.WRITE and any(_relation(grant.target, p) in ("is", "is under") for p in places)
 
 
 def _relation(path: str, place: str) -> str:

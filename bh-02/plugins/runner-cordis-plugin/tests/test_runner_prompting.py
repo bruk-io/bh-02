@@ -53,18 +53,34 @@ def test_a_net_grant_names_host_and_port_and_keeps_the_network_proxied() -> None
 
 
 def test_a_path_that_is_under_holds_or_is_a_socket_place_warns_network_would_be_violated() -> None:
+    for kind, target, meets in [
+        (Kind.READ, "/run/user/1000/bus", "is under /run"),
+        (Kind.READ, "/tmp", "is /tmp"),
+        (Kind.READ, "/var", "holds /var/run"),
+        (Kind.READ, "/run/user/1000/x", "is under /run/user/1000"),
+        (Kind.WRITE, "/var", "holds /var/run"),  # a root that only holds one starts, and is violated
+    ]:
+        question = _ask(Grant(kind, target))
+        warning = question["warning"]
+        assert isinstance(warning, str)
+        assert meets in warning, (kind, target, warning)
+        assert "network would be violated" in warning.replace("'s network", " network")
+        assert "stop counting it as confined" in warning
+
+
+def test_a_write_at_or_under_a_socket_place_says_the_program_would_not_start() -> None:
+    # Every start refuses a writable root there (`socket_refusal`): the jail is never graded.
     for target, meets in [
-        ("/run/user/1000/bus", "is under /run"),
         ("/tmp", "is /tmp"),
-        ("/var", "holds /var/run"),
+        ("/tmp/work", "is under /tmp"),
         ("/run/user/1000/x", "is under /run/user/1000"),
     ]:
-        for kind in (Kind.READ, Kind.WRITE):
-            warning = _ask(Grant(kind, target))["warning"]
-            assert isinstance(warning, str)
-            assert meets in warning, (kind, target, warning)
-            assert "network would be violated" in warning.replace("'s network", " network")
-            assert "stop counting it as confined" in warning
+        question = _ask(Grant(Kind.WRITE, target))
+        warning, lines = question["warning"], question["lines"]
+        assert isinstance(warning, str) and isinstance(lines, list)
+        assert meets in warning and "would not start while this grant stands" in warning, warning
+        assert "/grants revoke" in warning and "violated" not in warning
+        assert lines[3] == "Grades: none: the program would not start while this grant stands"
 
 
 def test_the_runtime_directory_is_a_socket_place_only_when_set() -> None:

@@ -359,7 +359,9 @@ grant adds a destination and leaves the network proxied; `env` lets the variable
 program; `read` and `write` change no grade, unless the path is, holds or lies under a place hosts
 keep sockets (`policy.SOCKET_PLACES`, the ones a root is refused under, and `$XDG_RUNTIME_DIR`): then
 the warning says the jail's network would be violated and approval would stop counting it as
-confined. A `write` on a path `SELF_MODIFYING` names (a git hook, `.envrc`, a shell rc file) warns that
+confined. A `write` that is or lies under one says instead that the program would not start while
+the grant stands (every start refuses a writable root there, `socket_refusal`), and how to revoke it;
+one that only holds one (`/var`) is violated, as a read is. A `write` on a path `SELF_MODIFYING` names (a git hook, `.envrc`, a shell rc file) warns that
 it can run code outside the jail later. Ctrl-C answers '' and the broker records nothing, so the
 question is asked again next time; the answer is kept as decided (once for the session, always in the
 store, no for the session). An aside tells the model, on the next call's result, each answer decided
