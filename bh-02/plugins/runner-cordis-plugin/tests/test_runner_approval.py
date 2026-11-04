@@ -4,7 +4,7 @@ from collections.abc import Mapping
 
 from cordis.loader import resolve
 from cordis.testing import drive
-from runner_cordis_plugin import UNENFORCED, Approval, approval, is_confined
+from runner_cordis_plugin import UNENFORCED, Approval, BrigConfig, BrigJail, Host, Runner, approval, is_confined
 
 _CONFINED = {**UNENFORCED, "fs_write": "enforced", "network": "enforced"}
 _QUESTION = {"name": "python", "input": {"code": "print(1)"}}
@@ -111,3 +111,11 @@ def test_the_row_depends_on_the_runner_alone() -> None:
     hold on it, stay up; asking is the asker's (`output.confirm`), so a new ui reloads none of it."""
     row = resolve("runner:approval")
     assert row.inject == {"runner"} and row.provides == {"approval"}
+
+
+def test_a_confined_runner_that_cannot_jail_here_is_not_confined_before_any_start() -> None:
+    """On darwin every start of `runner:confined` refuses, so nothing is ever jailed: the report
+    that decides `confined` (and the status bar's `jailed`) says so before an input, not after one fails."""
+    runner = Runner(BrigJail(BrigConfig(), Host(), platform="darwin"))
+    assert Approval(runner).confined is False
+    assert runner.report() == UNENFORCED
