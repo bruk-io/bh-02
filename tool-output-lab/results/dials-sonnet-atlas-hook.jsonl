@@ -254,3 +254,11 @@
 {"tool": "mcp__r__national-parks_getVisitorCenters", "tool_use_id": "toolu_01TmqU78K7TycLn2AxmCvS1g", "spilled": false, "raw_tokens": 1358, "branch": "passthrough", "out_tokens": null}
 {"tool": "mcp__r__weather-data_weather_astronomy", "tool_use_id": "toolu_01XYFwtAqapjF54oJ48ifHY7", "spilled": false, "raw_tokens": 135, "branch": "passthrough", "out_tokens": null}
 {"tool": "mcp__r__arxiv_search_papers", "tool_use_id": "toolu_01LAB2Ac7WKmJQ2HXgPw4A9d", "spilled": false, "raw_tokens": 475, "branch": "passthrough", "out_tokens": null}
+{"tool": "mcp__r__arxiv_search_papers", "tool_use_id": "toolu_01Tit1jbWne9rvkxxqgboybV", "spilled": false, "raw_tokens": 475, "branch": "passthrough", "out_tokens": null}
+{"tool": "mcp__r__airtable_list_bases", "tool_use_id": "toolu_01FHtnXAPZuvbaCQfoFpJYD9", "spilled": false, "raw_tokens": 26, "branch": "passthrough", "out_tokens": null}
+{"tool": "mcp__r__lara-translate_translate", "tool_use_id": "toolu_011a7urPQ3B3N7rPYbUxVYF7", "spilled": false, "raw_tokens": 33, "branch": "passthrough", "out_tokens": null}
+{"tool": "mcp__r__airtable_list_tables", "tool_use_id": "toolu_014q4mc9PD6WsymK6xVU49nj", "spilled": false, "raw_tokens": 7359, "branch": "json", "out_tokens": 458}
+{"tool": "mcp__r__airtable_list_bases", "tool_use_id": "toolu_0159j6xfmLD4Tenmqr4SGDFm", "spilled": false, "raw_tokens": 26, "branch": "passthrough", "out_tokens": null}
+{"tool": "mcp__r__airtable_list_tables", "tool_use_id": "toolu_01HartfsMouLK2NF8uFFit5n", "spilled": false, "raw_tokens": 7359, "branch": "json", "out_tokens": 694}
+{"tool": "mcp__r__airtable_search_records", "tool_use_id": "toolu_01N5bZAQqg8UbYt13DaTo8T7", "spilled": false, "raw_tokens": 795, "branch": "passthrough", "out_tokens": null}
+{"tool": "mcp__r__airtable_search_records", "tool_use_id": "toolu_01DrGXmKMAbypGU4pVQLncNY", "spilled": false, "raw_tokens": 795, "branch": "passthrough", "out_tokens": null}
