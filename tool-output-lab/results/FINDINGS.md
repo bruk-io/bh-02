@@ -620,12 +620,37 @@ labels) and lookup (the file a block was allocated for, read off its lines).
     turns the mean cost change to +50% (-27% without it). Next for real data: tasks whose answers
     were written for the question (MCP-Atlas), not borrowed from another task.
 
+## Real tasks: MCP-Atlas (`l1-24-atlas*.md`, `dials-haiku-atlas.md`, `dials/haiku-atlas.toml`)
+
+ScaleAI's MCP-Atlas (`./lab fetch mcp-atlas`): 500 tasks written for real MCP servers, each with the
+claims a right answer makes and the trajectory recorded when it ran. A replay server offers the
+recorded tools and answers each call with the closest recorded call (`claude_code/replay_mcp.py`);
+a program scores the answer by the facts its claims state (`evals.atlas`, `evals.truth.Claims`).
+59 tasks qualify: one output over 8,000 characters, no tool that computes from what it is sent, a
+fact in every claim and every fact in the recorded data (42 at M, 17 at L; 50 of the large outputs
+are JSON, 8 text).
+
+72. **On real tasks the fold keeps answers and saves less: 5% of the context, 8% of the cost.**
+    Haiku, 59 tasks twice, native against the sample view and the schema view: 354 runs, $3.12,
+    none failed. Native gets 48% of tasks wholly right and 71% of claims. Neither view changes
+    that: accuracy +0% [-8%, +8%] and +1% [-6%, +8%], claim recall +0.002 and +0.017. The views
+    disagree with native on 20% and 14% of pairs, and native disagrees with itself between its two
+    repetitions on 19% of tasks, so the 12 pairs won and 12 lost are Haiku's own variation. The
+    sample view cuts the final context 2.6k [-3.7k, -1.5k] of 53.5k (3.5k at M, nothing at L, as on
+    synthetic data) and the cost 8%, in the same time; the schema view 2.1k and 3%. The savings are
+    half the synthetic ones because the large outputs are smaller (median 4.7k estimated tokens at
+    M, against 6.5k) and the tasks make several other calls. As on synthetic data, the model reads
+    the saved raw more often when folded (38 and 45 of 100 JSON runs, against 14 natively).
+    Layer 1 had the schema view keeping fewer answer facts (18 of 59 against 23): in a model's hands
+    the gap does not show. The scorer, checked by hand on 5 smoke runs, was right four times and
+    missed one answer that gave 4,109.4 metres as 4.1 km; misses like that fall on every condition.
+
 ## Where the design stands
 
 | Piece | Evidence | Leaning |
 |---|---|---|
 | Fold MCP results Claude Code spilled | P2 (Haiku, 104 pairs): accuracy +7% [+1%, +14%], 1.2 fewer requests, -9% cost, but the final context +800 tokens (34). P3 (Sonnet, 20 pairs): 20/20 against 18/20, cost -21%, final context -910 [-4.1k, +1.4k] (41). The size ladder (Haiku, L to XXL, 156 pairs): accuracy +6% [+3%, +11%], cost -12% to -15%, time saved growing to 9.7 s, final context unchanged (58-62); the schema view on JSON lowers it 1.2k to 1.4k (61) | cut for Haiku by the input criterion (37), at a price in answers, cost and time the ladder shows; open for Sonnet (undecided at 20 pairs); the schema view is the candidate to pass; `TOOL_OUTPUT_LAB_MODE=spilled` |
-| Fold MCP results under the spill threshold | P2 (Haiku): answers kept, final context -7.1k (35). P3 (Sonnet): 52/52 both, final context -8.8k, cost -20% (40) | keep; the hook's default (`inline`) |
+| Fold MCP results under the spill threshold | P2 (Haiku): answers kept, final context -7.1k (35). P3 (Sonnet): 52/52 both, final context -8.8k, cost -20% (40). Real tasks (MCP-Atlas, Haiku, 118 pairs): answers kept within run-to-run noise, context -2.6k, cost -8% (72); a real log (HDFS): -8.3k, -12% (71) | keep; the hook's default (`inline`) |
 | Force the fold on Bash (the hook on `Bash`) | 46-48: inline at M: final context -8.1k, cost -10%, +6 s, but 49/52 against 52/52 (undecided) and a regress (91 second looks folded); saved outputs at L: context +1.5k | inline: fix the regress, then decide; saved outputs: cut |
 | Fold a result the session will use again (under the threshold) | Sessions (Haiku, M, 32 pairs of six-turn sessions): context -8k through the session, but each follow-up that needs the data costs a fetch; cost +10%, +9 s, break-even after ~15 more requests (63-64); the schema view on JSON breaks even after two (65) | keep for long sessions; the schema view for data |
 | JSON folding with promotion | real MCP JSON to 13%; built anomaly kinds survive | keep |
