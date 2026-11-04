@@ -33,6 +33,7 @@ from compressors.envelope import (
     Lists,
     Prints,
     Role,
+    Selects,
     Shows,
     Total,
     Values,
@@ -64,6 +65,8 @@ def said(claim: Claim) -> tuple[tuple[str, ...], ...]:
             return ((at, text),)
         case Fetches(command=command) | Prints(command=command):
             return ((command,),)
+        case Selects(command=command, n=n):
+            return ((command, str(n)),)
         case Shows(first=first, lines=lines):
             return tuple((f"{first + k}: {text}",) for k, text in enumerate(lines))
         case Total(lines=lines, templates=templates):
@@ -134,6 +137,30 @@ def _fetches(raw: str, value: Any, c: Fetches, knobs: SchemaKnobs, run_jq: bool)
     return [] if got == want else [f"{c.command}: prints {len(got)} rows, {len(want)} break {c.usual}"]
 
 
+def _selects(raw: str, value: Any, c: Selects, run_jq: bool) -> list[str]:
+    """The rows whose field holds the value, counted, and what the command prints, read back."""
+    rows = [r for r in _rows(value, c.at) if (v := get(r, c.field)) is not MISSING and _json(v) == c.value]
+    out = [] if len(rows) == c.n else [f"{c.command}: says {c.n} rows, {len(rows)} hold {c.field} {c.value}"]
+    m = _COMMAND.match(c.command)
+    if m is None:
+        return [*out, f"cannot read the command {c.command!r}"]
+    if not run_jq or shutil.which("jq") is None:
+        return out
+    flags = ["-r", "-s"] if m["slurp"] else ["-r"]
+    proc = subprocess.run(
+        ["jq", *flags, m["prog"]], input=raw, capture_output=True, text=True, timeout=60, check=False
+    )
+    if proc.returncode != 0:
+        return [*out, f"jq rejects {c.command!r}: {proc.stderr.strip()[:200]}"]
+    want: list[Any] = [get(r, c.pick) if c.pick else r for r in rows]
+    if c.pick:
+        got: list[Any] = proc.stdout.splitlines()
+        want = [w if isinstance(w, str) else json.dumps(w) for w in want]
+    else:
+        got = _values(proc.stdout)
+    return out if got == want else [*out, f"{c.command}: prints {len(got)} rows, {len(want)} hold {c.value}"]
+
+
 def _values(text: str) -> list[Any]:
     """The JSON values in a stream of them, as jq prints them."""
     decoder, out, pos = json.JSONDecoder(), [], 0
@@ -186,6 +213,8 @@ def wrong(
             return [] if ok else [f"{at}: the sample is not the item's text"]
         case Fetches() as c:
             return _fetches(raw, value, c, knobs, run_jq)
+        case Selects() as c:
+            return _selects(raw, value, c, run_jq)
         case Shows() | Total() | Alike() | Prints():
             return [f"{claim!r}: a claim about lines, in an envelope of JSON"]
         case _ as unreachable:
@@ -318,7 +347,7 @@ def wrong_lines(source: str, lines: list[str], claim: Claim, run_tools: bool = T
             if printed == list(want):
                 return []
             return [f"{command}: prints lines {printed[:8]}, not {list(want)[:8]}"]
-        case Count() | Values() | Breaks() | Lists() | Verbatim() | Fetches():
+        case Count() | Values() | Breaks() | Lists() | Verbatim() | Fetches() | Selects():
             return [f"{claim!r}: a claim about JSON, in an envelope of lines"]
         case _ as unreachable:
             raise AssertionError(f"no check for {unreachable!r}")

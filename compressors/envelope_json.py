@@ -44,6 +44,7 @@ from compressors.envelope import (
     Recipe,
     Role,
     Sampler,
+    Selects,
     Shaper,
     Spotter,
     Values,
@@ -363,6 +364,56 @@ def rows(data: JsonData, _shape: Part, _anomalies: Part, _samples: Part, /) -> P
     return Part(Role.NAV, (Level("", tuple(body)),))
 
 
+_INDEX_GROUPS = (12, 4, 0)  # value groups listed, at each level
+_INDEX_ROWS = 8  # anomalous rows given a command of their own, at the fullest level
+
+
+def index(data: JsonData, _shape: Part, anomalies: Part, _samples: Part, /) -> Part:
+    """An address and a command for every group: each collection's rows, the rows that break a
+    dominant value, each value but the commonest of every few-valued field, and each listed row."""
+    if not data.found:
+        return nothing(Role.NAV)
+    cmd = "jq -s" if data.slurp else "jq"
+    base: list[str] = []
+    claims: list[Claim] = []
+    for f in data.found:
+        c = f.collection
+        p = c.path or "."
+        one = f'{p}["KEY"]' if c.keyed else f"{p}[I]"
+        many = f"{p} | keys" if c.keyed else f"{p}[A:B]"
+        base.append(f"{p}: {c.rows} rows; one: {cmd} '{one}' FILE; more: {cmd} '{many}' FILE")
+        claims.append(Count(c.path, c.rows))
+    q = query(tuple(f.collection for f in data.found), data.slurp, data.knobs)
+    if q is not None:
+        base.append(q.command)
+        claims.append(Fetches(q.command, q.at, q.field, q.usual, q.pick))
+    groups: list[tuple[str, Selects]] = []
+    for f in data.found:
+        c = f.collection
+        if c.keyed or c.of != "object":
+            continue
+        pick = c.ident if c.ident and c.ident != "key" else ""
+        for fld in c.fields:
+            if not 2 <= len(fld.counts) <= _FEW or fld.present != c.rows or fld.path == pick:
+                continue
+            for value, n in fld.counts[1:]:
+                if len(value) > _CLIP:
+                    continue
+                piped = f" | {pick}" if pick else ""
+                command = f"{cmd} '{c.path or '.'}[] | select({fld.path} == {value}){piped}' FILE"
+                groups.append((f"{command}  ({n} rows)", Selects(command, c.path, fld.path, value, pick, n)))
+    named = list(dict.fromkeys(c.row for c in anomalies.levels[0].claims if isinstance(c, Breaks)))[
+        :_INDEX_ROWS
+    ]
+    reads = [f"{cmd} '{row}' FILE" for row in named]
+    levels = []
+    for i, cap in enumerate(_INDEX_GROUPS):
+        picked = groups[:cap]
+        body = (*base, *(g for g, _ in picked), *(reads if i == 0 else ()))
+        levels.append(Level("", body, (*claims, *(s for _, s in picked))))
+    return Part(Role.NAV, tuple(levels))
+
+
 def no_nav(_data: JsonData, _shape: Part, _anomalies: Part, _samples: Part, /) -> Part:
     return nothing(Role.NAV)
 
@@ -381,12 +432,16 @@ SAMPLES: Mapping[str, Sampler[JsonData]] = {
     "head-tail": head_tail,
     "none": no_samples,
 }
-NAVS: Mapping[str, Navigator[JsonData]] = {"jq": jq, "rows": rows, "none": no_nav}
+NAVS: Mapping[str, Navigator[JsonData]] = {"jq": jq, "rows": rows, "index": index, "none": no_nav}
 
 
 PRESETS = {
     "sample": JsonEnvelopeKnobs(shape="summary", anomalies="standouts", samples="head-tail", nav="rows"),
     "schema": JsonEnvelopeKnobs(shape="fields", anomalies="exceptions", samples="matches", nav="jq"),
+    # the patterns: every part filled; the least that keeps the anomalies; a command for every group
+    "full": JsonEnvelopeKnobs(shape="fields", anomalies="exceptions", samples="typical", nav="jq"),
+    "lean": JsonEnvelopeKnobs(shape="summary", anomalies="exceptions", samples="none", nav="jq"),
+    "index": JsonEnvelopeKnobs(shape="fields", anomalies="exceptions", samples="matches", nav="index"),
 }
 VIEWS = tuple(PRESETS)  # how a view of JSON is named: by its recipe
 _PRODUCERS = Producers(SHAPES, ANOMALIES, SAMPLES, NAVS)

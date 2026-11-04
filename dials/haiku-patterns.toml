@@ -1,0 +1,32 @@
+# Three envelope patterns against the schema recipe (M4's control) and native, on the synthetic MCP
+# tasks of every format at M and L, once each. Haiku 5.5, the hook folding every result (mode
+# "all"). Full fills every part (a typical item among the samples); lean keeps a terse shape, the
+# anomalies and a command, no samples; index gives a command for every group in the output.
+# Predictions, set before the run: full lowers how often a session reads the saved raw; lean keeps
+# schema's answers at a smaller final context; index makes the reads smaller, not fewer.
+name = "haiku-patterns"
+model = "claude-haiku-5-5"
+bands = ["M", "L"]
+formats = ["json", "log", "a11y", "figma"]
+reps = 1
+max_cost = 5
+
+[[setting]]   # M4's control: every field, the query's rows or lines, a ready command
+name = "schema"
+mode = "all"
+view = "schema"
+
+[[setting]]   # A: every part filled
+name = "full"
+mode = "all"
+view = "full"
+
+[[setting]]   # B: the least that keeps the anomalies
+name = "lean"
+mode = "all"
+view = "lean"
+
+[[setting]]   # C: a command for every group
+name = "index"
+mode = "all"
+view = "index"
