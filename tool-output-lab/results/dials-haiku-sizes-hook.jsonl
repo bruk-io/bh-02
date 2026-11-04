@@ -149,3 +149,4 @@
 {"tool": "mcp__fixture__get_logs", "tool_use_id": "toolu_013AQZtvYyfhmzbMqvvSzVYa", "spilled": true, "raw_tokens": 164755, "branch": "lines", "out_tokens": 990}
 {"tool": "mcp__fixture__get_logs", "tool_use_id": "toolu_01135cRXudKDN9S8tu84TYpM", "spilled": true, "raw_tokens": 164732, "branch": "lines", "out_tokens": 832}
 {"tool": "mcp__fixture__get_logs", "tool_use_id": "toolu_01Kg2YoivW45VMN28NiUxPTy", "spilled": true, "raw_tokens": 164732, "branch": "lines", "out_tokens": 832}
+{"tool": "mcp__fixture__get_logs", "tool_use_id": "toolu_01JEZFx3gAiLCV6LZs1q51w6", "spilled": true, "raw_tokens": 164715, "branch": "lines", "out_tokens": 835}
