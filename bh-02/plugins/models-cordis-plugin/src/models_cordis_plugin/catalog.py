@@ -140,9 +140,9 @@ class Catalog:
             return {}
         found: dict[str, list[str]] = {}
         for host in known(config).models:
-            spec = key_spec(host.table.get("key")) if host.endpoint else None
-            if spec is not None and spec.source == "env":
-                found.setdefault(spec.value, []).append(host.name)
+            variable = _env_variable(host.table.get("key")) if host.endpoint else None
+            if variable is not None:
+                found.setdefault(variable, []).append(host.name)
         return {variable: tuple(names) for variable, names in found.items()}
 
     def listed(self) -> list[dict[str, Any]]:
@@ -321,3 +321,14 @@ async def _ask(host: Named) -> Ask | Unlisted:
         return Unlisted(error.message)
     headers["Accept"] = "application/json"
     return Ask(models_url(str(host.table["base_url"])), headers)
+
+
+def _env_variable(key: object) -> str | None:
+    """The variable a `key` table reads (`{ env = "NAME" }`), read from the table as written, not
+    through `key_spec`: a table with another problem (an unknown field, a `ttl_ms` on an `env`)
+    is no valid key, but the variable it names is still a secret's, so it still counts."""
+    if isinstance(key, Mapping):
+        variable = key.get("env")
+        if isinstance(variable, str) and variable:
+            return variable
+    return None

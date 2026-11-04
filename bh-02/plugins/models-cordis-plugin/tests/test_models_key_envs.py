@@ -97,3 +97,30 @@ def test_a_file_in_the_project_is_not_read_but_the_row_s_extra_still_counts(
 
 def test_a_row_that_is_another_component_has_no_endpoints() -> None:
     assert Catalog(_Loader({}, use="bh_02.testing:echo_model")).key_envs() == {}
+
+
+def test_a_key_table_with_another_problem_still_counts_the_variable_it_reads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A `key` that is no valid key (a `ttl_ms` on an `env`, an unknown field) still names a
+    variable a secret is in: it counts, so the runner refuses it and `!` withholds it."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    catalog = Catalog(
+        _Loader(
+            {
+                "extra": {
+                    "timed": {
+                        "provider": "openai",
+                        "base_url": "http://x/v1",
+                        "key": {"env": "TIMED_KEY", "ttl_ms": 5},
+                    },
+                    "odd": {
+                        "provider": "openai",
+                        "base_url": "http://y/v1",
+                        "key": {"env": "ODD_KEY", "colour": "red"},
+                    },
+                }
+            }
+        )
+    )
+    assert catalog.key_envs() == {"TIMED_KEY": ("timed",), "ODD_KEY": ("odd",)}
