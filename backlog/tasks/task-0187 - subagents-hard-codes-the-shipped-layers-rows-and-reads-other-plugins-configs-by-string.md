@@ -24,9 +24,9 @@ Architecture review 2026-11-03: subagents_cordis_plugin/agents.py defaults to 11
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A boot test brings up a child of the shipped layer with every row the parent's loop depends on (but agents and auto memory)
-- [ ] #2 No hand-kept row list in the subagents plugin: derived from what loop depends on, or kept in bh-02.toml beside the rows it names
-- [ ] #3 CONTRACTS.md lists the fields subagents reads or rewrites of other rows (the transcript's path, the model's state and default), and a test fails when one is renamed
+- [x] #1 A boot test brings up a child of the shipped layer with every row the parent's loop depends on (but agents and auto memory)
+- [x] #2 No hand-kept row list in the subagents plugin: derived from what loop depends on, or kept in bh-02.toml beside the rows it names
+- [x] #3 CONTRACTS.md lists the fields subagents reads or rewrites of other rows (the transcript's path, the model's state and default), and a test fails when one is renamed
 <!-- AC:END -->
 
 ## Implementation Plan
