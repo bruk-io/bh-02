@@ -1,21 +1,25 @@
 """The rows: a confined runner (brig) or an unconfined one, bound under `runner`; the rule for
-what runs unasked, under `approval`; and `/release`."""
+what runs unasked, under `approval`; the grants broker, under `grants`, and `/grants`; and
+`/release`."""
 
 import asyncio
 import os
 from collections.abc import Awaitable, Callable, Mapping, Sequence
+from functools import partial
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 from cordis import Effects, acquire, bind, component
 from runner_cordis_plugin import allowlist
 from runner_cordis_plugin.approval import Approval, Graded
-from runner_cordis_plugin.jail import BrigJail, Host
+from runner_cordis_plugin.broker import Broker
+from runner_cordis_plugin.commands import Listing, grants_command
+from runner_cordis_plugin.jail import BrigJail, Granting, Host
 from runner_cordis_plugin.policy import BrigConfig
 from runner_cordis_plugin.runner import ArgvFor, Runner, Started
 from runner_cordis_plugin.unconfined import Unjailed
 
-__all__ = ["approval", "confined", "release", "unconfined"]
+__all__ = ["approval", "confined", "grant_prompt", "grants", "release", "unconfined"]
 
 
 @runtime_checkable
@@ -67,10 +71,12 @@ class _Rechecked:
 
 
 @component(provides=("runner",))
-async def confined(*, config: BrigConfig, host: Host, models: _KeyReaders) -> Effects:
+async def confined(*, config: BrigConfig, host: Host, models: _KeyReaders, grants: Granting) -> Effects:
     """Fills a `runner` row: `use = "runner:confined"`. A brig jail for each program it starts:
     writes confined to the project, no network, credentials unreadable, graded honestly. Depends
-    on `host` so a program can never write the files the running composition is read from. The
+    on `host` so a program can never write the files the running composition is read from, and on
+    `grants`, whose value (not its binding) changes with what is granted, so a grant never reloads
+    the row: each start reads `grants.granted()`. The
     variables its programs see are the baseline, the names in the person's `runner.toml` and the
     layer's `env` when it sets one (`allowlist`); a list that names a variable a key reads
     (`models.key_envs()`: every endpoint the model row can reach, asked again at each start) is
@@ -85,9 +91,8 @@ async def confined(*, config: BrigConfig, host: Host, models: _KeyReaders) -> Ef
         allowlist.effective(config, standing, file=file, readers=models.key_envs())
 
     jailed, note = allowlist.effective(config, standing, file=file, readers=models.key_envs())
-    yield bind(
-        "runner", Runner(_Rechecked(BrigJail(jailed, host, note=note, key_envs=models.key_envs), refuse))
-    )
+    jail = BrigJail(jailed, host, note=note, key_envs=models.key_envs, grants=grants)
+    yield bind("runner", Runner(_Rechecked(jail, refuse)))
 
 
 @component(provides=("runner",))
@@ -95,6 +100,29 @@ async def unconfined() -> Effects:
     """Fills a `runner` row with no confinement: `use = "runner:unconfined"` (`--no-jail`). Every
     input, and every extension to load, is then put to the person."""
     yield bind("runner", Runner(Unjailed()))
+
+
+@component(provides=("grants",))
+async def grants(*, host: Host) -> Effects:
+    """Fills a `grants` row: `use = "runner:grants"`. The broker of what the person granted the
+    jail: a row's `need`, a requester's `ask`, `granted()` (what each start applies), `list` and
+    `revoke`. It depends on `host` alone, which the shell pins, so the row never reloads: a grant
+    changes the value it bound and not the binding, and so reloads neither `approval` (which
+    depends on neither this row nor a requester) nor `runner:confined`."""
+    yield bind("grants", Broker(Path(host.grants) if host.grants else None))
+
+
+@component
+async def grant_prompt(*, grants: Listing, commands: _Registrar) -> Effects:
+    """Fills a `grant-prompt` row: `use = "runner:grant_prompt"`. `/grants` lists what is granted
+    (id, kind, target, answer, scope, who asked and why) and `/grants revoke ID` takes one back,
+    for the session or, for an always-grant, the project: the next start no longer applies it."""
+    spec = {
+        "name": "grants",
+        "help": "list what is granted to the jail, or `revoke ID` to take one back",
+        "usage": "[revoke ID]",
+    }
+    yield acquire(commands.register, spec, partial(grants_command, grants))
 
 
 @component(provides=("approval",))

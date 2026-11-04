@@ -14,7 +14,7 @@ from typing import Any
 import pytest
 
 from cordis.testing import drive
-from runner_cordis_plugin import BASELINE_ENV, BrigConfig, Runner, allowlist, confined
+from runner_cordis_plugin import BASELINE_ENV, BrigConfig, Broker, Runner, allowlist, confined
 
 
 @dataclass(frozen=True)
@@ -235,7 +235,7 @@ async def _names_in_the_jail(runner: Runner, project: Path) -> list[str]:
 
 
 async def _runner_of(config: BrigConfig, host: _Host) -> Any:
-    effects = await drive(confined(config=config, host=host, models=_Models()))
+    effects = await drive(confined(config=config, host=host, models=_Models(), grants=Broker(None)))
     return effects[0].args[1]
 
 
@@ -279,7 +279,7 @@ async def test_a_malformed_file_stops_the_row_before_a_jail_exists(
     (tmp_path / "project").mkdir()
     monkeypatch.chdir(tmp_path / "project")
     with pytest.raises(allowlist.Refused, match="bogus"):
-        await drive(confined(config=BrigConfig(), host=_Host(), models=_Models()))
+        await drive(confined(config=BrigConfig(), host=_Host(), models=_Models(), grants=Broker(None)))
 
 
 async def test_a_name_a_key_reads_stops_the_row_at_startup(
@@ -292,7 +292,7 @@ async def test_a_name_a_key_reads_stops_the_row_at_startup(
     monkeypatch.chdir(project)
     models = _Models({"OPENROUTER_API_KEY": ("openrouter",)})
     with pytest.raises(allowlist.Refused, match="OPENROUTER_API_KEY") as raised:
-        await drive(confined(config=BrigConfig(), host=_Host(), models=models))
+        await drive(confined(config=BrigConfig(), host=_Host(), models=models, grants=Broker(None)))
     assert "'openrouter'" in str(raised.value)
 
 
@@ -307,7 +307,7 @@ async def test_a_key_variable_added_after_the_row_came_up_refuses_the_next_start
     project.mkdir()
     monkeypatch.chdir(project)
     models = _Models()
-    effects = await drive(confined(config=BrigConfig(), host=_Host(), models=models))
+    effects = await drive(confined(config=BrigConfig(), host=_Host(), models=models, grants=Broker(None)))
     runner = effects[0].args[1]
     models.readers["OTHER_KEY"] = ("added",)
     with pytest.raises(allowlist.Refused, match="OTHER_KEY"):

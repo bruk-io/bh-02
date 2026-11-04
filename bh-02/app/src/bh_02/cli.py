@@ -21,7 +21,7 @@ from typing import TextIO
 
 import click
 
-from bh_02 import sessions, viewing, watching
+from bh_02 import granting, sessions, viewing, watching
 from bh_02.bootstrap import (
     CompositionError,
     LayerError,
@@ -162,6 +162,40 @@ def sessions_command() -> None:
         click.echo(f"{session.id}  {session.created[:19]}  {session.stack}{patched}")  # to the second
     for record in broken:
         click.echo(f"warning: skipped {record.message}", err=True)
+
+
+@main.group("grants", invoke_without_command=True)
+@click.pass_context
+def grants_command(ctx: click.Context) -> None:
+    """List what this project's always-grants let the jail do, one per line: its id, the kind and
+    target, `always (project)`, and who asked and why. They are kept in the project's grants store,
+    outside every jail; `/grants` in a session lists those and the session's own. Nothing is started
+    but the broker that reads the store."""
+    if ctx.invoked_subcommand is not None:
+        return
+    try:
+        lines = asyncio.run(granting.listed(_grants_store()))
+    except granting.Unreadable as error:
+        raise click.ClickException(str(error)) from None
+    click.echo("\n".join(lines) if lines else "nothing is granted", err=not lines)
+
+
+@grants_command.command("revoke")
+@click.argument("grant_id", metavar="ID")
+def grants_revoke_command(grant_id: str) -> None:
+    """Take back the always-grant ID (the first column of `bh-02 grants`): the next start of a
+    session no longer applies it, and a session running now stops applying it at its next start of
+    a program. Exits 1 and says so for an id no grant has, or a store that can't be used."""
+    try:
+        said = asyncio.run(granting.revoked(_grants_store(), grant_id))
+    except (granting.Unreadable, LookupError, ValueError) as error:
+        raise click.ClickException(str(error)) from None
+    click.echo(f"revoked: {said}")
+
+
+def _grants_store() -> Path:
+    """This directory's project's grants store (`host.grants`), as a session reads it."""
+    return Path(grants_directory(project_of(Path.cwd().resolve()), os.environ, Path.home()))
 
 
 @main.command("check-examples")

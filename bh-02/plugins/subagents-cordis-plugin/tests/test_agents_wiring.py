@@ -697,6 +697,7 @@ async def test_a_child_s_python_runs_in_a_jail_of_its_own_under_the_confined_run
         loop=Row("loop", "agent:loop", {"requires": ["python"]}),
         host=Row("host", f"{__name__}:fake_host"),
         models=Row("models", f"{__name__}:fake_models"),
+        grants=Row("grants", "runner:grants"),
         runner=Row("runner", "runner:confined"),
         approval=Row("approval", "runner:approval"),
         python=Row("python", "python:tool", {"root": str(tmp_path), "startup": []}),

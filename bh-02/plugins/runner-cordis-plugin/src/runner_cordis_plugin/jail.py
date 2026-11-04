@@ -71,8 +71,8 @@ from brig import (
 )
 
 from host_paths import state_home
-from runner_cordis_plugin import store
 from runner_cordis_plugin.brig_spec import report_of, to_brig
+from runner_cordis_plugin.broker import Broker
 from runner_cordis_plugin.facts import git_identity, instead, interpreter_files, links_on_the_way
 from runner_cordis_plugin.grants import NO_GRANTS, Grants
 from runner_cordis_plugin.mounts import mountable, notice_for, released_for, tripwired
@@ -90,7 +90,17 @@ from runner_cordis_plugin.runner import ArgvFor
 from runner_cordis_plugin.tripwire import Tripwire
 from runner_cordis_plugin.unconfined import UNENFORCED
 
-__all__ = ["CHANNEL", "EGRESS", "HOST_UNDO", "PLANNED", "SYSTEM_READABLE", "BrigJail", "Host", "planned"]
+__all__ = [
+    "CHANNEL",
+    "EGRESS",
+    "HOST_UNDO",
+    "PLANNED",
+    "SYSTEM_READABLE",
+    "BrigJail",
+    "Granting",
+    "Host",
+    "planned",
+]
 
 #: The name of the one channel a program listens on: the socket its owner dials.
 CHANNEL = "program"
@@ -151,6 +161,16 @@ class Host(Protocol):
     def auto_memory(self) -> str: ...
     @property
     def grants(self) -> str: ...
+
+
+@runtime_checkable
+class Granting(Protocol):
+    """What the jail needs of the `grants` value (CONTRACTS.md: grants): `granted()`, what the next
+    start applies, read fresh; and `problem()`, the words of a store it could not use ('' when it
+    could), which the start's notice carries."""
+
+    async def granted(self) -> Grants: ...
+    def problem(self) -> str: ...
 
 
 def _not_ready_message(outcome: ChannelNotReady | ChannelRefused | ChannelJailFinished) -> str:
@@ -381,6 +401,7 @@ class BrigJail:
         note: str = "",
         key_envs: Callable[[], Mapping[str, Sequence[str]]] = dict,
         egress_hosts: Mapping[str, tuple[str, ...]] | None = None,
+        grants: Granting | None = None,
     ) -> None:
         self._config = config
         self._host = host
@@ -388,8 +409,9 @@ class BrigJail:
         self._key_envs = key_envs
         # only tests pass it: the names the egress proxy resolves, instead of the host's resolver
         self._egress_hosts = egress_hosts
-        # what the person granted for this session (once): empty until the broker holds them
-        self._session = NO_GRANTS
+        # what the person granted: the `grants` row's broker, or (a jail made on its own) one over
+        # the host's store with nothing to ask
+        self._grants = grants or Broker(Path(host.grants) if host.grants else None)
         # decided once, as the row binds: what is known before a start is said before one
         self._cannot = _why_unjailable(platform, shutil.which("bwrap"))
         # every program this jail started that may still run, and the starts under way: what
@@ -452,7 +474,7 @@ class BrigJail:
             reservation = reservations.reservations[0]
             argv = tuple(argv_for(reservation.endpoint))
             author = git_author(*git_identity(cwd))
-            grants = await self._granted()
+            grants = await self._grants.granted()
             policy = planned(
                 self._config,
                 self._host,
@@ -527,14 +549,6 @@ class BrigJail:
             raise
         return started
 
-    async def _granted(self) -> Grants:
-        """What the next start applies: the project's always-grants (`store`, read at each start, so
-        what was answered `always` in another process counts) and the session's, none until the
-        broker holds them (TASK-0181.05 replaces this method, and nothing else here). A grant the
-        floor refuses is `spec_for`'s to leave out, and its words reach the person in `notice()`."""
-        kept = await asyncio.to_thread(store.read, Path(self._host.grants)) if self._host.grants else ()
-        return Grants((*(request.grant for request in kept), *self._session))
-
     def _roots(self, policy: Policy, cwd: str, scratch_root: str) -> list[tuple[str, str]]:
         """The roots a start has, each named for the person and resolved through links (a
         link into `/tmp` is `/tmp`): the project, the scratch directory, the project's memory
@@ -559,7 +573,12 @@ class BrigJail:
             "\n".join(
                 filter(
                     None,
-                    (self._note, *policy.refused, notice_for([m for m in policy.masks if m in armed])),
+                    (
+                        self._note,
+                        self._grants.problem(),
+                        *policy.refused,
+                        notice_for([m for m in policy.masks if m in armed]),
+                    ),
                 )
             ),
             told_reads((*policy.readable, *policy.writable), (scratch_root,)),

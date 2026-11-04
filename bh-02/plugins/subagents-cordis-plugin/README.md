@@ -88,13 +88,15 @@ input, which the loop serves as it does the model's own calls) starts one child:
    so, not a child with one (decision-0002); one that names the auto memory row (any row using
    `memory:auto`) gets the same, below. Then `subagents:output` and `subagents:child`.
 4. **Its realm**: `performer.perform(use(cordis.loader:loader, config=LoaderConfig(overrides=rows,
-   watch=None), expose={runner, approval, host, asker}, id="agents/NAME"))`. The realm's own
+   watch=None), expose={runner, approval, host, asker, grants}, id="agents/NAME"))`. The realm's own
    loader resolves each row by name (this plugin imports no other), and every key its rows bind
    is its own: its `loop`, its `tools` broker, its `transcript`, its `model`. From outside it
    reads only `runner` (its python tool's REPL is a program of the parent's runner: in a jail of
    its own from the same policy, until the session has one jail, TASK-0074; its stop is
    `/release`'s, as the parent's is), `approval` (the one rule, never a copy), `host` (what the
-   jail keeps from the model; the model row reads it for the credential) and `asker`.
+   jail keeps from the model; the model row reads it for the credential), `asker` and `grants` (the one
+   broker, so a child's rows `need` and `ask` through it, as the parent's do, and a grant is the
+   session's, never a child's own copy).
 5. **A slot**: at most `max_running` children run at once, foreground and background alike; a
    further one waits for a slot, and a note through the parent's `output.show` says so.
 6. **Its reply**: once `subagents:child` has passed its loop (`Hand`), the run drives

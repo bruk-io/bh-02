@@ -19,7 +19,7 @@ from subagents_cordis_plugin import ALWAYS_REFUSED, GENERAL, child_rows
 
 # What a child's realm reads from outside (the agents row's `expose`), and the key it binds itself
 # in place of the parent's (`subagents:output`): none of their rows is copied.
-_OUTSIDE = {"runner", "approval", "host", "asker", "output"}
+_OUTSIDE = {"runner", "approval", "host", "asker", "grants", "output"}
 _WITHHELD = {"agents", "memory-auto"}  # decision-0002: depth one, and N writers to one directory
 
 

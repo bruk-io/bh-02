@@ -32,6 +32,7 @@ from runner_cordis_plugin import (
     Approval,
     BrigConfig,
     BrigJail,
+    Broker,
     Policy,
     Runner,
     Started,
@@ -60,7 +61,7 @@ from runner_cordis_plugin import (
 )
 from runner_cordis_plugin import jail as jail_module
 from runner_cordis_plugin import store as grants_store
-from runner_cordis_plugin.grants import Asker, Grant, Kind, Request, Source
+from runner_cordis_plugin.grants import Answer, Asker, Grant, Kind, Request, Source
 
 
 @dataclass(frozen=True)
@@ -388,7 +389,7 @@ def _a_uv_python_in(project: Path) -> tuple[Path, Path, tuple[Path, ...]]:
 
 
 async def test_the_row_binds_a_runner_over_a_brig_jail_over_the_layers_it_was_given() -> None:
-    effects = await drive(confined(config=BrigConfig(), host=Host(), models=_NoKeys()))
+    effects = await drive(confined(config=BrigConfig(), host=Host(), models=_NoKeys(), grants=Broker(None)))
     assert [(e.name, e.args[0]) for e in effects] == [("bind", "runner")]
     assert isinstance(effects[0].args[1], Runner)
 
@@ -2687,3 +2688,69 @@ async def test_a_destination_granted_is_reached_through_the_proxy_and_nothing_un
     assert dialled == [b"ping"]
     assert outcomes[0] == [f"{destination} -> 403", f"svc.test:{other} -> 403"]
     assert outcomes[1] == [f"{destination} -> 200 pong", f"svc.test:{other} -> 403"]
+
+
+async def test_what_the_broker_says_is_granted_is_what_the_next_start_applies(tmp_path: Path) -> None:
+    """`BrigJail` asks its `grants` for `granted()` at each start (decision-0012 item 7): a write root
+    the session was granted once is writable by the start after the answer, and the one before it
+    was refused; a revoke takes it away again at the start after. Seen failing: with the jail reading
+    only the store, the session's once-grant was refused."""
+    _needs_bwrap()
+    project = tmp_path / "project"
+    project.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    ask = Request(Grant(Kind.WRITE, str(outside)), Asker(Source.INPUT, "python"), "the test writes there")
+    broker = Broker(None)
+    one = BrigJail(BrigConfig(), Host(), grants=broker)
+    came_to = []
+    for step in ("before", "granted", "revoked"):
+        if step == "granted":
+            broker.serve(_Once())
+            assert await broker.ask(ask) == "once"
+        if step == "revoked":
+            (entry,) = await broker.list()
+            await broker.revoke(entry.id)
+        said = project / f"said-{step}"
+
+        def argv(endpoint: str, said: Path = said) -> list[str]:
+            return [
+                sys.executable,
+                "-I",
+                "-c",
+                _LISTEN_THEN_TRY_TO_WRITE,
+                endpoint,
+                str(outside / "file"),
+                str(said),
+            ]
+
+        started = await one.start(argv, cwd=str(project))
+        try:
+            came_to.append(await _report(said, started))
+        finally:
+            await started.stop()
+    assert came_to[1] == "file: done"
+    assert came_to[0] != "file: done" and came_to[2] != "file: done"
+
+
+class _Once:
+    async def __call__(self, request: Request) -> Answer | None:
+        return Answer.ONCE
+
+
+async def test_a_store_that_is_refused_grants_nothing_and_the_starts_notice_says_so(tmp_path: Path) -> None:
+    """A wrong `grants.toml` does not fail the start (decision-0012 item 7): nothing is granted from
+    it, and the words that say what to fix reach the person in the start's `notice()`."""
+    _needs_bwrap()
+    project = tmp_path / "project"
+    project.mkdir()
+    store = tmp_path / "state" / "grants"
+    store.mkdir(parents=True, mode=0o700)
+    (store / "grants.toml").write_text("not toml = =")
+    one = BrigJail(BrigConfig(), Host(grants=str(store)))
+    started = await one.start(_listening, cwd=str(project))
+    try:
+        assert "not TOML" in started.notice() and "grants.toml" in started.notice()
+    finally:
+        await started.stop()
+    assert (store / "grants.toml").read_text() == "not toml = ="
