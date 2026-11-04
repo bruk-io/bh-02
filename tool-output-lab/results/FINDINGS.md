@@ -447,6 +447,34 @@ claim of a schema view against the data with its own path walker, and runs the q
     with Sonnet, undecided). The hook never invalidates the cache, since it changes a result before
     it enters the conversation; offered tools do, once, by changing the prefix.
 
+## Dials on one model (`dials-haiku-m.md`, `dials/haiku-m.toml`)
+
+54. **At M on Haiku, the fold as shipped saves 12% of the final context and 5% of the cost, adds
+    4.4 s, and keeps every answer.** The 52 MCP tasks twice, native and six settings: 598 runs,
+    $4.17, none failed. Native answered 104 of 104, so accuracy sits at the ceiling and +0% [-4%,
+    +4%] is all 104 agreeing pairs can show. The final context falls 6.8k from 58k and each later
+    request carries 7.6k fewer tokens; summed input rises 69k, nearly all of it cache reads (+76k),
+    because the fold adds one to two requests and each re-reads the prefix at a tenth of the price.
+    Cache writes fall 6.9k: the folded result is written once instead of the raw.
+55. **The model checks the fold against the raw nearly every time, so the dials barely move.** It
+    read the saved output in 98 of 104 default runs (90 at budget 4000, 19 of 26 with the schema
+    view), in no native run, and never answered from the fold without another call. Budget 500 to
+    4000 moves the final context by 2.8k and the cost by 7 points; against the default, the schema
+    view saves 928 more tokens, 4% of the cost and 1.1 s, budget 500 saves 1,060 and 3%, and
+    `tree-cap-25` 437 and 2%. Three answers were lost in 416 pairs: twice at budgets 500 and 1000 on
+    `json-M-absent-none` (normal restart counts called anomalous) and once at 4000 on
+    `a11y-M-absent-none`.
+56. **The format matters more than any dial.** Native makes one call in three requests; the fold
+    makes 1.9 (JSON) to 3.3 (Figma) calls. JSON saves 9.8k of context and 20% of the cost (+2.8 s),
+    logs 10.1k and 15% (+4.1 s), accessibility trees 4.9k and nothing (+4.3 s), Figma 2.6k at 15%
+    more cost (+6.5 s): where the model has to fetch more to answer, the extra requests cost more
+    than the smaller result saves.
+57. **`estimate_tokens` (characters / 4) undercounts these payloads by 1.5 to 2 times.** A native
+    run's final context at M, less the 47k a native XXL run carries (where the result spills to a
+    short preview), puts the results at 9.5k (accessibility tree) to 13k (log) real tokens against
+    5.7k to 7.4k estimated: hex ids and punctuation tokenize short. Bands and budgets are in
+    estimated tokens; the savings in layer-2 reports are real tokens from the API.
+
 ## Where the design stands
 
 | Piece | Evidence | Leaning |
