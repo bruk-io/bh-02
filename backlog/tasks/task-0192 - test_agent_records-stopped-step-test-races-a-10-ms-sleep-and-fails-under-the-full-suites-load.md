@@ -1,9 +1,9 @@
 ---
-id: DRAFT-0028
+id: TASK-0192
 title: >-
   test_agent_records' stopped-step test races a 10 ms sleep and fails under the
   full suite's load
-status: Draft
+status: To Do
 assignee: []
 created_date: '2026-11-04T14:55:00Z'
 labels:
