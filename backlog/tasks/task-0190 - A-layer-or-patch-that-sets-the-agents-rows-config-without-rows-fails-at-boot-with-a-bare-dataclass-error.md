@@ -3,11 +3,11 @@ id: TASK-0190
 title: >-
   A layer or patch that sets the agents row's config without rows fails at boot
   with a bare dataclass error
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-11-04T14:18:00Z'
-updated_date: '2026-11-04T14:49:00Z'
+updated_date: '2026-11-04T14:55:00Z'
 labels:
   - subagents
   - size-1
@@ -164,4 +164,6 @@ FAILED bh-02/plugins/subagents-cordis-plugin/tests/test_agents_wiring.py::test_a
 ```
 
 Lead, 2026-11-04: the repro file changed after its recording only through TASK-0189's commit (63d6f38) and the floor fix (d957d98), which edit other tests in it. A new repro is recorded above: the file as it now stands, run on the code before the fix (4057a84) in a throwaway local worktree; it fails on the bare dataclass error lacking the message.
+
+Re-review (reviewer): closed. Both criteria met (evidence in the earlier review note). The lead's new repro, recorded on the file as it stands run against 4057a84, fails on the bare dataclass error; the repro test passes at HEAD. Full check at HEAD 2a306af (recorded on TASK-0189): 2602 passed and 1 failed. The failure is a timing flake in agent-cordis-plugin's test_agent_records, outside this branch: it passed 13 reruns. Filed as a draft (stopped-step test races a 10 ms sleep). The earlier finding about copying rows without refused is resolved by TASK-0189's ALWAYS_REFUSED floor.
 <!-- SECTION:NOTES:END -->
