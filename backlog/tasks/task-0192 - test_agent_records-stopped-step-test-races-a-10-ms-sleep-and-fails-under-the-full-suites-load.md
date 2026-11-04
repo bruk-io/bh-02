@@ -3,9 +3,11 @@ id: TASK-0192
 title: >-
   test_agent_records' stopped-step test races a 10 ms sleep and fails under the
   full suite's load
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@claude'
 created_date: '2026-11-04T14:55:00Z'
+updated_date: '2026-11-04T16:58:00Z'
 labels:
   - agent
   - size-1
@@ -24,3 +26,11 @@ In the full check on claude/subagents-followups (HEAD 2a306af, recorded on TASK-
 - [ ] #1 The test waits on an event the model fake sets when complete() is entered, not a fixed sleep
 - [ ] #2 The test passes 50 runs under scripts/check's -n auto load
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Reproduced on the unfixed test with 8 CPU burners, the plugin's tests with -n 4: 27 of 30 runs failed, at line 281 KeyError: 'step' (this test), and at the other two sleeps (see TASK-0191). Cause: the cancel after asyncio.sleep(0.01) lands before the model's complete() is entered, so no step is recorded. Fix: Silent.complete sets an asyncio.Event on entry and the test awaits it. After the fix: 50 of 50 runs passed (0 failures) under the same load.
+
+No repro: the failure is a race in the test itself, shown by the load runs above; the product records the step as soon as the model is entered. scripts/check bh-02/plugins/agent-cordis-plugin exits 0. The full scripts/check was started twice on a machine shared with other workers and did not finish in 30 min, so it is left for the reviewer; criteria unticked.
+<!-- SECTION:NOTES:END -->

@@ -267,14 +267,17 @@ async def test_a_step_that_failed_or_was_stopped_has_a_record_of_what_came_befor
         "took": 0.5,
     }  # up to the last chunk, not the error
 
+    entered = asyncio.Event()
+
     class Silent(Timing):
         async def complete(self, messages: Sequence[Json], tools: Sequence[Json]) -> AsyncIterator[Json]:
+            entered.set()
             await asyncio.Event().wait()
             yield text("never")  # pragma: no cover
 
     stepped, transcript = Stepped(), MemoryTranscript()
     task = asyncio.create_task(reply(loop(Silent(stepped, transcript), transcript, stepped), "hi"))
-    await asyncio.sleep(0.01)
+    await entered.wait()
     task.cancel()
     await asyncio.gather(task, return_exceptions=True)
     (answer,) = entries(transcript, "assistant")
