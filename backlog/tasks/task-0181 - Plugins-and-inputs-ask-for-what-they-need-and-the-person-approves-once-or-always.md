@@ -33,12 +33,12 @@ Today approval is one rule (runner:approval) that asks about every call unless b
 
 ## Open questions
 
-- [ ] Where are always-grants kept so the jailed model can never write them (bh-02's own state outside every jail root, per project), and can the person list and revoke them (a command)?
-- [ ] A grant changes the jail's policy, which brig fixes at create: does an always-grant apply from the next start only, and does a once-grant mid-session restart the program (losing the Python process's namespace), run one call in a jail of its own, or wait?
-- [ ] What may a plugin request without the person ever being asked, if anything, and what is always asked?
-- [ ] Network: hostname matching through the proxy (CONNECT or TLS SNI) and IP plus port for raw TCP; does a granted hostname cover the addresses it resolves to, and are wildcards (*.github.com) allowed?
-- [ ] How does a grant show in the grades and the prompt (a granted socket path would rightly lower channel_exclusivity), and what does the person see before saying always?
-- [ ] How does this replace the jail row's allow setting and relate to the access broker (a per-file check before a tool opens a file)?
+- [x] Where are always-grants kept so the jailed model can never write them (bh-02's own state outside every jail root, per project), and can the person list and revoke them (a command)?
+- [x] A grant changes the jail's policy, which brig fixes at create: does an always-grant apply from the next start only, and does a once-grant mid-session restart the program (losing the Python process's namespace), run one call in a jail of its own, or wait?
+- [x] What may a plugin request without the person ever being asked, if anything, and what is always asked?
+- [x] Network: hostname matching through the proxy (CONNECT or TLS SNI) and IP plus port for raw TCP; does a granted hostname cover the addresses it resolves to, and are wildcards (*.github.com) allowed?
+- [x] How does a grant show in the grades and the prompt (a granted socket path would rightly lower channel_exclusivity), and what does the person see before saying always?
+- [x] How does this replace the jail row's allow setting and relate to the access broker (a per-file check before a tool opens a file)?
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
