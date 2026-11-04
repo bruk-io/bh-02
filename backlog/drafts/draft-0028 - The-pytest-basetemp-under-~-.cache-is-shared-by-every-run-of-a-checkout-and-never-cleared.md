@@ -6,6 +6,7 @@ title: >-
 status: Draft
 assignee: []
 created_date: '2026-11-04T17:33:00Z'
+updated_date: '2026-11-04T17:43:00Z'
 labels:
   - runner
   - size-2
@@ -24,3 +25,9 @@ TASK-0181.02 set the root conftest's basetemp to $XDG_CACHE_HOME/bh-02-pytest/<c
 - [ ] #1 Two pytest runs in one checkout at once don't remove each other's tmp_path
 - [ ] #2 A run's leftovers under the cache are bounded (pytest's keep-3 numbered dirs, or removed), and checkouts that share a name don't share a directory
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Fixed by the lead the same day, before the merge: a temp directory per run (see the commit after the TASK-0181.02 close).
+<!-- SECTION:NOTES:END -->
