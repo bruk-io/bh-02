@@ -6,11 +6,10 @@ from typing import Any
 from compressors import markers
 from compressors.common import estimate_tokens, split_lines
 from compressors.config import DEFAULT, FoldConfig
-from compressors.envelope_json import envelope
+from compressors.envelope_json import VIEWS, envelope
 from compressors.html import html_to_text, looks_like_html
-from compressors.json_fold import fold_json, parse_json_or_jsonl
+from compressors.json_items import parse_json_or_jsonl
 from compressors.lines import fold_lines
-from compressors.schema import schema_view
 from compressors.tree import (
     XmlTree,
     fold_outline,
@@ -31,9 +30,6 @@ _BOM = "\ufeff"
 type _Parsed = tuple[Any, str] | XmlTree | None
 
 _BRANCHES = ("json", "xml", "html", "outline", "lines", "text")
-# How a data branch shows its data: samples (head, tail, stand-outs), its schema (PLAN.md, S1), or
-# an envelope of parts the knobs name (`compressors.envelope_json`).
-VIEWS = ("sample", "schema", "envelope")
 
 
 def _detect(raw: str) -> tuple[str, _Parsed]:
@@ -94,7 +90,13 @@ def _cut_chars(raw: str, budget_tokens: int) -> str:
 
 
 def _body(
-    branch: str, parsed: _Parsed, raw: str, terms: frozenset[str], budget_tokens: int, config: FoldConfig
+    branch: str,
+    parsed: _Parsed,
+    raw: str,
+    terms: frozenset[str],
+    budget_tokens: int,
+    config: FoldConfig,
+    view: str = "sample",
 ) -> tuple[str, str | None]:
     """The folded text, and the text its line numbers refer to when that is not `raw`.
 
@@ -107,26 +109,11 @@ def _body(
                 "\n".join(tree.lines) if tree.pretty else None
             )
         case "json", (value, "json"):
-            return fold_json(value, terms, budget_tokens), None
-        case "json-schema", (value, "json"):
-            return schema_view(value, terms, budget_tokens, knobs=config.schema), None
-        case "json-envelope", (value, "json"):
-            return envelope(value, terms, budget_tokens, config=config).text(), None
+            return envelope(value, terms, budget_tokens, config=config, view=view).text(), None
         case "jsonl", (list() as records, "jsonl"):
             note = markers.jsonl_note(len(records), _records_by_line(raw))
-            return f"{note}\n{fold_json(records, terms, budget_tokens)}", None
-        case "jsonl-envelope", (list() as records, "jsonl"):
-            note = markers.jsonl_note(len(records), _records_by_line(raw))
-            return (
-                f"{note}\n{envelope(records, terms, budget_tokens, slurp=True, config=config).text()}",
-                None,
-            )
-        case "jsonl-schema", (list() as records, "jsonl"):
-            note = markers.jsonl_note(len(records), _records_by_line(raw))
-            return (
-                f"{note}\n{schema_view(records, terms, budget_tokens, slurp=True, knobs=config.schema)}",
-                None,
-            )
+            body = envelope(records, terms, budget_tokens, slurp=True, config=config, view=view).text()
+            return f"{note}\n{body}", None
         case "outline", None:
             return fold_outline(raw, budget_tokens, terms, config.tree).text, None
         case "html", None:
@@ -166,14 +153,14 @@ def fold(
     None when the result fits the budget, or when folding would keep more than 90% of it. `terms`
     are the query (`common.query_words` of a query, `common.query_terms` of a tool call's
     arguments); `force` names the branch instead of detecting it; `view` says how a data branch
-    shows its data: by samples, by its schema (`compressors.schema`), or as an envelope
-    (`compressors.envelope_json`); `config` holds the knobs
+    shows its data: the recipe of a JSON envelope (`compressors.envelope_json`), sample or schema,
+    whose parts the `json_envelope` knobs can change one by one; `config` holds the knobs
     (`compressors.config`). A `force` the text cannot
     take (JSON that does not parse, XML that is not well formed) or that is no branch at all raises
     ValueError, from `_parse_as`.
 
     Raises:
-        ValueError: `view` is none of sample, schema and envelope.
+        ValueError: `view` names no JSON recipe (sample or schema).
     """
     raw_tokens = estimate_tokens(raw)
     if raw_tokens <= budget_tokens:
@@ -182,9 +169,7 @@ def fold(
     if view not in VIEWS:
         raise ValueError(f"unknown view {view!r}: use {' or '.join(VIEWS)}")
     branch, parsed = _parse_as(force, raw) if force else _detect(raw)
-    if view != "sample" and branch in ("json", "jsonl"):  # data: its schema, or an envelope
-        branch += f"-{view}"
-    body, source = _body(branch, parsed, raw, terms, budget_tokens, config)
-    if estimate_tokens(body) > raw_tokens * config.worth_it:
+    body, source = _body(branch, parsed, raw, terms, budget_tokens, config, view)
+    if not body.strip() or estimate_tokens(body) > raw_tokens * config.worth_it:  # shows nothing, or too much
         return None
     return Folded(branch, body, raw_tokens, source)

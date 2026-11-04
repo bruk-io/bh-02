@@ -45,7 +45,7 @@ def test_a_real_spill_is_folded_from_claude_codes_file(tmp_path):
     text = reply["hookSpecificOutput"]["updatedToolOutput"]
     assert str(spill) in text.splitlines()[0]
     assert case.planted[0] in text
-    assert json.loads(text.split("\n", 1)[1])["items"][0]["namespace"] == "default"
+    assert "This is the data's envelope" in text.splitlines()[0] and ".items: array[500] of object" in text
 
 
 def test_a_notice_naming_a_file_outside_the_session_is_not_read(tmp_path):

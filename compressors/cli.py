@@ -5,11 +5,12 @@
 
 Source code (by extension, or --lang for stdin) folds through ast-grep: every class, function and
 block header with its real line number, opened as far as the budget allows. Other text folds by
-what it is: JSON (long arrays keep head, tail and the items that stand out), XML (by element,
-pretty-printed first when packed), indentation outlines such as accessibility snapshots (by
-nesting), HTML (to text), logs (repeated lines collapsed, head, tail and windows around error
-words) or plain text (head and tail). Each marker says what it hides: a JSON path, or a line or
-character range, so `jq`, `sed -n 'A,Bp'` or Read with offset and limit fetch exactly that.
+what it is: JSON as an envelope (its shape, the rows that break it, samples, and jq commands to get
+more; --view picks the recipe), XML (by element, pretty-printed first when packed), indentation
+outlines such as accessibility snapshots (by nesting), HTML (to text), logs (repeated lines
+collapsed, head, tail and windows around error words) or plain text (head and tail). Each marker
+or path says what it hides: a jq path, or a line or character range, so `jq`, `sed -n 'A,Bp'` or
+Read with offset and limit fetch exactly that.
 
 Text that already fits the budget is printed unchanged. --query keeps in view the array items,
 siblings and log lines that hold those words (words that most items share are ignored). When the
@@ -26,7 +27,8 @@ from pathlib import Path
 from compressors.code import fold_code, language_for
 from compressors.common import estimate_tokens, query_words, read_text
 from compressors.config import DEFAULT, FoldConfig, load, with_sets
-from compressors.route import VIEWS, fold
+from compressors.envelope_json import VIEWS
+from compressors.route import fold
 
 FORMATS = ("auto", "code", "json", "xml", "html", "outline", "lines", "text")
 
@@ -83,9 +85,7 @@ def fold_text(
     result = Result(body, source, branch, language if branch == "code" else None)
     if quiet:
         return result
-    if branch.endswith("-schema"):
-        where = "paths are jq paths into the input, which FILE in the query stands for"
-    elif branch.endswith("-envelope"):
+    if branch in ("json", "jsonl"):
         where = "paths are jq paths into the input, which FILE in a command stands for"
     elif source is not None:
         where = "line numbers refer to the pretty-printed copy"
@@ -126,9 +126,9 @@ def main(argv: list[str] | None = None) -> int:
         "--view",
         choices=VIEWS,
         default="sample",
-        help="data (JSON) shown by samples; by its schema: fields, values and counts, and the rows that "
-        "break the pattern; or as an envelope of shape, anomalies, samples and how to get more, whose parts "
-        "the json_envelope knobs name (--set json_envelope.samples=typical)",
+        help="JSON's envelope recipe: sample (types and few-valued counts, the items that stand out, head "
+        "and tail) or schema (every field's values and counts, every row that breaks them, a ready jq "
+        "query); a json_envelope knob swaps one part (--set json_envelope.samples=typical)",
     )
     ns = parser.parse_args(argv)
     try:

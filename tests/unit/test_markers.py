@@ -16,16 +16,13 @@ def test_line_markers_read_back():
     assert markers.clipped("short", 10) == "short"
 
 
-def test_json_markers_read_back():
-    m = markers.JSON_SLICE.match(markers.json_slice('$["pod-list"]', 2, 499, 500))
-    assert m.group("path", "start", "stop", "count", "total") == ('$["pod-list"]', "2", "499", "497", "500")
-    k = markers.JSON_KEYS.match(markers.json_keys(["a", "b"], 17, "$.releases"))
-    assert k.group("omitted", "total", "path") == ("2", "17", "$.releases")
-    text = '{"_folded": "' + markers.json_slice("$.items", 2, 9, 10) + '"}'
-    assert markers.JSON_SLICE_IN_TEXT.search(text).group("path", "start") == ("$.items", "2")
+def test_the_jsonl_note_reads_back():
+    m = markers.JSONL_NOTE.match(markers.jsonl_note(300, by_line=False) + "\nshape:")
+    assert m["records"] == "300" and m["where"] == "blank lines are skipped, so index i is not line i+1"
 
 
 def test_keys_that_are_not_identifiers_are_quoted_so_the_jq_path_is_valid():
-    from compressors.json_fold import child_path
+    from compressors.envelope_json import envelope
 
-    assert child_path("$", "pod-list") == '$["pod-list"]' and child_path("$", "items") == "$.items"
+    text = envelope({"pod-list": [{"n": i} for i in range(9)]}, frozenset(), 2000, view="schema").text()
+    assert '["pod-list"]: array[9] of object' in text

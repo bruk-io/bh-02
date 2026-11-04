@@ -1,23 +1,21 @@
-"""A schema view of JSON: the data's shape, the rows that break it, and a query, instead of samples.
+"""JSON's shape, worked out over every row: what the envelope's JSON parts are made from.
 
     .items: array[500] of object
       .name      str, unique, like web-<hex>
       .phase     "Running" 488, "CrashLoopBackOff" 12
       .restarts  int 0..97, median 1
-      exceptions in 13 rows:
-        .items[312] web-a9da82d697: .restarts 97 (outlier)
-        .items[7] web-0c41d2e6b0: .phase "CrashLoopBackOff", .ready false
-    query: jq '.items[] | select(.phase != "Running") | .name' FILE
 
 A collection is an array of objects (or of values), or an object with many keys whose values share
 one shape (PyPI's releases by version); its rows are merged into one list of fields, each a jq path
 relative to the row, and an array of objects inside the rows is a collection of its own (`.items[]
 .containers[]`). Every count, range and exception is computed over all rows, never sampled. A row
 is an exception when it holds a value few rows hold where one value dominates, a number far outside
-the rest, a key few rows have (or lacks one nearly all have), or a value of another type. Paths are
-jq paths into the input; FILE in the query stands for it. The view's size depends on the structure,
-not on the number of rows; when it does not fit the budget, fewer values, fields and exception rows
-are shown, and each cut says what it left out.
+the rest, a key few rows have (or lacks one nearly all have), or a value of another type.
+
+`collections` finds them, `shape_levels` outlines the unique structure with each collection's
+fields at a few levels of detail, and `query` names a ready jq query for the rows that break a
+dominant value; `compressors.envelope_json` makes the envelope's parts of them. Paths are jq paths
+into the input.
 """
 
 import json
@@ -30,7 +28,7 @@ from types import MappingProxyType
 from typing import Any
 
 from compressors import markers
-from compressors.common import discriminating, estimate_tokens, matches
+from compressors.common import discriminating, matches
 from compressors.config import DEFAULT, SchemaKnobs
 
 _IDENT_NAMES = ("name", "id", "uid", "key", "ref", "title", "slug", "filename", "sha", "version")
@@ -39,6 +37,7 @@ _DIGITS = re.compile(r"\d+")
 _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 _FLATTEN_DEPTH = 3
 _NEST_DEPTH = 2  # collections inside collections, at most this deep
+_OUTLINE_DEPTH = 12  # objects inside objects outlined this deep; deeper ones are named, to read with jq
 # Dates and times sort as text, so their first and last say something; versions and IPs do not.
 _ORDERED_SHAPE = re.compile(r"<n>-<n>-<n>|<n>:<n>:<n>")
 
@@ -398,7 +397,8 @@ def describe(f: Field, rows: int, values: int = 8, clip: int = 60) -> str:
     return "; ".join(parts)
 
 
-def _render(c: Collection, indent: str, lim: _Limits, shape_only: bool = False) -> list[str]:
+def _render(c: Collection, indent: str, lim: _Limits) -> list[str]:
+    """A collection's header and its fields' lines, and those of the collections inside its rows."""
     if c.keyed:
         like = f" like {c.key_shape[0]}" if c.key_shape and c.key_shape[1] >= 0.5 else ""
         each = "an object" if c.of == "object" else c.of
@@ -420,19 +420,13 @@ def _render(c: Collection, indent: str, lim: _Limits, shape_only: bool = False) 
         rest = ", ".join(f.path for f in c.fields[lim.fields : lim.fields + 12])
         more = ", ..." if len(c.fields) > lim.fields + 12 else ""
         out.append(f"{indent}  [... {len(c.fields) - lim.fields} more fields: {rest}{more}]")
-    if c.exceptions and not shape_only:
-        out.append(f"{indent}  {markers.schema_exceptions(len(c.exceptions))}")
-        for e in c.exceptions[: lim.rows]:
-            who = f" {markers.clipped(e.ident, lim.clip)}" if e.ident else ""
-            out.append(f"{indent}    {e.row}{who}: {', '.join(e.notes)}")
-        if len(c.exceptions) > lim.rows:
-            out.append(f"{indent}    [... {len(c.exceptions) - lim.rows} more exception rows]")
-    for row, text in () if shape_only else c.matched:
-        # a row that holds the query is likely the answer: shown near whole
-        out.append(f"{indent}  matches the query: {row} {markers.clipped(text, 25 * lim.clip)}")
     for sub in c.inner:
-        out += _render(sub, indent + "  ", lim, shape_only)
+        out += _render(sub, indent + "  ", lim)
     return out
+
+
+def _deep(path: str) -> str:
+    return f"{path or '.'}  (nested deeper than {_OUTLINE_DEPTH} levels: read it with jq '{path or '.'}')"
 
 
 def _outline(
@@ -441,22 +435,24 @@ def _outline(
     terms: frozenset[str],
     lim: _Limits,
     found: list[Collection],
-    known: Mapping[str, Collection] | None = None,
-    shape_only: bool = False,
+    known: Mapping[str, Collection],
+    depth: int = 0,
 ) -> list[str]:
-    """The unique structure as an outline, and every collection in it as its schema (`known` holds
-    collections already made, by path; `shape_only` leaves out the exceptions and the query's rows)."""
+    """The unique structure as an outline, and every collection in it as its header and fields
+    (`known` holds the collections already made, by path)."""
+    if depth > _OUTLINE_DEPTH:
+        return [_deep(path)]
     if (rows := _rows_of(path, value, lim.knobs)) is not None:
-        c = known[path] if known and path in known else collection(path, *rows, terms, 0, lim.knobs)
+        c = known[path] if path in known else collection(path, *rows, terms, 0, lim.knobs)
         found.append(c)
-        return _render(c, "", lim, shape_only)
+        return _render(c, "", lim)
     if isinstance(value, Mapping) and value:
         out = []
         for k, v in list(value.items())[: lim.fields]:
             p = _key(path, k)
             nested = (isinstance(v, Mapping) and v) or _rows_of(p, v, lim.knobs) is not None
             out += (
-                _outline(p, v, terms, lim, found, known, shape_only)
+                _outline(p, v, terms, lim, found, known, depth + 1)
                 if nested
                 else [f"{p}  {_show(v, lim.clip)}"]
             )
@@ -511,7 +507,9 @@ def collections(value: Any, terms: frozenset[str], knobs: SchemaKnobs = DEFAULT.
     """Every collection the outline would show, outermost first, however wide the objects above them."""
     out: list[Found] = []
 
-    def visit(path: str, v: Any) -> None:
+    def visit(path: str, v: Any, depth: int = 0) -> None:
+        if depth > _OUTLINE_DEPTH:
+            return
         if (rows := _rows_of(path, v, knobs)) is not None:
             paths, items, keys = rows
             out.append(
@@ -521,7 +519,7 @@ def collections(value: Any, terms: frozenset[str], knobs: SchemaKnobs = DEFAULT.
             for k, x in v.items():
                 p = _key(path, k)
                 if (isinstance(x, Mapping) and x) or _rows_of(p, x, knobs) is not None:
-                    visit(p, x)
+                    visit(p, x, depth + 1)
 
     visit("", value)
     return tuple(out)
@@ -545,7 +543,7 @@ def shape_levels(
     out = []
     for lim in _levels(knobs):
         found: list[Collection] = []
-        lines = _outline("", value, terms, lim, found, by_path, shape_only=True)
+        lines = _outline("", value, terms, lim, found, by_path)
 
         def every(cs: list[Collection] | tuple[Collection, ...]) -> list[Collection]:
             return [x for c in cs for x in (c, *every(c.inner))]
@@ -553,24 +551,3 @@ def shape_levels(
         shown = tuple((c, min(len(c.fields), lim.fields)) for c in every(found))
         out.append(ShapeLevel(tuple(lines), shown, lim.values, lim.clip))
     return tuple(out)
-
-
-def schema_view(
-    value: Any,
-    terms: frozenset[str],
-    budget_tokens: int,
-    slurp: bool = False,
-    knobs: SchemaKnobs = DEFAULT.schema,
-) -> str:
-    """The schema view of a parsed JSON value within the budget (JSON Lines: `slurp`, read as one
-    array), or the tightest view when nothing fits."""
-    text = ""
-    for lim in _levels(knobs):
-        found: list[Collection] = []
-        lines = _outline("", value, terms, lim, found)
-        if (q := query(found, slurp, knobs)) is not None:
-            lines.append(f"query: {q.command}")
-        text = "\n".join(lines)
-        if estimate_tokens(text) <= budget_tokens:
-            return text
-    return text

@@ -40,8 +40,11 @@ Results and what they mean: `results/FINDINGS.md`.
 
 Deterministic folding by format, with the raw output kept and named, so nothing is lost:
 
-- JSON: long arrays keep head, tail and the items that stand out, in place; wide objects keep
-  their first keys and the ones the query names.
+- JSON, as an envelope (`compressors/envelope.py`): its shape in exact numbers, the rows that
+  break it, samples, and jq commands to get more, each part made by a producer a recipe names.
+  `--view sample` (types and few-valued counts, the items that stand out, head and tail; the
+  default) or `--view schema` (every field's values and counts, every row that breaks them, a ready
+  query); a `json_envelope` knob swaps one part. Every claim is checked against the data in layer 1.
 - Trees (`compressors/tree.py`): code through ast-grep, XML, indentation outlines. Outline first,
   stand-outs and containers before bodies, each hidden range one line-numbered marker.
 - Logs: runs of repeated lines collapse; head, tail and windows around error words stay.
@@ -83,7 +86,7 @@ Sonnet and once in 44 runs by Haiku (FINDINGS 33-45).
 ```
 lab            the one entry point
 corpus/        private transcripts and extracted results (gitignored)
-compressors/   route.fold/compress (the router), json_fold, tree, code, lines, html, recovery
+compressors/   route.fold (the router); envelope (the core) and envelope_json, schema, json_items (JSON); tree, code, lines, html
 claude_code/   hook (PostToolUse), fixture_mcp (serves an eval task to Claude Code)
 evals/         truth, synthetic, real, tasks, l1, l2, stats
 harness/       extract, stats (corpus tools)

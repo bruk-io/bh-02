@@ -575,6 +575,18 @@ condition (192 of 192 a band), so these kinds measure cost, not accuracy.
     is written right, and trust) is not something layer 1 measures, so whether it earns its tokens
     is a layer-2 question (PLAN.md E6).
 
+69. **The envelope replaces both JSON renderers, losing nothing layer 1 can see.** The sample
+    fold's JSON-with-markers, the schema view's text, their markers, the checks that read the
+    markers back and `recovery.py` are gone; `--view sample` and `--view schema` now name two
+    recipes. Over the 47 JSON and PyPI tasks each view is sufficient on exactly the tasks its old
+    renderer was (38 and 41, task by task), at 29 more tokens median; the other 154 folds are
+    unchanged in sufficiency and size; no violations in 201. Two things had to change for that:
+    rows matching the query are found by the old fold's rule (a term at most a fifth of the rows
+    hold, every such row listed, where the schema view's took a twentieth and three rows), which
+    brings back the PyPI 2023 releases; and a JSON value too small to hold a collection is outlined
+    rather than summarised, since the summary of it was empty and would have hidden the whole
+    output. Layer-2 results before this were measured on the old renderers' text.
+
 ## Where the design stands
 
 | Piece | Evidence | Leaning |

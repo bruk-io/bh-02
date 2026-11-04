@@ -187,11 +187,9 @@ def _score_prose(truth: Truth, answer: str) -> Score:
 
 
 def promotes(fold: str) -> bool:
-    """Whether the fold shows something as standing out: JSON's promotion marker; a list of siblings
-    with something shown between two hidden runs (a tree stand-out); a log with lines shown between
-    two gaps (a window around a signal); a schema view's exception rows; or an envelope's anomalies."""
-    if f'"{markers.PROMOTION_KEY}"' in fold or markers.SCHEMA_EXCEPTIONS.search(fold):
-        return True
+    """Whether the fold shows something as standing out: an envelope's anomalies; a list of siblings
+    with something shown between two hidden runs (a tree stand-out); or a log with lines shown
+    between two gaps (a window around a signal)."""
     if markers.ENVELOPE_ANOMALIES.search(fold):
         return True
     runs_per_indent: dict[str, int] = {}

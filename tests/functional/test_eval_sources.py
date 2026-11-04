@@ -72,24 +72,32 @@ def test_every_edit_task_fails_unedited_and_passes_a_correct_edit_of_the_real_fi
         assert t.truth.check(original, _scripted(t, original)) is None, t.task_id
 
 
-def test_a_schema_views_query_runs_in_jq_and_returns_the_rows_its_select_names():
+def test_an_envelopes_command_runs_in_jq_and_prints_the_rows_it_names():
     import json as _json
     import shutil
 
-    from compressors.schema import schema_view
-    from evals.schema_check import query_runs
+    from compressors.envelope import Fetches
+    from compressors.envelope_json import envelope
+    from evals.envelope_check import wrong
 
     data = {"items": [{"name": f"p{i}", "phase": "Failed" if i in (3, 7) else "Running"} for i in range(50)]}
     raw = _json.dumps(data)
-    view = schema_view(data, frozenset(), 2000)
+    fetch = next(
+        c for c in envelope(data, frozenset(), 2000, view="schema").claims() if isinstance(c, Fetches)
+    )
     if shutil.which("jq") is None:
         return
-    assert query_runs(raw, data, view) == []
-    wrong = view.replace('select(.phase != "Running")', 'select(.phase != "Failed")')
-    assert query_runs(raw, data, wrong) == [
-        'the query selects against "Failed", which 2 of 50 rows hold: not the dominant value'
+    assert wrong(raw, data, fetch) == []
+    against_failed = Fetches(
+        fetch.command.replace('"Running"', '"Failed"'), ".items", ".phase", '"Failed"', ".name"
+    )
+    assert wrong(raw, data, against_failed) == [
+        f'{against_failed.command}: selects against "Failed", which 2 of 50 rows hold, not the dominant'
     ]
-    assert query_runs(raw, data, view.replace("| .name'", "| .name |'"))[0].startswith("jq rejects the query")
+    broken = Fetches(
+        fetch.command.replace("| .name'", "| .name |'"), ".items", ".phase", '"Running"', ".name"
+    )
+    assert wrong(raw, data, broken)[0].startswith("jq rejects")
 
 
 def test_a_toml_file_of_knobs_loads_and_a_bad_one_says_why(tmp_path):

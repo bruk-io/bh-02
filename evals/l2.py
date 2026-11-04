@@ -44,7 +44,7 @@ from typing import Any
 
 from compressors.common import read_text
 from compressors.config import DEFAULT, FoldConfig, label, load, sets, with_sets
-from compressors.route import VIEWS
+from compressors.envelope_json import VIEWS
 from evals.stats import bootstrap, paired, paired_accuracy, wilson
 from evals.tasks import BANDS, FORMATS, KINDS, TOOLS, Task, bash_prompt, size_order, skipped, task, tasks
 from evals.truth import Edited, Truth, answer_line, score_answer, score_edit

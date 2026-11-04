@@ -1,10 +1,10 @@
-"""JSON as an envelope (`compressors.envelope`): the producers of each part, by name, and the recipe
-the knobs name (`compressors.config.JsonEnvelopeKnobs`).
+"""JSON as an envelope (`compressors.envelope`): the producers of each part, the two recipes the
+views name, and the knobs that change a part (`compressors.config.JsonEnvelopeKnobs`).
 
     shape      fields      each collection's header and fields: types, values and counts, ranges
                summary     each collection's header, each field's type, the counts of a field with few values
     anomalies  exceptions  every row that breaks its collection's shape, and what breaks it
-               standouts   the items the sample fold's rules pick: rare values, error keys, failing statuses
+               standouts   the items the stand-out rules pick: rare values, error keys, failing statuses
                none
     samples    matches     rows holding a query term few rows hold
                typical     those, and the first row of each collection that breaks nothing
@@ -14,10 +14,10 @@ the knobs name (`compressors.config.JsonEnvelopeKnobs`).
                rows        how to read any row, or a range, of each collection
                none
 
-The schema view is fields, exceptions, matches and jq (the defaults); the sample fold is summary,
-standouts, head-tail and rows. Every producer reads one analysis (`JsonData.found`, from
-`compressors.schema.collections`), so the parts agree on what the collections and their rows are.
-Paths are jq paths into the input; FILE in a command stands for it.
+The `sample` view is summary, standouts, head-tail and rows (what the fold showed before the
+envelope); the `schema` view is fields, exceptions, matches and jq. Every producer reads one
+analysis (`JsonData.found`, from `compressors.schema.collections`), so the parts agree on what the
+collections and their rows are. Paths are jq paths into the input; FILE in a command stands for it.
 """
 
 import json
@@ -26,6 +26,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from compressors import markers
+from compressors.common import discriminating
+from compressors.common import matches as holds
 from compressors.config import DEFAULT, FoldConfig, JsonEnvelopeKnobs, SchemaKnobs
 from compressors.envelope import (
     NOTHING,
@@ -49,7 +51,7 @@ from compressors.envelope import (
     nothing,
     priority,
 )
-from compressors.json_fold import promote
+from compressors.json_items import promote
 from compressors.schema import Collection, Found, collections, describe, lists_values, query, shape_levels
 
 
@@ -100,7 +102,7 @@ def _counted(c: Collection, fields: int, values: int, clip: int) -> list[Claim]:
 
 
 def fields(data: JsonData, /) -> Part:
-    """The schema view's outline without its exceptions: the unique structure, and each collection's
+    """The schema view's shape: the unique structure as an outline, and each collection's
     fields with their types, values and counts, ranges and shapes."""
     levels = []
     for lv in shape_levels(data.value, data.terms, data.found, data.knobs):
@@ -138,8 +140,11 @@ def _brief(c: Collection, cap: int, indent: str) -> tuple[list[str], list[Claim]
 
 
 def summary(data: JsonData, /) -> Part:
-    """What the sample fold's summary says: each collection's header, its fields' types, and the
-    counts of a field with few values; with the top level's own scalars."""
+    """What the sample fold's summary said: each collection's header, its fields' types, and the
+    counts of a field with few values; with the top level's own scalars. Data with no collection is
+    outlined as `fields` outlines it: there is nothing to summarise."""
+    if not data.found:
+        return fields(data)
     levels = []
     for cap in (30, 15, 8):
         lines: list[str] = []
@@ -212,7 +217,7 @@ _STANDOUTS = ((10, 600), (5, 300), (2, 160), (1, 100))  # items listed per colle
 
 
 def standouts(data: JsonData, _shape: Part, /) -> Part:
-    """The items the sample fold shows out of order, by its rules: a rare value where one dominates,
+    """The items the stand-out rules pick (`compressors.json_items`): a rare value where one dominates,
     a key few items have, an error key that is set, a failing status, a value matching the query."""
     # the rules read items that are all objects or all strings; of others they can say nothing
     read = [
@@ -259,19 +264,37 @@ def _anomalous(anomalies: Part) -> set[str]:
     }
 
 
-def _samples(data: JsonData, picked: list[tuple[str, Any]], clips: tuple[tuple[int, int], ...]) -> Part:
-    """The query's matching rows and the picked rows, verbatim, at each (matches, picked) clip."""
-    matched = [(row, text) for c in _all(data) for row, text in c.matched]
+_MATCH_SHARE = 0.2  # a query term at most this share of a collection's rows hold picks those rows out
+_MATCH_LEVELS = ((15, 1500), (15, 600), (15, 200), (5, 120))  # matching rows shown, and characters of each
+
+
+def _matched(data: JsonData) -> list[tuple[str, str]]:
+    """Rows holding a query term few rows hold, with their compact text: every one in a collection (as
+    the sample fold kept every key that matched), and those the analysis found inside rows."""
+    out = []
+    for f in data.found:
+        texts = [_compact(x) for x in f.items]
+        if useful := discriminating(data.terms, texts, share=_MATCH_SHARE):
+            out += [(f.paths[i], t) for i, t in enumerate(texts) if any(holds(t, w) for w in useful)]
+    out += [m for f in data.found for c in _every(list(f.collection.inner)) for m in c.matched]
+    return out
+
+
+def _samples(data: JsonData, picked: list[tuple[str, Any]], clips: tuple[int, ...]) -> Part:
+    """The query's matching rows, then the picked rows at each of `clips` (0: none), verbatim."""
+    matched = _matched(data)
     if not matched and not picked:
         return nothing(Role.SAMPLES)
     levels = []
-    for clip_matched, clip_picked in clips:
+    for (cap, clip_matched), clip_picked in zip(_MATCH_LEVELS, clips, strict=True):
         body: list[str] = []
         claims: list[Claim] = []
-        for row, text in matched:
+        for row, text in matched[:cap]:
             shown, said = _verbatim(row, text, clip_matched)
             body.append(f"{row}: {shown}  (matches the query)")
             claims.append(said)
+        if len(matched) > cap:
+            body.append(f"[... {len(matched) - cap} more rows match the query]")
         if clip_picked:
             for at, item in picked:
                 shown, said = _verbatim(at, _compact(item), clip_picked)
@@ -283,7 +306,7 @@ def _samples(data: JsonData, picked: list[tuple[str, Any]], clips: tuple[tuple[i
 
 def matches(data: JsonData, _shape: Part, _anomalies: Part, /) -> Part:
     """Rows holding a query term few rows hold: likely the answer, shown near whole."""
-    return _samples(data, [], ((1500, 0), (600, 0), (200, 0)))
+    return _samples(data, [], (0, 0, 0, 0))
 
 
 def typical(data: JsonData, _shape: Part, anomalies: Part, /) -> Part:
@@ -294,13 +317,13 @@ def typical(data: JsonData, _shape: Part, anomalies: Part, /) -> Part:
         i = next((i for i, p in enumerate(f.paths) if p not in odd), None)
         if i is not None:
             picked.append((f.paths[i], f.items[i]))
-    return _samples(data, picked, ((1500, 600), (600, 300), (200, 0)))
+    return _samples(data, picked, (600, 300, 0, 0))
 
 
 def head_tail(data: JsonData, _shape: Part, _anomalies: Part, /) -> Part:
     """The query's rows, and each collection's first two rows and its last."""
     picked = [(f.paths[i], f.items[i]) for f in data.found for i in sorted({0, 1, len(f.items) - 1})]
-    return _samples(data, picked, ((1500, 600), (600, 200), (200, 0)))
+    return _samples(data, picked, (600, 200, 0, 0))
 
 
 def no_samples(_data: JsonData, _shape: Part, _anomalies: Part, /) -> Part:
@@ -358,24 +381,48 @@ SAMPLES: Mapping[str, Sampler[JsonData]] = {
 NAVS: Mapping[str, Navigator[JsonData]] = {"jq": jq, "rows": rows, "none": no_nav}
 
 
-def recipe(k: JsonEnvelopeKnobs) -> Recipe[JsonData]:
-    """The recipe the knobs name.
+PRESETS = {
+    "sample": JsonEnvelopeKnobs(shape="summary", anomalies="standouts", samples="head-tail", nav="rows"),
+    "schema": JsonEnvelopeKnobs(shape="fields", anomalies="exceptions", samples="matches", nav="jq"),
+}
+VIEWS = tuple(PRESETS)  # how a view of JSON is named: by its recipe
+
+
+def recipe(k: JsonEnvelopeKnobs, view: str = "sample") -> Recipe[JsonData]:
+    """The view's recipe, with each part a knob names in place of the view's.
 
     Raises:
-        ValueError: a knob names no producer, or the priority does not name each part once.
+        ValueError: the view names no recipe, a knob names no producer, or the priority does not name
+            each part once.
     """
-    for name, table in (("shape", SHAPES), ("anomalies", ANOMALIES), ("samples", SAMPLES), ("nav", NAVS)):
-        if getattr(k, name) not in table:
-            raise ValueError(f"json_envelope.{name} is one of {', '.join(table)}; not {getattr(k, name)!r}")
+    if view not in PRESETS:
+        raise ValueError(f"no JSON view {view!r}: the views are {', '.join(PRESETS)}")
+    base = PRESETS[view]
+    names = {
+        part: getattr(k, part) or getattr(base, part) for part in ("shape", "anomalies", "samples", "nav")
+    }
+    for part, table in (("shape", SHAPES), ("anomalies", ANOMALIES), ("samples", SAMPLES), ("nav", NAVS)):
+        if names[part] not in table:
+            raise ValueError(f"json_envelope.{part} is one of {', '.join(table)}; not {names[part]!r}")
     return Recipe(
-        SHAPES[k.shape], ANOMALIES[k.anomalies], SAMPLES[k.samples], NAVS[k.nav], priority(k.priority)
+        SHAPES[names["shape"]],
+        ANOMALIES[names["anomalies"]],
+        SAMPLES[names["samples"]],
+        NAVS[names["nav"]],
+        priority(k.priority),
     )
 
 
 def envelope(
-    value: Any, terms: frozenset[str], budget_tokens: int, slurp: bool = False, config: FoldConfig = DEFAULT
+    value: Any,
+    terms: frozenset[str],
+    budget_tokens: int,
+    slurp: bool = False,
+    config: FoldConfig = DEFAULT,
+    view: str = "sample",
 ) -> Envelope:
-    """The envelope of a parsed JSON value within the budget, by the recipe `config` names (JSON
-    Lines: `slurp`, read as one array). A config that names no producer raises ValueError, from
-    `recipe`."""
-    return compose(recipe(config.json_envelope), json_data(value, terms, slurp, config.schema), budget_tokens)
+    """The envelope of a parsed JSON value within the budget, by the view's recipe and the parts
+    `config` changes (JSON Lines: `slurp`, read as one array). A view or knob that names no recipe
+    or producer raises ValueError, from `recipe`."""
+    data = json_data(value, terms, slurp, config.schema)
+    return compose(recipe(config.json_envelope, view), data, budget_tokens)

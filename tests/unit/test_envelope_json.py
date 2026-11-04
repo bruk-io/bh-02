@@ -27,9 +27,9 @@ def _config(*sets: str):
     return with_sets(DEFAULT, list(sets))
 
 
-def test_the_default_recipe_is_the_schema_views_parts_and_every_claim_holds():
+def test_the_schema_view_is_its_parts_and_every_claim_holds():
     value = _pods()
-    env = envelope(value, frozenset(), 2000)
+    env = envelope(value, frozenset(), 2000, view="schema")
     text = env.text()
     assert text.startswith('shape:\n  .kind  "PodList"\n  .items: array[40] of object')
     assert (
@@ -42,11 +42,9 @@ def test_the_default_recipe_is_the_schema_views_parts_and_every_claim_holds():
     assert any(isinstance(c, Lists) for c in env.claims())  # the list of failing pods claims to be complete
 
 
-def test_the_sample_recipe_shows_stand_outs_head_and_tail_and_how_to_read_any_row():
+def test_the_sample_view_shows_stand_outs_head_and_tail_and_how_to_read_any_row():
     value = _pods()
-    config = _config("json_envelope.shape=summary", "json_envelope.anomalies=standouts")
-    config = with_sets(config, ["json_envelope.samples=head-tail", "json_envelope.nav=rows"])
-    env = envelope(value, frozenset(), 2000, config=config)
+    env = envelope(value, frozenset(), 2000)
     text = env.text()
     assert "anomalies: 2 items stand out, all listed" in text and ".items[7] (" in text
     assert ".items[0]: {" in text and ".items[39]: {" in text
@@ -56,7 +54,7 @@ def test_the_sample_recipe_shows_stand_outs_head_and_tail_and_how_to_read_any_ro
 
 def test_a_typical_sample_is_a_row_that_breaks_nothing():
     value = _pods(failing=(0, 1))
-    env = envelope(value, frozenset(), 2000, config=_config("json_envelope.samples=typical"))
+    env = envelope(value, frozenset(), 2000, config=_config("json_envelope.samples=typical"), view="schema")
     samples = env.level(Role.SAMPLES)
     assert [c.at for c in samples.claims if isinstance(c, Verbatim)] == [".items[2]"]
     assert problems("", value, env, run_jq=False) == []
@@ -64,7 +62,7 @@ def test_a_typical_sample_is_a_row_that_breaks_nothing():
 
 def test_a_tight_budget_cuts_the_anomalies_and_says_how_many_it_left_out():
     value = _pods(200, failing=tuple(range(0, 200, 10)))  # 20 failing, a tenth: still rare
-    env = envelope(value, frozenset(), 150)
+    env = envelope(value, frozenset(), 150, view="schema")
     anomalies = env.level(Role.ANOMALIES)
     assert anomalies.head == "20 rows, 3 listed" and anomalies.body[-1] == "[... 17 more rows of .items]"
     assert not any(isinstance(c, Lists) for c in anomalies.claims)  # a cut list claims no completeness
@@ -81,7 +79,7 @@ def test_a_claim_the_data_does_not_bear_out_is_caught():
     assert wrong("", value, missing) == [
         '.items: .items[31] holds .phase other than "Running" and is not listed'
     ]
-    env = envelope(value, frozenset(), 2000)
+    env = envelope(value, frozenset(), 2000, view="schema")
     shape = env.parts[0]
     lying = replace(
         shape, levels=(replace(shape.levels[0], claims=(Count(".items", 40), Count(".items", 7))),)
@@ -97,11 +95,13 @@ def test_standouts_say_nothing_of_items_they_cannot_read():
 
 
 def test_each_part_knob_names_exactly_the_producers_there_are():
-    assert set(CHOICES["json_envelope.shape"]) == set(SHAPES)
-    assert set(CHOICES["json_envelope.anomalies"]) == set(ANOMALIES)
-    assert set(CHOICES["json_envelope.samples"]) == set(SAMPLES)
-    assert set(CHOICES["json_envelope.nav"]) == set(NAVS)
-    with pytest.raises(ValueError, match=r"json_envelope\.samples is one of matches, typical"):
+    assert set(CHOICES["json_envelope.shape"]) == {"", *SHAPES}  # "": the view's
+    assert set(CHOICES["json_envelope.anomalies"]) == {"", *ANOMALIES}  # "": the view's
+    assert set(CHOICES["json_envelope.samples"]) == {"", *SAMPLES}  # "": the view's
+    assert set(CHOICES["json_envelope.nav"]) == {"", *NAVS}  # "": the view's
+    with pytest.raises(
+        ValueError, match=r"json_envelope\.samples is one of \"\" \(the view's\), matches, typical"
+    ):
         _config("json_envelope.samples=some")
     with pytest.raises(ValueError, match="names each part once"):
         _config("json_envelope.priority=shape,shape,nav,samples")
