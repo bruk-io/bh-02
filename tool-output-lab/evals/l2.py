@@ -42,6 +42,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
+from claude_code.hook import digest
 from compressors.common import read_text
 from compressors.config import DEFAULT, FoldConfig, label, load, sets, with_sets
 from compressors.envelope_json import VIEWS
@@ -94,10 +95,10 @@ _STOP_AFTER_FAILURES = 5
 _COST_PER_RUN = {"haiku": 0.007, "sonnet": 0.10, "opus": 0.25}  # rough, from the A/Bs so far
 _CLAUDE_MD = """# Tools
 
-`lab-fold FILE` prints a file's outline with its real line numbers: every class, function and method
-header, and the blocks inside them, opened as far as a token budget allows (`--budget N`, default
-2000; 6000 or more suits a large file). A folded part shows as `[... lines A-B folded]`; read it with
-Read offset=A limit=B-A+1. Use it to see the structure of a large file before reading parts of it.
+`lab-fold FILE` prints a file's envelope within a token budget (`--budget N`, default 2000; 6000 or
+more suits a large file): its outline at its real line numbers (every class, function and method
+header), what breaks it, samples, and how to read the rest. Read any lines it names with Read
+offset=A limit=B-A+1. Use it to see the structure of a large file before reading parts of it.
 """
 
 
@@ -125,11 +126,12 @@ class Session:
         int  # cache writes with the one-hour lifetime (2x the input price; five-minute ones 1.25x)
     )
     error: str | None  # the run failed to produce an answer (no result, an API or usage error): not scored
+    session_id: str = ""  # Claude Code's id for the session, which the hook logs with each fold
 
 
 def parse_stream(lines: Iterable[str]) -> Session:
     """Read a `--output-format stream-json --verbose` session."""
-    calls, read_saved, ran_fold = 0, False, False
+    calls, read_saved, ran_fold, session_id = 0, False, False, ""
     usage: dict[str, dict[str, int]] = {}  # per API request (assistant message id), last seen
     result: dict[str, Any] = {}
     for line in lines:
@@ -137,6 +139,7 @@ def parse_stream(lines: Iterable[str]) -> Session:
             event = json.loads(line)
         except ValueError:
             continue
+        session_id = session_id or str(event.get("session_id") or "")
         if event.get("type") == "assistant":
             message = event.get("message", {})
             if message.get("id") and isinstance(message.get("usage"), dict):
@@ -190,7 +193,37 @@ def parse_stream(lines: Iterable[str]) -> Session:
         first_cache_write=int(first.get("cache_creation_input_tokens", 0) or 0),
         cache_write_1h=hour,
         error=_run_error(result),
+        session_id=session_id,
     )
+
+
+def acted(entries: Iterable[dict[str, Any]], payload: str) -> dict[str, Any]:
+    """What the hook did in one session (its log entries for that session): how many results it
+    folded, and whether it saw the task's large output and folded it, matched by digest (a shell's
+    output may lose the trailing newline)."""
+    want = {digest(payload), digest(payload.rstrip("\n"))}
+    mine = list(entries)
+    large = [e for e in mine if e.get("digest") in want]
+    return {
+        "folds": sum(e.get("branch", "passthrough") != "passthrough" for e in mine),
+        "large_seen": bool(large),
+        "large_folded": any(e.get("branch", "passthrough") != "passthrough" for e in large),
+    }
+
+
+def hook_entries(log: Path, session_id: str) -> list[dict[str, Any]]:
+    """The hook's log entries for one session (none when it has no id or the log is missing)."""
+    if not session_id or not log.exists():
+        return []
+    out = []
+    for line in log.read_text(encoding="utf-8").splitlines():
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        if entry.get("session_id") == session_id:
+            out.append(entry)
+    return out
 
 
 def _run_error(result: dict[str, Any]) -> str | None:
@@ -367,6 +400,7 @@ def run_one(
     else:
         score = score_answer(t.truth, session.answer)
     head = {"task_id": t.task_id, "fmt": t.fmt, "kind": t.kind, "band": t.band, "condition": condition}
+    hook = acted(hook_entries(log, session.session_id), t.payload())
     return {
         **head,
         "rep": rep,
@@ -381,6 +415,7 @@ def run_one(
         "precision": score.precision,
         "answer_line": answer_line(session.answer),
         **{k: v for k, v in asdict(session).items() if k != "answer"},
+        **hook,
         "answer": session.answer[-2000:],  # the end: the ANSWER line and what led to it
         **extra,
     }
@@ -522,6 +557,30 @@ def _cache_section(
     return out
 
 
+def _acted_section(by_band: dict[tuple[str, str], dict[str, dict[str, Any]]], columns: str) -> list[str]:
+    """How often each fold condition's hook folded the task's large output, and the pairs whose
+    folded session it did: a session that never received it (a replay serving a smaller output) or
+    never called its tool ran as native did, and dilutes the comparison."""
+    out = [
+        "",
+        "## When the envelope acted: the pairs whose folded session folded the task's large output",
+        "",
+    ]
+    out += [f"| band | condition | acted {columns}", "|---|---|---|---|---|---|---|---|---|---|---|"]
+    for (band, cond), runs in sorted(by_band.items(), key=lambda kv: (size_order(kv[0][0]), kv[0][1])):
+        base = BASELINE.get(cond, "native")
+        if cond in _NATIVE or cond == base or (band, base) not in by_band:
+            continue
+        hit = {k: v for k, v in runs.items() if v.get("large_folded")}
+        seen = sum(bool(v.get("large_seen")) for v in runs.values())
+        share = f"{len(hit)}/{len(runs)} (saw it {seen})"
+        if hit and hit.keys() & by_band[(band, base)].keys():
+            out.append(f"| {band} | {_against(cond)} | {share} {_paired(by_band[(band, base)], hit)}")
+        else:
+            out.append(f"| {band} | {_against(cond)} | {share} |" + " |" * 8)
+    return out
+
+
 def report(rows: list[dict[str, Any]], model: str) -> str:
     """The run as tables. Runs that failed to produce an answer (see `_run_error`) are listed, not
     scored: counted as wrong at no cost, they would make a condition look both worse and cheaper."""
@@ -589,6 +648,7 @@ def report(rows: list[dict[str, Any]], model: str) -> str:
         base = BASELINE.get(cond, "native")
         if cond != base and (band, base) in by_band:  # pairs: the tasks both conditions ran
             out.append(f"| {band} | {_against(cond)} {_paired(by_band[(band, base)], runs)}")
+    out += _acted_section(by_band, columns)
     out += [
         "",
         "Verdict: passes when the accuracy change's lower bound is above -3 points and the final context "
