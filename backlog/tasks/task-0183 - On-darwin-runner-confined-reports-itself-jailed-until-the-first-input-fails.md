@@ -64,4 +64,27 @@ E           TypeError: Protocols cannot be instantiated
 FAILED bh-02/plugins/runner-cordis-plugin/tests/test_runner_approval.py::test_a_confined_runner_that_cannot_jail_here_is_not_confined_before_any_start
 1 failed, 9 passed in 0.81s
 ```
+
+Repro at cf903e132189, test files: bh-02/plugins/runner-cordis-plugin/tests/test_runner_approval.py; command: `uv run pytest bh-02/plugins/runner-cordis-plugin/tests/test_runner_approval.py -q` exited 1
+
+```text
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+.........F                                                               [100%]
+=================================== FAILURES ===================================
+_ test_a_confined_runner_that_cannot_jail_here_is_not_confined_before_any_start _
+
+    def test_a_confined_runner_that_cannot_jail_here_is_not_confined_before_any_start() -> None:
+        """On darwin every start of `runner:confined` refuses, so nothing is ever jailed: the report
+        that decides `confined` (and the status bar's `jailed`) says so before an input, not after one fails."""
+        runner = Runner(BrigJail(BrigConfig(), _Host(), platform="darwin"))
+>       assert Approval(runner).confined is False
+E       assert True is False
+E        +  where True = Approval(runner=<runner_cordis_plugin.runner.Runner object at 0x7fb94228a270>).confined
+E        +    where Approval(runner=<runner_cordis_plugin.runner.Runner object at 0x7fb94228a270>) = Approval(<runner_cordis_plugin.runner.Runner object at 0x7fb94228a270>)
+
+bh-02/plugins/runner-cordis-plugin/tests/test_runner_approval.py:131: AssertionError
+=========================== short test summary info ============================
+FAILED bh-02/plugins/runner-cordis-plugin/tests/test_runner_approval.py::test_a_confined_runner_that_cannot_jail_here_is_not_confined_before_any_start
+1 failed, 9 passed in 2.48s
+```
 <!-- SECTION:NOTES:END -->
