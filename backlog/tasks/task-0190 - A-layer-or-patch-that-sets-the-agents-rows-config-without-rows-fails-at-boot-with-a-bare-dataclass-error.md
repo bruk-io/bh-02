@@ -3,9 +3,11 @@ id: TASK-0190
 title: >-
   A layer or patch that sets the agents row's config without rows fails at boot
   with a bare dataclass error
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@claude'
 created_date: '2026-11-04T14:18:00Z'
+updated_date: '2026-11-04T14:23:00Z'
 labels:
   - subagents
   - size-1
