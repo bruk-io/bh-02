@@ -1875,3 +1875,17 @@ async def test_agents_watch_says_the_command_that_follows_a_child_s_log_running_
     assert "takes nothing" in await _bounded(commands.run("/agents watch"))
     await _bounded(commands.run("/agents stop"))
     await _bounded(rt.shutdown())
+
+
+async def test_an_agents_row_whose_config_names_no_rows_is_refused_saying_where_the_list_is() -> None:
+    """A patch's config replaces the row's whole, so `{ start = 60 }` drops the shipped `rows`: the
+    row fails at boot, and `/explain agents` says to list the child's rows in the row's `rows` and
+    where the shipped list is (bh-02.toml's agents row), not only which keyword is missing."""
+    rows = _rows(_Model(parent=[]), _Screen(), agents=Row("agents", "subagents:parent", {"start": 60}))
+    booted = await _bounded(boot((), rows, watch=None))
+    await _bounded(booted.runtime.settle())
+    assert booted.loader.status()["agents"] != "active"
+    said = booted.loader.explain("agents")
+    assert "list the child's rows in the agents row's `rows`" in said
+    assert "bh-02.toml" in said
+    await _bounded(booted.runtime.shutdown())
