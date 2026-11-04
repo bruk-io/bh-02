@@ -117,3 +117,10 @@ def test_each_log_part_knob_names_exactly_the_producers_there_are():
         _config("log_envelope.nav=jq")
     terse = envelope(_log(), frozenset(), 2000, config=_config("log_envelope.shape=count"))
     assert terse.level(Role.SHAPE).body == ()
+
+
+def test_a_pattern_that_starts_with_a_dash_is_passed_after_e():
+    raw = "".join(f"INFO step {i} ok\n" for i in range(300)) + "-- yarn-error.log written\n"
+    env = envelope(raw, frozenset(), 2000, view="schema")
+    assert "grep -nF -e '-- yarn-error.log written' FILE" in env.text()
+    assert text_problems(raw, env, run_tools=False) == []

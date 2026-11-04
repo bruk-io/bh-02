@@ -1,17 +1,9 @@
-"""Every marker a fold writes reads back with the pattern that goes with it."""
+"""Every marker an envelope writes reads back with the pattern that goes with it."""
 
 from compressors import markers
 
 
-def test_line_markers_read_back():
-    assert markers.LINE_RANGE.match(markers.lines_folded(4, 44, markers.siblings(40, 3))).group(
-        "first", "last"
-    ) == ("4", "44")
-    assert markers.LINE_RANGE.match(markers.lines_omitted(16, 342)).group("first", "last") == ("16", "342")
-    assert markers.LINE_RANGE.match(markers.repeated(9, 2, 10)).group("first", "last") == ("2", "10")
-    assert markers.INLINE.search("12\tdef f():  " + markers.lines_folded(13, 40, "28 lines"))["first"] == "13"
-    assert markers.SIBLING_RUN.search("  " + markers.lines_folded(3, 9, markers.siblings(5)))
-    assert markers.NOTE.match(markers.signals_hidden(4))
+def test_a_clipped_line_says_how_much_was_cut_and_reads_back():
     assert markers.CLIPPED.search(markers.clipped("x" * 50, 10))["chars"] == "40"
     assert markers.clipped("short", 10) == "short"
 

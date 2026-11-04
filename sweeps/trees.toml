@@ -1,0 +1,12 @@
+# Tree compositions (accessibility snapshots, Figma XML, an XML file, code): each kind of anomaly with
+# each kind of sample, at two budgets. The schema recipe is outline, rare, matches and grep.
+name = "trees"
+only = ["a11y", "figma", "xml", "python", "rust"]
+
+[base]
+view = "schema"
+
+[grid]
+"tree_envelope.anomalies" = ["rare", "errors", "none"]
+"tree_envelope.samples" = ["none", "matches", "typical", "head-tail"]
+budget = [500, 2000]

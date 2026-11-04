@@ -18,7 +18,6 @@ Writes `results/<name>.md` and `results/<name>.jsonl`.
 
 import argparse
 import json
-import re
 import statistics
 from collections import defaultdict
 from dataclasses import asdict, dataclass
@@ -36,54 +35,6 @@ from evals.tasks import BANDS, BUDGET, FORMATS, Task, skipped, tasks
 from evals.truth import score_fold
 
 _LAB = Path(__file__).resolve().parent.parent
-_MARKER, _INLINE, _CLIPPED, _NOTE = markers.LINE_RANGE, markers.INLINE, markers.CLIPPED, markers.NOTE
-
-
-def _same(shown: str, source: str) -> bool:
-    m = _CLIPPED.search(shown)
-    if m is None:
-        return shown == source
-    head = shown[: m.start()]
-    return source.startswith(head) and len(source) - len(head) == int(m[1])
-
-
-def coverage(source: str, out: str, numbered: bool) -> list[str]:
-    """Problems with how the output accounts for the source's lines; empty when every line is
-    shown at its place or inside exactly one marker."""
-    src = split_lines(source)
-    problems: list[str] = []
-    i = 0  # the next source line (0-based) the output must account for
-    for k, line in enumerate(split_lines(out)):
-        if _NOTE.match(line.strip()):
-            continue
-        if (m := _MARKER.match(line.strip())) is not None:
-            a, b = int(m[1]), int(m[2])
-            if a != i + 1 or b < a:
-                problems.append(f"output line {k + 1}: marker hides {a}-{b}, expected it to start at {i + 1}")
-            i = max(i, b)
-            continue
-        text = line
-        if numbered:
-            n = re.match(r"^(\d+)\t", line)
-            if n is None or int(n[1]) != i + 1:
-                problems.append(f"output line {k + 1}: expected source line {i + 1}, got {line[:60]!r}")
-                return problems
-            text = line[n.end() :]
-        inline = _INLINE.search(text)
-        if inline is not None:
-            text = text[: inline.start()]
-        if i >= len(src) or not _same(text, src[i]):
-            problems.append(f"output line {k + 1}: not source line {i + 1}: {text[:60]!r}")
-            return problems
-        i += 1
-        if inline is not None:
-            a, b = int(inline[1]), int(inline[2])
-            if a != i + 1 or b < a:
-                problems.append(f"output line {k + 1}: inline marker hides {a}-{b}, expected {i + 1}-")
-            i = max(i, b)
-    if i != len(src):
-        problems.append(f"output accounts for {i} of {len(src)} source lines")
-    return problems
 
 
 def _line_holds(lines: list[str], i: int, item: object) -> bool:

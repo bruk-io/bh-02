@@ -24,11 +24,14 @@ only find it by fetching more. L2 answers all four.
 
 ### L1 checks, for every payload
 
-- **Claims hold.** Every claim a part makes (a count, the values a field holds and how many of
-  each, a row's note, that a list of rows is complete, a sample's text, what a command prints) is
-  recomputed from the input by `evals/schema_check.py`'s jq-path walker, and each command is run
-  with `jq` itself (`evals/envelope_check.py`). The shape's field lines are read back for what they
-  say beyond the claims: ranges, medians, uniqueness.
+- **Claims hold.** Every claim a part makes is recomputed from the input (`evals/envelope_check.py`).
+  For JSON (a count, the values a field holds and how many of each, a row's note, that a list of
+  rows is complete, a sample's text, what a command prints) by `evals/schema_check.py`'s jq-path
+  walker, each command run with `jq` itself, and the shape's field lines read back for what they
+  say beyond the claims: ranges, medians, uniqueness. For an envelope of lines (what lines read,
+  how many lines have a template or hold a value in a hole, what a grep prints) against the source
+  its numbers refer to, with the checker's own line split, template rule and reading of the clip
+  marker, each grep run with `grep` itself.
 - **Claims are said.** Each claim appears on one line of its level's text.
 - **Determinism and size.** The same input folds to the same text, and the envelope is never
   larger than the input.
@@ -44,6 +47,8 @@ only find it by fetching more. L2 answers all four.
 | Look up | "What is the IP address of pod web-0417a1b2c3?" | exact value | recovery |
 | Enumerate | "List every pod that is not Running." | recall and precision against the computed set | partial views read as complete |
 | Count | "How many pods are not Running?" | exact number | counting only the visible rows |
+| Locate | "On which line is close defined in Server?" | the line shown with its number | line numbers that lie |
+| Edit | "Add a timeout parameter to create_server, defaulting to None." | where to start: the definition shown with its number (layer 1); the edit checked with `ast` (layer 2) | edits made blind into folded code |
 | Claims | an MCP-Atlas task's own prompt | every claim of the recorded answer holds in the answer: its numbers and quoted titles, and two thirds of its names | real questions over real outputs |
 
 Each run also records whether the model answered "cannot tell" or answered wrongly. Wrong and
@@ -54,6 +59,12 @@ confident is the harm, so it is reported separately from wrong and hedged.
 | Format | Source | Truth |
 |---|---|---|
 | `json` | synthetic pod lists (`evals/synthetic.py`) at every size band | planted by the generator |
+| `log` | synthetic request logs: a failed payment is a rule-kind anomaly, an exhausted pool a quiet one | planted |
+| `a11y` | synthetic accessibility snapshots of an invoices page: a disabled Pay button, a $0.00 invoice | planted |
+| `figma` | synthetic Figma node XML of a product grid: a hidden card, a half-width card | planted |
+| `hdfs` | Loghub's HDFS_v1, whole block lifecycles, anomalies labelled by the people who ran it (`./lab fetch hdfs`) | the labels |
+| `python`, `rust` | stdlib and cargo registry sources | computed with `ast` or ast-grep patterns kept apart from the fold |
+| `xml` | `/usr/share/xml/iso-codes/iso_3166-2.xml` | computed from the file |
 | `pypi` | the PyPI release JSON for click, saved once | computed with `jq` paths |
 | `atlas` | MCP-Atlas (ScaleAI, CC-BY-4.0): the tasks with one large tool output that a replay can answer and a program can score (`evals/atlas.py`, `./lab fetch mcp-atlas`) | the facts in each recorded answer claim; a fold is sufficient when it keeps the facts the large output holds |
 
@@ -130,8 +141,8 @@ message, so it cannot invalidate what is cached. What it changes is what comes a
 
 ```
 ./lab evals l1 --only json pypi atlas [--view schema] [--set KNOB=VALUE] [--name l1-x]   # layer 1, free
-./lab evals l1 --bands XL XXL --only json                           # the larger bands
-./lab evals sweep sweeps/envelopes.toml                             # layer 1 over a grid of compositions
+./lab evals l1 --bands XL XXL --only json log a11y figma            # the larger bands
+./lab evals sweep sweeps/envelopes.toml                             # layer 1 over a grid of compositions (logs.toml, trees.toml)
 ./lab evals dials dials/haiku-atlas.toml --dry-run                  # layer 2: the plan and its cost
 ./lab evals dials dials/haiku-atlas.toml                            # run it (headless Claude Code)
 ./lab evals sessions sessions/haiku.toml --dry-run                  # follow-up questions in one session

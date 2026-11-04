@@ -1,4 +1,4 @@
-"""Source code as a tree of line ranges, through ast-grep, for `compressors.tree.fold_tree`.
+"""Source code as a tree of line ranges, through ast-grep, for `compressors.envelope_tree`.
 
 A node is anything with a body: a class, function or method, and the compound blocks inside them
 (if, for, while, try, with, match, and their else and except clauses), plus literals that span
@@ -14,8 +14,7 @@ from pathlib import Path
 from ast_grep_py import SgNode, SgRoot
 
 from compressors.common import split_lines
-from compressors.config import DEFAULT, TreeKnobs
-from compressors.tree import Node, TreeFold, fold_tree
+from compressors.tree import Node
 
 _BODY_KINDS = frozenset(
     {
@@ -158,20 +157,3 @@ def code_tree(source: str, language: str) -> tuple[Node, ...]:
     """The source's foldable nodes: definitions, blocks and multi-line literals, nested. A language
     ast-grep has no grammar for raises ValueError, from `_parse`."""
     return tuple(_nodes(_parse(source, language).root(), split_lines(source)))
-
-
-def fold_code(
-    source: str,
-    language: str,
-    budget_tokens: int,
-    terms: frozenset[str] = frozenset(),
-    knobs: TreeKnobs = DEFAULT.tree,
-) -> TreeFold:
-    """The outline of a source file, opened as far as the budget allows, with real line numbers;
-    definitions that hold a query term (few others do) open first. A language ast-grep has no
-    grammar for raises ValueError, from `_parse`."""
-    lines = split_lines(source)
-    text, opened, folded = fold_tree(
-        lines, code_tree(source, language), budget_tokens, numbered=True, terms=terms, knobs=knobs
-    )
-    return TreeFold(text, source, opened, folded)

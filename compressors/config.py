@@ -8,9 +8,6 @@ The defaults are the values the findings were measured with. A knob is set in a 
     [schema]
     rare = 0.15
 
-    [tree]
-    max_promoted = 5
-
     [json_envelope]               # a part of the JSON envelope other than the view's
     samples = "typical"
 
@@ -46,20 +43,6 @@ class SchemaKnobs:
     fields: int = 40  # fields shown per collection, keys per plain object
     rows: int = 25  # exception rows shown per collection
     clip: int = 60  # characters of a value shown
-
-
-@dataclass(frozen=True)
-class TreeKnobs:
-    """The tree fold of code, XML and outlines (`compressors.tree`)."""
-
-    max_promoted: int = 10  # stand-outs shown per list; the rest are counted in the marker that hides them
-    head_children: int = 3  # a list opened partly shows at least its first this many children,
-    tail_children: int = 1  # and its last this many
-    min_gap: int = 6  # a run of this many plain lines no node covers folds as a leaf of its own
-    min_hidden: int = 3  # a node hiding fewer lines than this is shown whole
-    max_line_chars: int = 300  # a longer line is clipped
-    rare_share: float = 0.1  # a sibling shape held by at most this share of a list stands out,
-    dominant: float = 0.6  # when one shape holds at least this share
 
 
 @dataclass(frozen=True)
@@ -121,7 +104,6 @@ class TreeEnvelopeKnobs:
 class FoldConfig:
     worth_it: float = 0.9  # a fold that keeps more than this share of the input passes it through instead
     schema: SchemaKnobs = SchemaKnobs()
-    tree: TreeKnobs = TreeKnobs()
     json_envelope: JsonEnvelopeKnobs = JsonEnvelopeKnobs()
     log_envelope: LogEnvelopeKnobs = LogEnvelopeKnobs()
     tree_envelope: TreeEnvelopeKnobs = TreeEnvelopeKnobs()
@@ -130,7 +112,6 @@ class FoldConfig:
 DEFAULT = FoldConfig()
 _SECTIONS = {
     "schema": SchemaKnobs,
-    "tree": TreeKnobs,
     "json_envelope": JsonEnvelopeKnobs,
     "log_envelope": LogEnvelopeKnobs,
     "tree_envelope": TreeEnvelopeKnobs,

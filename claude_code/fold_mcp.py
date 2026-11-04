@@ -2,8 +2,8 @@
 
 For sessions with no shell, where `lab-fold` cannot be run: the tool returns what `./lab fold`
 prints for a file (`compressors.cli.fold_text`), header included. Code folds by its extension
-through ast-grep; JSON, XML, outlines, logs and text by what they are. Every marker names the line
-range or JSON path it hides, so Read with offset and limit, or Grep, fetches exactly that.
+through ast-grep; JSON, XML, outlines, logs and text by what they are. Each folds as an envelope
+addressed by line number or jq path, so Read with offset and limit, Grep or jq fetches the rest.
 
 It reads any path it is given, as Read does, but Claude Code's permission rules do not govern an MCP
 server's own file access: give it only to sessions allowed to read those files. Standard library
@@ -25,10 +25,10 @@ type Fold = Callable[[str, int, str], str]  # (path, budget, query) -> the folde
 _TOOL = {
     "name": "fold",
     "description": (
-        "Show a large file's outline within a token budget: every class, function and block of code "
-        "with its real line number, XML by element, JSON as its shape, the rows that break it and jq "
-        "commands to get more. Each marker names the lines or jq path it hides; fetch them with Read "
-        "(offset and limit), Grep or jq. A file that fits the budget comes back whole."
+        "Show a large file's envelope within a token budget: its shape (code's definitions, a log's "
+        "line templates, a tree's outline, JSON's fields), what breaks it, samples, and commands to "
+        "get more, by line number or jq path; fetch the rest with Read (offset and limit), Grep or "
+        "jq. A file that fits the budget comes back whole."
     ),
     "inputSchema": {
         "type": "object",

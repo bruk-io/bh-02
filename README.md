@@ -7,11 +7,12 @@ when it has results worth keeping.
 
 ## The envelope
 
-A large JSON output reaches the model as four parts, each made by a producer that a composition
-names: its **shape** in exact numbers, the **anomalies** that break it with their jq paths,
-**samples** verbatim, and how to **get more** (a ready `jq` command, or how to read any path). The
-raw output stays saved and the envelope names the file. Every claim an envelope makes is checked
-against the data in layer 1. PLAN.md has the protocol, the producers and the compositions.
+A large output reaches the model as four parts, each made by a producer that a composition names:
+its **shape** in exact numbers, the **anomalies** that break it with their addresses, **samples**
+verbatim, and how to **get more** (a ready command, or how to read any part). JSON is addressed by
+jq path; a log, an outline, XML, a page, plain text and code by line number. The raw output stays
+saved and the envelope names the file. Every claim an envelope makes is checked against the data
+in layer 1. PLAN.md has the protocol, each format's producers and the compositions.
 
 ## The tool
 
@@ -20,10 +21,9 @@ against the data in layer 1. PLAN.md has the protocol, the producers and the com
 COMMAND | ./lab fold [--budget 2000] ...
 ```
 
-Text that fits the budget comes back unchanged. JSON folds as an envelope; `--view` names a recipe
-and `--set json_envelope.PART=PRODUCER` swaps one part. Other formats (code through ast-grep, XML,
-accessibility outlines, HTML, logs) still fold by their own rules, which the experiments do not
-measure.
+Text that fits the budget comes back unchanged. Everything else folds as an envelope: `--view` names
+a recipe (sample or schema) and `--set FORMAT_envelope.PART=PRODUCER` swaps one part (`json_envelope`,
+`log_envelope`, `tree_envelope`). Code folds by its extension, or `--lang`, through ast-grep.
 
 ## Target: Claude Code
 
@@ -59,7 +59,7 @@ intervals.
 ./lab fix                                         # apply the formatter and ruff's safe fixes
 ./lab fetch mcp-atlas                             # the MCP-Atlas tasks into corpus/real/ (untracked)
 ./lab evals l1 --only json pypi atlas [--view schema] [--set KNOB=VALUE]   # layer 1: fold and check (free)
-./lab evals sweep sweeps/envelopes.toml           # layer 1 over a grid of compositions (free)
+./lab evals sweep sweeps/envelopes.toml           # layer 1 over a grid of compositions (free; logs.toml, trees.toml)
 ./lab evals dials dials/haiku-atlas.toml --dry-run   # layer 2: native against each composition (paid)
 ./lab evals sessions sessions/haiku.toml --dry-run   # layer 2: follow-up questions in one session (paid)
 ```
@@ -69,7 +69,7 @@ intervals.
 ```
 lab            the one entry point
 corpus/        fetched real data (gitignored)
-compressors/   route.fold (the router); envelope (the protocol) and envelope_json, schema, json_items (JSON); tree, code, lines, html (other formats)
+compressors/   route (the router); envelope (the protocol); envelope_json, schema, json_items (JSON); envelope_text, envelope_log, envelope_tree (lines); tree, code, html (parsers)
 claude_code/   hook (PostToolUse); fixture_mcp and replay_mcp (serve a task to Claude Code); fold_mcp
 evals/         truth, synthetic, real, atlas, tasks; envelope_check, schema_check; l1, sweep, l2, dials, sessions, stats
 harness/       fetch (real corpora); extract, stats (Claude Code transcripts)

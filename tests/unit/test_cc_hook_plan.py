@@ -163,9 +163,12 @@ def test_folded_bash_output_keeps_bashs_shape_and_stderr_and_drops_the_saved_out
 
 def test_the_hook_takes_its_knobs_and_view_from_the_environment():
     config, view = config_from(
-        {"TOOL_OUTPUT_LAB_SET": "schema.rare=0.2; tree.max_promoted=25", "TOOL_OUTPUT_LAB_VIEW": "schema"}
+        {
+            "TOOL_OUTPUT_LAB_SET": "schema.rare=0.2; tree_envelope.min_items=25",
+            "TOOL_OUTPUT_LAB_VIEW": "schema",
+        }
     )
-    assert (config.schema.rare, config.tree.max_promoted, view) == (0.2, 25, "schema")
+    assert (config.schema.rare, config.tree_envelope.min_items, view) == (0.2, 25, "schema")
     assert config_from({}) == (DEFAULT, "sample")
 
 

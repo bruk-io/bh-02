@@ -1,0 +1,12 @@
+# Log compositions: each kind of anomaly with each kind of sample, at two budgets, over the synthetic
+# logs and the HDFS log. The schema recipe is templates, rare, matches and grep.
+name = "logs"
+only = ["log", "hdfs"]
+
+[base]
+view = "schema"
+
+[grid]
+"log_envelope.anomalies" = ["rare", "errors"]
+"log_envelope.samples" = ["none", "matches", "typical", "head-tail"]
+budget = [500, 2000]
