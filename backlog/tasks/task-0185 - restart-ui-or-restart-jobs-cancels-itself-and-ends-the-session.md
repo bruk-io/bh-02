@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-03T17:47:00Z'
-updated_date: '2026-11-04T13:44:00Z'
+updated_date: '2026-11-04T13:45:00Z'
 labels:
   - commands
   - cordis
@@ -31,4 +31,47 @@ Architecture review 2026-11-03 (reproduced in memory): commands:jobs runs each r
 
 <!-- SECTION:NOTES:BEGIN -->
 Lead, 2026-11-04: promoted from a draft review; criteria written right after promotion (finish-moved for that reason only).
+
+Repro at 2aa4b7d8ad24, test files: bh-02/plugins/commands-cordis-plugin/tests/test_restart.py; command: `uv run pytest bh-02/plugins/commands-cordis-plugin/tests/test_restart.py -q` exited 1
+
+```text
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+F                                                                        [100%]
+=================================== FAILURES ===================================
+_________ test_restarting_the_ui_or_jobs_never_leaves_a_row_unmounted __________
+
+    async def test_restarting_the_ui_or_jobs_never_leaves_a_row_unmounted() -> None:
+        booted = await boot(
+            [],
+            overrides=[
+                Row("commands", "commands_cordis_plugin.wiring:registry"),
+                Row("ui", f"{__name__}:_ui"),
+                Row("jobs", "commands_cordis_plugin.wiring:jobs"),
+                Row("operator", "commands_cordis_plugin.wiring:operator"),
+            ],
+            watch=None,
+        )
+        rt, loader = booted.runtime, booted.loader
+        every_row_up = {rid: "active" for rid in ("commands", "ui", "jobs", "operator")}
+        assert await _settled(loader.status, every_row_up) == every_row_up
+        for line in ("/restart ui", "/restart jobs"):
+            await rt.root.get("commands").run(line)
+            await asyncio.sleep(0.2)
+>           assert await _settled(loader.status, every_row_up) == every_row_up, line
+E           AssertionError: /restart ui
+E           assert {'commands': ...': 'inactive'} == {'commands': ...or': 'active'}
+E             
+E             Omitting 1 identical items, use -vv to show
+E             Differing items:
+E             {'jobs': 'inactive'} != {'jobs': 'active'}
+E             {'operator': 'inactive'} != {'operator': 'active'}
+E             Right contains 1 more item:
+E             {'ui': 'active'}
+E             Use -v to get more diff
+
+bh-02/plugins/commands-cordis-plugin/tests/test_restart.py:52: AssertionError
+=========================== short test summary info ============================
+FAILED bh-02/plugins/commands-cordis-plugin/tests/test_restart.py::test_restarting_the_ui_or_jobs_never_leaves_a_row_unmounted
+1 failed in 9.40s
+```
 <!-- SECTION:NOTES:END -->
