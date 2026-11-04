@@ -90,3 +90,37 @@ the 72 compositions.
 For layer 2 this leaves two questions layer 1 cannot answer: whether the schema recipe's
 composition (exceptions or rare, matches, a ready command) keeps answers against native at less
 context (M4), and whether samples the query did not ask for earn their tokens (M5).
+
+## 3. MCP-Atlas on Haiku: where the envelope acted, answers held within noise and the final context fell by 3.8k
+
+Run: `results/dials-haiku-atlas.md`, 354 sessions, $3.10, none failed: the 59 MCP-Atlas tasks (42
+at M, 17 at L), twice each, native against the hook folding every result (mode `all`) as the
+sample recipe and as the schema recipe. Native answers 53% right.
+
+- **The envelope acted in half the folded sessions.** The hook folded the task's large output in
+  63 of 118 sample sessions and 59 of 118 schema ones, and in every session that received it. The
+  rest never received it, since the replay answers a call with the closest recorded call and the
+  model asked otherwise; those sessions folded nothing, so they ran as native does.
+- **The sessions where it did not act are noise, and they made the pooled result look worse.**
+  Over all pairs the sample recipe lost answers at M (-10% [-17%, -2%], 2 pairs won and 10 lost).
+  Seven of its eight disagreements in sessions that folded nothing went against it, although
+  those sessions ran under native's conditions and disagreed with native 15% of the time, less
+  than native's 19% with itself.
+- **Where it acted**, paired against native:
+
+  | Recipe | pairs | accuracy | won/lost | final context | cost | time |
+  |---|---|---|---|---|---|---|
+  | sample | 63 | -2% [-12%, +9%] | 5/6 | -3,928 [-5,628, -2,229] | -5% | +1.5 s [-1.6, +3.9] |
+  | schema | 59 | +0% [-12%, +12%] | 7/7 | -3,788 [-5,527, -2,097] | -3% | +4.8 s [+1.2, +10.6] |
+
+  The two recipes disagree with native 17% and 24% of the time, about as often as native
+  disagrees with itself (19%). At M the final context falls by 4.5k and 3.7k (46 and 44 pairs);
+  at L by 0.8k and 1.1k (17 and 15 pairs), since over the spill threshold native's context holds
+  only Claude Code's preview of the output.
+- **Against the kill criteria**, the final context shrinks under both recipes, its interval below
+  zero, which passes the input criterion. Accuracy is undecided: about 60 pairs bound the change
+  to about 12 points either way, not the 3 the criterion asks.
+- **More requests, smaller context.** The folded sessions carry more summed input (+25k and +37k
+  on average: the requests that fetch from the saved output, each reading the prefix from the
+  cache) and still cost 3 to 5% less, since cache reads are cheap and the context they re-read is
+  smaller. The schema recipe's sessions take longer (+4.8 s), the sample recipe's about as long.
