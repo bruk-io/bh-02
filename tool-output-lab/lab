@@ -8,6 +8,7 @@
 #   ./lab fold [FILE|-] [...]   fold a file or stdin into a token budget (the tool itself)
 #   ./lab evals l1 [...]        layer 1: every eval task folded and checked, no model (free)
 #   ./lab evals l2 [...]        layer 2: headless Claude Code on the eval tasks (costs money; --dry-run first)
+#   ./lab fetch hdfs            a real corpus into corpus/real/ (Python 3.13 with pyarrow; untracked)
 set -euo pipefail
 cd "$(dirname "$0")"
 export UV_SYSTEM_CERTS="${UV_SYSTEM_CERTS:-${UV_NATIVE_TLS:-}}"; unset UV_NATIVE_TLS
@@ -19,5 +20,6 @@ case "$cmd" in
   extract|stats) run python -m "harness.$cmd" "$@" ;;
   evals) layer="${1:-l1}"; shift || true; run python -m "evals.$layer" "$@" ;;
   fold) run python -m compressors.cli "$@" ;;
-  *) echo "unknown command '$cmd': use check, fix, fold, evals, extract or stats" >&2; exit 2 ;;
+  fetch) uv run --quiet --no-project --python 3.13 --with pyarrow python -m harness.fetch "$@" ;;
+  *) echo "unknown command '$cmd': use check, fix, fold, evals, fetch, extract or stats" >&2; exit 2 ;;
 esac

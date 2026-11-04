@@ -10,7 +10,8 @@ import ast
 import json
 import re
 import xml.etree.ElementTree as ET
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from pathlib import Path
 
 from ast_grep_py import SgNode, SgRoot
@@ -242,3 +243,61 @@ def _rename(node: ast.AST, to: str) -> None:
             node.attr = to
         case ast.Name():
             node.id = to
+
+
+# --- HDFS logs (Loghub's HDFS_v1, `./lab fetch hdfs`) ---------------------------------------------
+
+HDFS_BLOCKS = Path(__file__).resolve().parent.parent / "corpus/real/hdfs/blocks.jsonl"
+_ALLOCATED = re.compile(r"NameSystem\.allocateBlock: (\S+)\. (blk_-?\d+)$")
+_IDS = re.compile(r"blk_-?\d+")
+_ADDRESSES = re.compile(r"/?\d+(?:\.\d+){3}(?::\d+)?")
+_NUMBERS = re.compile(r"\d+")
+
+
+@dataclass(frozen=True)
+class HdfsBlock:
+    """One HDFS block's lines, in the log's order, and whether the cluster's operators marked it
+    anomalous (the dataset's label: the truth, set by people, not by this lab)."""
+
+    block: str
+    anomalous: bool
+    lines: tuple[tuple[int, str], ...]  # (line number in the original log, the line)
+
+
+def hdfs_blocks(text: str) -> tuple[HdfsBlock, ...]:
+    out = []
+    for line in text.splitlines():
+        if line.strip():
+            r = json.loads(line)
+            out.append(HdfsBlock(r["block"], bool(r["anomaly"]), tuple((n, s) for n, s in r["lines"])))
+    return tuple(out)
+
+
+def hdfs_log(blocks: Iterable[HdfsBlock]) -> str:
+    """The blocks' lines merged in the original log's order: the log filtered to those blocks."""
+    return "\n".join(s for _, s in sorted(x for b in blocks for x in b.lines)) + "\n"
+
+
+def hdfs_template(line: str) -> str:
+    """A line's message with its block ids, addresses and numbers blanked: the kind of event it is."""
+    message = line.split(": ", 1)[1] if ": " in line else line
+    return _NUMBERS.sub("<n>", _ADDRESSES.sub("<ip>", _IDS.sub("<blk>", message)))
+
+
+def hdfs_rare_templates(blocks: Iterable[HdfsBlock], share: float = 0.01) -> frozenset[str]:
+    """The kinds of line at most `share` of the normal blocks have."""
+    normal = [b for b in blocks if not b.anomalous]
+    held: dict[str, int] = {}
+    for b in normal:
+        for t in {hdfs_template(s) for _, s in b.lines}:
+            held[t] = held.get(t, 0) + 1
+    every = {hdfs_template(s) for b in blocks for _, s in b.lines}
+    return frozenset(t for t in every if held.get(t, 0) <= share * len(normal))
+
+
+def hdfs_allocated(b: HdfsBlock) -> str | None:
+    """The file the block was allocated for, from its allocateBlock line."""
+    for _, s in b.lines:
+        if (m := _ALLOCATED.search(s)) and m[2] == b.block:
+            return m[1]
+    return None

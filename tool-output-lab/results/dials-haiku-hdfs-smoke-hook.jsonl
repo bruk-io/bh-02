@@ -1,0 +1,2 @@
+{"tool": "mcp__fixture__get_logs", "tool_use_id": "toolu_0127xMuETrHxo9H95aZ5TkPW", "spilled": true, "raw_tokens": 68608, "branch": "lines", "out_tokens": 1553}
+{"tool": "mcp__fixture__get_logs", "tool_use_id": "toolu_01Xa3nVpRqoagDiA1REBDdd2", "spilled": false, "raw_tokens": 9205, "branch": "lines", "out_tokens": 1461}

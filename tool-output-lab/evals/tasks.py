@@ -23,7 +23,7 @@ from evals.truth import ANSWER_INSTRUCTION, Absent, Edited, Exact, Items, Locati
 
 BUDGET = 2000
 SPILL_TOKENS = 50_000 // 4
-FORMATS = ("json", "log", "a11y", "figma", "python", "rust", "xml", "pypi")
+FORMATS = ("json", "log", "a11y", "figma", "hdfs", "python", "rust", "xml", "pypi")
 KINDS = ("spot", "absent", "lookup", "enumerate", "count", "locate", "edit")
 
 
@@ -66,7 +66,13 @@ _SIZES = {
     "figma": {"S": 20, "M": 100, "L": 500, "XL": 2000, "XXL": 8000},
 }
 _MAKE = {"json": synthetic.pods, "log": synthetic.logs, "a11y": synthetic.snapshot, "figma": synthetic.figma}
-TOOLS = {"json": "list_pods", "log": "get_logs", "a11y": "browser_snapshot", "figma": "get_figma_metadata"}
+TOOLS = {
+    "json": "list_pods",
+    "log": "get_logs",
+    "a11y": "browser_snapshot",
+    "figma": "get_figma_metadata",
+    "hdfs": "get_logs",  # a real log, served by the same tool as the synthetic ones
+}
 _ASK = {
     "json": {
         "spot": "Does any pod look wrong or unusual? Name it, or say none.",
@@ -124,6 +130,7 @@ _COMMAND_SAYS = {
     "log": "it prints the recent log lines of a service",
     "a11y": "it prints an accessibility snapshot of the current browser page",
     "figma": "it prints the layer tree of a Figma node as XML: ids, names, types, positions and sizes",
+    "hdfs": "it prints the log lines of a Hadoop file system (HDFS) cluster",
 }
 
 
@@ -455,7 +462,12 @@ def task(task_id: str) -> Task:
         KeyError: no task has this id; the message lists a few that do.
     """
     fmt, band, *_ = [*task_id.split("-", 2), "", ""]
-    pool = _synthetic(fmt, band) if fmt in _SIZES and band in BANDS else tasks()
+    if fmt in _SIZES and band in BANDS:
+        pool = _synthetic(fmt, band)
+    elif fmt == "hdfs" and "hdfs" not in skipped():
+        pool = _hdfs()
+    else:
+        pool = tasks()
     found = {t.task_id: t for t in pool}
     if task_id not in found:
         raise KeyError(f"no eval task {task_id!r}; ids look like {', '.join(list(found)[:3])}")
@@ -523,6 +535,108 @@ def _edits() -> list[Task]:
     ]
 
 
+# --- HDFS: a real cluster's log, its anomalies labelled by the people who ran it ---------------------
+
+_HDFS_BLOCKS = {"M": 10, "L": 80}  # blocks a log holds: about 9k and 70k estimated tokens
+_HDFS_K = {"M": (2, 3), "L": (4, 8)}  # problem blocks in a count or enumerate task
+_HDFS_ASK = {
+    "spot": "Does any block in the log show a problem? If so, give its block id; if not, say none.",
+    "count": "How many blocks in the log show a problem?",
+    "enumerate": "List every block in the log that shows a problem.",
+    "lookup": "Which file was block {subject} allocated for?",
+}
+
+
+@cache
+def hdfs_index() -> dict[str, real.HdfsBlock]:
+    return {b.block: b for b in real.hdfs_blocks(_read(real.HDFS_BLOCKS))}
+
+
+def _hdfs_payload(ids: tuple[str, ...]) -> str:
+    index = hdfs_index()
+    return real.hdfs_log(index[i] for i in ids)
+
+
+def _hdfs() -> list[Task]:
+    return list(_hdfs_tasks())
+
+
+@cache
+def _hdfs_tasks() -> tuple[Task, ...]:
+    """Logs of whole blocks from Loghub's HDFS_v1, each the cluster's log filtered to a chosen set of
+    blocks over their whole lives, in the original order. Spot: one problem block that has a kind of
+    line few normal blocks have (distinct) or none (subtle: what is wrong is its sequence); absent:
+    none; count and enumerate: k problem blocks; lookup: the file a block was allocated for. Every
+    truth is the dataset's label or read off the block's lines; distinct and subtle only sort the
+    spot tasks by how hard they look. Error words sort nothing here: nearly every normal block has
+    a line with "exception" in it."""
+    blocks = list(hdfs_index().values())
+    rare = real.hdfs_rare_templates(blocks)
+    normal = [b for b in blocks if not b.anomalous]
+    distinct = [b for b in blocks if b.anomalous and any(real.hdfs_template(s) in rare for _, s in b.lines)]
+    subtle = [b for b in blocks if b.anomalous and b not in distinct]
+    return tuple(t for size in _HDFS_BLOCKS for t in _hdfs_band(size, normal, distinct, subtle))
+
+
+def _hdfs_band(
+    size: str, normal: list[real.HdfsBlock], distinct: list[real.HdfsBlock], subtle: list[real.HdfsBlock]
+) -> list[Task]:
+    rng, n = random.Random(f"hdfs/{size}"), _HDFS_BLOCKS[size]
+    out: list[Task] = []
+
+    def add(
+        kind: str, tag: str, problems: list[real.HdfsBlock], subject: real.HdfsBlock | None = None
+    ) -> None:
+        kept = [*problems, *([subject] if subject else [])]
+        others = rng.sample([b for b in normal if b not in kept], n - len(kept))
+        chosen = sorted([*kept, *others], key=lambda b: b.lines[0][0])
+        ids = tuple(b.block for b in chosen)
+        wanted = frozenset(b.block for b in problems)
+        truth: Truth
+        match kind:
+            case "spot":
+                truth = Needle(problems[0].block)
+            case "absent":
+                truth = Absent(frozenset(ids))
+            case "count":
+                truth = Number(len(problems), wanted)
+            case "enumerate":
+                truth = Items(wanted, frozenset(ids))
+            case _:
+                assert subject is not None, "a lookup names the block it asks about"
+                truth = Exact(real.hdfs_allocated(subject) or "")
+        name = subject.block if subject else ""
+        ask = _HDFS_ASK["spot" if kind == "absent" else kind].format(subject=name)
+        question = f"{ask} {ANSWER_INSTRUCTION[kind]}."
+        payload = _hdfs_payload(ids)
+        out.append(
+            Task(
+                task_id=f"hdfs-{band_of(estimate_tokens(payload))}-{kind}-{tag}",
+                fmt="hdfs",
+                kind=kind,
+                band=band_of(estimate_tokens(payload)),
+                path="",
+                prompt=f"Use the {TOOLS['hdfs']} tool. {question}",
+                truth=truth,
+                query=name,
+                load=partial(_hdfs_payload, ids),
+                question=question,
+            )
+        )
+
+    for i, b in enumerate(rng.sample(distinct, 2), 1):
+        add("spot", f"distinct{i}", [b])
+    for i, b in enumerate(rng.sample(subtle, 2), 1):
+        add("spot", f"subtle{i}", [b])
+    add("absent", "none", [])
+    for k in _HDFS_K[size]:
+        add("count", f"k{k}", rng.sample(distinct + subtle, k))
+    add("enumerate", f"k{_HDFS_K[size][0]}", rng.sample(distinct + subtle, _HDFS_K[size][0]))
+    for tag in ("a", "b"):
+        add("lookup", tag, [], subject=rng.choice([b for b in normal if real.hdfs_allocated(b)]))
+    return out
+
+
 # Each real source: the files its tasks are built from, and the function that builds them.
 _REAL: dict[str, tuple[tuple[Path, ...], Callable[[], list[Task]]]] = {
     "python": (_PYTHON_FILES, _python),
@@ -530,6 +644,7 @@ _REAL: dict[str, tuple[tuple[Path, ...], Callable[[], list[Task]]]] = {
     "rust": (_RUST_FILES, _rust),
     "xml": ((real.ISO_3166_2,), _xml),
     "pypi": ((real.PYPI_CLICK,), _pypi),
+    "hdfs": ((real.HDFS_BLOCKS,), _hdfs),
 }
 
 
