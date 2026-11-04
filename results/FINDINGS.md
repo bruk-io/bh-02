@@ -520,6 +520,38 @@ schema view on JSON. 507 runs, $3.66, none failed.
     over it, Claude Code's spill already caps the context, and the fold saves answers, requests,
     cost and time instead, more as the output grows.
 
+## Sessions: one result, six questions (`sessions-haiku.md`, `sessions/haiku.toml`, EVALS.md "Sessions")
+
+Each conversation asks, in one Claude Code process, the count on a count task's payload (the prompt
+names the tool), then every planted item, then four items looked up across the payload: 16
+conversations a band at M and L, twice, native against the fold (`all`, budget 2000) and, on JSON,
+the schema view. 144 sessions, 864 turns, $1.77, none failed; every turn right under every
+condition (192 of 192 a band), so these kinds measure cost, not accuracy.
+
+63. **Under the threshold the fold's saving lasts the session, and so does its fetching.** At M the
+    folded session's context is 8.5k smaller after the first answer and still 8.0k smaller after
+    the sixth. But native answers each follow-up from the raw it holds (1.0 request, $0.00076, 3.6 s)
+    and the folded session fetches from the saved raw for most of them (1.8 requests, 0.8 calls,
+    $0.00117, 5.0 s). Over six turns: cost +10% ($0.0012), time +9.3 s, 5.4 more requests, cache
+    writes -7.7k, cache reads +235k.
+64. **The break-even is about 15 later requests, on Haiku's prices.** Every later request that needs
+    nothing from the result carries 8k fewer tokens, $0.00008 at the cache-read price; every
+    follow-up that does need it costs $0.0004 more, about five such requests' saving. After these
+    five follow-ups the folded session is $0.0012 behind, made up after 15 more requests. Cost scales
+    with one price structure on every model here (FINDINGS 52), so the count should carry over; the
+    time does not come back: 1.4 s more for each follow-up that fetches.
+65. **The schema view breaks even after two.** On JSON at M its first answer is a third cheaper
+    ($0.0050 against $0.0074) and its context 12.2k smaller, still 10.7k after the sixth turn; its
+    follow-ups fetch as the fold's do. Session cost +1%, time +2.4 s; the context saving pays the rest
+    back within two later requests.
+66. **Past the threshold the session changes nothing for the fold, and the schema view keeps its
+    edge.** At L every session fetches from the saved file on every follow-up, native or not (1.8 to
+    2.0 requests a follow-up). The fold: cost -2%, time +0.3 s, final context +738 (the fold is larger
+    than Claude Code's preview), each within noise. The schema view: cost -8%, time -3.3 s, context
+    1.5k smaller, 0.5 fewer requests. With count, list and lookup questions native Haiku greps the
+    saved file reliably; the spot tasks, where the fold won answers past the threshold (60), are not
+    among them.
+
 ## Where the design stands
 
 | Piece | Evidence | Leaning |
@@ -527,6 +559,7 @@ schema view on JSON. 507 runs, $3.66, none failed.
 | Fold MCP results Claude Code spilled | P2 (Haiku, 104 pairs): accuracy +7% [+1%, +14%], 1.2 fewer requests, -9% cost, but the final context +800 tokens (34). P3 (Sonnet, 20 pairs): 20/20 against 18/20, cost -21%, final context -910 [-4.1k, +1.4k] (41). The size ladder (Haiku, L to XXL, 156 pairs): accuracy +6% [+3%, +11%], cost -12% to -15%, time saved growing to 9.7 s, final context unchanged (58-62); the schema view on JSON lowers it 1.2k to 1.4k (61) | cut for Haiku by the input criterion (37), at a price in answers, cost and time the ladder shows; open for Sonnet (undecided at 20 pairs); the schema view is the candidate to pass; `TOOL_OUTPUT_LAB_MODE=spilled` |
 | Fold MCP results under the spill threshold | P2 (Haiku): answers kept, final context -7.1k (35). P3 (Sonnet): 52/52 both, final context -8.8k, cost -20% (40) | keep; the hook's default (`inline`) |
 | Force the fold on Bash (the hook on `Bash`) | 46-48: inline at M: final context -8.1k, cost -10%, +6 s, but 49/52 against 52/52 (undecided) and a regress (91 second looks folded); saved outputs at L: context +1.5k | inline: fix the regress, then decide; saved outputs: cut |
+| Fold a result the session will use again (under the threshold) | Sessions (Haiku, M, 32 pairs of six-turn sessions): context -8k through the session, but each follow-up that needs the data costs a fetch; cost +10%, +9 s, break-even after ~15 more requests (63-64); the schema view on JSON breaks even after two (65) | keep for long sessions; the schema view for data |
 | JSON folding with promotion | real MCP JSON to 13%; built anomaly kinds survive | keep |
 | Line folding for logs | error words survive; quiet anomalies lost, and the loss costs answers | keep, with the gap stated |
 | Tree folding for XML and accessibility trees | A/B 2 (Haiku): -37% tokens on spilled results; A/B 3 (Sonnet): no gain | keep for weaker models; Sonnet does as well alone |
