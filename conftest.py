@@ -37,11 +37,13 @@ GROUPS = (
             "lock over them under its own state directory (`BRIG_HOME`), which the fixture below gives "
             "each test, so none shares that. test_host_values.py boots runner:confined and expects it "
             "to refuse before any jail starts; it is here because a regression in that refusal would "
-            "start one."
+            "start one. test_runner_approval.py builds a BrigJail to read its report without starting "
+            "it, for the same reason."
         ),
         modules=(
             "bh-02/app/tests/test_host_values.py",
             "bh-02/app/tests/test_python_repl.py",
+            "bh-02/plugins/runner-cordis-plugin/tests/test_runner_approval.py",
             "bh-02/plugins/runner-cordis-plugin/tests/test_runner_confined.py",
             "bh-02/plugins/runner-cordis-plugin/tests/test_runner_tmux.py",
             "bh-02/plugins/subagents-cordis-plugin/tests/test_agents_wiring.py",
