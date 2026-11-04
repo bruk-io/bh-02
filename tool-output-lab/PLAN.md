@@ -79,7 +79,7 @@ knobs: `./lab fold`, layer 1, layer 2, the hook, and the specs in `dials/`, `ses
 | E1 | Every format folds as an envelope: logs by line templates, trees (outlines, XML, pages, text, code) by runs of like items | no | done: no claim fails on any task (FINDINGS 1) |
 | M1 | Log each fold with its session, so every layer-2 row says whether the envelope acted on the task's large output, and the report splits on it | no | done: rows carry `large_seen` and `large_folded`; a Haiku smoke matched inline, spilled and replayed outputs by digest (`results/dials-haiku-m1-smoke.md`) |
 | M2 | Layer-1 baseline: both recipes on every task | no | done (FINDINGS 1) |
-| M3 | Layer-1 sweeps over compositions: `sweeps/envelopes.toml`, `logs.toml`, `trees.toml` | no | |
+| M3 | Layer-1 sweeps over compositions: `sweeps/envelopes.toml`, `logs.toml`, `trees.toml` | no | done: anomalies decide the most; samples past the query's matches add nothing in layer 1 (FINDINGS 2) |
 | M4 | Layer 2 on Haiku: native against the two recipes on MCP-Atlas (about $3) and on the synthetic tasks of every format at M and L | yes | |
 | M5 | Layer 2 on compositions layer 1 cannot tell apart: a typical sample or none, no get more | yes | |
 | M6 | Sonnet on the compositions Haiku leaves standing | yes | |
