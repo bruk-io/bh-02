@@ -127,8 +127,11 @@ A start applies a grant as follows:
 - `net`: the destination joins the start's egress policy; the proxy lets the program reach exactly
   that host and port. Nothing else is reachable. A `net` grant also reaches every program running
   now, at once, with no restart (a connection the program makes after it is let through), and a
-  revoke is refused from the next connection on; a connection already open stays open until the
-  program restarts (`/clear` restarts the Python process), since the proxy judges a connection once.
+  `/grants revoke` in the session is refused from the next connection on; a connection already open
+  stays open until the program restarts (`/clear` restarts the Python process), since the proxy
+  judges a connection once. `bh-02 grants revoke`, from outside a session, changes what later starts
+  apply: a session running now keeps the destination until its next start of a program, and the
+  command says so.
 
 When a program's connection is refused, you are asked while the call runs: the destination, which
 input asked (`python` or `extensions`), and once, always or no. On a yes the model is told it may

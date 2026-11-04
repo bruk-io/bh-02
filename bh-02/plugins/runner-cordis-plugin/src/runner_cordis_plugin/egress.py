@@ -107,9 +107,9 @@ class _Tell:
 
 
 def _judged(decision: Decision, owner: str) -> _Ask | _Tell | None:
-    """What a decision of the proxy comes to: nothing when it allowed, an an ask for a destination
+    """What a decision of the proxy comes to: nothing when it allowed, an ask for a destination
     that was not granted (as the name) or one that resolved to a private address (as that address
-    alone, the name is never offered), else a a tell. `owner` is the row that started the program."""
+    alone, the name is never offered), else a tell. `owner` is the row that started the program."""
     if decision.verdict != "refused":
         return None
     host, port = decision.destination.host, decision.destination.port
