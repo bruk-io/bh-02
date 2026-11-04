@@ -8,7 +8,6 @@ created_date: '2026-11-04T13:57:00Z'
 updated_date: '2026-11-04T17:04:00Z'
 labels:
   - tests
-  - size-1
   - size-2
   - finish-moved
 dependencies: []
