@@ -95,6 +95,19 @@ confident is the harm, so it is reported separately from wrong and hedged.
 - **Recovery:** reads of the saved raw file, and how much of it was read.
 - **Tool use:** whether `fold` was run, and how.
 
+## Sessions
+
+One-question tasks measure what a fold costs and saves once. A real session uses a result again,
+and every later request re-reads whatever the result left in the context. `./lab evals sessions`
+asks six questions about one tool result in one Claude Code process (`--input-format stream-json`,
+each question sent once the last has its result): the count task's own prompt, which names the tool,
+then every planted item, then four items looked up across the payload (`evals.tasks.conversations`).
+A native session under the spill threshold holds the raw result and can answer a follow-up from it;
+a folded one holds the fold and fetches from the saved raw when the fold does not show the answer.
+Every turn is scored and costed on its own (a result event's `total_cost_usd` and `modelUsage` add up
+over the session; `usage` and `duration_ms` are the turn's), and the report follows the context
+turn by turn: whether the fold's saving survives the follow-ups, and what the fetches cost.
+
 ## The prompt cache
 
 Claude Code caches each request's prefix (system prompt, tools, the conversation so far) and writes
@@ -145,6 +158,7 @@ message, so it cannot invalidate what is cached. What it changes is what comes a
 ./lab evals l2 --merge l2-x l2-y --name l2-xy                       # report runs together, rescored
 ./lab evals sweep sweeps/schema-rare.toml                           # layer 1 over a grid of knobs (free)
 ./lab evals dials dials/haiku-m.toml --dry-run                      # layer 2 over dial settings, one model
+./lab evals sessions sessions/haiku.toml --dry-run                  # follow-up questions in one session
 ```
 
 Every entry point takes the same knobs (`compressors/config.py`): `--config FILE.toml` and
