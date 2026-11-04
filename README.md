@@ -61,7 +61,9 @@ Change these numbers only before a run, never after seeing one. Layer 2 applies 
 95% intervals. Folding results under the spill threshold passes with Haiku (P2) and holds on Sonnet
 (P3: same answers, final context -8.8k, cost -20%). Folding spilled results fails the input
 criterion with Haiku (the final context grows 800 tokens) and is cut; with Sonnet it is undecided
-at 20 pairs. Fold tools offered to the model, by CLAUDE.md or as an MCP tool, were never used by
+at 20 pairs. The size ladder (Haiku, L to XXL, up to 16 times L) keeps it cut, since Claude Code's
+spill already caps native's context, while showing what the cut gives up: answers +6 points, cost
+-12% to -15%, and time saved growing with the output to 9.7 s a run (FINDINGS 58-62). Fold tools offered to the model, by CLAUDE.md or as an MCP tool, were never used by
 Sonnet and once in 44 runs by Haiku (FINDINGS 33-45).
 
 ## Running
