@@ -723,7 +723,7 @@ async def test_a_linux_jail_lets_an_input_write_its_project_s_auto_memory_and_no
     def argv(endpoint: str) -> list[str]:
         return [sys.executable, "-I", "-c", _LISTEN_THEN_REMEMBER, endpoint, *memories, str(project / "done")]
 
-    started = await one.start(argv, cwd=str(project))
+    started = await one.start(argv, cwd=str(project), owner="test")
     try:
         for _ in range(200):
             if (project / "done").exists():
@@ -791,7 +791,7 @@ async def test_a_linux_jail_keeps_the_grants_store_from_being_read_or_written_wh
     def argv(endpoint: str) -> list[str]:
         return [sys.executable, "-I", "-c", _LISTEN_THEN_REACH_FOR_THE_STORE, endpoint, str(store), str(said)]
 
-    started = await one.start(argv, cwd=str(project))
+    started = await one.start(argv, cwd=str(project), owner="test")
     try:
         for _ in range(200):
             if said.exists():
@@ -870,7 +870,7 @@ async def test_a_linux_jail_refuses_an_input_that_writes_the_interpreter_bh_02_r
             *[str(file), str(link), str(beside), str(said)],
         ]
 
-    started = await one.start(argv, cwd=str(project))
+    started = await one.start(argv, cwd=str(project), owner="test")
     try:
         report = await _report(said, started)
         came_to = dict(line.split(": ") for line in report.splitlines())
@@ -946,7 +946,7 @@ async def test_a_linux_jail_refuses_an_input_that_changes_a_link_on_the_way_to_t
             *[*map(str, chain), str(beside), str(said)],
         ]
 
-    started = await one.start(argv, cwd=str(project))
+    started = await one.start(argv, cwd=str(project), owner="test")
     try:
         report = await _report(said, started)
         came_to = dict(line.split(": ") for line in report.splitlines())
@@ -1014,7 +1014,7 @@ async def test_a_linux_jail_refuses_a_rename_of_a_directory_on_the_way_to_the_in
             *[*map(str, dirs), str(said)],
         ]
 
-    started = await one.start(argv, cwd=str(project))
+    started = await one.start(argv, cwd=str(project), owner="test")
     try:
         for _ in range(200):  # the file exists before the child writes it: wait for every line
             if said.exists() and len(said.read_text().splitlines()) == len(dirs):
@@ -1328,7 +1328,7 @@ async def test_a_linux_jail_ends_when_the_host_replaces_or_removes_a_secret_it_h
                 *map(str, (secret, absent, seen)),
             ]
 
-        return await one.start(argv, cwd=str(project))
+        return await one.start(argv, cwd=str(project), owner="test")
 
     started = await jailed()
     try:
@@ -1379,7 +1379,7 @@ async def test_the_tripwire_ends_the_whole_jail_a_program_in_a_session_of_its_ow
     def argv(endpoint: str) -> list[str]:
         return [sys.executable, "-I", "-c", _LISTEN_WITH_A_SESSION_OF_ITS_OWN, endpoint, marker]
 
-    started = await one.start(argv, cwd=str(project))
+    started = await one.start(argv, cwd=str(project), owner="test")
     try:
         assert await _until(lambda: bool(_marked_groups(marker)), 5.0), "CONTROL failed: it never ran"
         assert started.ended() == "" and absent.is_dir()  # held
@@ -1415,7 +1415,7 @@ async def test_a_jail_whose_hold_the_host_lifted_ends_at_once_whatever_its_progr
     def argv(endpoint: str) -> list[str]:
         return [sys.executable, "-I", "-c", _HOSTILE_IGNORING_SIGTERM, endpoint, str(absent), str(stamp)]
 
-    started = await one.start(argv, cwd=str(project))
+    started = await one.start(argv, cwd=str(project), owner="test")
     try:
         # the program rewrites the stamp (truncate, then write), so a read can land between the two
         # and see "": wait for a time in it, then for a later one, rather than compare two reads
@@ -1473,7 +1473,7 @@ async def test_a_linux_jail_ends_when_the_host_renames_over_a_write_deny_and_a_n
         def argv(endpoint: str) -> list[str]:
             return [sys.executable, "-I", "-c", _LISTEN_THEN_APPEND, endpoint, str(config)]
 
-        return await BrigJail(BrigConfig(), Host()).start(argv, cwd=str(project))
+        return await BrigJail(BrigConfig(), Host()).start(argv, cwd=str(project), owner="test")
 
     started = await jailed()
     try:
@@ -1508,7 +1508,7 @@ async def test_a_linux_jail_ends_when_the_host_renames_a_directory_brig_pinned_o
     project = tmp_path / "project"
     (project / "a" / "b").mkdir(parents=True)
     one = BrigJail(BrigConfig(deny=("a/b/c",)), Host())
-    started = await one.start(_listening, cwd=str(project))
+    started = await one.start(_listening, cwd=str(project), owner="test")
     try:
         await asyncio.sleep(0.5)
         assert started.ended() == "" and (project / "a" / "b" / "c").is_dir()  # held
@@ -1532,7 +1532,7 @@ async def test_a_jail_for_a_typical_project_is_graded_enforced_for_reads_and_say
     home = tmp_path / "home"
     (home / ".ssh").mkdir(parents=True)
     monkeypatch.setenv("HOME", str(home))
-    started = await BrigJail(BrigConfig(), Host()).start(_listening, cwd=str(project))
+    started = await BrigJail(BrigConfig(), Host()).start(_listening, cwd=str(project), owner="test")
     try:
         report = started.report()
         assert report["fs_read"] == "enforced" and report["fs_write"] == "best_effort", report
@@ -1559,7 +1559,7 @@ async def test_git_init_on_the_host_works_while_a_jail_runs_in_a_project_that_is
     def argv(endpoint: str) -> list[str]:
         return [sys.executable, "-I", "-c", _LISTEN_THEN_WRITE, endpoint, str(git_config)]
 
-    started = await one.start(argv, cwd=str(project))
+    started = await one.start(argv, cwd=str(project), owner="test")
     try:
         assert (project / ".git").is_dir() and not git_config.exists()  # held whole: nothing inside
         made = await asyncio.create_subprocess_exec("git", "init", "-q", str(project))
@@ -1592,7 +1592,7 @@ async def test_a_second_jail_s_carve_out_outlives_the_first_jail_in_the_same_pro
         def argv(endpoint: str) -> list[str]:
             return [sys.executable, "-I", "-c", _LISTEN_THEN_WRITE, endpoint, str(claude)]
 
-        started.append(await one.start(argv, cwd=str(project)))
+        started.append(await one.start(argv, cwd=str(project), owner="test"))
         assert claude.is_dir(), n  # the first made it; the second found it
     await started[0].stop()
     await asyncio.sleep(1.0)  # the second's workload keeps trying to write under .claude
@@ -1632,7 +1632,7 @@ async def _in_a_jail(project: Path, steps: Sequence[Sequence[str]]) -> list[tupl
     def argv(endpoint: str) -> list[str]:
         return [sys.executable, "-I", "-c", _RUN_STEPS, endpoint, str(said), json.dumps(steps)]
 
-    started = await BrigJail(BrigConfig(), Host()).start(argv, cwd=str(project))
+    started = await BrigJail(BrigConfig(), Host()).start(argv, cwd=str(project), owner="test")
     try:
         return [(code, line) for code, line in json.loads(await _report(said, started))]
     finally:
@@ -1773,7 +1773,7 @@ async def test_a_platform_brig_has_no_jail_for_is_refused_by_name(tmp_path: Path
     for platform in ("darwin", "freebsd"):
         one = BrigJail(BrigConfig(), Host(), platform=platform)
         with pytest.raises(RuntimeError, match=rf"this is {platform}.*`runner:unconfined`"):
-            await one.start(_listening, cwd=str(tmp_path))
+            await one.start(_listening, cwd=str(tmp_path), owner="test")
 
 
 def test_a_host_that_cannot_jail_reports_nothing_enforced_and_says_so_before_any_start(
@@ -1799,7 +1799,9 @@ async def test_a_host_with_no_bubblewrap_is_refused_with_what_a_person_does(
 ) -> None:
     monkeypatch.setattr("runner_cordis_plugin.jail.shutil.which", lambda name: None)
     with pytest.raises(RuntimeError, match=r"no `bwrap` on PATH.*`runner:unconfined`"):
-        await BrigJail(BrigConfig(), Host(), platform="linux").start(_listening, cwd=str(tmp_path))
+        await BrigJail(BrigConfig(), Host(), platform="linux").start(
+            _listening, cwd=str(tmp_path), owner="test"
+        )
 
 
 async def test_a_policy_that_mounts_no_interpreter_is_refused_by_brig_before_anything_starts(
@@ -1816,7 +1818,7 @@ async def test_a_policy_that_mounts_no_interpreter_is_refused_by_brig_before_any
     monkeypatch.setattr(f"{module}.prefix", str(tmp_path / "nowhere"))
     monkeypatch.setattr(f"{module}.host_executable", "/usr/bin/python3")
     with pytest.raises(Exception, match="add a readable root") as raised:
-        await BrigJail(BrigConfig(), Host()).start(_listening, cwd=str(project))
+        await BrigJail(BrigConfig(), Host()).start(_listening, cwd=str(project), owner="test")
     assert type(raised.value).__name__ == "PolicyInterpreterUnreachable"
     assert list(project.iterdir()) == []
 
@@ -1831,7 +1833,7 @@ async def test_a_jail_that_fails_to_launch_leaves_nothing_on_the_host(tmp_path: 
     program = "import sys; sys.stderr.write('no listening today')"
     with pytest.raises(RuntimeError, match=r"(?s)never listened.*no listening today"):
         await BrigJail(BrigConfig(), Host()).start(
-            lambda endpoint: [sys.executable, "-I", "-c", program], cwd=str(project)
+            lambda endpoint: [sys.executable, "-I", "-c", program], cwd=str(project), owner="test"
         )
     assert list(project.iterdir()) == []
     assert list((tmp_path / "state" / "bh-02" / "jails").iterdir()) == []
@@ -1855,7 +1857,9 @@ async def test_a_jail_start_cancelled_while_it_launches_ends_what_the_launch_sta
     monkeypatch.setattr("runner_cordis_plugin.jail.create_bwrap_jail", slow)
     starting = asyncio.ensure_future(
         BrigJail(BrigConfig(), Host()).start(
-            lambda endpoint: [sys.executable, "-I", "-c", _LISTEN, endpoint, marker], cwd=str(project)
+            lambda endpoint: [sys.executable, "-I", "-c", _LISTEN, endpoint, marker],
+            cwd=str(project),
+            owner="test",
         )
     )
     await asyncio.sleep(0.1)  # launching
@@ -1902,7 +1906,7 @@ async def test_each_start_keeps_what_it_is_whatever_the_jail_starts_after_it(tmp
             def argv(endpoint: str, name: str = name) -> list[str]:
                 return [sys.executable, "-I", str(tmp_path / name / "worker.py"), endpoint]
 
-            started.append(await one.start(argv, cwd=str(project)))
+            started.append(await one.start(argv, cwd=str(project), owner="test"))
         python_process, extensions = started
         assert str(tmp_path / "python") in python_process.reads(), python_process.reads()
         assert (
@@ -1926,7 +1930,7 @@ async def test_a_start_s_grades_are_brig_s_and_the_planned_ones_are_no_stronger(
     project = tmp_path / "project"
     project.mkdir()
     one = BrigJail(BrigConfig(), Host())
-    started = await one.start(_listening, cwd=str(project))
+    started = await one.start(_listening, cwd=str(project), owner="test")
     try:
         report = dict(started.report())
         assert report.pop("host_undo") == "tripwired"  # bh-02's own axis, which brig does not grade
@@ -1957,7 +1961,7 @@ async def test_release_frees_what_the_programs_held_once_each_owner_stopped_its_
     runner = Runner(BrigJail(BrigConfig(), Host()))
     started = []
     for _ in ("python", "extensions"):
-        started.append(await runner.start(_listening, cwd=str(project)))
+        started.append(await runner.start(_listening, cwd=str(project), owner="test"))
         runner.on_release(_stops(started[-1]))
     try:
         groups = [each.group for each in started]
@@ -1968,7 +1972,7 @@ async def test_release_frees_what_the_programs_held_once_each_owner_stopped_its_
         for group in groups:
             assert await _gone(group)
         assert runner.released()
-        again = await runner.start(_listening, cwd=str(project))
+        again = await runner.start(_listening, cwd=str(project), owner="test")
         try:
             assert not runner.released() and placeholder.is_dir()  # the next input's jail holds it again
         finally:
@@ -1997,7 +2001,7 @@ async def test_release_never_stops_a_program_its_owner_did_not_and_says_it_still
     project = tmp_path / "project"
     project.mkdir()
     runner = Runner(BrigJail(BrigConfig(), Host()))
-    kept = await runner.start(_listening, cwd=str(project))
+    kept = await runner.start(_listening, cwd=str(project), owner="test")
     try:
         said = await runner.release()
         assert "still runs" in said and "/restart" in said, said
@@ -2023,7 +2027,7 @@ async def test_release_waits_for_a_start_under_way_and_says_it_still_runs(
 
     monkeypatch.setattr("runner_cordis_plugin.jail.create_bwrap_jail", slow)
     runner = Runner(BrigJail(BrigConfig(), Host()))
-    starting = asyncio.ensure_future(runner.start(_listening, cwd=str(project)))
+    starting = asyncio.ensure_future(runner.start(_listening, cwd=str(project), owner="test"))
     await asyncio.sleep(0.1)  # launching
     said = await runner.release()
     assert starting.done(), "release answered before the start under way had"
@@ -2052,7 +2056,9 @@ async def test_an_input_creating_a_hidden_file_the_project_lacks_is_refused_and_
     def argv(endpoint: str) -> list[str]:
         return [sys.executable, "-I", "-c", program, endpoint, str(created), str(done)]
 
-    started = await BrigJail(BrigConfig(hide=("private.txt",)), Host()).start(argv, cwd=str(project))
+    started = await BrigJail(BrigConfig(hide=("private.txt",)), Host()).start(
+        argv, cwd=str(project), owner="test"
+    )
     try:
         await _report(done, started)
         await asyncio.sleep(0.3)  # the tripwire's thread has read the creation, if it watches it
@@ -2105,7 +2111,7 @@ async def test_a_deny_inside_another_is_left_to_the_outer_one(tmp_path: Path) ->
         ]
 
     config = BrigConfig(deny=("pkg/src",), hide=("pkg/src/private.txt",))
-    started = await BrigJail(config, Host()).start(argv, cwd=str(project))
+    started = await BrigJail(config, Host()).start(argv, cwd=str(project), owner="test")
     try:
         await _report(done, started)
         assert done.read_text() == "refused" and list((project / "pkg" / "src").iterdir()) == []
@@ -2142,7 +2148,7 @@ async def test_the_program_sees_the_allowlist_and_what_the_policy_sets_and_nothi
     def argv(endpoint: str) -> list[str]:
         return [sys.executable, "-I", "-c", _LISTEN_THEN_REPORT_THE_ENVIRONMENT, endpoint, str(said)]
 
-    started = await BrigJail(BrigConfig(), Host()).start(argv, cwd=str(project))
+    started = await BrigJail(BrigConfig(), Host()).start(argv, cwd=str(project), owner="test")
     try:
         seen = json.loads(await _report(said, started))
         assert "PATH" in seen and seen["TMPDIR"].endswith("/tmp")
@@ -2179,14 +2185,14 @@ async def test_one_jail_cannot_dial_another_jail_s_channel(tmp_path: Path) -> No
     project = tmp_path / "project"
     project.mkdir()
     one = BrigJail(BrigConfig(), Host())
-    victim = await one.start(_listening, cwd=str(project))
+    victim = await one.start(_listening, cwd=str(project), owner="test")
     said = project / "said"
     try:
 
         def argv(endpoint: str) -> list[str]:
             return [sys.executable, "-I", "-c", _LISTEN_THEN_DIAL, endpoint, victim.endpoint, str(said)]
 
-        attacker = await one.start(argv, cwd=str(project))
+        attacker = await one.start(argv, cwd=str(project), owner="test")
         try:
             _, writer = await asyncio.open_unix_connection(victim.endpoint)  # CONTROL: the owner can
             writer.close()
@@ -2226,7 +2232,7 @@ async def test_interrupting_a_running_input_reaches_the_program_and_the_program_
     def argv(endpoint: str) -> list[str]:
         return [sys.executable, "-I", "-c", _LISTEN_AND_SAY_ON_INTERRUPT, endpoint, str(said)]
 
-    started = await BrigJail(BrigConfig(), Host()).start(argv, cwd=str(project))
+    started = await BrigJail(BrigConfig(), Host()).start(argv, cwd=str(project), owner="test")
     try:
         assert started.interrupt() is True
         assert await _report(said, started) == "interrupted"
@@ -2255,7 +2261,7 @@ async def test_a_killed_bh_02_s_jail_ends_with_it_and_the_next_jail_removes_what
         assert await _gone(group, within=10.0), "the jail outlived the bh-02 that started it"
     assert (project / ".claude").is_dir() and not list((project / ".claude").iterdir())
     one = BrigJail(BrigConfig(), Host())
-    await (await one.start(_listening, cwd=str(project))).stop()  # brig swept
+    await (await one.start(_listening, cwd=str(project), owner="test")).stop()  # brig swept
     assert sorted(p.name for p in project.iterdir()) == ["alive", "alive.pid"]
 
 
@@ -2362,6 +2368,7 @@ async def test_the_owners_connection_still_reaches_the_jail_after_the_program_sw
     started = await BrigJail(BrigConfig(), Host()).start(
         lambda endpoint: [sys.executable, "-I", "-c", _LISTEN_THEN_SWAP_ITS_SOCKET, endpoint, str(victim)],
         cwd=str(project),
+        owner="test",
     )
     try:
         reader, writer = await asyncio.open_unix_connection(sock=started.connection)
@@ -2401,7 +2408,7 @@ async def test_a_start_with_a_project_under_tmp_is_refused_before_anything_start
     elsewhere = Path(tempfile.mkdtemp(prefix="bh-p-", dir="/tmp"))
     try:
         with pytest.raises(RuntimeError, match=rf"the project {elsewhere} is under /tmp.*--no-jail"):
-            await BrigJail(BrigConfig(), Host()).start(_listening, cwd=str(elsewhere))
+            await BrigJail(BrigConfig(), Host()).start(_listening, cwd=str(elsewhere), owner="test")
         assert (
             list(Path(os.environ["XDG_STATE_HOME"], "bh-02", "jails").iterdir()) == []
         )  # nothing left behind
@@ -2421,7 +2428,9 @@ async def test_a_memory_directory_under_the_runtime_directory_is_refused(
     memory = runtime / "memory"
     memory.mkdir()
     with pytest.raises(RuntimeError, match=rf"the memory directory {memory} is under {runtime}"):
-        await BrigJail(BrigConfig(), Host(auto_memory=str(memory))).start(_listening, cwd=str(project))
+        await BrigJail(BrigConfig(), Host(auto_memory=str(memory))).start(
+            _listening, cwd=str(project), owner="test"
+        )
 
 
 # Listens on argv[1]; then tries to reach the host's server at 127.0.0.1:argv[2] directly (a program that
@@ -2485,7 +2494,7 @@ async def test_a_jailed_program_reaches_no_network_and_one_that_ignores_the_prox
     def argv(endpoint: str) -> list[str]:
         return [sys.executable, "-I", "-c", _TRY_THE_NETWORK, endpoint, str(port), str(said)]
 
-    started = await BrigJail(BrigConfig(), Host()).start(argv, cwd=str(project))
+    started = await BrigJail(BrigConfig(), Host()).start(argv, cwd=str(project), owner="test")
     try:
         seen = json.loads(await _report(said, started))
         assert seen["direct_loopback"].startswith("refused"), seen
@@ -2537,7 +2546,7 @@ async def _tried_to_write(project: Path, store: Path, files: Sequence[Path], nam
     def argv(endpoint: str) -> list[str]:
         return [sys.executable, "-I", "-c", _LISTEN_THEN_TRY_TO_WRITE, endpoint, *map(str, files), str(said)]
 
-    started = await one.start(argv, cwd=str(project))
+    started = await one.start(argv, cwd=str(project), owner="test")
     try:
         return (await _report(said, started)).splitlines()
     finally:
@@ -2582,7 +2591,7 @@ async def test_a_refused_grant_in_the_store_never_reaches_the_jail_and_is_told_i
     def argv(endpoint: str) -> list[str]:
         return [sys.executable, "-I", "-c", _LISTEN_THEN_TRY_TO_WRITE, endpoint, str(layer), str(said)]
 
-    started = await one.start(argv, cwd=str(project))
+    started = await one.start(argv, cwd=str(project), owner="test")
     try:
         assert (await _report(said, started)).splitlines() == ["mine.toml: Read-only file system"]
         assert "is never granted" in started.notice() and str(layer) in started.notice()
@@ -2674,7 +2683,7 @@ async def test_a_destination_granted_is_reached_through_the_proxy_and_nothing_un
                     str(said),
                 ]
 
-            started = await one.start(argv, cwd=str(project))
+            started = await one.start(argv, cwd=str(project), owner="test")
             try:
                 outcomes.append((await _report(said, started)).splitlines())
             finally:
@@ -2724,7 +2733,7 @@ async def test_what_the_broker_says_is_granted_is_what_the_next_start_applies(tm
                 str(said),
             ]
 
-        started = await one.start(argv, cwd=str(project))
+        started = await one.start(argv, cwd=str(project), owner="test")
         try:
             came_to.append(await _report(said, started))
         finally:
@@ -2748,7 +2757,7 @@ async def test_a_store_that_is_refused_grants_nothing_and_the_starts_notice_says
     store.mkdir(parents=True, mode=0o700)
     (store / "grants.toml").write_text("not toml = =")
     one = BrigJail(BrigConfig(), Host(grants=str(store)))
-    started = await one.start(_listening, cwd=str(project))
+    started = await one.start(_listening, cwd=str(project), owner="test")
     try:
         assert "not TOML" in started.notice() and "grants.toml" in started.notice()
     finally:

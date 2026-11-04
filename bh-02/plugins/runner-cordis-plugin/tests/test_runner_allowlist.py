@@ -222,6 +222,7 @@ async def _names_in_the_jail(runner: Runner, project: Path) -> list[str]:
     started = await runner.start(
         lambda endpoint: [sys.executable, "-I", "-c", _LISTEN_AND_LIST, endpoint, str(seen)],
         cwd=str(project),
+        owner="test",
     )
     try:
         for _ in range(200):
@@ -311,4 +312,4 @@ async def test_a_key_variable_added_after_the_row_came_up_refuses_the_next_start
     runner = effects[0].args[1]
     models.readers["OTHER_KEY"] = ("added",)
     with pytest.raises(allowlist.Refused, match="OTHER_KEY"):
-        await runner.start(lambda endpoint: [sys.executable, endpoint], cwd=str(project))
+        await runner.start(lambda endpoint: [sys.executable, endpoint], cwd=str(project), owner="test")

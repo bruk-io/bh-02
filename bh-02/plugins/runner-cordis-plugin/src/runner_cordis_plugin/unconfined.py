@@ -140,7 +140,8 @@ class Unjailed:
         """Nothing: no jail holds anything on the host."""
         return ""
 
-    async def start(self, argv_for: ArgvFor, *, cwd: str) -> _Process:
+    async def start(self, argv_for: ArgvFor, *, cwd: str, owner: str) -> _Process:
+        """Start the program; `owner` is the runner's (nothing here asks for a destination)."""
         endpoint = reserved_endpoint()
         log = Path(endpoint).with_name("stderr.log")
         try:

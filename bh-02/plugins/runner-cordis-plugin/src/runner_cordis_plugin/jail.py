@@ -47,7 +47,7 @@ import signal
 import socket
 import tempfile
 import threading
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from sys import base_prefix, prefix
@@ -62,19 +62,25 @@ from brig import (
     ChannelNotReady,
     ChannelReady,
     ChannelRefused,
+    Destination,
     Jail,
+    JailEgressEnded,
+    allow_egress,
     await_channel_ready,
     create_bwrap_jail,
     destroy_jail,
+    egress_decisions,
     interrupt_jail,
     reserve_channels,
+    revoke_egress,
 )
 
 from host_paths import state_home
 from runner_cordis_plugin.brig_spec import report_of, to_brig
-from runner_cordis_plugin.broker import Broker
+from runner_cordis_plugin.broker import Broker, Outcome
+from runner_cordis_plugin.egress import Decision, Egress, Ended
 from runner_cordis_plugin.facts import git_identity, instead, interpreter_files, links_on_the_way
-from runner_cordis_plugin.grants import NO_GRANTS, Grants
+from runner_cordis_plugin.grants import NO_GRANTS, Grant, Grants, Kind, Request
 from runner_cordis_plugin.mounts import mountable, notice_for, released_for, tripwired
 from runner_cordis_plugin.policy import (
     BrigConfig,
@@ -166,11 +172,16 @@ class Host(Protocol):
 @runtime_checkable
 class Granting(Protocol):
     """What the jail needs of the `grants` value (CONTRACTS.md: grants): `granted()`, what the next
-    start applies, read fresh; and `problem()`, the words of a store it could not use ('' when it
-    could), which the start's notice carries."""
+    start applies, read fresh; `problem()`, the words of a store it could not use ('' when it
+    could), which the start's notice carries; and, for a running program's destinations, `on_change`
+    (what is granted may have changed), `ask` (a refused connection, as a question) and `tell` (a
+    refusal there is nothing to ask for, said to the model)."""
 
     async def granted(self) -> Grants: ...
     def problem(self) -> str: ...
+    def on_change(self, fn: Callable[[], None]) -> Callable[[], None]: ...
+    async def ask(self, request: Request) -> Outcome: ...
+    def tell(self, text: str) -> None: ...
 
 
 def _not_ready_message(outcome: ChannelNotReady | ChannelRefused | ChannelJailFinished) -> str:
@@ -216,7 +227,14 @@ class _Jailed:
     did)."""
 
     def __init__(
-        self, jail: Jail, endpoint: str, facts: _Facts, directories: Sequence[str], wire: Tripwire
+        self,
+        jail: Jail,
+        endpoint: str,
+        facts: _Facts,
+        directories: Sequence[str],
+        wire: Tripwire,
+        egress: Egress,
+        gone: threading.Event,
     ) -> None:
         self.endpoint = endpoint
         self._connection: socket.socket | None = None
@@ -224,6 +242,8 @@ class _Jailed:
         self._jail = jail
         self._facts = facts
         self._wire = wire
+        self.egress = egress
+        self._gone = gone  # set once brig's teardown has run: nothing of the jail is left to drain
         self._directories = tuple(directories)
         self._stopping: asyncio.Future[None] | None = None
         self._destroyed = False
@@ -282,6 +302,7 @@ class _Jailed:
             if not self._destroyed:
                 destroy_jail(self._jail)
                 self._destroyed = True
+                self._gone.set()
 
     def kill(self) -> None:
         """SIGKILL to the jail's process group: what the tripwire does when `end` raised."""
@@ -298,11 +319,39 @@ class _Jailed:
         try:
             if self._connection is not None:
                 self._connection.close()
+            await self.egress.end()
             await asyncio.to_thread(self._wire.stop)
             await asyncio.to_thread(self.end)
         finally:
             for directory in self._directories:
                 shutil.rmtree(directory, ignore_errors=True)
+
+
+class _BrigWire:
+    """A running jail's egress over brig (`egress.Wire`): its proxy's changes and decisions."""
+
+    def __init__(self, jail: Jail, gone: Callable[[], bool]) -> None:
+        self._jail = jail
+        self._gone = gone
+
+    def allow(self, grant: Grant) -> None:
+        try:
+            allow_egress(self._jail, Destination(grant.target, grant.port))
+        except JailEgressEnded as error:
+            raise Ended(str(error)) from error
+
+    def revoke(self, grant: Grant) -> None:
+        try:
+            revoke_egress(self._jail, Destination(grant.target, grant.port))
+        except JailEgressEnded as error:
+            raise Ended(str(error)) from error
+
+    def decisions(self) -> Iterable[Decision]:
+        drained: Iterable[Decision] = egress_decisions(self._jail)
+        return drained
+
+    def ended(self) -> bool:
+        return self._gone()
 
 
 def planned(
@@ -437,10 +486,12 @@ class BrigJail:
         self._live = [started for started in self._live if not started.stopped]
         return released_for(running=bool(self._live))
 
-    async def start(self, argv_for: ArgvFor, *, cwd: str) -> _Jailed:
+    async def start(self, argv_for: ArgvFor, *, cwd: str, owner: str) -> _Jailed:
         """Start the program `argv_for(endpoint)` in `cwd`, in a jail of its own made from the
         policy, listening on the endpoint brig reserved for this start (`started.endpoint`, for argv
-        alone) and connected to it by brig's verified connect (`started.connection`).
+        alone) and connected to it by brig's verified connect (`started.connection`). While it runs,
+        the destinations granted reach its proxy and each it refuses is asked, as `owner`'s input
+        (`egress.Egress`).
 
         Raises:
             RuntimeError: this is not Linux, or there is no bubblewrap, or a root of the jail (the
@@ -451,7 +502,7 @@ class BrigJail:
         starting: asyncio.Future[None] = asyncio.get_running_loop().create_future()
         self._starting.add(starting)
         try:
-            started = await self._launched(argv_for, cwd=cwd)
+            started = await self._launched(argv_for, cwd=cwd, owner=owner)
             self._live = [*(each for each in self._live if not each.stopped), started]
             return started
         finally:
@@ -459,7 +510,7 @@ class BrigJail:
             if not starting.done():  # a `release` cancelled as it waited cancels it
                 starting.set_result(None)
 
-    async def _launched(self, argv_for: ArgvFor, *, cwd: str) -> _Jailed:
+    async def _launched(self, argv_for: ArgvFor, *, cwd: str, owner: str) -> _Jailed:
         if self._cannot:
             raise RuntimeError(self._cannot)
         root = _jails_root()
@@ -528,8 +579,21 @@ class BrigJail:
             for directory in directories:
                 shutil.rmtree(directory, ignore_errors=True)
             raise
+        gone = threading.Event()
+        egress = Egress(
+            _BrigWire(jail, gone.is_set),
+            self._grants,
+            owner=owner,
+            held=grants.of(Kind.NET),
+        )
         started = _Jailed(
-            jail, reservation.endpoint, self._facts(policy, jail, scratch_root, armed), directories, wire
+            jail,
+            reservation.endpoint,
+            self._facts(policy, jail, scratch_root, armed),
+            directories,
+            wire,
+            egress,
+            gone,
         )
         wire.arm(started.end, fallback=started.kill)
         try:
@@ -543,6 +607,7 @@ class BrigJail:
                     f"the jailed program never listened: {_not_ready_message(outcome)}\n{detail}"
                 )
             started.ready(outcome.connection)
+            egress.begin()
         except BaseException:
             with contextlib.suppress(Exception):
                 await started.stop()

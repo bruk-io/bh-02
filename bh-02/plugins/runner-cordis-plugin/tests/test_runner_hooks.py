@@ -45,7 +45,7 @@ class _Mechanism:
     def notice(self) -> str:
         return ""
 
-    async def start(self, argv_for: Callable[[str], Sequence[str]], *, cwd: str) -> _Start:
+    async def start(self, argv_for: Callable[[str], Sequence[str]], *, cwd: str, owner: str) -> _Start:
         started = _Start(len(self.starts) + 1)
         self.starts.append(started)
         self.argvs.append(list(argv_for(started.endpoint)))
@@ -84,17 +84,17 @@ async def test_a_start_ends_a_release_and_is_told_to_each_watcher() -> None:
     stop_watching = runner.on_start(lambda started: seen.append(started.n))  # type: ignore[attr-defined]
     await runner.release()
     assert runner.released()
-    await runner.start(lambda endpoint: ["x", endpoint], cwd="/w")
+    await runner.start(lambda endpoint: ["x", endpoint], cwd="/w", owner="test")
     assert not runner.released() and seen == [1]
     assert runner.report()["fs_read"] == "grade 1" and runner.notice() == "notice 1"
     stop_watching()
-    await runner.start(lambda endpoint: ["y", endpoint], cwd="/w")
+    await runner.start(lambda endpoint: ["y", endpoint], cwd="/w", owner="test")
     assert seen == [1] and runner.report()["fs_read"] == "grade 2"  # the last start's
 
 
 async def test_the_runner_hands_the_command_the_endpoint_it_started_the_program_on() -> None:
     mechanism = _Mechanism([])
-    started = await Runner(mechanism).start(lambda endpoint: ["x", endpoint], cwd="/w")
+    started = await Runner(mechanism).start(lambda endpoint: ["x", endpoint], cwd="/w", owner="test")
     assert mechanism.argvs == [["x", "/s/1"]] and started.endpoint == "/s/1"
 
 
@@ -118,7 +118,7 @@ async def test_an_unconfined_start_chooses_a_short_socket_in_a_directory_of_its_
         given.append(endpoint)
         return [sys.executable, "-I", "-c", _LISTENS, endpoint]
 
-    started = await Unjailed().start(argv_for, cwd=str(tmp_path))
+    started = await Unjailed().start(argv_for, cwd=str(tmp_path), owner="test")
     try:
         assert given == [started.endpoint] and len(os.fsencode(started.endpoint)) < 108
         assert Path(started.endpoint).exists()
@@ -133,7 +133,7 @@ async def test_an_unconfined_start_chooses_a_short_socket_in_a_directory_of_its_
 async def test_the_runner_stops_no_program_itself() -> None:
     mechanism = _Mechanism([])
     runner = Runner(mechanism)
-    await runner.start(lambda endpoint: ["x", endpoint], cwd="/w")
+    await runner.start(lambda endpoint: ["x", endpoint], cwd="/w", owner="test")
     await runner.release()
     assert not mechanism.starts[0].stopped  # its owner registered no stop: it is the owner's
 

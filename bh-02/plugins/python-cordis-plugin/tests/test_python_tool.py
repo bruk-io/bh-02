@@ -1315,8 +1315,8 @@ class Confined(Unjailed):
     def report(self) -> Mapping[str, str]:
         return _CONFINED
 
-    async def start(self, argv_for: Callable[[str], Sequence[str]], *, cwd: str) -> Any:
-        started = await super().start(argv_for, cwd=cwd)
+    async def start(self, argv_for: Callable[[str], Sequence[str]], *, cwd: str, owner: str) -> Any:
+        started = await super().start(argv_for, cwd=cwd, owner=owner)
         return Told(started, report=_CONFINED, writes=self.writable)
 
 
@@ -1342,12 +1342,12 @@ class Hiding(Confined):
     def __init__(self, hidden: str) -> None:
         self._hidden = hidden
 
-    async def start(self, argv_for: Callable[[str], Sequence[str]], *, cwd: str) -> Any:
+    async def start(self, argv_for: Callable[[str], Sequence[str]], *, cwd: str, owner: str) -> Any:
         def hidden(endpoint: str) -> list[str]:
             executable, isolated, *worker = argv_for(endpoint)
             return [executable, isolated, "-c", _HIDING, self._hidden, *worker]
 
-        return await super().start(hidden, cwd=cwd)
+        return await super().start(hidden, cwd=cwd, owner=owner)
 
 
 class _Tripped:
@@ -1389,8 +1389,8 @@ class Tripping(Confined):
     def __init__(self) -> None:
         self.started: list[_Tripped] = []
 
-    async def start(self, argv_for: Callable[[str], Sequence[str]], *, cwd: str) -> _Tripped:
-        started = _Tripped(await super().start(argv_for, cwd=cwd))
+    async def start(self, argv_for: Callable[[str], Sequence[str]], *, cwd: str, owner: str) -> _Tripped:
+        started = _Tripped(await super().start(argv_for, cwd=cwd, owner=owner))
         self.started.append(started)
         return started
 
@@ -1486,12 +1486,12 @@ async def test_the_python_process_builds_its_command_from_the_endpoint_the_runne
             self.argvs: list[list[str]] = []
             self.started: list[Any] = []
 
-        async def start(self, argv_for: Callable[[str], Sequence[str]], *, cwd: str) -> Any:
+        async def start(self, argv_for: Callable[[str], Sequence[str]], *, cwd: str, owner: str) -> Any:
             def recorded(endpoint: str) -> Sequence[str]:
                 self.argvs.append(list(argv_for(endpoint)))
                 return self.argvs[-1]
 
-            self.started.append(await super().start(recorded, cwd=cwd))
+            self.started.append(await super().start(recorded, cwd=cwd, owner=owner))
             return self.started[-1]
 
     jail = Choosing()
@@ -1517,8 +1517,8 @@ async def test_the_python_process_uses_the_runners_connection_and_never_dials_th
     server = await asyncio.start_unix_server(decoy_connected, path=str(short / "decoy.sock"))
 
     class Swapping(Unjailed):
-        async def start(self, argv_for: Callable[[str], Sequence[str]], *, cwd: str) -> Any:
-            started = await super().start(argv_for, cwd=cwd)
+        async def start(self, argv_for: Callable[[str], Sequence[str]], *, cwd: str, owner: str) -> Any:
+            started = await super().start(argv_for, cwd=cwd, owner=owner)
             Path(started.endpoint).unlink()
             Path(started.endpoint).symlink_to(short / "decoy.sock")
             return started
@@ -1540,10 +1540,10 @@ async def test_a_python_process_that_cannot_start_again_says_so_as_the_input_and
             super().__init__()
             self.refuse = False
 
-        async def start(self, argv_for: Callable[[str], Sequence[str]], *, cwd: str) -> Any:
+        async def start(self, argv_for: Callable[[str], Sequence[str]], *, cwd: str, owner: str) -> Any:
             if self.refuse:
                 raise RuntimeError("the jail is broken")
-            return await super().start(argv_for, cwd=cwd)
+            return await super().start(argv_for, cwd=cwd, owner=owner)
 
     jail = Flaky()
     async with _process(jail, PythonProcessConfig()) as k:
@@ -1607,8 +1607,8 @@ class Ending(Unjailed):
         super().__init__()
         self.why = ""
 
-    async def start(self, argv_for: Callable[[str], Sequence[str]], *, cwd: str) -> Any:
-        started = await super().start(argv_for, cwd=cwd)
+    async def start(self, argv_for: Callable[[str], Sequence[str]], *, cwd: str, owner: str) -> Any:
+        started = await super().start(argv_for, cwd=cwd, owner=owner)
         jail = self
 
         class Said:
@@ -1740,7 +1740,7 @@ async def test_the_row_starts_the_worker_registers_python_and_leaving_stops_it()
 async def test_a_worker_whose_host_goes_away_ends_even_mid_input() -> None:
     """If bh-02 dies while an input spins, the worker must not outlive it."""
     short = tempfile.mkdtemp(prefix="bh-t-", dir="/tmp")  # a socket path must fit in ~100 bytes
-    started = await Unjailed().start(worker_argv, cwd=short)
+    started = await Unjailed().start(worker_argv, cwd=short, owner="test")
     reader, writer = await asyncio.open_unix_connection(sock=started.connection)
     writer.write(b'{"op": "hello"}\n{"op": "exec", "code": "while True: pass"}\n')
     await writer.drain()
@@ -1860,10 +1860,10 @@ class Counting(Confined):
     def __init__(self) -> None:
         self.starts = 0
 
-    async def start(self, argv_for: Callable[[str], Sequence[str]], *, cwd: str) -> Any:
+    async def start(self, argv_for: Callable[[str], Sequence[str]], *, cwd: str, owner: str) -> Any:
         self.starts += 1
         n = self.starts
-        started = await Unjailed.start(self, argv_for, cwd=cwd)
+        started = await Unjailed.start(self, argv_for, cwd=cwd, owner=owner)
         report = {**_CONFINED, "fs_read": f"grade {n}"}
         return Told(
             started, report=report, notice=f"notice {n}", reads=(f"/start/{n}",), writes=(f"/root/{n}",)
@@ -1881,7 +1881,7 @@ async def test_the_python_process_tells_its_own_worker_s_jail_whatever_else_the_
         assert "/start/1" in told
         assert (k.reads(), k.notice(), k.report()["fs_read"]) == (("/start/1",), "notice 1", "grade 1")
         short = tempfile.mkdtemp(prefix="bh-t-", dir="/tmp")  # a socket path must fit in ~100 bytes
-        other = await jail.start(worker_argv, cwd=short)  # another program
+        other = await jail.start(worker_argv, cwd=short, owner="test")  # another program
         try:
             assert (k.reads(), k.notice(), k.report()["fs_read"]) == (("/start/1",), "notice 1", "grade 1")
             assert k.instructions() == told

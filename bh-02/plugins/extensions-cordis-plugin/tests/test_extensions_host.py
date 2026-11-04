@@ -183,8 +183,8 @@ async def test_the_extensions_use_the_runners_connection_and_never_dial_the_endp
     server = await asyncio.start_unix_server(decoy_connected, path=str(short / "decoy.sock"))
 
     class Swapping(PlainJail):
-        async def start(self, argv_for: Callable[[str], Sequence[str]], *, cwd: str) -> Any:
-            started = await super().start(argv_for, cwd=cwd)
+        async def start(self, argv_for: Callable[[str], Sequence[str]], *, cwd: str, owner: str) -> Any:
+            started = await super().start(argv_for, cwd=cwd, owner=owner)
             Path(started.endpoint).unlink()
             Path(started.endpoint).symlink_to(short / "decoy.sock")
             return started
@@ -552,7 +552,7 @@ async def test_after_release_stops_the_worker_every_extension_loads_again_once_t
         assert "/release" in h.status()["todo"]["error"], h.status()
         await h.extensions.look()
         assert len(h.jail.started) == 1  # released: no worker starts while nothing changed
-        python_process = await h.runner.start(worker_argv, cwd=str(tmp_path))
+        python_process = await h.runner.start(worker_argv, cwd=str(tmp_path), owner="test")
         try:  # the next input started the Python process (a stand-in): the runner runs again
             await h.extensions.look()
             assert len(h.jail.started) == 3 and h.extensions.statuses["todo"].ok

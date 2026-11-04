@@ -50,6 +50,7 @@ GROUPS = (
             "bh-02/app/tests/test_python_repl.py",
             "bh-02/plugins/runner-cordis-plugin/tests/test_runner_approval.py",
             "bh-02/plugins/runner-cordis-plugin/tests/test_runner_confined.py",
+            "bh-02/plugins/runner-cordis-plugin/tests/test_runner_live_egress.py",
             "bh-02/plugins/runner-cordis-plugin/tests/test_runner_tmux.py",
             "bh-02/plugins/subagents-cordis-plugin/tests/test_agents_wiring.py",
         ),

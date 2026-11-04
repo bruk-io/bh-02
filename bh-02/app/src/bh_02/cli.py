@@ -191,6 +191,15 @@ def grants_revoke_command(grant_id: str) -> None:
     except (granting.Unreadable, LookupError, ValueError) as error:
         raise click.ClickException(str(error)) from None
     click.echo(f"revoked: {said}")
+    click.echo(_ONLY_FROM_THE_NEXT_START)
+
+
+#: What a revoke from outside a session can't do (the store is read at each start of a program).
+_ONLY_FROM_THE_NEXT_START = (
+    "A session running now keeps it until its next start of a program: to take it off there now, "
+    "`/grants revoke` it in that session, or `/clear` there (a connection already open stays open "
+    "until the program restarts)."
+)
 
 
 def _grants_store() -> Path:

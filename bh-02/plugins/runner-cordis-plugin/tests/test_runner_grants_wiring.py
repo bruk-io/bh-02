@@ -360,3 +360,36 @@ async def test_revoking_a_session_answer_a_need_still_holds_asks_the_need_again(
     assert len(output.asked) == asked + 1  # the holder is not left silently without it: asked again
     assert len(await grants.granted()) == 0  # and the answer is no this time
     await rt.shutdown()
+
+
+async def test_what_the_runner_told_the_broker_reaches_the_model_on_the_next_call_once(
+    tmp_path: Path,
+) -> None:
+    store = tmp_path / "grants"
+    store.mkdir(mode=0o700)
+    booted = await _booted(store)
+    rt = booted.runtime
+    grants, asides = rt.root.get("grants"), rt.root.get("asides")
+    (aside,) = asides.added
+    grants.tell("A connection the program made to nowhere.test:443 was refused: it did not resolve.")
+    assert (
+        aside({"name": "python"})
+        == "A connection the program made to nowhere.test:443 was refused: it did not resolve."
+    )
+    assert aside({"name": "python"}) == ""  # told once
+    await rt.shutdown()
+
+
+async def test_revoking_a_net_grant_through_the_command_says_open_connections_stay_open(
+    tmp_path: Path,
+) -> None:
+    store = tmp_path / "grants"
+    store.mkdir(mode=0o700)
+    booted = await _booted(store, "always")
+    rt = booted.runtime
+    grants, commands = rt.root.get("grants"), rt.root.get("commands")
+    await _settled()
+    (entry,) = [each for each in await grants.list() if each.request.grant == NET.grant]
+    said = await commands.registered["grants"](f"revoke {entry.id}")
+    assert said.startswith("revoked: ") and "connections already open" in said
+    await rt.shutdown()

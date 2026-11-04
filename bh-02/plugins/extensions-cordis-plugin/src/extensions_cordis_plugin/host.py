@@ -117,7 +117,7 @@ class Runner(Protocol):
     started, and whether `/release` has stopped what runs until the next start (`released`),
     when it waits rather than start again only to come back."""
 
-    async def start(self, argv_for: Callable[[str], Sequence[str]], *, cwd: str) -> _Jailed: ...
+    async def start(self, argv_for: Callable[[str], Sequence[str]], *, cwd: str, owner: str) -> _Jailed: ...
     def released(self) -> bool: ...
 
 
@@ -636,7 +636,7 @@ class Extensions:
             await self._stop()
         root = str(Path(self._config.root).resolve())
         try:
-            self._process = await self._runner.start(worker_argv, cwd=root)
+            self._process = await self._runner.start(worker_argv, cwd=root, owner="extensions")
             reader, self._writer = await asyncio.open_unix_connection(
                 sock=self._process.connection, limit=_LINE_LIMIT
             )

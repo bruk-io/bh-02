@@ -79,7 +79,7 @@ async def test_the_unconfined_runner_starts_programs_without_tmux_s_variables(tm
     project.mkdir()
 
     async def start(argv: Callable[[str], list[str]], cwd: str) -> Any:
-        return await Unjailed().start(argv, cwd=cwd)
+        return await Unjailed().start(argv, cwd=cwd, owner="test")
 
     seen = await _environment_of(start, project)
     assert seen["TMUX"] is None and seen["TMUX_PANE"] is None
@@ -95,7 +95,7 @@ async def test_the_unconfined_runner_keeps_the_claude_token_out_and_passes_provi
     project.mkdir()
 
     async def start(argv: Callable[[str], list[str]], cwd: str) -> Any:
-        return await Unjailed().start(argv, cwd=cwd)
+        return await Unjailed().start(argv, cwd=cwd, owner="test")
 
     seen = await _environment_of(start, project)
     assert "CLAUDE_CODE_OAUTH_TOKEN" not in seen["names"]
@@ -112,7 +112,7 @@ async def test_the_confined_runner_starts_programs_without_tmux_s_variables(tmp_
     jail = BrigJail(BrigConfig(), _Host())
 
     async def start(argv: Callable[[str], list[str]], cwd: str) -> Any:
-        return await jail.start(argv, cwd=cwd)
+        return await jail.start(argv, cwd=cwd, owner="test")
 
     seen = await _environment_of(start, project)
     assert seen["TMUX"] is None and seen["TMUX_PANE"] is None
@@ -129,7 +129,7 @@ async def test_the_confined_runner_passes_neither_the_claude_token_nor_a_provide
     jail = BrigJail(BrigConfig(), _Host())
 
     async def start(argv: Callable[[str], list[str]], cwd: str) -> Any:
-        return await jail.start(argv, cwd=cwd)
+        return await jail.start(argv, cwd=cwd, owner="test")
 
     seen = await _environment_of(start, project)
     assert "CLAUDE_CODE_OAUTH_TOKEN" not in seen["names"] and "OPENROUTER_API_KEY" not in seen["names"]

@@ -56,6 +56,8 @@ def test_a_revoked_always_grant_is_gone_at_the_next_start(store: Path) -> None:
     result = CliRunner().invoke(main, ["grants", "revoke", id_net])
     assert result.exit_code == 0, result.output
     assert result.output.startswith(f"revoked: {id_net}")
+    assert "A session running now keeps it until its next start" in result.output
+    assert "`/grants revoke` it in that session" in result.output
     assert read(store) == (_DATA,)
     # a session's next start reads the store afresh
     assert asyncio.run(Broker(store).granted()).items == (_DATA.grant,)

@@ -4,6 +4,7 @@ from typing import Protocol, runtime_checkable
 
 from runner_cordis_plugin import store
 from runner_cordis_plugin.broker import Entry, Unknown
+from runner_cordis_plugin.prompting import revoked as revoked_words
 
 __all__ = ["Listing", "grants_command"]
 
@@ -31,4 +32,4 @@ async def grants_command(grants: Listing, args: str) -> str:
         revoked = await grants.revoke(words[1])
     except (Unknown, store.Refused) as error:
         return str(error)
-    return f"revoked: {revoked}"
+    return " ".join(filter(None, [f"revoked: {revoked}", revoked_words(revoked.request.grant)]))

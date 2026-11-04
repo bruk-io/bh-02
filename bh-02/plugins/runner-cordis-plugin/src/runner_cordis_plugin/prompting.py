@@ -9,12 +9,23 @@ and nowhere else.
 """
 
 from collections.abc import Sequence
+from ipaddress import ip_address
 from typing import Any
 
 from runner_cordis_plugin.grants import Answer, Grant, Kind, Request
 from runner_cordis_plugin.policy import SELF_MODIFYING
 
-__all__ = ["answer_of", "applies", "decided", "question"]
+__all__ = [
+    "answer_of",
+    "applies",
+    "decided",
+    "question",
+    "refusal_reason",
+    "revoked",
+    "unapplied",
+    "ungrantable",
+    "unasked",
+]
 
 #: The answers, in the order the keys line shows them: the key, the answer it gives and its label.
 _CHOICES: tuple[tuple[str, Answer, str], ...] = (
@@ -25,15 +36,12 @@ _CHOICES: tuple[tuple[str, Answer, str], ...] = (
 
 
 def applies(grant: Grant) -> str:
-    """When `grant`, once approved, takes effect in this build: from the next start of the program
-    it is for (`/clear` starts the Python process again), a destination included until egress
-    changes live."""
+    """When `grant`, once approved, takes effect in this build: a destination now, on every running
+    program (a connection already open is not affected); the rest from the next start of the
+    program it is for (`/clear` starts the Python process again)."""
     match grant.kind:
         case Kind.NET:
-            return (
-                "from each program's next start (one already running keeps its destinations until "
-                "then; `/clear` starts the Python process again)"
-            )
+            return "now, on every running program; connections already open are not affected"
         case Kind.READ | Kind.WRITE | Kind.ENV:
             return "from the program's next start (`/clear` starts the Python process again)"
 
@@ -70,13 +78,58 @@ def decided(request: Request, answer: Answer) -> str:
     """What the model is told of an answer, in a line: the grant, who asked, what was decided and,
     when it was granted, when it applies."""
     what = f"{_what(request.grant)} (asked by {request.asker})"
+    retry = " The call may retry it." if request.grant.kind is Kind.NET else ""
     match answer:
         case Answer.ONCE:
-            return f"The person granted {what} for this session; it applies {applies(request.grant)}."
+            return f"The person granted {what} for this session; it applies {applies(request.grant)}.{retry}"
         case Answer.ALWAYS:
-            return f"The person granted {what} for this project; it applies {applies(request.grant)}."
+            return f"The person granted {what} for this project; it applies {applies(request.grant)}.{retry}"
         case Answer.NO:
             return f"The person declined {what}; it is not granted this session and will not be asked again."
+
+
+def revoked(grant: Grant) -> str:
+    """What the person is told when `grant` is revoked, beyond the grant itself; '' for none. A
+    destination is refused from the next connection on, but brig never cuts one already open."""
+    if grant.kind is not Kind.NET:
+        return ""
+    return (
+        "connections already open through it stay open until the program restarts (`/clear` "
+        "restarts the Python process): the proxy judges a connection once, when it names its destination"
+    )
+
+
+def refusal_reason(host: str, port: int, reason: str, address: str) -> str:
+    """Why a refused connection is asked, as the asker's `reason`."""
+    if reason == "private-address":
+        return (
+            f"a connection the program made to {host}:{port} was refused: the name resolved to the "
+            f"private address {address}, which only a grant of that address itself opens"
+        )
+    return f"a connection the program made to {host}:{port} was refused: it is not granted"
+
+
+def unasked(reason: str, host: str, port: int) -> str:
+    """What the model is told of a refusal that is not asked, since there is nothing to grant."""
+    why = {
+        "unresolved": "the name did not resolve from the host, so there is nothing to allow",
+        "address-unparseable": "the address it resolved to could not be read, so there is nothing to allow",
+        "authority-unparseable": "the request's destination could not be read, so there is nothing to allow",
+    }.get(reason, f"the proxy refused it ({reason}), and there is nothing to allow")
+    return f"A connection the program made to {host}:{port} was refused: {why}."
+
+
+def ungrantable(host: str, port: int, problem: str) -> str:
+    """What the model is told of a refusal whose destination cannot be a grant."""
+    return f"A connection the program made to {host}:{port} was refused, and it cannot be granted: {problem}"
+
+
+def unapplied(error: Exception) -> str:
+    """What the model is told when a grant could not reach a running program's proxy."""
+    return (
+        f"A destination the person granted could not be applied to the running program ({error}); "
+        "it applies from the next start."
+    )
 
 
 def _what(grant: Grant) -> str:
@@ -102,6 +155,8 @@ def _effect(grant: Grant, places: Sequence[str]) -> str:
 
 
 def _warnings(grant: Grant, places: Sequence[str]) -> list[str]:
+    if grant.kind is Kind.NET:
+        return _private_warning(grant.target)
     if grant.kind not in (Kind.READ, Kind.WRITE):
         return []
     if _refused_at_start(grant, places):
@@ -130,6 +185,18 @@ def _warnings(grant: Grant, places: Sequence[str]) -> list[str]:
             "setting): a write there can run as you, unconfined"
         )
     return warnings
+
+
+def _private_warning(target: str) -> list[str]:
+    """A warning for a net grant on an IP literal that is not public: it lets the jail reach that
+    address on the person's own network."""
+    try:
+        address = ip_address(target)
+    except ValueError:
+        return []
+    if address.is_global:
+        return []
+    return [f"{target} is not a public address: this lets the program reach {target} on your network"]
 
 
 def _refused_at_start(grant: Grant, places: Sequence[str]) -> bool:
