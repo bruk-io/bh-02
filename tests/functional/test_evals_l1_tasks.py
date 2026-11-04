@@ -35,7 +35,7 @@ _SYNTHETIC = ("json", "log", "a11y", "figma")  # the formats whose anomalies wer
 def test_an_anomaly_the_fold_has_a_rule_for_is_in_view_and_none_is_ever_invented(task_id):
     """Quiet anomalies (no rule) are measured, not promised: they are in the l1 report. So are real
     logs (HDFS), whose anomalies nobody planted and whose healthy blocks are full of error words:
-    there the fold does invent anomalies, and the report says how often (FINDINGS 70)."""
+    there the fold does invent anomalies, and the report says how often."""
     assert check(_BY_ID[task_id], 2000, query_on=False).sufficient
 
 

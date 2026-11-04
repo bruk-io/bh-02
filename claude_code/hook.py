@@ -7,15 +7,13 @@
 The `cd` is required: Claude Code runs hooks in the session's directory. The hook sees one of two
 things in `tool_response`: the result itself, when it is under Claude Code's own limits, or Claude
 Code's notice that it saved the result to a file. By default (`inline`) it folds only the first,
-saving the raw beside Claude Code's own spills, and leaves spills to Claude Code: in P2 (FINDINGS
-34-35) folding results under the spill threshold kept answers and shrank the final context by 7k
-tokens, while folding spills grew it, since Claude reads the saved raw anyway. `spilled` folds
-only spills (it reads the file Claude Code saved and gives Claude the folded view and that path);
-`all` folds both.
+saving the raw beside Claude Code's own spills, and leaves spills to Claude Code, whose notice
+already keeps the result out of the context. `spilled` folds only spills (it reads the file
+Claude Code saved and gives Claude the folded view and that path); `all` folds both.
 
 Bash is folded the same way, after the command has run: permission rules were checked on the real
-command, and `cd` and exit codes are untouched (rewriting the command before it runs breaks both;
-FINDINGS 46). Its stdout is the inline result; above 30,000 characters Claude Code saves the output
+command, and `cd` and exit codes are untouched (rewriting the command before it runs breaks both).
+Its stdout is the inline result; above 30,000 characters Claude Code saves the output
 and gives `persistedOutputPath`, which is the spill. Read is never folded: it is how Claude gets a
 file exactly, and what Edit relies on.
 

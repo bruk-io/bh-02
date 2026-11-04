@@ -1,127 +1,90 @@
 # Plan
 
-Goal: find out which tool-output compressors keep what the model needs while cutting tokens, with
-numbers, before anything is built into a harness. See README.md for the design under test and the
-kill criteria.
+Goal: find which composition of the envelope gives Claude Code what it needs from a large tool
+output at the least context and cost, measured against native Claude Code on the same tasks. The
+kill criteria are in README.md.
+
+## The envelope
+
+A large output reaches the model as an envelope of four parts: **shape** (what the data is, in
+exact numbers), **anomalies** (what breaks the shape, each with its address), **samples** (what
+items look like, verbatim) and **get more** (how to fetch the rest: addresses and a ready command).
+The raw output stays saved, and the envelope names the file.
+
+A producer makes each part. Producers run in a fixed order, shape first, and each is given the
+parts before it, which it reads through what they claim (a count, the values a field holds, a row
+that breaks the shape, a command and what it prints). Each part offers levels, fullest first, and
+each level states the claims it makes. `compose` starts every part at its tersest level and raises
+them in priority order while the text fits the budget.
+
+Layer 1 checks every claim against the data, apart from the producers' code: a jq-path walker
+recomputes counts, values and rows, and each command is run with `jq` itself. It also checks that
+each claim is said on a line of its level's text, since a claim the text does not show is one the
+model never reads.
+
+Code: `compressors/envelope.py` (the protocol and `compose`), `compressors/envelope_json.py` (JSON's
+producers and recipes), `evals/envelope_check.py` (layer 1's check). JSON is the one format with an
+envelope so far.
+
+## Compositions
+
+A composition names a producer for each part, a priority and a budget.
+
+| Part | Producers |
+|---|---|
+| shape | `fields` (every field's types, values and counts, ranges), `summary` (each field's type, and counts for fields with six values or fewer) |
+| anomalies | `exceptions` (every row that breaks its collection's shape, and what breaks it), `standouts` (items the stand-out rules pick: rare values, error keys, failing statuses), `none` |
+| samples | `matches` (rows holding a query term at most a fifth of the rows hold), `typical` (those, and a row that breaks nothing), `head-tail` (those, and each collection's first two rows and its last), `none` |
+| get more | `jq` (a ready query for the rows that break the shape, and how to read any path), `rows` (how to read any row or range), `none` |
+
+Two compositions are named recipes, chosen with `--view` (the hook's `TOOL_OUTPUT_LAB_VIEW`):
+`sample`, the default, is summary, standouts, head-tail and rows; `schema` is fields, exceptions,
+matches and jq. Any other composition is a recipe with parts swapped by knobs, such as `--set
+json_envelope.samples=none` or `json_envelope.priority=shape,anomalies,samples,nav`. Every entry
+point takes the same knobs: `./lab fold`, layer 1, layer 2, the hook, and the specs in `dials/`,
+`sessions/` and `sweeps/`.
+
+## How compositions are compared
+
+- **Layer 1, free.** Every task's payload is folded under each composition: claims checked, then
+  sufficiency (the task's own scorer run on the envelope's text, an upper bound on what a model can
+  answer without fetching) and size. `./lab evals sweep sweeps/envelopes.toml` runs a grid.
+- **Layer 2, paid.** Headless Claude Code on the same tasks, native against each composition,
+  paired by task and repetition (`./lab evals dials SPEC`, a setting per composition). `./lab evals
+  sessions SPEC` asks follow-up questions about one result in one session.
+- **Tasks.** JSON only: synthetic pod lists with planted answers (`json`), the PyPI release file
+  (`pypi`), and MCP-Atlas tasks replayed from their recorded tool calls and scored by the facts in
+  each task's answer claims (`atlas`). EVALS.md has the task kinds and the statistics.
 
 ## Stages
 
-Each stage leaves a script and a file in `results/`. A later stage never edits an earlier result.
-
 | # | Stage | Needs a model | Status |
 |---|---|---|---|
-| 1 | Extraction: Claude Code transcripts -> `corpus/results.jsonl` (one row per tool result, with the next assistant step as replay ground truth) | no | done; corpus 1 is six sub-agents' transcripts |
-| 2 | Corpus stats: size distribution, per-tool totals, format mix of the large ones | no | done |
-| 3 | Compressors: `lines` (dedupe + head/tail + error windows), `json` (array folding + anomaly promotion), `html` (strip to text, then `lines`), `text` (head/tail by chars), router, recovery | no | done (html not yet in the needle grid) |
-| 4 | Deterministic ratio: run every compressor over the corpus; tokens in/out per branch | no | done; `results/stats-agents-1.md` |
-| 5 | Needle survival: synthetic JSON and logs with one planted anomaly; does it survive compression? This is the upper bound on what a model can find | no | done; see results/FINDINGS.md |
-| 6 | Replay: re-run the step after each large result with the compressed result; judge equivalence; count recovery calls | yes | blocked: API key and a real corpus |
-| 7 | Needle with a model: same synthetic set, ask the model to find the anomaly, raw vs compressed | yes | blocked: API key |
-| 8 | Verdict per branch against the kill criteria | - | after 6 and 7 |
+| M1 | Log each fold with its session, so every layer-2 row says whether the envelope acted on the task's large output, and the report splits on it | no | |
+| M2 | MCP-Atlas tasks limited to those whose large output is JSON (50 of 59), so every fold under test is an envelope | no | |
+| M3 | Layer-1 baseline: every composition in `sweeps/envelopes.toml` on the synthetic, PyPI and MCP-Atlas tasks | no | |
+| M4 | Layer 2 on Haiku: native against the sample and schema recipes on MCP-Atlas (about $3) and on the synthetic JSON tasks at M and L (about $1) | yes | |
+| M5 | Layer 2 on compositions layer 1 cannot tell apart: a typical sample or none, no get more | yes | |
+| M6 | Sonnet on the compositions Haiku leaves standing | yes | |
+| M7 | Sessions: follow-up questions on one JSON result, native against the two recipes (`sessions/haiku.toml`, about $4) | yes | |
 
-## Decisions taken while working alone
+Later, other formats on the same protocol: trees (accessibility snapshots, Figma) with a nested
+envelope for each run of repeated siblings, and logs as templates (the templates and their counts
+as the shape, the rare ones as the anomalies).
 
-- Python 3.15 via `uv run --no-project --python 3.15`, standard library only for the code; pytest for tests. Own
-  `pytest.ini` and `ruff.toml` so the bh-02 root config (workspace globs, member paths) never applies here.
-- Compressors are pure functions `(tool_name, args, raw) -> Compressed`. The raw-output cache is the
-  caller's dict keyed by call id; `recover(raw, query)` is pure too.
-- Token counts are `ceil(chars / 4)`. Good enough for ratios between branches; the model stages
-  use the API's own counts.
-- Anomaly promotion in JSON is statistical (a low-cardinality field where one value dominates, and
-  an item holds a rare value) plus explicit error keys. No substring match on the whole item, which
-  flags every `"deleted": false`.
-- Promoted JSON items stay in place in the array, between fold markers, so the array stays an
-  array and the item looks like what it is.
-- Query terms come from the tool-call arguments only, and are a knob the needle stage measures with
-  and without.
+## Decisions
 
-## Known caveat for the corpus
+- Python 3.15 through `uv run --no-project`, standard library only for the envelope; own
+  `pytest.ini` and `ruff.toml`, so the bh-02 root config never applies here.
+- Producers are pure functions and an envelope is a value. Layer 1's checks share no code with the
+  producers.
+- Every count, range and row an envelope states is computed over all rows, never sampled. A model
+  will trust "Failed 3".
+- Budgets count tokens as `ceil(chars / 4)`; layer 2 reports the API's own counts.
+- Query terms come from the tool call's own arguments, ignoring terms most rows share.
 
-Claude Code already caps what reaches the model (Bash output is cut, Read pages long files), so a
-Claude Code corpus understates how large raw tool outputs get. Stats report that the sizes are
-post-harness.
+## Known caveat
 
-## Claude Code stages (from 2026-11-03)
-
-| # | Stage | Status |
-|---|---|---|
-| C1 | Map what Claude Code already does with large outputs, from its docs | done |
-| C2 | Probe the hook points (PostToolUse output shapes, spills, Read numbering, PreToolUse deny) | done |
-| C3 | PostToolUse fold hook for MCP results, inline and spilled | done |
-| C4 | Fixture MCP server and headless A/B harness | done |
-| C5 | A/B 1: JSON and logs, Haiku | done: fold wins on spilled, loses inline |
-| C6 | Tree folding: code (ast-grep), XML, outlines | done |
-| C7 | A/B 2: accessibility snapshots and Figma XML, Haiku | done: same split |
-| C8 | Read gate (PreToolUse) with ast-grep outlines | removed (review 1, R2): it showed file content before Claude Code's permission check, and models page on their own |
-| C9 | A/B with Sonnet, spilled-only mode, large cases | done (A/B 3); superseded by P2 and P3 (EVALS.md) |
-| C10 | The outline as a tool Claude calls, against its own grep outlines | done: P2 and P3 offered it as `lab-fold` and as an MCP tool; used once in 76 runs (FINDINGS 36, 42) |
-| C11 | Fold Bash output from the hook (after the command runs) | done: FINDINGS 46-48; the second-look regress is open |
-
-## Schema views for data (from 2026-11-03)
-
-What the evals showed about the current fold: after a fold, models query the raw (grep, `jq` or a
-script in 89% of first moves, FINDINGS 46-48 and the transcripts), they use the commands the output
-names, and they almost never open a marker's range. The fold shows samples (head, tail, stand-outs)
-and leaves the model to infer the data's shape from them; quiet anomalies, which no rule names, are
-lost at M and L in every format (R7), and counts past the stand-out cap survive only in JSON,
-because its summary states them.
-
-So for data, show its schema instead: what fields there are, what values they take and how many of
-each, where the rows that break the pattern are, and the query that fetches instances. A schema's
-size depends on the structure, not on the number of rows.
-
-    .items: array[500], every item has the same 10 keys
-      name      str, unique, like web-<hex>
-      phase     Running 488, CrashLoopBackOff 12
-      restarts  int 0..97, median 1; 97 at .items[312] (next highest 3)
-    exceptions: .items[312] (web-a9da82d697) restarts=97; ...
-    query:      jq '.items[] | select(.phase != "Running") | .name' FILE
-
-Rules:
-
-- **Exact.** Every count, range and exception is computed over all rows, never sampled, and layer
-  1 checks each claim against the data. A model will trust "Failed 3".
-- **Exceptions with addresses.** A row breaks the pattern when it holds a value few rows hold, a
-  number far outside the rest, or a key most rows lack (or lacks one most have). Each is listed with
-  its path and its identifying field (a unique name or id), so it can be named and fetched.
-- **Native addresses and a query.** Paths are `jq` paths (`yq` for YAML, XPath or ids for XML), and
-  the view names one ready query, since models use the commands the output names.
-- **Mixed trees.** Show unique nodes as an outline, and replace each run of same-shaped siblings by
-  its schema and exceptions (Figma and accessibility trees are document-like at the top and data
-  where siblings repeat).
-- **Documents are not data.** Code and Markdown keep the outline (their signatures and headings are
-  their schema), with open, find and read verbs later. Logs (line templates) are paused.
-
-| # | Stage | Needs a model | Status |
-|---|---|---|---|
-| S1 | JSON schema view (`compressors/schema.py`): structure, field statistics, exceptions, a query; `--view schema`, the sample fold staying for comparison | no | done |
-| S2 | Layer 1 on both views: the claims checked against the data; sufficiency on spot (rule and quiet), count (past the cap), enumerate, absent, and lookup (expected to need the raw) | no | done: schema 41/47, sample 38/47, half the size, 0 false claims (FINDINGS 49-50) |
-| S3 | Repeated siblings in XML and accessibility trees as schemas | no | |
-| S4 | YAML through the same schema (multi-document manifests) | no | |
-| S5 | Layer 2 on Haiku: the schema view against the sample fold and native, M and L | yes, about $2 | in part: as a dial at M, L to XXL and in sessions, never an answer lost, 8 to 39 pairs a cell (FINDINGS 54-66); a deciding run is open |
-| S6 | The second-look regress in forced Bash folding (FINDINGS 48), before any Bash run of S5 | yes, about $0.70 | |
-
-## The envelope (from 2026-11-04)
-
-Every view of a large output answers four questions, and the envelope is that structure: **shape**
-(what the data is, in exact numbers), **anomalies** (what breaks the shape, each with its address),
-**samples** (what items look like, verbatim) and **nav** (how to fetch the rest: addresses and a
-ready command). A recipe names a producer for each part; producers run in that order, each given
-the parts before it, and read one another through what each part claims. Each part offers levels,
-fullest first, with the claims each makes; `compose` starts every part at its tersest and raises
-them in priority order within the budget. Layer 1 checks every claim against the data and that
-the text says it. Code: `compressors/envelope.py` (the core), `compressors/envelope_json.py` (JSON's
-producers), `evals/envelope_check.py`. JSON always folds as an envelope: `--view sample` or `--view
-schema` names a recipe, and a `json_envelope` knob swaps one part. The old renderers (the sample
-fold's JSON-with-markers, the schema view's text, their markers and marker checks, `recovery.py`) are
-gone (E7).
-
-| # | Stage | Needs a model | Status |
-|---|---|---|---|
-| E1 | The protocols and `compose` | no | done |
-| E2 | JSON's two views split into producers; the schema and sample recipes reproduce them in layer 1 | no | done: schema recipe on exactly the schema view's 41 of 47, sample recipe on 37 of the fold's 38 (FINDINGS 67) |
-| E3 | A layer-1 sweep over mixed recipes | no | done: `sweep-envelopes.md` (FINDINGS 68) |
-| E4 | Trees (S3) as producers on the same protocol, with nested envelopes for repeated siblings | no | |
-| E5 | Logs as templates: shape the templates and counts, anomalies the rare ones | no | |
-| E6 | Layer 2 on recipes that layer 1 cannot tell apart (a typical sample or none) | yes | |
-| E7 | The envelope replaces both JSON renderers; views become recipes | no | done: layer 1 as before, and the sample view finds the query's rows by the old fold's rule (FINDINGS 69) |
+The MCP-Atlas replay answers a call with the closest recorded call of the same tool, so a model
+that asks differently from the recorded run can get a smaller output and never see the large one.
+M1 measures how often, and the report keeps those sessions apart.

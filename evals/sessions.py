@@ -5,14 +5,15 @@
     name = "haiku"
     model = "claude-haiku-5-5"
     bands = ["M", "L"]
-    formats = ["json", "log", "a11y", "figma"]
+    formats = ["json"]
     reps = 2
-    max_cost = 8                  # USD; no new session starts once this is spent
+    max_cost = 4                  # USD; no new session starts once this is spent
     ids = ["json-M-count-k7"]     # exact conversations, for a smoke run (optional)
 
     [[setting]]                   # as in a dials spec (evals/dials.py)
-    name = "fold"
+    name = "schema"
     mode = "all"
+    view = "schema"
 
 Each conversation (`evals.tasks.conversations`) is built on a count task's payload: the count (whose
 prompt names the tool), every planted item, then four items looked up across the payload, asked in

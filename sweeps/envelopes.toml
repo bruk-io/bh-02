@@ -1,6 +1,6 @@
-# Envelopes mixed from the two JSON views' parts: every shape with every kind of anomaly and of
-# sample (nav the schema view's jq, which states no answers), at two budgets. The schema view is
-# fields, exceptions, matches; the sample view is summary, standouts, head-tail.
+# Compositions mixed from the two recipes' parts: every shape with every kind of anomaly and of
+# sample (get more the schema recipe's jq, which states no answers), at two budgets. The schema
+# recipe is fields, exceptions, matches; the sample recipe is summary, standouts, head-tail.
 name = "envelopes"
 only = ["json", "pypi"]
 

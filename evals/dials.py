@@ -1,31 +1,31 @@
 """Layer 2 over dial settings: the same tasks on one model, native against each setting of the fold.
 
-    ./lab evals dials dials/haiku-m.toml [--dry-run]
+    ./lab evals dials dials/haiku-atlas.toml [--dry-run]
 
-    name = "haiku-m"
+    name = "haiku-json"
     model = "claude-haiku-5-5"
     bands = ["M"]
-    formats = ["json", "log", "a11y", "figma"]
+    formats = ["json", "atlas"]
     reps = 2
     max_cost = 6                  # USD; no new session starts once this is spent
     ids = ["json-M-spot-at50"]    # exact tasks, for a smoke run (optional)
 
-    [[setting]]                   # the hook as shipped
-    name = "default"
-
-    [[setting]]
-    name = "budget-500"
-    budget = 500
+    [[setting]]                   # the sample recipe, the default view
+    name = "sample"
 
     [[setting]]
     name = "schema"
     view = "schema"
-    formats = ["json"]            # a setting that changes one format runs on that format alone
+
+    [[setting]]                   # a composition: the schema recipe without its samples
+    name = "schema-no-samples"
+    view = "schema"
+    set = ["json_envelope.samples=none"]
+    formats = ["json"]            # a setting that names formats runs on those alone
 
     [[setting]]
-    name = "tree-cap-25"
-    set = ["tree.max_promoted=25", "tree.rare_share=0.2"]
-    formats = ["a11y", "figma"]
+    name = "budget-500"
+    budget = 500
 
 A setting takes `mode` (inline by default), `budget` (2000), `view` (sample), `set` (knobs, as for
 `--set`) and `formats`. Every task runs natively and under each setting that covers it, interleaved
