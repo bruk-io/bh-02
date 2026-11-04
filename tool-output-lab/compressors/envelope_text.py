@@ -127,7 +127,7 @@ def numbered(lines: tuple[str, ...], rows: tuple[int, ...], clip: int) -> tuple[
     return body, claims
 
 
-def query_rows(lines: tuple[str, ...], terms: frozenset[str], share: float = 0.2) -> tuple[int, ...]:
+def query_rows(lines: tuple[str, ...], terms: frozenset[str], share: float = 0.05) -> tuple[int, ...]:
     """Lines holding a query term that at most `share` of the non-blank lines hold."""
     filled = [i for i, line in enumerate(lines) if line.strip()]
     useful = discriminating(terms, [lines[i] for i in filled], share=share)

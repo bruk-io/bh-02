@@ -3,21 +3,14 @@
 from dataclasses import dataclass
 from typing import Any
 
-from compressors import envelope_log, markers
+from compressors import envelope_log, envelope_tree, markers
 from compressors.common import estimate_tokens, split_lines
 from compressors.config import DEFAULT, FoldConfig
 from compressors.envelope_json import VIEWS, envelope
 from compressors.html import html_to_text, looks_like_html
 from compressors.json_items import parse_json_or_jsonl
 from compressors.lines import fold_lines
-from compressors.tree import (
-    XmlTree,
-    fold_outline,
-    fold_xml_tree,
-    looks_like_outline,
-    looks_like_xml,
-    xml_tree,
-)
+from compressors.tree import XmlTree, indent_tree, looks_like_outline, looks_like_xml, xml_tree
 
 _MIN_LINES = 40  # fewer lines than this and the text is cut by characters instead
 _MAX_AVG_LINE = 500
@@ -105,9 +98,8 @@ def _body(
     """
     match branch, parsed:
         case "xml", XmlTree() as tree:
-            return fold_xml_tree(tree, budget_tokens, terms, config.tree).text, (
-                "\n".join(tree.lines) if tree.pretty else None
-            )
+            env = envelope_tree.envelope(tuple(tree.lines), tree.roots, terms, budget_tokens, config, view)
+            return env.text(), ("\n".join(tree.lines) if tree.pretty else None)
         case "json", (value, "json"):
             return envelope(value, terms, budget_tokens, config=config, view=view).text(), None
         case "jsonl", (list() as records, "jsonl"):
@@ -115,7 +107,9 @@ def _body(
             body = envelope(records, terms, budget_tokens, slurp=True, config=config, view=view).text()
             return f"{note}\n{body}", None
         case "outline", None:
-            return fold_outline(raw, budget_tokens, terms, config.tree).text, None
+            lines = tuple(split_lines(raw))
+            env = envelope_tree.envelope(lines, indent_tree(list(lines)), terms, budget_tokens, config, view)
+            return env.text(), None
         case "html", None:
             text = html_to_text(raw)
             return (

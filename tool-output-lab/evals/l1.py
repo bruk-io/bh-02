@@ -8,7 +8,7 @@ through `compressors.cli.fold_text`, then check:
 - invariants (any failure is a bug):
   - coverage: walking the output accounts for every source line exactly once, shown at its own
     number or inside exactly one marker;
-  - envelopes (JSON, logs): every claim a part makes holds against the data and is said in its text
+  - envelopes (JSON, logs, trees): every claim a part makes holds against the data and is said in its text
     (`evals.envelope_check`; its commands run with jq or grep), the envelope made again is the same,
     and a JSON Lines note counts the records and says rightly whether index i is line i+1;
   - the output is no larger than the input, and folding twice gives the same text;
@@ -26,12 +26,13 @@ from collections import defaultdict
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from compressors import envelope_log, markers
+from compressors import envelope_log, envelope_tree, markers
 from compressors.cli import fold_text
 from compressors.common import estimate_tokens, query_words, split_lines
 from compressors.config import DEFAULT, FoldConfig, load, with_sets
 from compressors.envelope_json import VIEWS, envelope
 from compressors.json_items import parse_json_or_jsonl
+from compressors.tree import indent_tree, xml_tree
 from evals import envelope_check
 from evals.tasks import BANDS, BUDGET, FORMATS, Task, skipped, tasks
 from evals.truth import score_fold
@@ -167,7 +168,19 @@ def check(task: Task, budget: int, query_on: bool, view: str = "sample", config:
             if env.text() != out:
                 violations.append("the envelope made again from the same input differs from the fold")
             violations += envelope_check.text_problems(raw, env)
-        elif branch in ("xml", "outline") or branch.startswith("code-"):
+        elif branch in ("xml", "outline"):
+            if branch == "xml":
+                tree = xml_tree(raw)
+                assert tree is not None
+                lines, roots = tuple(tree.lines), tree.roots
+            else:
+                lines = tuple(split_lines(raw))
+                roots = indent_tree(list(lines))
+            env = envelope_tree.envelope(lines, roots, query_words(query), budget, config, view)
+            if env.text() != out:
+                violations.append("the envelope made again from the same input differs from the fold")
+            violations += envelope_check.text_problems(result.source or raw, env)
+        elif branch.startswith("code-"):
             source = result.source if result.source is not None else raw
             violations += coverage(source, out, numbered=branch.startswith("code-"))
     score = score_fold(task.truth, out)
