@@ -1,7 +1,7 @@
 ---
-id: DRAFT-0020
+id: TASK-0185
 title: /restart ui or /restart jobs cancels itself and ends the session
-status: Draft
+status: To Do
 assignee: []
 created_date: '2026-11-03T17:47:00Z'
 labels:
