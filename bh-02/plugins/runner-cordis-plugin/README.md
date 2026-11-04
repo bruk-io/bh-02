@@ -311,9 +311,9 @@ path that is not there is left out the same way.
 | `env` | a name in `Policy.env_allow` |
 | `net` | a `Destination` in the `EgressPolicy` of `Brigged.egress`, which `create_bwrap_jail` is given; empty when none is granted, because every start enforces egress |
 
-Where a refusal is reported: for now in the start's `notice()` (`BrigJail` appends `Policy.refused`),
-since nothing asks yet; the broker that asks (TASK-0181.05) refuses a request at the moment it is
-made, with the same `grants.refusal` words, before the person is asked.
+Where a refusal is reported: in the start's `notice()` (`BrigJail` appends `Policy.refused`), and the
+broker's requesters (the `grant` tool) refuse a request at the moment it is made, with the same
+`grants.refusal` words, before the person is asked. An extension's `grants.ask` is not checked up front.
 
 Where the grants come from: `BrigJail` asks its `grants` (the broker, below) for `granted()` at each
 start. A store that is wrong (`store.Refused`) grants nothing and does not fail the start: the start's

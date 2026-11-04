@@ -13,7 +13,7 @@ In short; the policy itself, path by path and why, is the
 |---|---|
 | **Writes** | the project, a scratch directory of the jail's own, and the project's auto memory directory. Not, even in the project: bh-02's layer files, its own code, the Python it runs on (and the directories of the links that lead to it, uv's Python directory when your project is the home directory) and the paths it imports from, its config directory, `.git/hooks`, `.git/config`, `.claude`, shell rc files, editor settings, and other files that could run code later. `CLAUDE.md` and `AGENTS.md` may be edited. |
 | **Reads** | everything but credentials: `~/.ssh`, `~/.aws` and the like, and the sessions' state. On Linux, only the system, the Python interpreter, the project and its auto memory directory are there at all; your home directory is not. |
-| **Network** | none |
+| **Network** | none, but through the proxy the destinations you [grant](#grants) |
 | **Environment** | scrubbed to a short list of variables: a provider key in your shell is not among them unless you list it |
 
 One thing bh-02 does writes outside the jail: the `memory` tool, which saves the model's auto
@@ -114,10 +114,58 @@ exception is `env`: a layer that leaves it out takes the list from your `runner.
 
 A grant is one thing the jail is given beyond its policy: `read` or `write` an absolute path, let an
 `env` variable through, or reach a `net` destination (a hostname, `*.suffix` or an IP address, with a
-port). Every start applies the project's always-grants, kept in `grants.toml` in the project's grants
-directory (`$XDG_STATE_HOME/bh-02/projects/<project>/grants/`; no jail reads or writes it) and the
-session's. For now nothing asks the person: the session's are empty, and the always-grants are the
-file as it stands (the request and the prompt are tasks of their own, in decision-0012).
+port). Every start applies the project's always-grants and the session's.
+
+### Who asks
+
+Nothing is granted without you being asked, and every question says who asks and why:
+
+- **A row's `needs`**: the python row's config can list grants it wants (`kind`, `target`, `port`,
+  `reason`). They are asked before the Python process first starts, so they cost no restart. (If
+  the prompt is not up yet when the process starts, which the shipped layers don't do, the need is
+  asked when it is, and the answer restarts the process before the next input.)
+- **The model**: it calls the `grant` tool, or `tools.grant(kind=..., target=..., reason=...)` in
+  its Python. It is shown as `input python`.
+- **An extension**: the model's own extension asks with `grants.ask(...)`, shown as `extension NAME`.
+  An extension's request is not checked against the never-granted list (below) before you are
+  asked; if it is on the list, the start leaves it out and its notice says so.
+- **A sub-agent**: a program a sub-agent runs asks for its `needs`, and its refused connections are
+  asked, shown by its label (`general-1 (general)`). A sub-agent has no `grant` tool of its own.
+- **A refused connection**: a program's connection the proxy refused (below).
+
+Under `--no-jail` there is nothing to grant: the jail is not there, the `grant` tool says so and asks
+nothing, and each input is put to you as before.
+
+### Answering
+
+The question shows what is asked for, who asks and why, when it takes effect and what it does to the
+grades, with a warning where the grant would reach your network or a place hosts keep sockets. Answer
+`o`, `a` or `n` (Esc is no):
+
+| Answer | Means |
+|---|---|
+| **once** | this session only, kept in memory |
+| **always** | this project, kept in `grants.toml` and applied at every later start until revoked |
+| **no** | this session; the same request is not asked again |
+
+Ctrl-C withdraws the question and records nothing, so it can be asked again. The model is told each
+answer on its next call's result.
+
+### Where always is kept, and how to revoke
+
+`always` is kept in `grants.toml` in `$XDG_STATE_HOME/bh-02/projects/<project>/grants/`, which no jail
+reads or writes. List and revoke in a session with `/grants` and `/grants revoke ID`, and from outside
+one with `bh-02 grants` and `bh-02 grants revoke ID` (an id is the first 8 hex digits of the SHA-256
+of the grant's text, the same in both). The file is yours to read; a file that is wrong grants nothing,
+is never written over, and the start's notice says why.
+
+### When a grant takes effect
+
+- `net`: from the next connection, with no restart. A revoke is refused from the next connection too;
+  a connection already open stays open until the program restarts.
+- `read`, `write`, `env`: from the next input. Before it the Python process starts again, so what
+  earlier inputs defined is gone, and the input's result says why. The extensions process is replaced
+  at once.
 
 A start applies a grant as follows:
 
@@ -125,21 +173,23 @@ A start applies a grant as follows:
   write grant on exactly a self-modifying path (above) lifts that path's protection and nothing else.
 - `env`: the variable joins the allow-list, and reaches the jail if bh-02's own environment has it.
 - `net`: the destination joins the start's egress policy; the proxy lets the program reach exactly
-  that host and port. Nothing else is reachable. A `net` grant also reaches every program running
-  now, at once, with no restart (a connection the program makes after it is let through), and a
-  `/grants revoke` in the session is refused from the next connection on; a connection already open
-  stays open until the program restarts (`/clear` restarts the Python process), since the proxy
-  judges a connection once. `bh-02 grants revoke`, from outside a session, changes what later starts
-  apply: a session running now keeps the destination until its next start of a program, and the
-  command says so.
+  that host and port, and nothing else. It opens the proxy's door only: a program that ignores the
+  proxy settings and connects directly reaches nothing, granted or not. `bh-02 grants revoke`, from
+  outside a session, changes what later starts apply: a session running now keeps the destination until
+  its next start of a program, and the command says so.
+
+### A refused connection
 
 When a program's connection is refused, you are asked while the call runs: the destination, which
-input asked (`python` or `extensions`), and once, always or no. On a yes the model is told it may
+input asked (`python` or `extensions`, or a sub-agent's label), and once, always or no. On a yes the model is told it may
 retry. A name that resolves to a private address (loopback, your network) is asked only as that
 address, with a warning that it lets the program reach it on your network; a name that does not resolve
 is not asked, and the model is told. A refusal never offers a wildcard.
 
-Some grants are refused whoever asks: a path that is or lies under a secret, the grants store, your
+### What is never granted
+
+Some grants are refused whoever asks, because they would let the jail change what bh-02 trusts, read a
+secret, or run code outside it: a path that is or lies under a secret, the grants store, your
 credentials, the layer files, bh-02's configuration (a read as well as a write), and for a write bh-02's
 own code, the interpreter and the directories of the links on the way to it; a variable a model's key
 reads; the proxy variables. Paths are resolved first, so a link to one of those is refused as what it
@@ -147,6 +197,8 @@ leads to. A refused grant is left out of the start, and the start's notice (the 
 about itself) says which and why. A read grant for a path that is not there is left out the same way,
 and so is a write grant for one outside the project that is not there (a worktree since removed) or one
 under a path the layer hides.
+
+A `grant` call for one of these is answered with why and nobody is asked.
 
 ## Which environment variables the model's code sees
 

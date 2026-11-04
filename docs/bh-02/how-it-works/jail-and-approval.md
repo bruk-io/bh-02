@@ -71,6 +71,53 @@ brig grades every part of what it enforces (`enforced`, `best_effort`, `cooperat
 `unenforced`) by what the stack can deliver, and the status bar's `jail` field (the `grades`
 row) shows those grades. A jail that enforced less than asked would say so.
 
+## Grants
+
+The policy is not the last word: the person can give the jail more, one grant at a time
+([Grants](../using/jail.md#grants) is how you meet it). Two rows do it.
+
+- **`runner:grants`** is the broker: a plain value that holds the project's always-grants (read
+  fresh from `grants.toml` at each start, so another process's change counts) and the session's
+  answers (`once`, and `no`, which is not asked again). Rows ask it with `need` (held while the row is
+  up) and anything else with `ask`. It depends on `host` alone, which never reloads, so a grant changes
+  what the broker holds and reloads no row.
+- **`runner:grant_prompt`** serves the broker its prompt (once, always, no, through `output.choose`),
+  tells the model each answer in an aside, and registers `/grants` and the `grant` tool.
+
+`approval` depends on `runner` alone, so a grant, an always, or a requester coming and going leaves the
+rule up. A grant never changes whether the code is confined; it changes what the confined code can reach.
+
+**The floor.** `spec_for` checks every path and variable a grant names against what bh-02 builds from its
+own arguments: the secrets and the grants store, your credentials, the layer files, its configuration, its
+own code and interpreters, and the variables a model's key reads and the proxy variables. A grant on the
+floor, or on a path that leads there through a link, is refused before the person is asked and left out of
+a start that holds it. That is why a jailed input can't widen the jail into bh-02's own trust: the person
+is never asked for it. The floor is not applied to an extension's `grants.ask` before the question; the
+start drops such a grant and says so.
+
+**Generations and the restart.** A `read`, `write` or `env` grant is applied when a program starts. When
+what a start would apply has changed (an answer, a revoke, a need held or released), the Python process
+starts again before the next input, never during one, and the input's result says why; the extensions
+process is replaced at once. A row's `needs` are awaited before its first start (`ready()`), so they cost
+no restart, except that with no prompt served `ready()` does not wait.
+
+**Live egress.** A `net` grant needs no restart. Each running jail has an egress watcher that follows the
+broker: it allows a destination the jail lacks and revokes one it no longer holds, on the running proxy,
+and about every 0.2 s it reads the proxy's refusals and asks about each one as the program that made it
+(`python`, `extensions`, or a sub-agent's label). A name that resolved to a private address is asked as
+that address alone, and a name that did not resolve is not asked. The proxy judges a connection once, so
+a revoke refuses from the next connection and never cuts one already open. A sub-agent's realm reads the
+one broker; it has no `grant` tool of its own.
+
+**The honest grade.** A grant opens the proxy's door and nothing else: a program that ignores the proxy
+settings and connects directly reaches nothing, because the jail has loopback only. Even so brig cannot
+vouch for more than that, so `network` is graded `best_effort`, never `enforced`, and the egress is
+`proxied`. `approval` counts a best-effort network as confined, because every start applies the egress
+policy, which passes only what is granted. A start under `--no-jail` grades every part unenforced and
+there is nothing to grant.
+
+The runner plugin's README has the detail: [runner-cordis-plugin](../reference/plugins/runner.md).
+
 ## The credential never gets in
 
 bh-02 reads no credential file: a model's key and the Claude token come from the environment
