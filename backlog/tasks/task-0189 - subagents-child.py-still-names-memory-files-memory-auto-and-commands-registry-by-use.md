@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-04T14:14:00Z'
-updated_date: '2026-11-04T14:36:00Z'
+updated_date: '2026-11-04T14:41:00Z'
 labels:
   - subagents
   - size-2
@@ -23,8 +23,8 @@ TASK-0187 moved the row list to bh-02.toml and listed the cross-plugin config fi
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 child.py names no other plugin's component
-- [ ] #2 a child whose row injects commands gets a registry of its own, derived in wiring.py
+- [x] #1 child.py names no other plugin's component
+- [x] #2 a child whose row injects commands gets a registry of its own, derived in wiring.py
 <!-- AC:END -->
 
 ## Implementation Plan
