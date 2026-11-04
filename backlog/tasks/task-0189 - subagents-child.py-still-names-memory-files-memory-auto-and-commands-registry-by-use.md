@@ -3,9 +3,11 @@ id: TASK-0189
 title: >-
   subagents child.py still names memory:files, memory:auto and commands:registry
   by use
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@claude'
 created_date: '2026-11-04T14:14:00Z'
+updated_date: '2026-11-04T14:36:00Z'
 labels:
   - subagents
   - size-2
@@ -24,3 +26,9 @@ TASK-0187 moved the row list to bh-02.toml and listed the cross-plugin config fi
 - [ ] #1 child.py names no other plugin's component
 - [ ] #2 a child whose row injects commands gets a registry of its own, derived in wiring.py
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+child.py names no other plugin's component: AgentsConfig gains commands_row and refused (bh-02.toml names them); wiring.py derives which rows inject commands from cordis's resolve(use).inject and passes the predicate to Agents; child_rows copies the parent's commands row's component for a child with such a row. Proof: plugin and app tests, scripts/check on both members.
+<!-- SECTION:PLAN:END -->
