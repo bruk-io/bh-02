@@ -84,7 +84,7 @@ knobs: `./lab fold`, layer 1, layer 2, the hook, and the specs in `dials/`, `ses
 | M5 | Layer 2 on compositions layer 1 cannot tell apart: a typical sample or none, no get more | yes | done as the patterns below: a typical sample (full) and no samples (lean) change nothing a model does but lean's extra reads (FINDINGS 6) |
 | P1 | Three envelope patterns as recipes in every format: full (every part filled), lean (a terse shape, the anomalies, a command; no samples), index (a command for every group, a new get-more producer) | no | done: no claim fails (FINDINGS 5) |
 | P2 | Haiku: native, schema, full, lean and index on the synthetic tasks at M and L (`dials/haiku-patterns.toml`); predictions set in the spec | yes, about $3.60 | done: all keep the answers; no pattern changes how often the model reads the raw; schema stays (FINDINGS 6) |
-| M6 | Sonnet on the compositions Haiku leaves standing | yes | |
+| M6 | Sonnet on the compositions Haiku leaves standing | yes | in part: the schema recipe on the synthetic tasks (FINDINGS 7): context passes, accuracy undecided at one loss, the $0.00 invoice |
 | M7 | Sessions: follow-up questions on one result, native against the two recipes (`sessions/haiku.toml`, about $2) | yes | |
 
 Later: a run nested in a run's items as an envelope of its own (a country's subdivisions inside the

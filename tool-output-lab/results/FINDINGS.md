@@ -242,3 +242,36 @@ envelope acted in every folded session.
 So the schema recipe stays the composition to carry forward, with full as good and no better;
 neither lean nor index earns its change. The lever left is the model's habit of checking the raw,
 which no composition moved on Haiku: whether Sonnet has the same habit (M6) is the next question.
+
+## 7. Sonnet on the schema recipe: it trusts the envelope more than Haiku, and the one answer lost is the gap layer 1 named
+
+Run: `results/dials-sonnet-synthetic.md`, 208 sessions, $22.25, none failed: the 104 synthetic tasks
+(JSON, logs, accessibility snapshots, Figma XML; M and L), once each, native against the schema
+recipe, the hook folding every result. The envelope acted in every folded session.
+
+- **Answers.** Native answers 104 of 104; the schema recipe 103, one pair lost and none won: -1%
+  [-5.2%, +2.7%]. The context criterion passes; the accuracy criterion is undecided, since one
+  loss in 104 pairs leaves the interval's floor below -3 points.
+- **The one loss is the gap layer 1 named** (FINDINGS 1): the $0.00 invoice in an accessibility
+  snapshot at L, a numeric outlier no rule finds. The envelope said its anomalies were none;
+  Sonnet read the saved snapshot (5 calls) and still answered none. Native, reading it all, found
+  it. This is the harm the evals ask about, a confident wrong answer, and it comes from a claim of
+  "none" that is true of the rules and not of the data.
+- **Context, cost and time**, paired against native:
+
+  | Band | final context | cost | time | read the raw (of 52) | Haiku read it |
+  |---|---|---|---|---|---|
+  | M | -10,401 [-11,379, -9,195] | -28% ($-0.037) | +2.1 s | 26 | 36 |
+  | L | -2,329 [-4,203, -1,022] | -17% ($-0.018) | -2.9 s | 27 (native 52) | 39 |
+  | both | -6,365 [-7,683, -5,188] | -23% ($-0.028) | -0.4 s | 53 of 104 | 75 |
+
+- **The prediction, set in the spec, holds in part.** Sonnet reads the saved raw in half the
+  folded sessions, against 69% and 75% for Haiku under the same recipe (FINDINGS 6), and at M it
+  saves more of the context (-10.4k against Haiku's -9.1k). At L it saves less (-2.3k against
+  -4.3k), since native Sonnet is already leaner there (3.2 calls against Haiku's 4.7), so the
+  pooled saving is about Haiku's.
+- **What it trusts differs by format.** At M Sonnet read the raw for 3 of 13 JSON tasks and 4 of 13
+  logs, 7 of 13 snapshots, and 12 of 13 Figma XML payloads; Haiku read 6, 6, 12 and 12. A small
+  raw that Read returns whole (Figma at about 7k tokens) is read whatever the model.
+- **Each session costs $0.028 less**, a quarter of native's $0.12: on Sonnet the saving is in
+  dollars what Haiku's was in cents.
