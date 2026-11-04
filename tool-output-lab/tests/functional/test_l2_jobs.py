@@ -4,7 +4,7 @@ import json
 import os
 import subprocess
 
-from evals.l2 import bash_channel, file_tools, select
+from evals.l2 import Dials, bash_channel, file_tools, select
 from evals.tasks import bash_prompt, tasks
 
 
@@ -76,14 +76,32 @@ def test_the_view_and_knobs_reach_the_hook_the_shim_and_the_fold_server(tmp_path
 
     config = with_sets(DEFAULT, ["schema.rare=0.15"])
     t = next(x for x in tasks() if x.task_id == "log-M-spot-at50")
-    bash_channel(t, "fold-bash", tmp_path, tmp_path / "hook.jsonl", "schema", config)
+    bash_channel(
+        t, "fold-bash", tmp_path, tmp_path / "hook.jsonl", Dials(budget=500, view="schema", config=config)
+    )
     command = json.loads((tmp_path / "settings.json").read_text())["hooks"]["PostToolUse"][0]["hooks"][0][
         "command"
     ]
     assert "TOOL_OUTPUT_LAB_VIEW=schema" in command and "TOOL_OUTPUT_LAB_SET=schema.rare=0.15" in command
+    assert "TOOL_OUTPUT_LAB_BUDGET=500" in command
     for c in ("fold-tool", "noshell-fold"):
         (tmp_path / c).mkdir()
         file_tools(c, tmp_path / c, view="schema", config=config)
     assert "--view schema --set schema.rare=0.15" in (tmp_path / "fold-tool" / "bin" / "lab-fold").read_text()
     server = json.loads((tmp_path / "noshell-fold" / "mcp.json").read_text())["mcpServers"]["fold"]
     assert server["env"] == {"TOOL_OUTPUT_LAB_VIEW": "schema", "TOOL_OUTPUT_LAB_SET": "schema.rare=0.15"}
+
+
+def test_dial_jobs_interleave_native_and_each_setting_that_covers_the_task():
+    from evals.dials import jobs, settings
+
+    spec = {"bands": ["M"], "formats": ["json", "log"], "reps": 1}
+    spec["setting"] = [{"name": "default"}, {"name": "schema", "view": "schema", "formats": ["json"]}]
+    planned = jobs(spec, settings(spec), tasks())
+    first = [(t.task_id, c) for t, c, _, _ in planned[:5]]
+    assert first[0][1] == "native" and first[1][1] == "default"
+    json_task = next(t for t, _, _, _ in planned if t.fmt == "json")
+    assert [c for t, c, _, _ in planned if t.task_id == json_task.task_id] == ["native", "default", "schema"]
+    log_task = next(t for t, _, _, _ in planned if t.fmt == "log")
+    assert [c for t, c, _, _ in planned if t.task_id == log_task.task_id] == ["native", "default"]
+    assert {t.band for t, _, _, _ in planned} == {"M"}

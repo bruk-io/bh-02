@@ -65,6 +65,30 @@ FILE_CONDITIONS = ("native", "fold-tool", "noshell", "noshell-fold")
 # What each condition is paired against: a fold condition against the same session without it.
 BASELINE = {"noshell-fold": "noshell", "fold-bash": "bash-native", "fold-bash-all": "bash-native"}
 _FOLD_TOOL = "mcp__fold__fold"
+
+
+@dataclass(frozen=True)
+class Dials:
+    """How a fold condition folds: the hook's mode (None: the condition's own, `HOOK_MODE`), the
+    budget, the view and the knobs. Native conditions ignore them."""
+
+    mode: str | None = None
+    budget: int = 2000
+    view: str = "sample"
+    config: FoldConfig = DEFAULT
+
+    def mode_for(self, condition: str) -> str | None:
+        """The hook's mode for a condition: a native one has none; a fold condition its own, or
+        this record's when it names one (a dial setting is a fold condition of its own)."""
+        if condition in _NATIVE:
+            return None
+        return self.mode or HOOK_MODE.get(condition)
+
+
+_DIALS = Dials()
+_NATIVE = frozenset({"native", "bash-native", "noshell"})  # conditions with no hook
+
+
 _STOP_AFTER_FAILURES = 5
 _COST_PER_RUN = {"haiku": 0.007, "sonnet": 0.10, "opus": 0.25}  # rough, from the A/Bs so far
 _CLAUDE_MD = """# Tools
@@ -183,28 +207,31 @@ def conditions_for(t: Task) -> tuple[str, ...]:
 
 
 def _hook_settings(
-    mode: str, log: Path, matcher: str = "mcp__.*", view: str = "sample", config: FoldConfig = DEFAULT
+    mode: str,
+    log: Path,
+    matcher: str = "mcp__.*",
+    view: str = "sample",
+    config: FoldConfig = DEFAULT,
+    budget: int = 2000,
 ) -> dict[str, Any]:
     knobs = shlex.quote(";".join(sets(config)))
     env = f"TOOL_OUTPUT_LAB_LOG={log} TOOL_OUTPUT_LAB_MODE={mode} TOOL_OUTPUT_LAB_VIEW={view}"
-    env += f" TOOL_OUTPUT_LAB_SET={knobs}"
+    env += f" TOOL_OUTPUT_LAB_SET={knobs} TOOL_OUTPUT_LAB_BUDGET={budget}"
     command = f"cd {_LAB} && {env} {_UV} -m claude_code.hook"
     hook = {"type": "command", "timeout": 30, "command": command}
     return {"hooks": {"PostToolUse": [{"matcher": matcher, "hooks": [hook]}]}}
 
 
-def bash_channel(
-    t: Task, condition: str, w: Path, log: Path, view: str = "sample", config: FoldConfig = DEFAULT
-) -> list[str]:
+def bash_channel(t: Task, condition: str, w: Path, log: Path, dials: Dials = _DIALS) -> list[str]:
     """The flags (and files in the run's folder) for a synthetic task on the bash channel: `./<tool>`
     prints the payload (the task id reaches it through the environment, not the script), and the
     hook, when the condition has one, folds Bash."""
     script = w / TOOLS[t.fmt]
     script.write_text(f'#!/bin/sh\ncd "{_LAB}" && exec {_UV} -m claude_code.fixture_cmd\n')
     script.chmod(0o755)
-    mode = HOOK_MODE.get(condition)
+    mode = dials.mode_for(condition)
     (w / "settings.json").write_text(
-        json.dumps(_hook_settings(mode, log, "Bash", view, config) if mode else {})
+        json.dumps(_hook_settings(mode, log, "Bash", dials.view, dials.config, dials.budget) if mode else {})
     )
     return ["--strict-mcp-config", "--settings", "settings.json", "--allowedTools", "Bash,Read,Grep"]
 
@@ -246,13 +273,7 @@ def file_tools(
 
 
 def run_one(
-    t: Task,
-    condition: str,
-    model: str,
-    rep: int,
-    log: Path,
-    view: str = "sample",
-    config: FoldConfig = DEFAULT,
+    t: Task, condition: str, model: str, rep: int, log: Path, dials: Dials = _DIALS
 ) -> dict[str, Any]:
     """One Claude Code session for one task under one condition, scored."""
     with tempfile.TemporaryDirectory(prefix="l2-") as work:
@@ -265,10 +286,10 @@ def run_one(
         command += ["--output-format", "stream-json", "--verbose"]
         edit = isinstance(t.truth, Edited)
         if bash:
-            command += bash_channel(t, condition, w, log, view, config)
+            command += bash_channel(t, condition, w, log, dials)
             env["TOOL_OUTPUT_LAB_TASK"] = t.task_id
         elif t.path:
-            command += file_tools(condition, w, edit, view, config)
+            command += file_tools(condition, w, edit, dials.view, dials.config)
             copy, original = w / Path(t.path).name, Path(t.path)
             if edit:
                 copy.write_text(t.payload(), encoding="utf-8")
@@ -280,9 +301,13 @@ def run_one(
                 "env": {"TOOL_OUTPUT_LAB_TASK": t.task_id},
             }
             (w / "mcp.json").write_text(json.dumps({"mcpServers": {"fixture": server}}))
-            mode = HOOK_MODE.get(condition)
+            mode = dials.mode_for(condition)
             (w / "settings.json").write_text(
-                json.dumps(_hook_settings(mode, log, view=view, config=config) if mode else {})
+                json.dumps(
+                    _hook_settings(mode, log, view=dials.view, config=dials.config, budget=dials.budget)
+                    if mode
+                    else {}
+                )
             )
             command += ["--mcp-config", "mcp.json", "--strict-mcp-config", "--settings", "settings.json"]
             command += ["--allowedTools", f"mcp__fixture__{TOOLS[t.fmt]},Bash,Read,Grep"]
@@ -335,8 +360,10 @@ def run_one(
         **head,
         "rep": rep,
         "model": model,
-        "view": view,
-        "config": label(config),
+        "view": dials.view,
+        "config": label(dials.config),
+        "budget": dials.budget,
+        "mode": dials.mode_for(condition),
         "correct": score.correct,
         "parsed": score.parsed,
         "recall": score.recall,
@@ -595,12 +622,17 @@ def merged(runs: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
     models = {r["model"] for rows in runs.values() for r in rows}
     if len(models) > 1:
         raise ValueError(f"the runs used different models ({', '.join(sorted(models))}); report them apart")
-    settings = {
-        (r.get("view", "sample"), r.get("config", "defaults")) for rows in runs.values() for r in rows
-    }
-    if len(settings) > 1:
-        said = "; ".join(f"view {v}, knobs {c}" for v, c in sorted(settings))
-        raise ValueError(f"the runs folded with different settings ({said}); report them apart")
+    settings: dict[str, set[tuple[str, str, int]]] = {}
+    for rows in runs.values():
+        for r in rows:
+            fold = (r.get("view", "sample"), r.get("config", "defaults"), r.get("budget", 2000))
+            settings.setdefault(r["condition"], set()).add(fold)
+    if mixed := {c: f for c, f in settings.items() if len(f) > 1}:
+        cond, folds = next(iter(mixed.items()))
+        said = "; ".join(f"view {v}, knobs {k}, budget {b}" for v, k, b in sorted(folds))
+        raise ValueError(
+            f"condition {cond} folded with different settings in these runs ({said}); report them apart"
+        )
     out = []
     for name, rows in runs.items():
         for r in rows:
@@ -693,6 +725,42 @@ def _merge(names: list[str], name: str) -> int:
     return 0
 
 
+def run_jobs(
+    jobs: list[tuple[Task, str, int, Dials]], model: str, name: str, workers: int, max_cost: float | None
+) -> list[dict[str, Any]]:
+    """Run the sessions in parallel, writing each row to results/NAME.jsonl as it comes, and stop
+    starting new ones after five failures in a row (a usage limit or an outage) or once `max_cost`
+    is spent."""
+    results = _LAB / "results"
+    log = results / f"{name}-hook.jsonl"
+    rows: list[dict[str, Any]] = []
+    with ThreadPoolExecutor(workers) as pool, (results / f"{name}.jsonl").open("w", encoding="utf-8") as f:
+        pending = [pool.submit(run_one, t, c, model, rep, log, dials) for t, c, rep, dials in jobs]
+        failed_in_a_row, spent, capped = 0, 0.0, False
+        for future in as_completed(pending):
+            row = future.result()
+            f.write(json.dumps(row) + "\n")
+            f.flush()
+            rows.append(row)
+            mark = "FAILED" if row["error"] else "ok" if row["correct"] else "MISS"
+            print(
+                f"{len(rows)}/{len(jobs)} {row['task_id']} {row['condition']}: {mark} ${row['cost_usd']:.4f}",
+                flush=True,
+            )
+            failed_in_a_row = failed_in_a_row + 1 if row["error"] else 0
+            spent += row["cost_usd"]
+            stop = None
+            if max_cost is not None and spent >= max_cost and not capped:
+                capped, stop = True, f"${spent:.2f} spent, the --max-cost of ${max_cost:.2f}"
+            if failed_in_a_row == _STOP_AFTER_FAILURES:
+                stop = f"{failed_in_a_row} runs in a row failed; last: {row['error']}"
+            if stop:
+                print(f"stopping: {stop}", flush=True)
+                for p in pending:
+                    p.cancel()
+    return rows
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -711,6 +779,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--view", choices=VIEWS, default="sample", help="how the fold shows data (JSON)")
+    parser.add_argument("--budget", type=int, default=2000, help="tokens the hook folds into")
     parser.add_argument("--config", type=Path, help="a TOML file of knobs (compressors/config.py)")
     parser.add_argument("--set", dest="sets", action="append", default=[], metavar="NAME=VALUE")
     parser.add_argument(
@@ -752,39 +821,11 @@ def main(argv: list[str] | None = None) -> int:
         for source, why in skipped().items():
             print(f"left out on this host: {source} ({why})")
         return 0
-    results = _LAB / "results"
-    log = results / f"{ns.name}-hook.jsonl"
-    rows: list[dict[str, Any]] = []
-    with (
-        ThreadPoolExecutor(ns.workers) as pool,
-        (results / f"{ns.name}.jsonl").open("w", encoding="utf-8") as f,
-    ):
-        config = with_sets(load(ns.config) if ns.config else DEFAULT, ns.sets)
-        pending = [pool.submit(run_one, t, c, ns.model, rep, log, ns.view, config) for t, c, rep in jobs]
-        failed_in_a_row, spent, capped = 0, 0.0, False
-        for future in as_completed(pending):
-            row = future.result()
-            f.write(json.dumps(row) + "\n")
-            f.flush()
-            rows.append(row)
-            mark = "FAILED" if row["error"] else "ok" if row["correct"] else "MISS"
-            print(
-                f"{len(rows)}/{len(jobs)} {row['task_id']} {row['condition']}: {mark} ${row['cost_usd']:.4f}",
-                flush=True,
-            )
-            failed_in_a_row = failed_in_a_row + 1 if row["error"] else 0
-            spent += row["cost_usd"]
-            if ns.max_cost is not None and spent >= ns.max_cost and not capped:
-                capped = True
-                print(f"stopping: ${spent:.2f} spent, the --max-cost of ${ns.max_cost:.2f}", flush=True)
-                for p in pending:
-                    p.cancel()
-            if failed_in_a_row == _STOP_AFTER_FAILURES:  # a usage limit or an outage: stop spending
-                print(f"stopping: {failed_in_a_row} runs in a row failed; last: {row['error']}", flush=True)
-                for p in pending:
-                    p.cancel()
+    config = with_sets(load(ns.config) if ns.config else DEFAULT, ns.sets)
+    dials = Dials(budget=ns.budget, view=ns.view, config=config)
+    rows = run_jobs([(t, c, rep, dials) for t, c, rep in jobs], ns.model, ns.name, ns.workers, ns.max_cost)
     text = report(rows, ns.model)
-    (results / f"{ns.name}.md").write_text(text, encoding="utf-8")
+    (_LAB / "results" / f"{ns.name}.md").write_text(text, encoding="utf-8")
     print(text, end="")
     return 0
 
