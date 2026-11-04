@@ -14,6 +14,9 @@ The defaults are the values the findings were measured with. A knob is set in a 
     [json_envelope]               # a part of the JSON envelope other than the view's
     samples = "typical"
 
+    [log_envelope]                # and of a log's
+    nav = "sed"
+
 The fold's budget and view are not knobs here: each call names them. `label` names a config by
 what it changes from the defaults, for reports; `sets` turns one back into `--set` arguments.
 """
@@ -74,22 +77,52 @@ class JsonEnvelopeKnobs:
 
 
 @dataclass(frozen=True)
+class LogEnvelopeKnobs:
+    """The envelope of a log, or any output read line by line (`compressors.envelope_log`): which
+    producer makes each part ("" leaves it to the view's recipe), the order the parts claim the
+    budget in, and how its statistics are worked out over line templates."""
+
+    shape: str = ""  # templates: each line template and its count, few-valued holes too; count: totals
+    anomalies: str = ""  # rare: rare templates, error words, rare values in a hole; errors: error words; none
+    samples: str = ""  # matches: lines with the query; typical: and common templates' first; head-tail; none
+    nav: str = ""  # grep: a command per anomaly printing exactly its lines; sed: how to read any lines; none
+    priority: str = "shape,anomalies,nav,samples"
+    rare: float = 0.01  # a template on at most this share of the lines is rare,
+    common: float = 0.5  # when the templates that are not rare cover at least this share
+    errors: float = 0.1  # a template holding an error word is an anomaly on at most this share of the lines
+    few: int = 6  # a hole holding at most this many values is a field, and its counts are shown
+    dominant: float = 0.8  # when one of them is on this share of its template's lines, the lines
+    value_rare: float = 0.02  # holding a value on at most this share of them are anomalies
+    clip: int = 300  # characters of a line shown, at the roomiest level
+
+
+@dataclass(frozen=True)
 class FoldConfig:
     worth_it: float = 0.9  # a fold that keeps more than this share of the input passes it through instead
     schema: SchemaKnobs = SchemaKnobs()
     tree: TreeKnobs = TreeKnobs()
     json_envelope: JsonEnvelopeKnobs = JsonEnvelopeKnobs()
+    log_envelope: LogEnvelopeKnobs = LogEnvelopeKnobs()
 
 
 DEFAULT = FoldConfig()
-_SECTIONS = {"schema": SchemaKnobs, "tree": TreeKnobs, "json_envelope": JsonEnvelopeKnobs}
-# The knobs that name a producer: the names each takes (`compressors.envelope_json` holds the producers).
-# "" is the view's.
+_SECTIONS = {
+    "schema": SchemaKnobs,
+    "tree": TreeKnobs,
+    "json_envelope": JsonEnvelopeKnobs,
+    "log_envelope": LogEnvelopeKnobs,
+}
+# The knobs that name a producer: the names each takes (each format's `compressors.envelope_*` holds
+# its producers). "" is the view's.
 CHOICES = {
     "json_envelope.shape": ("", "fields", "summary"),
     "json_envelope.anomalies": ("", "exceptions", "standouts", "none"),
     "json_envelope.samples": ("", "matches", "typical", "head-tail", "none"),
     "json_envelope.nav": ("", "jq", "rows", "none"),
+    "log_envelope.shape": ("", "templates", "count"),
+    "log_envelope.anomalies": ("", "rare", "errors", "none"),
+    "log_envelope.samples": ("", "matches", "typical", "head-tail", "none"),
+    "log_envelope.nav": ("", "grep", "sed", "none"),
 }
 
 
@@ -108,7 +141,7 @@ def _typed(name: str, default: Any, value: Any) -> Any:
     if name in CHOICES and value not in CHOICES[name]:
         names = ", ".join(c or '"" (the view\'s)' for c in CHOICES[name])
         raise ValueError(f"{name} is one of {names}; not {value!r}")
-    if name == "json_envelope.priority":
+    if name.endswith("_envelope.priority"):
         priority(str(value))  # names each part once, or raises
     if isinstance(value, str):
         try:

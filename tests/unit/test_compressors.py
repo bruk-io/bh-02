@@ -94,27 +94,24 @@ def test_a_jsonl_record_may_hold_characters_that_splitlines_splits_on():
     assert folded is not None and folded.branch == "jsonl"
 
 
-def test_a_repeated_line_pattern_collapses_to_one_line_and_a_count():
+def test_lines_that_differ_in_numbers_are_one_template_and_a_count():
     raw = "\n".join(f"2026-11-03T10:00:{i % 60:02d}Z INFO heartbeat ok seq={i}" for i in range(1000))
     text = _text(raw, 200)
-    assert "repeated 999 more times, lines 2-1000" in text and len(text) / 4 < 100
+    assert "  1000  <*>:<*>:<*> INFO heartbeat ok seq=<*>" in text and len(text) / 4 <= 200
 
 
-def test_an_error_line_in_the_middle_is_kept_with_its_window():
+def test_an_error_line_in_the_middle_is_listed_at_its_number():
     lines = _log(2000)
     lines[1000] = "2026-11-03T10:16:40Z ERROR payment failed order=needle-42"
     tight = _text("\n".join(lines), 500)
-    assert "needle-42" in tight and len(tight) / 4 <= 500  # the line survives inside the budget
-    roomy = _text("\n".join(lines), 2000)
-    assert lines[997] in roomy and lines[1003] in roomy  # with room, its window too
+    assert f"1001: {lines[1000]}" in tight and len(tight) / 4 <= 500  # it survives inside the budget
 
 
-def test_gap_markers_name_the_lines_they_hide():
+def test_every_numbered_line_is_the_line_at_that_number():
     lines = _log(2000)
-    shown = _text("\n".join(lines), 500).split("\n")
-    for a, b in re.findall(r"lines (\d+)-(\d+) omitted", "\n".join(shown)):
-        assert lines[int(a) - 2] in shown and lines[int(a) - 1] not in shown  # shown, then hidden
-        assert int(b) == len(lines) or lines[int(b)] in shown
+    lines[700] = "2026-11-03T10:11:40Z ERROR upstream timed out"
+    numbered = re.findall(r"(?m)^\s*(\d+): (.*)$", _text("\n".join(lines), 500))
+    assert numbered and all(lines[int(n) - 1] == text for n, text in numbered)
 
 
 def test_long_text_with_few_lines_is_cut_by_characters():
@@ -181,7 +178,7 @@ def test_text_that_only_contains_tags_is_not_html():
         + "".join(f"-<p>old {i}</p>\n+<p>new {i}</p>\n" for i in range(100))
     )
     assert [detect(t) for t in (_jsx_diff(), readme, html_diff)] == ["lines"] * 3
-    assert "<span>59</span>" in _text(_jsx_diff(), 300)  # the code around the tags is kept
+    assert "line templates" in _text(_jsx_diff(), 300)  # read as lines, its templates counted
 
 
 def test_pages_and_fragments_are_still_html():

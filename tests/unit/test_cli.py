@@ -93,9 +93,8 @@ def test_a_progress_line_with_carriage_returns_stays_one_line():
     lines[200] = "2026-11-03T10:03:20Z ERROR upload failed"
     raw = "\n".join(lines)
     out = fold_text(raw, budget=300, quiet=True).text
-    last = max(int(b) for _, b in re.findall(r"lines (\d+)-(\d+)", out))
-    assert last <= len(lines)
-    assert "ERROR upload failed" in out
+    assert "201: 2026-11-03T10:03:20Z ERROR upload failed" in out  # numbered as sed counts lines
+    assert all(int(n) <= len(lines) for n in re.findall(r"(?m)^\s*(\d+): ", out))
 
 
 def test_crlf_input_folds_exactly_like_lf():
@@ -133,7 +132,7 @@ def test_a_query_matching_a_few_of_thirty_siblings_still_shows_them():
             "  - open: yes",
         ]
     out = fold_text("\n".join(offices), budget=150, query="Kyoto", quiet=True).text
-    assert out.count("Kyoto") == 2
+    assert "57:   - city: Kyoto" in out and "97:   - city: Kyoto" in out
 
 
 def test_a_query_that_names_every_key_keeps_none_of_them_specially():

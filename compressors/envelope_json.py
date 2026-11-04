@@ -40,6 +40,7 @@ from compressors.envelope import (
     Lists,
     Navigator,
     Part,
+    Producers,
     Recipe,
     Role,
     Sampler,
@@ -49,7 +50,7 @@ from compressors.envelope import (
     Verbatim,
     compose,
     nothing,
-    priority,
+    recipe_of,
 )
 from compressors.json_items import promote
 from compressors.schema import Collection, Found, collections, describe, lists_values, query, shape_levels
@@ -388,31 +389,14 @@ PRESETS = {
     "schema": JsonEnvelopeKnobs(shape="fields", anomalies="exceptions", samples="matches", nav="jq"),
 }
 VIEWS = tuple(PRESETS)  # how a view of JSON is named: by its recipe
+_PRODUCERS = Producers(SHAPES, ANOMALIES, SAMPLES, NAVS)
 
 
 def recipe(k: JsonEnvelopeKnobs, view: str = "sample") -> Recipe[JsonData]:
-    """The view's recipe, with each part a knob names in place of the view's.
-
-    Raises:
-        ValueError: the view names no recipe, a knob names no producer, or the priority does not name
-            each part once.
-    """
-    if view not in PRESETS:
-        raise ValueError(f"no JSON view {view!r}: the views are {', '.join(PRESETS)}")
-    base = PRESETS[view]
-    names = {
-        part: getattr(k, part) or getattr(base, part) for part in ("shape", "anomalies", "samples", "nav")
-    }
-    for part, table in (("shape", SHAPES), ("anomalies", ANOMALIES), ("samples", SAMPLES), ("nav", NAVS)):
-        if names[part] not in table:
-            raise ValueError(f"json_envelope.{part} is one of {', '.join(table)}; not {names[part]!r}")
-    return Recipe(
-        SHAPES[names["shape"]],
-        ANOMALIES[names["anomalies"]],
-        SAMPLES[names["samples"]],
-        NAVS[names["nav"]],
-        priority(k.priority),
-    )
+    """The view's recipe, with each part a knob names in place of the view's. A view that names no
+    recipe, a knob that names no producer, or a priority that does not name each part once raises
+    ValueError, from `envelope.recipe_of`."""
+    return recipe_of("json_envelope", _PRODUCERS, PRESETS, k, view)
 
 
 def envelope(

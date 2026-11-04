@@ -8,9 +8,9 @@ through `compressors.cli.fold_text`, then check:
 - invariants (any failure is a bug):
   - coverage: walking the output accounts for every source line exactly once, shown at its own
     number or inside exactly one marker;
-  - JSON envelopes: every claim a part makes holds against the data and is said in its text
-    (`evals.envelope_check`; its commands run with jq), the envelope made again is the same, and a
-    JSON Lines note counts the records and says rightly whether index i is line i+1;
+  - envelopes (JSON, logs): every claim a part makes holds against the data and is said in its text
+    (`evals.envelope_check`; its commands run with jq or grep), the envelope made again is the same,
+    and a JSON Lines note counts the records and says rightly whether index i is line i+1;
   - the output is no larger than the input, and folding twice gives the same text;
 - sufficiency: the task's own scorer, run on the fold text (can the answer be read off it?);
 - size: tokens in and out, and whether the output fits the budget.
@@ -26,7 +26,7 @@ from collections import defaultdict
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from compressors import markers
+from compressors import envelope_log, markers
 from compressors.cli import fold_text
 from compressors.common import estimate_tokens, query_words, split_lines
 from compressors.config import DEFAULT, FoldConfig, load, with_sets
@@ -162,7 +162,12 @@ def check(task: Task, budget: int, query_on: bool, view: str = "sample", config:
             if env.text() != body:
                 violations.append("the envelope made again from the same input differs from the fold")
             violations += envelope_check.problems(raw, parsed[0], env, config.schema)
-        elif branch in ("xml", "outline", "lines") or branch.startswith("code-"):
+        elif branch == "lines":
+            env = envelope_log.envelope(raw, query_words(query), budget, config, view)
+            if env.text() != out:
+                violations.append("the envelope made again from the same input differs from the fold")
+            violations += envelope_check.text_problems(raw, env)
+        elif branch in ("xml", "outline") or branch.startswith("code-"):
             source = result.source if result.source is not None else raw
             violations += coverage(source, out, numbered=branch.startswith("code-"))
     score = score_fold(task.truth, out)

@@ -21,13 +21,14 @@ are what layer 1 checks against the data (every count, listed anomaly, sample an
 text a level shows says each of its claims.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol
 
 from compressors.common import estimate_tokens
 
-type Address = str  # in the data's own terms: a jq path, a ref or an XPath, a line range
+type Address = str  # in the data's own terms: a jq path for JSON (line-addressed claims take numbers)
 
 
 class Role(StrEnum):
@@ -99,7 +100,54 @@ class Fetches:
     pick: str
 
 
-type Claim = Count | Values | Breaks | Lists | Verbatim | Fetches
+# Line-addressed claims, for every format read as lines (logs, trees, code, documents). Lines are
+# numbered from 1 in the source: the text the commands read (the raw output, or a copy of it
+# pretty-printed or converted to text). A template is a line with every token (letters, digits, `_`
+# and `-`) that holds a digit or a part of six or more hex digits, and every quoted string when
+# `quoted`, replaced by <*>; its slots are what those holes hold, in order.
+
+
+@dataclass(frozen=True)
+class Shows:
+    """Source lines `first`, `first + 1`, ... read as `lines`: each whole, or cut short with the clip
+    marker (`...[+N chars]`, N the characters cut)."""
+
+    first: int
+    lines: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class Total:
+    """The source has `lines` lines, and `templates` distinct templates among its non-blank ones."""
+
+    lines: int
+    templates: int
+    quoted: bool = False
+
+
+@dataclass(frozen=True)
+class Alike:
+    """`n` source lines among `first` to `last` have `template`, and hold `value` in slot `slot`
+    (counted from 1) when `slot` is set."""
+
+    template: str
+    n: int
+    first: int
+    last: int
+    quoted: bool = False
+    slot: int = 0
+    value: str = ""
+
+
+@dataclass(frozen=True)
+class Prints:
+    """`command`, run on the source, prints exactly source lines `lines` (grep -n or sed -n)."""
+
+    command: str
+    lines: tuple[int, ...]
+
+
+type Claim = Count | Values | Breaks | Lists | Verbatim | Fetches | Shows | Total | Alike | Prints
 
 
 # --- parts ------------------------------------------------------------------------------------------
@@ -179,6 +227,60 @@ def priority(text: str) -> tuple[Role, ...]:
     if sorted(names) != sorted(ROLES):
         raise ValueError(f"a priority names each part once, as {','.join(_PRIORITY)}; not {text!r}")
     return tuple(Role(n) for n in names)
+
+
+class Chosen(Protocol):
+    """What names a recipe: a format's envelope knobs, a producer's name for each part ("" leaves
+    the part to the view's recipe) and the priority."""
+
+    @property
+    def shape(self) -> str: ...
+    @property
+    def anomalies(self) -> str: ...
+    @property
+    def samples(self) -> str: ...
+    @property
+    def nav(self) -> str: ...
+    @property
+    def priority(self) -> str: ...
+
+
+@dataclass(frozen=True)
+class Producers[D]:
+    """A format's producers for each part, by name."""
+
+    shape: Mapping[str, Shaper[D]]
+    anomalies: Mapping[str, Spotter[D]]
+    samples: Mapping[str, Sampler[D]]
+    nav: Mapping[str, Navigator[D]]
+
+
+_PARTS = ("shape", "anomalies", "samples", "nav")
+
+
+def recipe_of[D](
+    section: str, producers: Producers[D], presets: Mapping[str, Chosen], chosen: Chosen, view: str
+) -> Recipe[D]:
+    """The view's recipe (a preset), with each part `chosen` names in place of the view's.
+
+    Raises:
+        ValueError: the view names no preset, a part names no producer, or the priority does not name
+            each part once.
+    """
+    if view not in presets:
+        raise ValueError(f"{section}: no view {view!r}; the views are {', '.join(presets)}")
+    names = {p: getattr(chosen, p) or getattr(presets[view], p) for p in _PARTS}
+    for p in _PARTS:
+        table = getattr(producers, p)
+        if names[p] not in table:
+            raise ValueError(f"{section}.{p} is one of {', '.join(table)}; not {names[p]!r}")
+    return Recipe(
+        producers.shape[names["shape"]],
+        producers.anomalies[names["anomalies"]],
+        producers.samples[names["samples"]],
+        producers.nav[names["nav"]],
+        priority(chosen.priority),
+    )
 
 
 # --- the envelope -------------------------------------------------------------------------------------

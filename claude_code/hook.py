@@ -175,7 +175,13 @@ def render(folded: Folded, path: str, raw_path: str = "") -> str:
                 "This is the data's envelope: its shape (fields, values and counts), the rows that break it, "
                 f"samples, and how to get more, by jq path (jq{slurp}). FILE in a command is {quoted}"
             )
-        case "lines" | "html" | "xml" | "outline":
+        case "lines":
+            how = (
+                "This is the output's envelope: its line templates and how many lines say each, the "
+                "lines that break them, samples, and how to get more, by line number. FILE in a command "
+                f"is {quoted}"
+            )
+        case "html" | "xml" | "outline":
             m = markers.ANY_RANGE.search(folded.body)
             first, last = (int(m[1]), min(int(m[2]), int(m[1]) + 20)) if m else (1, 20)
             how = (

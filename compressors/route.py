@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from typing import Any
 
-from compressors import markers
+from compressors import envelope_log, markers
 from compressors.common import estimate_tokens, split_lines
 from compressors.config import DEFAULT, FoldConfig
 from compressors.envelope_json import VIEWS, envelope
@@ -122,7 +122,7 @@ def _body(
                 text if estimate_tokens(text) <= budget_tokens else fold_lines(text, terms, budget_tokens)
             ), text
         case "lines", None:
-            return fold_lines(raw, terms, budget_tokens), None
+            return envelope_log.envelope(raw, terms, budget_tokens, config, view).text(), None
         case "text", None:
             return _cut_chars(raw, budget_tokens), None
         case _:
