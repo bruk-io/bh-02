@@ -1,8 +1,0 @@
-# The sample fold as an envelope (`--view envelope --config recipes/sample.toml`): the fold's summary
-# as the shape, its stand-outs as the anomalies, its head and tail as samples, and how to read any
-# row as the way to get more. The default knobs are the schema view's parts.
-[json_envelope]
-shape = "summary"
-anomalies = "standouts"
-samples = "head-tail"
-nav = "rows"

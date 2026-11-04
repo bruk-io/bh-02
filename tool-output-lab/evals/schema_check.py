@@ -1,30 +1,20 @@
-"""Layer 1's check of a schema view: every claim it makes, recomputed from the data.
+"""Layer 1's readers for JSON envelopes: a jq-path walker, a reader of field lines, and a note check.
 
-The view is parsed as the model reads it (collection headers, field lines, exception rows, the
-query), and each claim is checked against the input with this module's own jq-path walker, not the
-schema module's code, so a bug in one cannot hide in the other:
-
-- a collection's row count; a field's presence ("in P of N"), its single value ("(all N)"), its
-  value counts, its types, its range and median, and "unique";
-- each exception row: the row exists, and each note holds (the value is there and is not the
-  field's dominant one; the key is missing; the type differs);
-- completeness: when the exception list is not cut, every row holding a rare value of a field whose
-  value counts show one dominant value is listed;
-- the query: `jq` runs it on the input, and it returns exactly the rows its select names.
-
-A claim the view clipped (`...[+N chars]`) is not checked.
+Written apart from the producers, so a bug in one cannot hide in the other: `walk` reads jq paths
+into the input, `shape_claims` reads an envelope's shape back line by line (a collection's row
+count; a field's presence, its single value, its value counts, its types, its range and median,
+"unique") and checks each against the data, and `note_claims` checks what an anomaly row says of
+itself. `evals.envelope_check` uses all three. A claim the text clipped (`...[+N chars]`) is not
+checked.
 """
 
 import json
 import re
-import shutil
 import statistics
-import subprocess
 from collections import Counter
 from typing import Any
 
 from compressors import markers
-from compressors.config import DEFAULT, SchemaKnobs
 
 MISSING = object()
 _SEGMENT = re.compile(r'\.([A-Za-z_][A-Za-z0-9_]*)|\[("(?:[^"\\]|\\.)*")\]|\[(\d+)\]|(\[\])')
@@ -32,11 +22,6 @@ _HEADER = re.compile(
     r"^(?P<ind> *)(?P<path>\S+): (?:array\[(?P<n>\d+)\] of \S+|object of (?P<keys>\d+) keys)"
 )
 _FIELD = re.compile(r"^(?P<ind> *)(?P<field>[.\[]\S*|\(each\)) {2,}(?P<desc>.+)$")
-_EXCEPTION = re.compile(r"^ *(?P<row>\.\S+?)(?: (?P<name>[^:]+?))?: (?P<notes>.+)$")
-_QUERY = re.compile(r"^query: jq(?P<slurp> -s)? '(?P<prog>.+)' FILE$")
-_SELECT = re.compile(
-    r"^(?P<base>.*)\[\] \| select\((?P<field>\S+) != (?P<value>.+?)\)(?: \| (?P<pick>\S+))?$"
-)
 _TYPES = {"str", "int", "float", "bool", "null", "array", "object"}
 _DECODER = json.JSONDecoder()
 
@@ -182,118 +167,21 @@ def note_claims(row_path: str, row: Any, note: str) -> tuple[list[str], str | No
     return [f"{row_path}: cannot read the note {note!r}"], None
 
 
-def _notes(text: str) -> list[str]:
-    """A row's notes, split on the commas between them (not those inside a JSON value)."""
-    out, pos, start = [], 0, 0
-    while pos < len(text):
-        if text[pos] in '"[{':
-            try:
-                _, pos = _DECODER.raw_decode(text, pos)
-                continue
-            except ValueError:
-                pass
-        if text.startswith(", ", pos):
-            out.append(text[start:pos])
-            pos += 2
-            start = pos
-            continue
-        pos += 1
-    out.append(text[start:])
-    return out
-
-
-def claims(
-    raw_value: Any, view: str, knobs: SchemaKnobs = DEFAULT.schema, complete: bool = True
-) -> list[str]:
-    """Every claim of the view that the data does not bear out (judged by the knobs it was made with).
-    `complete` False skips completeness, for a text with no exception rows of its own (an envelope's
-    shape, whose anomalies are listed in a part of their own)."""
+def shape_claims(raw_value: Any, text: str) -> list[str]:
+    """Every claim of a shape's lines that the data does not bear out: each collection header's row
+    count, and each field line under it."""
     problems: list[str] = []
     rows: list[Any] = []
     path = ""
-    fields: dict[str, str] = {}
-    listed: set[str] = set()
-    cut = False
-
-    def close() -> None:  # completeness, once a collection's lines are all read
-        if not complete or not path or cut or path.endswith("[]"):  # rows inside rows: not one index
-            return
-        for rel, desc in fields.items():
-            counts = _values_then_counts(desc.split("; ")[-1])
-            if not counts or counts[0][1] / max(1, len(rows)) < knobs.dominant:
-                continue
-            rare = {json.dumps(v) for v, n in counts[1:] if n / len(rows) <= knobs.rare}
-            for i, r in enumerate(rows):
-                v = get(r, rel)
-                if (
-                    v is not MISSING
-                    and json.dumps(v) in rare
-                    and not any(row.endswith(f"[{i}]") or row in walk_keys.get(i, ()) for row in listed)
-                ):
-                    problems.append(f"{path}: row {i} holds {rel} {json.dumps(v)} and is not listed")
-
-    walk_keys: dict[int, tuple[str, ...]] = {}
-    for line in view.splitlines():
+    for line in text.splitlines():
         if m := _HEADER.match(line):
-            close()
-            path, fields, listed, cut = m["path"], {}, set(), False
-            base = "" if path == "." else path
-            rows = walk(raw_value, base + "[]")
+            path = m["path"]
+            rows = walk(raw_value, ("" if path == "." else path) + "[]")
             n = int(m["n"] or m["keys"])
             if len(rows) != n:
                 problems.append(f"{path}: says {n} rows, it has {len(rows)}")
-            if m["keys"]:  # a keyed collection's rows are named by key
-                keys = list(walk(raw_value, base)[0]) if walk(raw_value, base) else []
-                walk_keys = {i: (f"{base}[{json.dumps(k)}]", f"{base}.{k}") for i, k in enumerate(keys)}
-            else:
-                walk_keys = {}
             continue
-        if not path:
-            continue
-        if (m := _FIELD.match(line)) and not line.strip().startswith(("exceptions", "keys:", "matches")):
+        if path and (m := _FIELD.match(line)) and not line.strip().startswith(("keys:", "[... ")):
             rel = "" if m["field"] == "(each)" else m["field"]
-            fields[rel] = m["desc"]
             problems += _field_claims(path, rows, rel, m["desc"])
-            continue
-        if line.strip().startswith("[... ") and "more exception rows" in line:
-            cut = True
-            continue
-        if (m := _EXCEPTION.match(line)) and line.startswith("    "):
-            got = walk(raw_value, m["row"])
-            if not got:
-                problems.append(f"{m['row']}: listed as an exception, and there is no such row")
-                continue
-            listed.add(m["row"])
-            for note in _notes(m["notes"]):
-                problems += note_claims(m["row"], got[0], note)[0]
-    close()
     return problems
-
-
-def query_runs(raw: str, raw_value: Any, view: str, knobs: SchemaKnobs = DEFAULT.schema) -> list[str]:
-    """The view's query, run with jq on the input, against what its select names."""
-    line = next((x for x in view.splitlines() if x.startswith("query: ")), None)
-    if line is None or shutil.which("jq") is None:
-        return []
-    m = _QUERY.match(line)
-    if m is None:
-        return [f"cannot read the query line {line!r}"]
-    flags = ["-r", "-s"] if m["slurp"] else ["-r"]
-    proc = subprocess.run(
-        ["jq", *flags, m["prog"]], input=raw, capture_output=True, text=True, timeout=60, check=False
-    )
-    if proc.returncode != 0:
-        return [f"jq rejects the query: {proc.stderr.strip()[:200]}"]
-    sel = _SELECT.match(m["prog"])
-    if sel is None:
-        return []
-    value = json.loads(sel["value"])
-    rows = walk(raw_value, sel["base"] + "[]") if sel["base"] not in ("", ".") else walk(raw_value, "[]")
-    held = sum(1 for r in rows if get(r, sel["field"]) == value)
-    if not rows or held / len(rows) < knobs.dominant:  # it must select the rows that break the dominant value
-        said = f"the query selects against {sel['value']}, which {held} of {len(rows)} rows hold"
-        return [f"{said}: not the dominant value"]
-    want = [get(r, sel["pick"]) if sel["pick"] else r for r in rows if get(r, sel["field"]) != value]
-    got = proc.stdout.splitlines()
-    expected = [w if isinstance(w, str) else json.dumps(w) for w in want]
-    return [] if got == expected else [f"the query returns {len(got)} rows, its select names {len(expected)}"]

@@ -1,4 +1,4 @@
-# The sample fold against the schema view, at three budgets, on the JSON tasks.
+# The sample view against the schema view (both envelopes since 2026-11-04), at three budgets, on the JSON tasks.
 name = "views-budgets"
 only = ["json", "pypi"]
 

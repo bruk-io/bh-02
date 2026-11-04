@@ -162,11 +162,6 @@ def trusted_spill(resolved: str, session_resolved: str, from_field: bool = False
     return from_field or _SPILL_NAME.match(name) is not None
 
 
-def _jq_path(path: str) -> str:
-    rest = path[1:]
-    return rest if rest.startswith(".") else "." + rest
-
-
 def render(folded: Folded, path: str, raw_path: str = "") -> str:
     """The folded view, under a banner that says where the full output is and how to read it.
 
@@ -177,12 +172,10 @@ def render(folded: Folded, path: str, raw_path: str = "") -> str:
     head = f"[Folded: {size}. Full output: {path}{raw_note}"
     match folded.branch:
         case "json" | "jsonl":
-            m = markers.JSON_SLICE_IN_TEXT.search(folded.body)
-            example = f"{_jq_path(m[1])}[{m[2]}:{min(int(m[3]), int(m[2]) + 5)}]" if m else "."
             slurp = " -s" if folded.branch == "jsonl" else ""  # JSON Lines: jq reads the records as one array
             how = (
-                "Fold markers give the JSON path of what they hide, and say why any item shown out of order "
-                f"is shown. Read hidden parts from the file, e.g. jq{slurp} '{example}' {quoted}"
+                "This is the data's envelope: its shape (fields, values and counts), the rows that break it, "
+                f"samples, and how to get more, by jq path (jq{slurp}). FILE in a command is {quoted}"
             )
         case "lines" | "html" | "xml" | "outline":
             m = markers.ANY_RANGE.search(folded.body)
@@ -190,16 +183,6 @@ def render(folded: Folded, path: str, raw_path: str = "") -> str:
             how = (
                 "Markers name the line numbers they hide. "
                 f"Read them with sed -n '{first},{last}p' {quoted} or grep -n"
-            )
-        case "json-schema" | "jsonl-schema":
-            how = (
-                "This is the data's schema: its fields, their values and counts, and the rows that break the "
-                f"pattern, by jq path. FILE in the query is {quoted}"
-            )
-        case "json-envelope" | "jsonl-envelope":
-            how = (
-                "This is the data's envelope: its shape (fields, values and counts), the rows that break it, "
-                f"samples, and how to get more, by jq path. FILE in a command is {quoted}"
             )
         case _:
             how = f"Markers give the character offsets they hide; read them with python or grep on {quoted}"

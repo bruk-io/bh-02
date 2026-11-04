@@ -63,13 +63,13 @@ def test_a_spill_is_trusted_only_inside_the_session_folder_under_claude_codes_na
     assert not trusted_spill(f"{session}/sub/mcp-x-y-1.txt", session)
 
 
-def test_the_banners_jq_example_reads_json_lines_as_one_array():
+def test_the_banner_names_the_file_for_a_command_and_reads_json_lines_as_one_array():
     pods = [{"name": f"pod-{i:04d}", "phase": "Running"} for i in range(300)]
     lines = fold("\n".join(json.dumps(p) for p in pods), budget_tokens=200)
     doc = fold(json.dumps({"pods": pods}), budget_tokens=200)
     assert lines is not None and doc is not None
-    assert "jq -s '.[2:7]' /s/out.txt" in render(lines, "/s/out.txt")
-    assert "jq '.pods[2:7]' /s/out.txt" in render(doc, "/s/out.txt")
+    assert "by jq path (jq -s). FILE in a command is /s/out.txt" in render(lines, "/s/out.txt")
+    assert "by jq path (jq). FILE in a command is /s/out.txt" in render(doc, "/s/out.txt")
 
 
 _PODS = json.dumps([{"name": f"pod-{i:04d}", "phase": "Running"} for i in range(400)])
@@ -174,5 +174,5 @@ def test_a_bash_json_output_folds_as_its_schema_when_the_view_is_schema():
     raw = json.dumps({"items": pods})
     out = decide(_bash(raw), Inline(raw), raw, 300, _SESSION, view="schema").reply
     stdout = out["hookSpecificOutput"]["updatedToolOutput"]["stdout"]
-    assert "This is the data's schema" in stdout.splitlines()[0]
+    assert "This is the data's envelope" in stdout.splitlines()[0]
     assert ".items: array[500] of object" in stdout and '.items[7] web-0007x: .phase "Failed"' in stdout

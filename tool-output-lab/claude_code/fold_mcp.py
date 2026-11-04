@@ -26,9 +26,9 @@ _TOOL = {
     "name": "fold",
     "description": (
         "Show a large file's outline within a token budget: every class, function and block of code "
-        "with its real line number, XML by element, JSON with long arrays cut to head, tail and the items "
-        "that stand out. Each marker names the lines or JSON path it hides; fetch them with Read (offset "
-        "and limit) or Grep. A file that fits the budget comes back whole."
+        "with its real line number, XML by element, JSON as its shape, the rows that break it and jq "
+        "commands to get more. Each marker names the lines or jq path it hides; fetch them with Read "
+        "(offset and limit), Grep or jq. A file that fits the budget comes back whole."
     ),
     "inputSchema": {
         "type": "object",

@@ -4,9 +4,9 @@ Both checks stand apart from the producers' code. Each claim is recomputed from 
 `evals.schema_check`'s jq-path walker, and a command is run with `jq` itself: a count, the values
 a field holds, a row's note, that a list of rows is complete, a sample's text, what a command
 prints. And each claim is said in the text of the level that makes it, on one line: a claim the
-text does not show is one the model never reads. A shape is also read back line by line, as
-`schema_check.claims` reads a schema view, for what its field lines say beyond the claims (ranges,
-medians, uniqueness).
+text does not show is one the model never reads. A shape is also read back line by line
+(`schema_check.shape_claims`), for what its field lines say beyond the claims (ranges, medians,
+uniqueness).
 """
 
 import json
@@ -29,8 +29,7 @@ from compressors.envelope import (
     Values,
     Verbatim,
 )
-from evals.schema_check import MISSING, get, note_claims, walk
-from evals.schema_check import claims as shape_claims
+from evals.schema_check import MISSING, get, note_claims, shape_claims, walk
 
 _COMMAND = re.compile(r"^jq(?P<slurp> -s)? '(?P<prog>.+)' FILE$")
 
@@ -176,5 +175,5 @@ def problems(
     out = unsaid(env)
     for claim in env.claims():
         out += wrong(raw, value, claim, knobs, run_jq)
-    out += shape_claims(value, "\n".join(env.level(Role.SHAPE).body), knobs, complete=False)
+    out += shape_claims(value, "\n".join(env.level(Role.SHAPE).body))
     return out

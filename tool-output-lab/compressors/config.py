@@ -11,7 +11,7 @@ The defaults are the values the findings were measured with. A knob is set in a 
     [tree]
     max_promoted = 5
 
-    [json_envelope]               # the envelope's parts for JSON (`--view envelope`)
+    [json_envelope]               # a part of the JSON envelope other than the view's
     samples = "typical"
 
 The fold's budget and view are not knobs here: each call names them. `label` names a config by
@@ -28,7 +28,7 @@ from compressors.envelope import priority
 
 @dataclass(frozen=True)
 class SchemaKnobs:
-    """The schema view of data (`compressors.schema`)."""
+    """How JSON's shape and its exceptions are worked out (`compressors.schema`)."""
 
     dominant: float = 0.75  # a value held by this share of rows makes the rows without it exceptions,
     rare: float = 0.1  # when the value they hold instead is at most this share
@@ -62,16 +62,14 @@ class TreeKnobs:
 @dataclass(frozen=True)
 class JsonEnvelopeKnobs:
     """Which producer makes each part of a JSON envelope (`compressors.envelope_json`), and the order
-    the parts claim the budget in. The defaults are the schema view's parts."""
+    the parts claim the budget in. "" leaves a part to the view's recipe (sample or schema)."""
 
     shape: str = (
-        "fields"  # fields: every field with its values and counts; summary: types and few-valued counts
+        ""  # fields: every field with its values, counts and ranges; summary: types, few-valued counts
     )
-    anomalies: str = "exceptions"  # exceptions: every row that breaks the shape; standouts: the fold's rules
-    samples: str = (
-        "matches"  # matches: rows holding the query; typical: and one ordinary row; head-tail; none
-    )
-    nav: str = "jq"  # jq: a ready query for the broken rows; rows: how to fetch any row; none
+    anomalies: str = ""  # exceptions: every row that breaks the shape; standouts: the stand-out rules; none
+    samples: str = ""  # matches: rows holding the query; typical: and one ordinary row; head-tail; none
+    nav: str = ""  # jq: a ready query for the broken rows; rows: how to fetch any row; none
     priority: str = "shape,anomalies,nav,samples"
 
 
@@ -86,11 +84,12 @@ class FoldConfig:
 DEFAULT = FoldConfig()
 _SECTIONS = {"schema": SchemaKnobs, "tree": TreeKnobs, "json_envelope": JsonEnvelopeKnobs}
 # The knobs that name a producer: the names each takes (`compressors.envelope_json` holds the producers).
+# "" is the view's.
 CHOICES = {
-    "json_envelope.shape": ("fields", "summary"),
-    "json_envelope.anomalies": ("exceptions", "standouts", "none"),
-    "json_envelope.samples": ("matches", "typical", "head-tail", "none"),
-    "json_envelope.nav": ("jq", "rows", "none"),
+    "json_envelope.shape": ("", "fields", "summary"),
+    "json_envelope.anomalies": ("", "exceptions", "standouts", "none"),
+    "json_envelope.samples": ("", "matches", "typical", "head-tail", "none"),
+    "json_envelope.nav": ("", "jq", "rows", "none"),
 }
 
 
@@ -107,7 +106,8 @@ def _typed(name: str, default: Any, value: Any) -> Any:
     """
     kind = type(default)
     if name in CHOICES and value not in CHOICES[name]:
-        raise ValueError(f"{name} is one of {', '.join(CHOICES[name])}; not {value!r}")
+        names = ", ".join(c or '"" (the view\'s)' for c in CHOICES[name])
+        raise ValueError(f"{name} is one of {names}; not {value!r}")
     if name == "json_envelope.priority":
         priority(str(value))  # names each part once, or raises
     if isinstance(value, str):

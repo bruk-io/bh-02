@@ -8,8 +8,9 @@ through `compressors.cli.fold_text`, then check:
 - invariants (any failure is a bug):
   - coverage: walking the output accounts for every source line exactly once, shown at its own
     number or inside exactly one marker;
-  - JSON markers: every `_folded` path and slice, read back with `resolve`, holds the count it
-    claims;
+  - JSON envelopes: every claim a part makes holds against the data and is said in its text
+    (`evals.envelope_check`; its commands run with jq), the envelope made again is the same, and a
+    JSON Lines note counts the records and says rightly whether index i is line i+1;
   - the output is no larger than the input, and folding twice gives the same text;
 - sufficiency: the task's own scorer, run on the fold text (can the answer be read off it?);
 - size: tokens in and out, and whether the output fits the budget.
@@ -29,17 +30,14 @@ from compressors import markers
 from compressors.cli import fold_text
 from compressors.common import estimate_tokens, query_words, split_lines
 from compressors.config import DEFAULT, FoldConfig, load, with_sets
-from compressors.envelope_json import envelope
-from compressors.json_fold import parse_json_or_jsonl
-from compressors.recovery import RecoveryError, resolve
-from compressors.route import VIEWS
-from evals import envelope_check, schema_check
+from compressors.envelope_json import VIEWS, envelope
+from compressors.json_items import parse_json_or_jsonl
+from evals import envelope_check
 from evals.tasks import BANDS, BUDGET, FORMATS, Task, skipped, tasks
 from evals.truth import score_fold
 
 _LAB = Path(__file__).resolve().parent.parent
 _MARKER, _INLINE, _CLIPPED, _NOTE = markers.LINE_RANGE, markers.INLINE, markers.CLIPPED, markers.NOTE
-_JSON_FOLD, _JSON_KEYS = markers.JSON_SLICE, markers.JSON_KEYS
 
 
 def _same(shown: str, source: str) -> bool:
@@ -96,56 +94,24 @@ def _line_holds(lines: list[str], i: int, item: object) -> bool:
         return False
 
 
-def json_markers(raw: str, out: str) -> list[str]:
-    """Problems with the JSON fold's markers, each checked against the source with `resolve`."""
+def jsonl_note(raw: str, out: str) -> list[str]:
+    """Problems with a JSON Lines envelope's note: the records it counts, and the line it says each is on."""
     parsed = parse_json_or_jsonl(raw)
     if parsed is None:
-        return ["the JSON fold's source does not parse"]
+        return ["the envelope's source does not parse as JSON"]
     source, kind = parsed
     note = markers.JSONL_NOTE.match(out)
-    problems: list[str] = []
     if (note is not None) != (kind == "jsonl"):
-        problems.append("the JSONL note is missing" if note is None else "a JSONL note on a JSON document")
-    if note is not None:
-        if int(note["records"]) != len(source):
-            problems.append(f"the JSONL note says {note['records']} records, the source has {len(source)}")
-        if note["where"] == "index i is line i+1":  # read each record back from its claimed line
-            lines = split_lines(raw)
-            if not all(_line_holds(lines, i, item) for i, item in enumerate(source)):
-                problems.append("the JSONL note maps index i to line i+1, and a record is not there")
-    try:
-        folded = json.loads(out[note.end() :] if note else out)
-    except ValueError as e:
-        return [*problems, f"the JSON fold does not parse: {e}"]
-
-    def walk(v: object) -> None:
-        if isinstance(v, dict):
-            note = v.get("_folded")
-            if isinstance(note, str) and (m := _JSON_FOLD.match(note)):
-                path, a, b, k, n = m[1], int(m[2]), int(m[3]), int(m[4]), int(m[5])
-                try:
-                    hidden, whole = resolve(source, f"{path}[{a}:{b}]"), resolve(source, path)
-                except RecoveryError as e:
-                    problems.append(f"{note!r}: {e}")
-                    return
-                if len(hidden) != k or b - a != k or len(whole) != n:
-                    problems.append(f"{note!r}: the source has {len(hidden)} there, {len(whole)} in all")
-            keys = v.get("_folded_keys")
-            if isinstance(keys, str) and (m := _JSON_KEYS.match(keys)):
-                try:
-                    whole = resolve(source, m[3])
-                except RecoveryError as e:
-                    problems.append(f"{keys[:60]!r}: {e}")
-                    return
-                if not isinstance(whole, dict) or len(whole) != int(m[2]) or int(m[1]) > int(m[2]):
-                    problems.append(f"{keys[:60]!r}: the source object has {len(whole)} keys")
-            for x in v.values():
-                walk(x)
-        elif isinstance(v, list):
-            for x in v:
-                walk(x)
-
-    walk(folded)
+        return ["the JSONL note is missing" if note is None else "a JSONL note on a JSON document"]
+    if note is None:
+        return []
+    problems = []
+    if int(note["records"]) != len(source):
+        problems.append(f"the JSONL note says {note['records']} records, the source has {len(source)}")
+    if note["where"] == "index i is line i+1":  # read each record back from its claimed line
+        lines = split_lines(raw)
+        if not all(_line_holds(lines, i, item) for i, item in enumerate(source)):
+            problems.append("the JSONL note maps index i to line i+1, and a record is not there")
     return problems
 
 
@@ -188,19 +154,11 @@ def check(task: Task, budget: int, query_on: bool, view: str = "sample", config:
             violations.append(f"{estimate_tokens(out)} tokens for a budget of {budget}, and not the floor")
     if not passthrough:
         if branch in ("json", "jsonl"):
-            violations += json_markers(raw, out)
-        elif branch in ("json-schema", "jsonl-schema"):
+            violations += jsonl_note(raw, out)
             parsed = parse_json_or_jsonl(raw)
             assert parsed is not None
             body = out[note.end() :] if (note := markers.JSONL_NOTE.match(out)) else out
-            violations += schema_check.claims(parsed[0], body, config.schema)
-            violations += schema_check.query_runs(raw, parsed[0], body, config.schema)
-        elif branch in ("json-envelope", "jsonl-envelope"):
-            parsed = parse_json_or_jsonl(raw)
-            assert parsed is not None
-            body = out[note.end() :] if (note := markers.JSONL_NOTE.match(out)) else out
-            slurp = branch == "jsonl-envelope"
-            env = envelope(parsed[0], query_words(query), budget, slurp=slurp, config=config)
+            env = envelope(parsed[0], query_words(query), budget, branch == "jsonl", config, view)
             if env.text() != body:
                 violations.append("the envelope made again from the same input differs from the fold")
             violations += envelope_check.problems(raw, parsed[0], env, config.schema)

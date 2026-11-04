@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from compressors.config import DEFAULT, FoldConfig, with_values
-from compressors.route import VIEWS
+from compressors.envelope_json import VIEWS
 from evals.l1 import Row, run
 from evals.tasks import BANDS, BUDGET, FORMATS, KINDS
 

@@ -10,7 +10,6 @@ whose files are missing on this host (the Python 3.13 stdlib, the cargo registry
 saved PyPI JSON in the untracked corpus/) is left out, and `skipped()` says which and why.
 """
 
-import json
 import random
 import re
 from collections.abc import Callable, Iterable
@@ -135,11 +134,10 @@ def bash_prompt(t: Task) -> str:
 
 
 def _count(fmt: str, p: synthetic.Payload) -> Number:
-    """A count's truth: the planted items, and for JSON where a view states the count: the sample
-    view's summary entry, or the schema view's value count."""
+    """A count's truth: the planted items, and for JSON where an envelope states the count: the value
+    count on a field's line."""
     k = len(p.planted)
-    sample = json.dumps({json.dumps("CrashLoopBackOff"): k})[1:-1]
-    stated = (sample, f'"CrashLoopBackOff" {k}') if fmt == "json" else ()
+    stated = (f'"CrashLoopBackOff" {k}',) if fmt == "json" else ()
     return Number(k, frozenset(p.planted), stated)
 
 
@@ -425,11 +423,7 @@ def _pypi() -> list[Task]:
             "count",
             real.PYPI_CLICK,
             "{path} is PyPI's JSON for the package click. How many releases does it list?",
-            Number(  # the sample fold's marker states it, and so does a schema's or an envelope's header
-                len(versions),
-                versions,
-                (f"of {len(versions)} keys of $.releases", f".releases: object of {len(versions)} keys"),
-            ),
+            Number(len(versions), versions, (f".releases: object of {len(versions)} keys",)),  # a header
         ),
         _file_task(
             "pypi-L-enumerate-2023",

@@ -64,43 +64,11 @@ def clipped(text: str, max_chars: int) -> str:
 # --- JSON -----------------------------------------------------------------------------------------
 
 
-def json_slice(path: str, start: int, stop: int, total: int) -> str:
-    """The value of a `_folded` entry standing for array items path[start:stop]."""
-    return f"{path}[{start}:{stop}] omitted ({stop - start} of {total} items)"
-
-
-def json_keys(omitted: list[str], total: int, path: str, names_shown: int = 40) -> str:
-    """The value of `_folded_keys`: how many of an object's keys are left out, and their names."""
-    names = ", ".join(omitted[:names_shown]) + (", ..." if len(omitted) > names_shown else "")
-    return f"{len(omitted)} of {total} keys of {path} omitted: {names}"
-
-
-def json_deep(path: str, depth: int) -> str:
-    return f"{path} omitted (nested deeper than {depth})"
-
-
 def jsonl_note(records: int, by_line: bool) -> str:
-    """The line above a JSON Lines fold: the records are shown as one array, and how to read item i."""
+    """The line above a JSON Lines envelope: the records are read as one array, and how to read item i."""
     where = "index i is line i+1" if by_line else "blank lines are skipped, so index i is not line i+1"
     return f"JSONL shown as one array of {records} records; {where}; jq -s '.[i]' reads item i."
 
 
-JSON_SLICE = re.compile(
-    r"^(?P<path>\$\S*)\[(?P<start>\d+):(?P<stop>\d+)\] omitted \((?P<count>\d+) of (?P<total>\d+) items\)$"
-)
-JSON_SLICE_IN_TEXT = re.compile(r'"_folded": "(?P<path>\$[^"\s]*)\[(?P<start>\d+):(?P<stop>\d+)\] omitted')
-JSON_KEYS = re.compile(r"^(?P<omitted>\d+) of (?P<total>\d+) keys of (?P<path>\$\S*) omitted")
-PROMOTION_KEY = "_next_item_shown_because"
-
-
-# --- schema views ---------------------------------------------------------------------------------
-
-
-def schema_exceptions(rows: int) -> str:
-    """The line above a collection's exception rows: the rows that break its pattern."""
-    return f"exceptions in {rows} rows:"
-
-
-SCHEMA_EXCEPTIONS = re.compile(r"(?m)^ *exceptions in \d+ rows:$")
-ENVELOPE_ANOMALIES = re.compile(r"(?m)^anomalies: [1-9]")  # an envelope's anomalies part names some
 JSONL_NOTE = re.compile(r"\AJSONL shown as one array of (?P<records>\d+) records; (?P<where>[^;]+);[^\n]*\n")
+ENVELOPE_ANOMALIES = re.compile(r"(?m)^anomalies: [1-9]")  # an envelope's anomalies part names some

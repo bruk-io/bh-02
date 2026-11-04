@@ -1,11 +1,11 @@
 # Envelopes mixed from the two JSON views' parts: every shape with every kind of anomaly and of
-# sample (nav fixed at jq, which states no answers), at two budgets. The schema view is fields,
-# exceptions, matches; the sample fold is summary, standouts, head-tail (recipes/sample.toml).
+# sample (nav the schema view's jq, which states no answers), at two budgets. The schema view is
+# fields, exceptions, matches; the sample view is summary, standouts, head-tail.
 name = "envelopes"
 only = ["json", "pypi"]
 
 [base]
-view = "envelope"
+view = "schema"
 
 [grid]
 "json_envelope.shape" = ["fields", "summary"]

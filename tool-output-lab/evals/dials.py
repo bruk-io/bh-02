@@ -44,7 +44,7 @@ from typing import Any
 
 from compressors.common import estimate_tokens
 from compressors.config import DEFAULT, with_sets
-from compressors.route import VIEWS
+from compressors.envelope_json import VIEWS
 from evals.l2 import _COST_PER_RUN, Dials, implied_input_price, report, run_jobs
 from evals.stats import bootstrap, paired, paired_accuracy
 from evals.tasks import BANDS, FORMATS, Task, tasks

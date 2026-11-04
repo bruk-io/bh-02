@@ -111,7 +111,10 @@ the parts before it, and read one another through what each part claims. Each pa
 fullest first, with the claims each makes; `compose` starts every part at its tersest and raises
 them in priority order within the budget. Layer 1 checks every claim against the data and that
 the text says it. Code: `compressors/envelope.py` (the core), `compressors/envelope_json.py` (JSON's
-producers), `evals/envelope_check.py`; `--view envelope` with the `json_envelope` knobs.
+producers), `evals/envelope_check.py`. JSON always folds as an envelope: `--view sample` or `--view
+schema` names a recipe, and a `json_envelope` knob swaps one part. The old renderers (the sample
+fold's JSON-with-markers, the schema view's text, their markers and marker checks, `recovery.py`) are
+gone (E7).
 
 | # | Stage | Needs a model | Status |
 |---|---|---|---|
@@ -121,3 +124,4 @@ producers), `evals/envelope_check.py`; `--view envelope` with the `json_envelope
 | E4 | Trees (S3) as producers on the same protocol, with nested envelopes for repeated siblings | no | |
 | E5 | Logs as templates: shape the templates and counts, anomalies the rare ones | no | |
 | E6 | Layer 2 on recipes that layer 1 cannot tell apart (a typical sample or none) | yes | |
+| E7 | The envelope replaces both JSON renderers; views become recipes | no | done: layer 1 as before, and the sample view finds the query's rows by the old fold's rule (FINDINGS 69) |

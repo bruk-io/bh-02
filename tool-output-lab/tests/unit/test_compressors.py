@@ -1,4 +1,4 @@
-"""The router and its folds: JSON, logs, plain text, HTML; and resolving a folded JSON path."""
+"""The router and its folds: JSON (as an envelope, by the sample view), logs, plain text, HTML."""
 
 import json
 import re
@@ -7,7 +7,6 @@ import pytest
 
 from compressors.common import query_terms
 from compressors.html import html_to_text
-from compressors.recovery import RecoveryError, resolve
 from compressors.route import detect, fold
 
 
@@ -27,10 +26,6 @@ def _text(raw: str, budget: int, args: dict | None = None, use_query: bool = Tru
     return raw if folded is None else folded.body
 
 
-def _json(raw: str, budget: int, args: dict | None = None) -> object:
-    return json.loads(_text(raw, budget, args))
-
-
 def _log(n: int) -> list[str]:
     paths = ["/api/items", "/api/users", "/health", "/api/orders", "/static/app.js"]
     return [
@@ -42,34 +37,33 @@ def test_small_results_pass_through_untouched():
     assert fold("hello\n" * 10, budget_tokens=2000) is None
 
 
-def test_a_long_array_stays_an_array_and_shows_head_tail_and_markers():
+def test_a_long_array_becomes_an_envelope_with_its_shape_head_tail_and_how_to_read_any_row():
     raw = json.dumps({"pods": _pods(500)})
     folded = fold(raw, budget_tokens=500)
     assert folded is not None and folded.branch == "json"
-    pods = json.loads(folded.body)["pods"]
-    assert isinstance(pods, list)
-    assert pods[0]["name"] == "pod-0000" and pods[-1]["name"] == "pod-0499"
-    assert any("_folded" in p and "$.pods[2:499]" in p["_folded"] for p in pods)
+    assert folded.body.startswith("shape:\n  .pods: array[500] of object")
+    assert '.pods[0]: {"name":"pod-0000"' in folded.body and '.pods[499]: {"name":"pod-0499"' in folded.body
+    assert "jq '.pods[I]' FILE" in folded.body
     assert len(folded.body) / 4 < len(raw) / 40
 
 
-def test_the_summary_counts_values_of_low_cardinality_fields():
-    raw = json.dumps(_pods(500, at7={"phase": "Failed"}))
-    marker = next(p for p in _json(raw, 500) if "_all_items" in p)
-    assert marker["_all_items"]["value_counts"]["phase"] == {'"Running"': 499, '"Failed"': 1}
+def test_the_shape_counts_the_values_of_a_field_with_few_of_them():
+    text = _text(json.dumps(_pods(500, at7={"phase": "Failed"})), 500)
+    assert re.search(r'(?m)^    \.phase +"Running" 499, "Failed" 1$', text)
 
 
-def test_a_rare_value_is_promoted_in_place_with_its_reason():
+def test_a_rare_value_stands_out_with_its_reason():
     text = _text(json.dumps(_pods(500, at312={"phase": "CrashLoopBackOff"})), 500)
-    assert "pod-0312" in text and "CrashLoopBackOff" in text and "$[312]" in text
+    assert "anomalies: 1 items stand out" in text
+    assert "[312] (phase='CrashLoopBackOff' is rare in this array)" in text and "pod-0312" in text
 
 
-def test_an_error_key_only_one_item_has_is_promoted():
+def test_an_error_key_only_one_item_has_stands_out():
     assert "pod-0250" in _text(json.dumps(_pods(500, at250={"error": "OOMKilled"})), 500)
 
 
-def test_a_false_boolean_everyone_shares_promotes_nothing():
-    assert not any("_next_item_shown_because" in p for p in _json(json.dumps(_pods(500)), 500))
+def test_a_false_boolean_everyone_shares_stands_out_nowhere():
+    assert "anomalies: none" in _text(json.dumps(_pods(500)), 500)
 
 
 def test_a_value_matching_the_query_is_promoted_only_when_the_query_is_used():
@@ -78,7 +72,7 @@ def test_a_value_matching_the_query_is_promoted_only_when_the_query_is_used():
     assert "pod-0377" not in _text(raw, 500, args, use_query=False)
 
 
-def test_jsonl_is_folded_as_one_array():
+def test_jsonl_is_read_as_one_array():
     raw = "\n".join(json.dumps(p) for p in _pods(300, at100={"phase": "Evicted"}))
     folded = fold(raw, budget_tokens=300)
     assert folded is not None and folded.branch == "jsonl"
@@ -91,21 +85,13 @@ def test_jsonl_with_blank_lines_does_not_claim_index_i_is_line_i_plus_1():
     folded = fold("\n" + "\n\n".join(rows) + "\n", budget_tokens=300)
     assert folded is not None and folded.branch == "jsonl"
     assert "blank lines are skipped, so index i is not line i+1" in folded.body.splitlines()[0]
-    assert "$[150]" in folded.body  # the path still names the record, for jq -s
+    assert "[150] (" in folded.body  # the path still names the record, for jq -s
 
 
 def test_a_jsonl_record_may_hold_characters_that_splitlines_splits_on():
     rows = [json.dumps({"name": f"pod-{i:04d}", "note": "a\u2028b"}, ensure_ascii=False) for i in range(300)]
     folded = fold("\n".join(rows), budget_tokens=300)
     assert folded is not None and folded.branch == "jsonl"
-
-
-def test_a_folded_json_path_resolves_to_what_it_names():
-    value = {"pods": _pods(500)}
-    assert resolve(value, "$.pods[40]")["name"] == "pod-0040"
-    assert [p["name"] for p in resolve(value, "$.pods[10:12]")] == ["pod-0010", "pod-0011"]
-    with pytest.raises(RecoveryError, match="its keys are: pods"):
-        resolve(value, "$.items")
 
 
 def test_a_repeated_line_pattern_collapses_to_one_line_and_a_count():
@@ -167,10 +153,9 @@ def test_the_last_line_of_a_stack_trace_counts_as_an_error():
     assert "needle-7" in _text("\n".join(lines), 500)
 
 
-def test_a_query_term_most_items_share_promotes_nothing():
+def test_a_query_term_most_items_share_makes_nothing_stand_out():
     raw = json.dumps([{"repo": "bh-02", "owner": "bruk-io", "sha": f"{i:040x}"} for i in range(60)])
-    items = _json(raw, 200, {"owner": "bruk-io", "repo": "bh-02"})
-    assert not any("_next_item_shown_because" in p for p in items)
+    assert "anomalies: none" in _text(raw, 200, {"owner": "bruk-io", "repo": "bh-02"})
 
 
 def test_forcing_a_branch_that_does_not_exist_names_the_ones_that_do():
