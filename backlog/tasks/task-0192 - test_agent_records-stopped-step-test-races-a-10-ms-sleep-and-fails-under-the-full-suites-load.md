@@ -23,8 +23,8 @@ In the full check on claude/subagents-followups (HEAD 2a306af, recorded on TASK-
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 The test waits on an event the model fake sets when complete() is entered, not a fixed sleep
-- [ ] #2 The test passes 50 runs under scripts/check's -n auto load
+- [x] #1 The test waits on an event the model fake sets when complete() is entered, not a fixed sleep
+- [x] #2 The test passes 50 runs under scripts/check's -n auto load
 <!-- AC:END -->
 
 ## Implementation Notes
