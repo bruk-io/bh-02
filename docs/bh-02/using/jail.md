@@ -132,7 +132,9 @@ credentials, the layer files, bh-02's configuration (a read as well as a write),
 own code, the interpreter and the directories of the links on the way to it; a variable a model's key
 reads; the proxy variables. Paths are resolved first, so a link to one of those is refused as what it
 leads to. A refused grant is left out of the start, and the start's notice (the line the jail reports
-about itself) says which and why. A read grant for a path that is not there is left out the same way.
+about itself) says which and why. A read grant for a path that is not there is left out the same way,
+and so is a write grant for one outside the project that is not there (a worktree since removed) or one
+under a path the layer hides.
 
 ## Which environment variables the model's code sees
 

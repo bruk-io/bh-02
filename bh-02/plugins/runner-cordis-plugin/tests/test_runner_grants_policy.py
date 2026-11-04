@@ -150,3 +150,43 @@ def test_a_granted_directory_beyond_the_project_keeps_the_self_modification_list
     policy = _policy(tmp_path, Grants((Grant(Kind.WRITE, str(elsewhere)),)))
     assert str(elsewhere) in policy.writable
     assert f"{elsewhere}/.bashrc" in policy.write_denies and f"{elsewhere}/.git/hooks" in policy.write_denies
+
+
+def test_a_write_grant_where_nothing_is_there_outside_the_project_is_left_out_with_the_reason(
+    tmp_path: Path,
+) -> None:
+    # An always-grant on a folder since removed (a worktree): brig refuses a writable root that is
+    # absent, so keeping it would fail every start.
+    gone = tmp_path / "gone"
+    policy = _policy(tmp_path, Grants((Grant(Kind.WRITE, str(gone)),)))
+    assert str(gone) not in policy.writable and not any(d.startswith(str(gone)) for d in policy.write_denies)
+    assert len(policy.refused) == 1 and "nothing there to write into" in policy.refused[0]
+    assert all(Path(w).exists() for w in policy.writable if w != str(tmp_path / "scratch"))
+
+
+def test_a_write_grant_on_an_absent_self_modifying_path_in_the_project_still_lifts_its_deny(
+    tmp_path: Path,
+) -> None:
+    root = str(tmp_path / "project")
+    policy = _policy(tmp_path, Grants((Grant(Kind.WRITE, f"{root}/.envrc"),)))
+    assert f"{root}/.envrc" not in policy.write_denies  # the jail may make it
+    assert policy.writable == (root, str(tmp_path / "scratch"))  # inside the project: no absent root
+    assert policy.refused == ()
+
+
+def test_a_write_grant_under_a_hidden_path_is_left_out_with_the_reason(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    (project / "private" / "inner").mkdir(parents=True)
+    granted = str(project / "private" / "inner")
+    policy = spec_for(
+        root=str(project),
+        scratch=str(tmp_path / "scratch"),
+        home=str(tmp_path / "home"),
+        config=BrigConfig(hide=("private",)),
+        layers=(),
+        host=(),
+        secrets=(),
+        grants=Grants((Grant(Kind.WRITE, granted),)),
+    )
+    assert granted not in policy.writable  # brig refuses a mask that hides a root
+    assert len(policy.refused) == 1 and "the layer hides it" in policy.refused[0]

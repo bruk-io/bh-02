@@ -208,8 +208,13 @@ def spec_for(
         key_envs=key_envs,
     )
     allowed, refused = admitted(grants, floor)
-    given = [Path(g.target) for g in allowed.of(Kind.WRITE)]
     roots = [str(Path(root, w).resolve()) for w in config.write]
+    given, left = _placeable(
+        [Path(g.target) for g in allowed.of(Kind.WRITE)],
+        roots,
+        [str(Path(root, name).resolve()) for name in config.hide],
+    )
+    refused = (*refused, *left)
     # a granted directory beyond the project is a root of its own; one inside a root changes nothing
     # but its exact self-modifying path, below
     outside = [str(g) for g in given if g.is_dir() and not any(_within(str(g), r) for r in roots)]
@@ -317,6 +322,26 @@ def admitted(grants: Grants, floor: Floor) -> tuple[Grants, tuple[str, ...]]:
         else:
             kept.append(each)
     return Grants(tuple(kept)), tuple(refused)
+
+
+def _placeable(
+    given: Sequence[Path], roots: Sequence[str], hidden: Sequence[str]
+) -> tuple[list[Path], list[str]]:
+    """The write grants a start can mount, and the words for each it leaves out, so an always-grant
+    that no longer fits fails nothing: one under a path the layer hides (brig would refuse the mask
+    as hidden by it), and one that is not there and lies under no writable root (brig would refuse an
+    absent root). An absent one under a root is kept: it lifts that path's deny, so the jail may make
+    it (an `.envrc`), and is no root of its own (`Policy` names a tree once)."""
+    kept: list[Path] = []
+    left: list[str] = []
+    for g in given:
+        if any(_within(str(g), h) for h in hidden):
+            left.append(f"a write grant on {g} is not applied: the layer hides it (`hide`)")
+        elif not g.exists() and not any(_within(str(g), r) for r in roots):
+            left.append(f"a write grant on {g} is not applied: there is nothing there to write into")
+        else:
+            kept.append(g)
+    return kept, left
 
 
 def _resolving(grant: Grant) -> Grant:
