@@ -23,9 +23,9 @@ Architecture review 2026-11-03: bh_02/cli.py computes key_envs at boot from the 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 The runner refuses, and ! withholds, every key variable of every endpoint the model row can reach: the default models file, the row's models file and its extra endpoints; repro test: a layer pointing the model row at another file whose key is { env = 'OTHER_KEY' } with runner.toml listing OTHER_KEY is refused
-- [ ] #2 The set is read fresh at each start, so an endpoint added mid-session counts; tested
-- [ ] #3 The draft's related unguarded rules move to drafts of their own
+- [x] #1 The runner refuses, and ! withholds, every key variable of every endpoint the model row can reach: the default models file, the row's models file and its extra endpoints; repro test: a layer pointing the model row at another file whose key is { env = 'OTHER_KEY' } with runner.toml listing OTHER_KEY is refused
+- [x] #2 The set is read fresh at each start, so an endpoint added mid-session counts; tested
+- [x] #3 The draft's related unguarded rules move to drafts of their own
 <!-- AC:END -->
 
 ## Implementation Notes
