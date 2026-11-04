@@ -60,7 +60,8 @@ start ends the release, whoever starts: the next input, or an extension that cha
 The policy (`spec_for` in the runner plugin) is one pure function: writes only to the project and
 a few places bh-02 names, never to what bh-02 itself reads and trusts (its layer files, its config
 directory, the paths it imports from) or what could run code later; reads of everything but
-credentials; no network; a scrubbed environment. [The jail](../using/jail.md) lists it as you meet
+credentials; no network; a scrubbed environment; and whatever the person has granted that the
+floor allows (read and write paths, environment variables, network destinations). [The jail](../using/jail.md) lists it as you meet
 it.
 
 brig's bubblewrap jail enforces it on Linux (by allowlist: the system, the interpreter, the project;

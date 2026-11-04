@@ -30,7 +30,7 @@ as confined only on the strength of this tripwire: a start that arms one reports
 secrets (`mounts.notice_for`). The tripwire is armed once brig has made the jail, so a host change in
 the moments between bubblewrap mounting a path and the watch being set is not seen.
 
-Every start passes brig an egress policy, empty until something is granted (`EGRESS`): the jail has
+Every start passes brig an egress policy, empty until a destination is granted (`EGRESS`): the jail has
 loopback only, a proxy on the host is its one route out, and a program that ignores the proxy
 settings reaches nothing. Brig then grades `network` best-effort while the jail sees any host root
 (and violated where it sees a place hosts keep sockets, so a root at or under one is refused at
@@ -47,7 +47,7 @@ import signal
 import socket
 import tempfile
 import threading
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from sys import base_prefix, prefix
@@ -62,7 +62,6 @@ from brig import (
     ChannelNotReady,
     ChannelReady,
     ChannelRefused,
-    EgressPolicy,
     Jail,
     await_channel_ready,
     create_bwrap_jail,
@@ -72,8 +71,10 @@ from brig import (
 )
 
 from host_paths import state_home
+from runner_cordis_plugin import store
 from runner_cordis_plugin.brig_spec import report_of, to_brig
 from runner_cordis_plugin.facts import git_identity, instead, interpreter_files, links_on_the_way
+from runner_cordis_plugin.grants import NO_GRANTS, Grants
 from runner_cordis_plugin.mounts import mountable, notice_for, released_for, tripwired
 from runner_cordis_plugin.policy import (
     BrigConfig,
@@ -292,11 +293,14 @@ def planned(
     cwd: str,
     argv: Sequence[str],
     author: Sequence[tuple[str, str]] = (),
+    grants: Grants = NO_GRANTS,
+    key_envs: Mapping[str, Sequence[str]] | None = None,
 ) -> Policy:
     """The policy for `argv` in `cwd` as the Linux jail takes it: the host's `spec_for`, reading by
     allowlist, its denies made ones bubblewrap can mount, the git author (`author`) set. Reads the
     host (the interpreter and its links, which paths exist) and makes the jail's scratch directory
-    under `scratch_root`."""
+    under `scratch_root`. `grants` are checked against the floor and applied by `spec_for`
+    (`key_envs`: the variables a model's key reads, which no env grant may name)."""
     scratch = str(Path(scratch_root, "tmp"))
     Path(scratch).mkdir(parents=True, exist_ok=True)
     hosted = [str(Path(p).resolve()) for p in (*import_path, prefix) if p]
@@ -314,7 +318,9 @@ def planned(
         interpreters=interpreter_files(names),
         links=[link.entry for link in links_on_the_way(names)],
         memory=host.auto_memory,
-        grants=host.grants,
+        store=host.grants,
+        grants=grants,
+        key_envs=key_envs,
     )
     readable = readable_roots(
         argv=argv, interpreter=(base_prefix, prefix), system=SYSTEM_READABLE, code=host.code
@@ -367,11 +373,23 @@ class BrigJail:
     names `runner:unconfined`."""
 
     def __init__(
-        self, config: BrigConfig, host: Host, *, platform: str = host_platform, note: str = ""
+        self,
+        config: BrigConfig,
+        host: Host,
+        *,
+        platform: str = host_platform,
+        note: str = "",
+        key_envs: Callable[[], Mapping[str, Sequence[str]]] = dict,
+        egress_hosts: Mapping[str, tuple[str, ...]] | None = None,
     ) -> None:
         self._config = config
         self._host = host
         self._note = note
+        self._key_envs = key_envs
+        # only tests pass it: the names the egress proxy resolves, instead of the host's resolver
+        self._egress_hosts = egress_hosts
+        # what the person granted for this session (once): empty until the broker holds them
+        self._session = NO_GRANTS
         # decided once, as the row binds: what is known before a start is said before one
         self._cannot = _why_unjailable(platform, shutil.which("bwrap"))
         # every program this jail started that may still run, and the starts under way: what
@@ -434,8 +452,16 @@ class BrigJail:
             reservation = reservations.reservations[0]
             argv = tuple(argv_for(reservation.endpoint))
             author = git_author(*git_identity(cwd))
+            grants = await self._granted()
             policy = planned(
-                self._config, self._host, scratch_root=scratch_root, cwd=cwd, argv=argv, author=author
+                self._config,
+                self._host,
+                scratch_root=scratch_root,
+                cwd=cwd,
+                argv=argv,
+                author=author,
+                grants=grants,
+                key_envs=self._key_envs(),
             )
             if refusal := socket_refusal(
                 self._roots(policy, cwd, scratch_root), os.environ.get("XDG_RUNTIME_DIR", "")
@@ -443,6 +469,7 @@ class BrigJail:
                 raise RuntimeError(refusal)
             brigged = to_brig(
                 policy,
+                grants=grants,
                 environ=os.environ,
                 stdout=str(Path(logs, "stdout.log")),
                 stderr=str(Path(logs, "stderr.log")),
@@ -457,7 +484,8 @@ class BrigJail:
                     channels=reservations,
                     cwd=cwd,
                     stdio=brigged.stdio,
-                    egress=EgressPolicy(),
+                    egress=brigged.egress,
+                    egress_hosts=self._egress_hosts,
                 )
             )
             try:
@@ -499,6 +527,14 @@ class BrigJail:
             raise
         return started
 
+    async def _granted(self) -> Grants:
+        """What the next start applies: the project's always-grants (`store`, read at each start, so
+        what was answered `always` in another process counts) and the session's, none until the
+        broker holds them (TASK-0181.05 replaces this method, and nothing else here). A grant the
+        floor refuses is `spec_for`'s to leave out, and its words reach the person in `notice()`."""
+        kept = await asyncio.to_thread(store.read, Path(self._host.grants)) if self._host.grants else ()
+        return Grants((*(request.grant for request in kept), *self._session))
+
     def _roots(self, policy: Policy, cwd: str, scratch_root: str) -> list[tuple[str, str]]:
         """The roots a start has, each named for the person and resolved through links (a
         link into `/tmp` is `/tmp`): the project, the scratch directory, the project's memory
@@ -520,7 +556,12 @@ class BrigJail:
         writes = tuple(w for w in policy.writable if not Path(w).is_relative_to(scratch_root))
         return _Facts(
             {**report_of(jail.report), HOST_UNDO: "tripwired", EGRESS: "proxied"},
-            "\n".join(filter(None, (self._note, notice_for([m for m in policy.masks if m in armed])))),
+            "\n".join(
+                filter(
+                    None,
+                    (self._note, *policy.refused, notice_for([m for m in policy.masks if m in armed])),
+                )
+            ),
             told_reads((*policy.readable, *policy.writable), (scratch_root,)),
             writes,
         )

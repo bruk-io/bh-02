@@ -12,6 +12,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import uuid
 from collections import namedtuple
@@ -49,7 +50,6 @@ from runner_cordis_plugin import (
     readable_roots,
     released_for,
     report_of,
-    self_modify_denied,
     socket_refusal,
     spec_for,
     to_brig,
@@ -59,6 +59,8 @@ from runner_cordis_plugin import (
     wires,
 )
 from runner_cordis_plugin import jail as jail_module
+from runner_cordis_plugin import store as grants_store
+from runner_cordis_plugin.grants import Asker, Grant, Kind, Request, Source
 
 
 @dataclass(frozen=True)
@@ -117,7 +119,7 @@ def test_the_grants_store_is_masked_and_never_written_wherever_it_is() -> None:
         config=BrigConfig(),
         layers=(),
         host=(),
-        grants=store,
+        store=store,
     )
     assert store in inside.masks and store in inside.write_denies
     outside = spec_for(
@@ -127,7 +129,7 @@ def test_the_grants_store_is_masked_and_never_written_wherever_it_is() -> None:
         config=BrigConfig(),
         layers=(),
         host=(),
-        grants=store,
+        store=store,
     )
     assert store in outside.masks and store not in outside.write_denies
     assert (
@@ -161,7 +163,9 @@ def test_the_spec_denies_what_would_reach_outside_the_jail_later() -> None:
         "/w/app/.git/config",
         "/w/app/.claude",
     } <= denies  # brig's self-modify list
-    assert not {"/w/app/CLAUDE.md", "/w/app/AGENTS.md"} & denies  # but the guidance files: `allow`'s default
+    assert (
+        not {"/w/app/CLAUDE.md", "/w/app/AGENTS.md"} & denies
+    )  # but the guidance files (`GUIDANCE`): writable by default
     assert "/Users/me/.ssh" in spec.masks
     assert "/w/app/private.txt" in spec.masks  # a file `hide` names, beside the project
     assert "/src/bh/private.txt" in spec.masks  # a secret, wherever the project is
@@ -381,15 +385,6 @@ def _a_uv_python_in(project: Path) -> tuple[Path, Path, tuple[Path, ...]]:
     (venv / "bin" / "python").symlink_to(through / "bin" / "python3")
     (venv / "bin" / "python3").symlink_to("python")
     return venv, file, (venv / "bin" / "python3", venv / "bin" / "python", through, base / "bin" / "python3")
-
-
-def test_allow_takes_names_off_the_self_modification_list_and_only_those() -> None:
-    assert "CLAUDE.md" not in self_modify_denied(("CLAUDE.md",))
-    assert {".git/hooks", ".git/config", "AGENTS.md"} <= set(self_modify_denied(("CLAUDE.md",)))
-    assert ".git/config" in self_modify_denied(())  # nothing allowed: the whole list
-    with pytest.raises(ValueError) as raised:
-        self_modify_denied(("README.md",))
-    assert "'README.md'" in str(raised.value) and "use `write`" in str(raised.value)
 
 
 async def test_the_row_binds_a_runner_over_a_brig_jail_over_the_layers_it_was_given() -> None:
@@ -784,7 +779,11 @@ async def test_a_linux_jail_keeps_the_grants_store_from_being_read_or_written_wh
     project = tmp_path / "project"
     store = project / "state" / "bh-02" / "projects" / "-project" / "grants"
     store.mkdir(parents=True, mode=0o700)
-    (store / "grants.toml").write_text("SECRET-GRANT")
+    kept = (
+        '[[grant]]\nkind = "env"\ntarget = "NOT_SET_HERE"\nsource = "row"\nname = "r"\n'
+        'reason = "SECRET-GRANT"\n'
+    )
+    (store / "grants.toml").write_text(kept)
     one = BrigJail(BrigConfig(), Host(grants=str(store)))
     said = project / "said"
 
@@ -808,7 +807,7 @@ async def test_a_linux_jail_keeps_the_grants_store_from_being_read_or_written_wh
             "make: Read-only file system",
             "remove: Read-only file system",
         ]
-        assert (store / "grants.toml").read_text() == "SECRET-GRANT"
+        assert (store / "grants.toml").read_text() == kept
         assert sorted(p.name for p in store.iterdir()) == ["grants.toml"]
     finally:
         await started.stop()
@@ -2498,3 +2497,193 @@ async def test_a_jailed_program_reaches_no_network_and_one_that_ignores_the_prox
     finally:
         host_server.close()
         await started.stop()
+
+
+def _always(directory: Path, *grants: Grant) -> None:
+    """Keep `grants` as the project's always-grants in `directory`, as the person answered them."""
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    asker = Asker(Source.ROW, "test")
+    grants_store.write(directory, [Request(grant, asker, "the test needs it") for grant in grants])
+
+
+# Listens; once the jail has seen it, tries to write the files argv[2:-1] and says what each came to
+# in argv[-1] (renamed into place, so whole), then waits.
+_LISTEN_THEN_TRY_TO_WRITE = """
+import os, socket, sys, time
+server = socket.socket(socket.AF_UNIX)
+server.bind(sys.argv[1])
+server.listen(4)
+server.accept()
+said = sys.argv[-1]
+came_to = []
+for file in sys.argv[2:-1]:
+    try:
+        open(file, "w").write("planted")
+        came_to.append(os.path.basename(file) + ": done")
+    except OSError as error:
+        came_to.append(os.path.basename(file) + ": " + os.strerror(error.errno))
+with open(said + ".tmp", "w") as report:
+    report.write("\\n".join(came_to))
+os.replace(said + ".tmp", said)
+time.sleep(60)
+"""
+
+
+async def _tried_to_write(project: Path, store: Path, files: Sequence[Path], name: str) -> list[str]:
+    said = project / name
+    one = BrigJail(BrigConfig(), Host(grants=str(store)))
+
+    def argv(endpoint: str) -> list[str]:
+        return [sys.executable, "-I", "-c", _LISTEN_THEN_TRY_TO_WRITE, endpoint, *map(str, files), str(said)]
+
+    started = await one.start(argv, cwd=str(project))
+    try:
+        return (await _report(said, started)).splitlines()
+    finally:
+        await started.stop()
+
+
+async def test_a_write_grant_on_an_exact_self_modifying_path_lets_the_next_start_write_it_and_only_it(
+    tmp_path: Path,
+) -> None:
+    """decision-0012 item 10: `.git/config` is denied, and so it stays until a write grant names
+    that exact path (here an always-grant, as the store holds it); the next start then writes it, and
+    still not `.envrc` (a placeholder directory is held there). Seen failing: with the
+    grant's lift of the deny removed from `spec_for`, the second start's `config` came to
+    'Read-only file system'."""
+    _needs_bwrap()
+    project = _a_repository(tmp_path)
+    store = tmp_path / "state" / "grants"
+    files = [project / ".git" / "config", project / ".envrc", project / "CLAUDE.md"]
+    _always(store)  # bh-02 makes the directory before any start
+    ungranted = await _tried_to_write(project, store, files, "before")
+    assert ungranted[:2] == ["config: Read-only file system", ".envrc: Is a directory"]
+    assert ungranted[2] == "CLAUDE.md: done"  # the guidance files are writable by default
+    _always(store, Grant(Kind.WRITE, str(project / ".git" / "config")))
+    granted = await _tried_to_write(project, store, files, "after")
+    assert granted == ["config: done", ".envrc: Is a directory", "CLAUDE.md: done"]
+
+
+async def test_a_refused_grant_in_the_store_never_reaches_the_jail_and_is_told_in_its_notice(
+    tmp_path: Path,
+) -> None:
+    """A write grant on the layer file the host runs from (a floor path) is in the store; the start
+    goes ahead without it, the layer file stays read-only, and the notice says why."""
+    _needs_bwrap()
+    project = _a_repository(tmp_path)
+    layer = project / "mine.toml"
+    layer.write_text("")
+    store = tmp_path / "state" / "grants"
+    _always(store, Grant(Kind.WRITE, str(layer)))
+    said = project / "said"
+    one = BrigJail(BrigConfig(), Host(paths=(str(layer),), grants=str(store)))
+
+    def argv(endpoint: str) -> list[str]:
+        return [sys.executable, "-I", "-c", _LISTEN_THEN_TRY_TO_WRITE, endpoint, str(layer), str(said)]
+
+    started = await one.start(argv, cwd=str(project))
+    try:
+        assert (await _report(said, started)).splitlines() == ["mine.toml: Read-only file system"]
+        assert "is never granted" in started.notice() and str(layer) in started.notice()
+    finally:
+        await started.stop()
+
+
+# Listens; once the jail has seen it, asks the proxy the jail reaches (127.0.0.1:3128) to connect to
+# each `host:port` in argv[2:-1], sends `ping` through one it opens, and says in argv[-1] what each came
+# to: the proxy's status line and, for a connection, what came back.
+_LISTEN_THEN_REACH_THROUGH_THE_PROXY = """
+import os, socket, sys, time
+server = socket.socket(socket.AF_UNIX)
+server.bind(sys.argv[1])
+server.listen(4)
+server.accept()
+said = sys.argv[-1]
+came_to = []
+for target in sys.argv[2:-1]:
+    try:
+        link = socket.create_connection(("127.0.0.1", 3128), timeout=10)
+        link.sendall(f"CONNECT {target} HTTP/1.1\\r\\nHost: {target}\\r\\n\\r\\n".encode())
+        head = b""
+        while b"\\r\\n\\r\\n" not in head:
+            head += link.recv(1)
+        status = head.split(b"\\r\\n")[0].decode().split(" ", 2)[1]
+        if status == "200":
+            link.sendall(b"ping")
+            status += " " + link.recv(4).decode()
+        came_to.append(target + " -> " + status)
+        link.close()
+    except OSError as error:
+        came_to.append(target + " -> " + type(error).__name__)
+with open(said + ".tmp", "w") as report:
+    report.write("\\n".join(came_to))
+os.replace(said + ".tmp", said)
+time.sleep(60)
+"""
+
+
+async def test_a_destination_granted_is_reached_through_the_proxy_and_nothing_ungranted_is(
+    tmp_path: Path,
+) -> None:
+    """A net grant becomes a `Destination` in the start's egress policy (decision-0012 item 9): the
+    program reaches a host server by a name the proxy resolves from a table (`egress_hosts`, the
+    seam brig gives a test) once the name and the address are both granted, and is refused the same
+    name at a port that was not, and the whole destination before the grant. Seen failing: with the
+    egress policy left empty in `to_brig`, the granted destination came to 403."""
+    _needs_bwrap()
+    project = tmp_path / "project"
+    project.mkdir()
+    host_server = socket.create_server(("127.0.0.1", 0))
+    port = host_server.getsockname()[1]
+    other = port + 1 if port < 65535 else port - 1
+    host_server.settimeout(0.2)
+    dialled: list[bytes] = []
+    done = threading.Event()
+
+    def serve() -> None:
+        while not done.is_set():
+            try:
+                connection, _ = host_server.accept()
+            except OSError:
+                continue
+            with connection:
+                dialled.append(connection.recv(4))
+                connection.sendall(b"pong")
+
+    thread = threading.Thread(target=serve)
+    thread.start()
+    store = tmp_path / "state" / "grants"
+    destination = f"svc.test:{port}"
+    outcomes = []
+    try:
+        for grants in ((), (Grant(Kind.NET, "svc.test", port), Grant(Kind.NET, "127.0.0.1", port))):
+            _always(store, *grants)
+            said = project / f"said-{len(grants)}"
+            one = BrigJail(BrigConfig(), Host(grants=str(store)), egress_hosts={"svc.test": ("127.0.0.1",)})
+
+            def argv(endpoint: str, said: Path = said) -> list[str]:
+                return [
+                    sys.executable,
+                    "-I",
+                    "-c",
+                    _LISTEN_THEN_REACH_THROUGH_THE_PROXY,
+                    endpoint,
+                    destination,
+                    f"svc.test:{other}",
+                    str(said),
+                ]
+
+            started = await one.start(argv, cwd=str(project))
+            try:
+                outcomes.append((await _report(said, started)).splitlines())
+            finally:
+                await started.stop()
+            if not grants:
+                assert dialled == []  # nothing granted: the host server was never dialled
+    finally:
+        done.set()
+        thread.join(timeout=5)
+        host_server.close()
+    assert dialled == [b"ping"]
+    assert outcomes[0] == [f"{destination} -> 403", f"svc.test:{other} -> 403"]
+    assert outcomes[1] == [f"{destination} -> 200 pong", f"svc.test:{other} -> 403"]

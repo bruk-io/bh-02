@@ -85,7 +85,9 @@ async def confined(*, config: BrigConfig, host: Host, models: _KeyReaders) -> Ef
         allowlist.effective(config, standing, file=file, readers=models.key_envs())
 
     jailed, note = allowlist.effective(config, standing, file=file, readers=models.key_envs())
-    yield bind("runner", Runner(_Rechecked(BrigJail(jailed, host, note=note), refuse)))
+    yield bind(
+        "runner", Runner(_Rechecked(BrigJail(jailed, host, note=note, key_envs=models.key_envs), refuse))
+    )
 
 
 @component(provides=("runner",))

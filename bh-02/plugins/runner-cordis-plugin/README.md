@@ -7,7 +7,7 @@ over it; and `/release`. The only package in the workspace that imports brig (th
 
 | Row | Binds | Consumes |
 |---|---|---|
-| `runner:confined` | `runner` over a brig jail (bruk-io/brig's `create_bwrap_jail`, bubblewrap: Linux only for now, darwin, or Linux with no `bwrap`, reports every grade `unenforced` from the start and says before the first input to use `runner:unconfined`, and refuses each start), a jail per start; config: `write` (default `["."]`), `deny`, `allow` (names taken off the self-modification list, `SELF_MODIFYING`; default `["CLAUDE.md", "AGENTS.md"]`), `hide` (files in the project inputs may not read; none by default), `env` (the names that survive the scrub; unset, they are the baseline `PATH`, `HOME`, `LANG`, `LC_ALL`, `TERM` plus the names in the person's `runner.toml`, below) | `host`, `models` (`key_envs()`, below) |
+| `runner:confined` | `runner` over a brig jail (bruk-io/brig's `create_bwrap_jail`, bubblewrap: Linux only for now, darwin, or Linux with no `bwrap`, reports every grade `unenforced` from the start and says before the first input to use `runner:unconfined`, and refuses each start), a jail per start; config: `write` (default `["."]`), `deny`, `hide` (files in the project inputs may not read; none by default), `env` (the names that survive the scrub; unset, they are the baseline `PATH`, `HOME`, `LANG`, `LC_ALL`, `TERM` plus the names in the person's `runner.toml`, below) | `host`, `models` (`key_envs()`, below) |
 | `runner:unconfined` | `runner`: each program as a plain subprocess (`--no-jail`), every axis reported `unenforced`, its environment without `CLAUDE*` (`CLAUDE_CODE_OAUTH_TOKEN`, and what a Claude Code that launched bh-02 leaves, a messaging token among them), `ANTHROPIC_*`, `TMUX` or `TMUX_PANE` (hygiene, not a boundary: an input without a jail can find the tmux socket itself; the confined runner's `env` allowlist never passes them, `tests/test_runner_tmux.py` shows both) | |
 | `runner:approval` | `approval`: `confined` (whether the runner confines what runs in it), `unasked(question) -> bool` (whether it runs without asking the person) | `runner` (`report`) |
 | `runner:release` | (nothing: registers `/release`) | `runner` (`release`), `commands` (`register`) |
@@ -101,10 +101,11 @@ The modules:
   the composition's layer files (`host.paths`), every path the host imports code from that sits
   under a writable root (`sys.path` entries, the interpreter's prefix), the
   self-modification list (`SELF_MODIFYING`: `.git/hooks`, `.git/config`, `.claude`, shell rc files, editor
-  settings, ...: what can run code outside the jail later) minus what `allow` names, and `deny`.
-  `allow` defaults to the project's guidance files (CLAUDE.md, AGENTS.md), which editing is
-  ordinary work; a name not on the list is a config error, since `write` is for other paths.
-  An `allow` in a layer replaces the default, so name every file it should let through. Nor
+  settings, ...: what can run code outside the jail later) minus the paths a write grant names
+  exactly, and `deny`. The project's guidance files (`GUIDANCE`: CLAUDE.md, AGENTS.md), which editing
+  is ordinary work, are not on the list. There is no `allow`: a layer naming it fails at boot with the
+  loader's error (`invalid config for BrigConfig`), and a self-modifying path is writable only by a
+  write grant on that exact path (decision-0012 item 10; a grant on its parent lifts nothing). Nor
   bh-02's configuration directories (`host.trusted`: `$XDG_CONFIG_HOME/bh-02` and
   `~/.config/bh-02`, as named and as resolved) where one is under a writable root, as when bh-02
   runs from the home directory: the host reads the models file and the person's startup file
@@ -290,3 +291,30 @@ channel, which brig counts any writable root as (so for any project), or can see
 keeps sockets (`/run`, `/tmp` and the like); the status bar shows it `!`.
 
 **Known gap**: darwin has no jail (above).
+
+## Grants in the policy
+
+`spec_for` and `brig_spec.to_brig` take `grants.Grants`, a frozen collection of `Grant`s (decision-0012
+items 1, 5 and 10). The floor comes first: `policy.admitted` resolves each path grant (`Path.resolve`,
+and the floor's paths too, so a link to a floor path is refused as what it leads to) and asks
+`grants.refusal` with the floor `spec_for` builds from its own arguments (`secrets`, `store`, the
+credentials under `home`, `layers`, `code`, `trusted`, `interpreters`, the directories of `links`, and
+`key_envs`). A refused grant is never used: `Policy.refused` holds the words, and a read grant for a
+path that is not there is left out the same way.
+
+| Grant | Becomes |
+|---|---|
+| `read` | a root in `Policy.readable` (kept by `allowlisted`; the policy's masks inside it are still carved out) |
+| `write` | a root in `Policy.writable`; a directory beyond the project also gets the self-modification list and the `trusted` and `code` denies a root has; one on exactly a self-modifying path lifts that deny |
+| `env` | a name in `Policy.env_allow` |
+| `net` | a `Destination` in the `EgressPolicy` of `Brigged.egress`, which `create_bwrap_jail` is given; empty when none is granted, because every start enforces egress |
+
+Where a refusal is reported: for now in the start's `notice()` (`BrigJail` appends `Policy.refused`),
+since nothing asks yet; the broker that asks (TASK-0181.05) refuses a request at the moment it is
+made, with the same `grants.refusal` words, before the person is asked.
+
+Where the grants come from: `BrigJail._granted` reads the always-grants from the store
+(`store.read(host.grants)`, at each start) and adds the session's, an empty `Grants` until the broker
+holds them. That method is the one seam the broker replaces. A store that is wrong (`store.Refused`)
+fails the start with its message, and grants nothing. `BrigJail(egress_hosts=...)` is brig's table the
+egress proxy resolves names from instead of the host's resolver; only tests pass it.

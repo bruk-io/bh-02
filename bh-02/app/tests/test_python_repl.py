@@ -24,6 +24,7 @@ import cordis
 import memory_cordis_plugin
 from agent_cordis_plugin import ToolBroker
 from bh_02.bootstrap import (
+    NotStarted,
     code_directories,
     code_packages,
     config_directories,
@@ -42,7 +43,6 @@ from runner_cordis_plugin import (
     BrigConfig,
     BrigJail,
     Runner,
-    self_modify_denied,
 )
 from subagents_cordis_plugin import EventLog
 
@@ -289,28 +289,22 @@ async def test_a_jailed_input_may_edit_the_project_s_guidance_but_not_what_runs_
     _answers()
     await run([*layers(), patch], [Row("chat", config={"prompt": "go"})])
     out = _shown()
-    assert "[0] WROTE" in out and "[1] WROTE" in out, out  # guidance files: `allow`'s default
+    assert "[0] WROTE" in out and "[1] WROTE" in out, out  # guidance files: writable by default (`GUIDANCE`)
     assert "[2] DENIED" in out and "[3] DENIED" in out, out  # git config and Claude settings stay denied
     assert (project / "CLAUDE.md").read_text() == "x" and not (project / ".git" / "config").exists()
 
 
-@pytest.mark.usefixtures("_needs_a_jail")
-async def test_the_jail_row_s_allow_lets_an_input_write_one_more_self_modification_path(
+async def test_a_layer_naming_allow_fails_at_boot_with_the_loader_s_error(
     composition: Callable[..., Path], tmp_path: Path
 ) -> None:
-    project = tmp_path / "project"
-    (project / ".git" / "hooks").mkdir(parents=True)
-    inputs = _writes(
-        project / ".git" / "config", project / ".git" / "hooks" / "pre-commit", project / "CLAUDE.md"
-    )
-    jail = _jailed_in(project) + 'config = { allow = [".git/config"] }\n'
-    patch = _inputs(composition, *inputs, extra=jail)
-    _answers()
-    await run([*layers(), patch], [Row("chat", config={"prompt": "go"})])
-    out = _shown()
-    assert "[0] WROTE" in out, out  # the one it allowed
-    assert "[1] DENIED" in out, out  # hooks still denied
-    assert "[2] DENIED" in out, out  # an `allow` replaces the default: CLAUDE.md is denied again
+    """`allow` is gone with no compatibility path (decision-0012 item 10): the guidance files are
+    writable by default and any other self-modifying path is a write grant on that exact path."""
+    jail = _jailed_in(tmp_path) + 'config = { allow = ["CLAUDE.md", ".git/config"] }\n'
+    patch = _inputs(composition, "1", extra=jail)
+    with pytest.raises(
+        NotStarted, match="invalid config for BrigConfig.*unexpected keyword argument 'allow'"
+    ):
+        await run([*layers(), patch], [Row("chat", config={"prompt": "go"})])
 
 
 @pytest.mark.usefixtures("_needs_a_jail")
@@ -736,9 +730,7 @@ async def test_a_jailed_input_can_t_write_bh_02_s_own_code_when_the_project_is_i
         Path(cordis.__file__).with_name("planted_by_an_input.py"),
     ]
     before = shipped.read_bytes()
-    # the self-modification list let through, so the jail makes no placeholder in the checkout
-    # (`.envrc/`, ...): what this is about is bh-02's own code alone
-    config = BrigConfig(allow=self_modify_denied(()))
+    config = BrigConfig()
     inputs = [
         _append_to(shipped, text=""),  # opened to append, nothing written: the real file stays as it was
         *(_append_to(path, mode="x", text="import os\n") for path in planted),
