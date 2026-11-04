@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-03T03:39:00Z'
-updated_date: '2026-11-04T13:56:00Z'
+updated_date: '2026-11-04T13:57:00Z'
 labels:
   - tests
   - size-1
@@ -24,10 +24,10 @@ Seen once in the reviewer's full scripts/check for TASK-0179 (2026-11-03, on 1e0
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 When the launch's exit code is not 0, the failure shows the app's last screen and stderr (app.text())
-- [ ] #2 If it recurs, the cause is named and fixed, or the test's flake is explained in its notes
-- [ ] #3 Every exit_code() mismatch in test_real_launch.py shows app.text() in its failure; a planted non-zero exit shows it
-- [ ] #4 The notes record whether the keyed-model launch failure recurred over a stated number of full runs
+- [x] #1 When the launch's exit code is not 0, the failure shows the app's last screen and stderr (app.text())
+- [x] #2 If it recurs, the cause is named and fixed, or the test's flake is explained in its notes
+- [x] #3 Every exit_code() mismatch in test_real_launch.py shows app.text() in its failure; a planted non-zero exit shows it
+- [x] #4 The notes record whether the keyed-model launch failure recurred over a stated number of full runs
 <!-- AC:END -->
 
 ## Implementation Notes
