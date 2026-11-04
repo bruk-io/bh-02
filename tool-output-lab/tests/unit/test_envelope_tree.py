@@ -2,6 +2,7 @@ from compressors.common import split_lines
 from compressors.config import CHOICES
 from compressors.envelope import Role
 from compressors.envelope_tree import ANOMALIES, NAVS, SAMPLES, SHAPES, envelope
+from compressors.route import lines_envelope
 from compressors.tree import indent_tree, xml_tree
 from evals.envelope_check import text_problems
 
@@ -68,3 +69,31 @@ def test_each_tree_part_knob_names_exactly_the_producers_there_are():
     assert set(CHOICES["tree_envelope.anomalies"]) == {"", *ANOMALIES}
     assert set(CHOICES["tree_envelope.samples"]) == {"", *SAMPLES}
     assert set(CHOICES["tree_envelope.nav"]) == {"", *NAVS}
+
+
+def test_a_page_is_its_headings_and_the_query_shows_its_section():
+    sections = "".join(
+        f"<h2>Part {i}</h2>"
+        + "".join(f"<p>Paragraph {j} of part {i}, on topic {i * 10 + j}.</p>" for j in range(8))
+        for i in range(30)
+    )
+    raw = f"<!doctype html><html><body><h1>Guide</h1>{sections}</body></html>"
+    env, source = lines_envelope(raw, "html", frozenset({"part 17"}), 400)
+    text = env.text()
+    assert "1: # Guide" in text and "## Part 0" in text
+    assert "## Part 17" in text and "Paragraph 3 of part 17" in text  # the section the query names
+    assert text_problems(source, env, run_tools=False) == []
+
+
+def test_code_is_its_definitions_a_class_with_all_its_methods():
+    words = [
+        a + b for a in ("red", "blue", "gold", "jade", "rust", "teal", "plum") for b in ("fox", "owl", "elk")
+    ]
+    methods = "".join(f"    def {w}(self):\n        return self.{w}\n\n" for w in words[:12])
+    helpers = "".join(f"def {w}_helper():\n    if True:\n        return '{w}'\n\n" for w in words * 2)
+    src = f"class Server:\n{methods}\n{helpers}"
+    env, source = lines_envelope(src, "code", frozenset(), 2000, language="python")
+    text = env.text()
+    assert env.level(Role.ANOMALIES).head == "none"  # definitions with their own names are no run
+    assert "1: class Server:" in text and all(f"def {w}(self):" in text for w in words[:12])
+    assert text_problems(source, env, run_tools=False) == []

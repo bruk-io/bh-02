@@ -5,11 +5,10 @@ import random
 
 import pytest
 
-from compressors import envelope_log
 from compressors.cli import fold_text
 from compressors.common import estimate_tokens
+from compressors.route import LINE_BRANCHES, lines_envelope
 from evals.envelope_check import text_problems
-from evals.l1 import coverage
 
 
 def _cases():
@@ -58,14 +57,12 @@ def _cases():
 
 
 @pytest.mark.parametrize(("name", "text", "path", "budget"), _cases(), ids=[c[0] for c in _cases()])
-def test_the_fold_fits_the_budget_and_accounts_for_every_line(name, text, path, budget):
+def test_the_fold_fits_the_budget_and_every_claim_holds(name, text, path, budget):
     result = fold_text(text, budget=budget, path=path, quiet=True)
     assert estimate_tokens(result.text) <= budget * 1.1, name
-    if result.branch == "lines":  # an envelope of lines: every claim holds against the input
-        env = envelope_log.envelope(text, frozenset(), budget)
-        assert env.text() == result.text and text_problems(text, env, run_tools=False) == []
-    elif path or not text.lstrip().startswith(("{", "[")):
-        assert coverage(result.source or text, result.text, numbered=bool(path)) == []
+    if result.branch in LINE_BRANCHES:  # an envelope of lines: every claim holds against its source
+        env, source = lines_envelope(text, result.branch, frozenset(), budget, language=result.language or "")
+        assert env.text() == result.text and text_problems(source, env, run_tools=False) == []
 
 
 def test_a_traceback_under_error_is_cut_but_its_start_kept():

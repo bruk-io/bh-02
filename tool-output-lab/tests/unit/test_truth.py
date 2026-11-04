@@ -63,20 +63,11 @@ def test_a_count_is_not_sufficient_from_a_number_that_merely_appears():
     ).correct
 
 
-def test_promotion_is_seen_in_trees_and_logs_not_only_in_json():
-    tree = "\n".join(
-        [
-            "- list:",
-            "  - item a",
-            "  [... lines 3-40 folded (19 siblings)]",
-            "  - item odd",
-            "  [... lines 42-90 folded (24 siblings)]",
-        ]
-    )
-    assert promotes(tree)
-    assert not promotes("- list:\n  - item a\n  [... lines 3-90 folded (44 siblings)]\n  - item last")
-    log = "a\n[... lines 2-500 omitted (499 lines)]\nERROR x\n[... lines 502-990 omitted (489 lines)]\nz"
-    assert promotes(log) and not promotes("a\n[... lines 2-990 omitted (989 lines)]\nz")
+def test_promotion_is_an_envelope_naming_anomalies_whatever_the_format():
+    log = "shape: 300 lines, 5 line templates\nanomalies: 2 lines in 1 group, all listed\n  2 lines like: x"
+    tree = "shape: 610 lines\nanomalies: 2 of 60 items in 1 run, all listed"
+    assert promotes(log) and promotes(tree)
+    assert not promotes("shape: 300 lines\nanomalies: none\nget more:\n  sed -n 'A,Bp' FILE")
     assert not score_fold(Absent(frozenset()), tree).correct
 
 

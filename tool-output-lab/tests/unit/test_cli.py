@@ -19,10 +19,8 @@ def test_code_is_folded_by_its_extension_with_real_line_numbers():
     out = fold_text(_src(), budget=200, path="a.py").text
     head, *rest = out.splitlines()
     assert head.startswith("[fold: code (python), ~")
-    assert "1\tclass A:" in rest[0]
-    assert "3\t    def big(self):" in rest
-    assert any("folded (399 lines)" in line for line in rest)  # the body, folded below its header
-    assert "405\t    def small(self):" in rest
+    assert "  1: class A:" in rest and "  3:     def big(self):" in rest  # its definitions, at their numbers
+    assert "  405:     def small(self):" in rest  # past the 400-line body the outline skips
     assert len(out) / 4 <= 200
 
 
