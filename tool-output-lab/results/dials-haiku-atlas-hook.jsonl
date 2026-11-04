@@ -561,3 +561,9 @@
 {"tool": "mcp__r__airtable_search_records", "tool_use_id": "toolu_01EcS8Lt5dfg5Esb1p8us9WM", "spilled": false, "raw_tokens": 115, "branch": "passthrough", "out_tokens": null}
 {"tool": "mcp__r__mongodb_aggregate", "tool_use_id": "toolu_0131DEFzRTRAeTN2buDEixJi", "spilled": false, "raw_tokens": 20, "branch": "passthrough", "out_tokens": null}
 {"tool": "mcp__r__mongodb_list-collections", "tool_use_id": "toolu_01SeQ9fst6b4fwRhs22d3dFB", "spilled": false, "raw_tokens": 34, "branch": "passthrough", "out_tokens": null}
+{"tool": "mcp__r__fetch_fetch", "tool_use_id": "toolu_014uiGeiZUgmpAdKowPu6B3x", "spilled": true, "raw_tokens": 25803, "branch": "lines", "out_tokens": 1920}
+{"tool": "mcp__r__fetch_fetch", "tool_use_id": "toolu_01CRjQ2WGVCaNKgURaD34ik4", "spilled": true, "raw_tokens": 25803, "branch": "lines", "out_tokens": 1920}
+{"tool": "mcp__r__twelvedata_GetTimeSeries", "tool_use_id": "toolu_01PUFz7iRGMcZ23UCRmeMUxx", "spilled": false, "raw_tokens": 107, "branch": "passthrough", "out_tokens": null}
+{"tool": "mcp__r__twelvedata_GetTimeSeriesMacd", "tool_use_id": "toolu_015LTrVCpohdnSKgCAtD7QsJ", "spilled": false, "raw_tokens": 144, "branch": "passthrough", "out_tokens": null}
+{"tool": "mcp__r__twelvedata_GetTimeSeries", "tool_use_id": "toolu_013YPsKTcS4ocPbusKrmw6f5", "spilled": false, "raw_tokens": 107, "branch": "passthrough", "out_tokens": null}
+{"tool": "mcp__r__twelvedata_GetTimeSeriesMacd", "tool_use_id": "toolu_011ZYNxXv7j2jVNW7X3T5m9u", "spilled": false, "raw_tokens": 144, "branch": "passthrough", "out_tokens": null}
