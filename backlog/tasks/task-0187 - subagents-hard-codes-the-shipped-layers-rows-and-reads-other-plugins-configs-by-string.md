@@ -3,7 +3,7 @@ id: TASK-0187
 title: >-
   subagents hard-codes the shipped layer's rows and reads other plugins' configs
   by string
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-11-03T17:47:00Z'
@@ -110,4 +110,6 @@ INFO    -  Documentation built in 3.55 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+Review (reviewer, 2026-11-04): closed. Full scripts/check exit 0 (2600 passed; gates, docs ok). AC1: test_child_boot boots the shipped layers with only the model replaced; the child reports being offered python, so its loop's requires were met within start=10 under a 30 s cap. AC2: the list is in bh-02.toml beside the rows, with a walk test over loop's inject/provides plus requires; the planted missing executor failed it. It cannot see a new broker contributor (memory, on-touch, access style), which the worker argues and the toml comment states; accepted, since derivation could not name those either. AC3: CONTRACTS section plus field-existence and child_rows tests. Findings: (minor) a layer or patch that sets the agents config without rows fails with cordis's bare dataclass TypeError, which names rows but not what to write: DRAFT-0028. (note) child.py's by-use names are TASK-0189, filed by the worker.
 <!-- SECTION:NOTES:END -->
