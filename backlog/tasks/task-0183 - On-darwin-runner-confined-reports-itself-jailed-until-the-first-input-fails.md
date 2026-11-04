@@ -1,7 +1,7 @@
 ---
 id: TASK-0183
 title: On darwin runner:confined reports itself jailed until the first input fails
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-11-03T17:47:00Z'
@@ -229,4 +229,6 @@ INFO    -  Documentation built in 3.06 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+Closed by reviewer 2026-11-04. Full check (scripts/check) at 3409d29 exited 0: 2589 passed, 6 skipped, 1 xfailed. The earlier blocker (test_runner_approval.py in no xdist jails group) is fixed in 3409d29. Repro fails for the right reason (confined True is False). Off Linux or without bwrap, report() is UNENFORCED before and after a refused start; jailed is drawn only from approval.confined. The grades row shows the notice at bind, before any input. linux-jail-check passed with and without --as-root (366 passed, 1 skipped, 1 xfailed each), so a ready Linux host is unchanged. Findings: the worker ticked the criteria itself (I verified each against this evidence); the unrelated board files were a stale-checkout artefact, resolved by the rebase. No drafts.
 <!-- SECTION:NOTES:END -->
