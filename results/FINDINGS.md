@@ -55,3 +55,38 @@ folds of 251 tasks each (a task with a query is folded with it and without it).
 
 This bounds what a model can answer from the envelope alone. Whether a model answers as well as
 native Claude Code, at less context, is layer 2's question (PLAN.md M4).
+
+## 2. Which parts matter: each format's compositions swept in layer 1
+
+Runs: `results/sweep-envelopes.md` (JSON and the PyPI file, 32 compositions, 47 folds each),
+`results/sweep-logs.md` (the synthetic logs and HDFS, 16 compositions, 66 folds each) and
+`results/sweep-trees.md` (accessibility snapshots, Figma XML, the ISO 3166 file, Python and Rust,
+24 compositions, 112 folds each). Each grid crosses the kinds of anomaly with the kinds of sample
+at budgets of 500 and 2,000 tokens, the rest of the schema recipe held. No claim fails at any of
+the 72 compositions.
+
+- **The anomalies part decides the most, in every format.** JSON's `exceptions` find all 12
+  planted anomalies and all 3 quiet ones at every point; its `standouts` find 9 or 10 and at most
+  1. In logs, `rare` finds every quiet anomaly (3 of 3, against at most 1 for `errors`) and more
+  spots (16 of 20 against 13 or 14 at 2,000 tokens), but flags one healthy log, HDFS's rare thread
+  id (absent 4 of 5 against 5 of 5). In trees, `rare` finds 22 of 24 spots and 25 of 27 counts at
+  2,000 tokens; `errors` adds nothing over `none` there, since the synthetic trees name no errors,
+  and both find 8 spots and 8 or 9 counts. No tree composition flags a healthy tree.
+- **Matching the query adds the lookups, and nothing else does.** Matches add 5 to 13 lookups
+  depending on the format and budget (JSON 4 to 9 of 14 at 2,000 tokens, logs 4 to 10 of 20, trees
+  8 to 17 of 26). A typical sample, or the head and tail, answers no task that matches did not,
+  except where the anomalies part missed rows: with JSON's `standouts` and logs' `errors`, the head
+  and tail happen to show 1 to 3 answers the rule did not. They cost tokens: at 2,000 tokens the median envelope grows from 245 to 310 or 438 in
+  JSON, from 444 to 536 or 594 in logs, and from 310 to 398 or 510 in trees. Whether a model
+  uses a sample to write its query right is what layer 1 cannot see (PLAN.md M5).
+- **The shape: fields or a summary.** JSON's `fields` list a keyed collection's keys and answer
+  one more enumerate task (6 of 7 against 5) at 2,000 tokens; `summary` is about 65 tokens
+  smaller, and at 500 tokens summary, exceptions and matches is the best JSON composition (36 of
+  47 at 168 tokens).
+- **The budget.** At 500 tokens logs answer 7 of 14 count tasks against 13 at 2,000, since the
+  anomalies' lines are cut; code outlines need room too (trees locate 2 of 6 and edit 1 of 5 at
+  500, against 6 of 6 and 4 of 5).
+
+For layer 2 this leaves two questions layer 1 cannot answer: whether the schema recipe's
+composition (exceptions or rare, matches, a ready command) keeps answers against native at less
+context (M4), and whether samples the query did not ask for earn their tokens (M5).
