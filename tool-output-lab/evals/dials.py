@@ -42,6 +42,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from compressors.common import estimate_tokens
 from compressors.config import DEFAULT, with_sets
 from compressors.route import VIEWS
 from evals.l2 import _COST_PER_RUN, Dials, implied_input_price, report, run_jobs
@@ -220,11 +221,16 @@ def main(argv: list[str] | None = None) -> int:
     if ns.dry_run:
         return 0
     rows = run_jobs(planned, model, f"dials-{name}", ns.workers, spec.get("max_cost"))
-    lines = [
-        f"# Dials {name}: {model}, the same tasks native and under each setting",
-        "",
-        *dial_table(rows, chosen),
-    ]
+    lines = [f"# Dials {name}: {model}, the same tasks native and under each setting", ""]
+    bands = [b for b in ("S", "M", "L", "XL", "XXL") if any(r["band"] == b for r in rows)]
+    if len(bands) > 1:  # how each setting scales: a table per size band, smallest first
+        for b in bands:
+            sized = [r for r in rows if r["band"] == b]
+            inputs = [estimate_tokens(t.payload()) for t in {j[0] for j in planned if j[0].band == b}]
+            lines += [f"## Band {b} (median input {statistics.median(inputs):,.0f} tokens)", ""]
+            lines += [*dial_table(sized, chosen), ""]
+        lines += ["## Every band together", ""]
+    lines += dial_table(rows, chosen)
     text = "\n".join(lines) + "\n\n" + report(rows, model)
     (_LAB / "results" / f"dials-{name}.md").write_text(text, encoding="utf-8")
     print(text, end="")
