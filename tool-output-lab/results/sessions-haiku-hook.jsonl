@@ -77,3 +77,4 @@
 {"tool": "mcp__fixture__get_figma_metadata", "tool_use_id": "toolu_01Thxx21XVAbij1xUQJkSbDn", "spilled": true, "raw_tokens": 36734, "branch": "xml", "out_tokens": 1846}
 {"tool": "mcp__fixture__get_figma_metadata", "tool_use_id": "toolu_0128voGcMwZg916dqxWWp7Li", "spilled": true, "raw_tokens": 36758, "branch": "xml", "out_tokens": 1843}
 {"tool": "mcp__fixture__get_figma_metadata", "tool_use_id": "toolu_01Q7EXzWwW3Ljp8zihaF2mDn", "spilled": true, "raw_tokens": 36773, "branch": "xml", "out_tokens": 1849}
+{"tool": "mcp__fixture__get_figma_metadata", "tool_use_id": "toolu_01KmKMHcbQCwqjZu1mXjjuwK", "spilled": true, "raw_tokens": 36794, "branch": "xml", "out_tokens": 1848}
