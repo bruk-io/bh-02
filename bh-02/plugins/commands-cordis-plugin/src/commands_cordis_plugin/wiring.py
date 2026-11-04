@@ -10,6 +10,7 @@ from commands_cordis_plugin.operations import Loader, Operator, Queue
 from commands_cordis_plugin.registry import Commands, CommandSpec, Run
 from commands_cordis_plugin.shell_command import ShellCommandConfig, run_line
 from cordis import Effects, acquire, background, bind, component
+from cordis.loader import resolve
 from cordis_helpers import perform
 
 __all__ = ["jobs", "operator", "registry", "shell_command"]
@@ -41,7 +42,9 @@ async def jobs(*, output: _Notices) -> Effects:
     """Fills a `jobs` row: `use = "commands:jobs"`. The restarts commands queue (`put`), run one
     at a time in this row's own work, a failure told to the person (`output.notice`); and
     whether any is pending (`settled`), which the chat row waits on before it reads a line. It
-    depends on `output` alone, which never reloads, so no restart it runs reloads it."""
+    depends on `output`, which the ui row binds, so a restart of the ui, of `jobs` itself, or of
+    any row it depends on would reload it and cancel the restart it runs: `/restart` refuses
+    those rows (the operator's `restart`), and the ui is restarted only by restarting the program."""
     value = Jobs(output.notice)
     yield background(perform(value.queue, lambda why: output.notice(why)))
     yield bind("jobs", value)
@@ -83,6 +86,15 @@ async def shell_command(*, commands: _Claimant, config: ShellCommandConfig, mode
     yield acquire(commands.claim, config.prefix, spec, run)
 
 
+def _declared(use: str) -> tuple[frozenset[str], frozenset[str]] | None:
+    """The keys the component a row's `use` names injects and provides; None if it does not resolve."""
+    try:
+        component = resolve(use)
+    except Exception:  # importing a module can raise anything; the loader reports that row itself
+        return None
+    return component.inject, component.provides
+
+
 @component
 async def operator(*, commands: _Registrar, loader: Loader, jobs: Queue) -> Effects:
     """Fills an `operator` row: `use = "commands:operator"`. /rows, /explain and /restart, over
@@ -90,5 +102,5 @@ async def operator(*, commands: _Registrar, loader: Loader, jobs: Queue) -> Effe
     answered, and one that fails is told to the person there. It depends on neither `model` nor
     `models`, so a composition without them keeps these commands, and a switch never reloads
     it."""
-    for spec, run in Operator(loader, jobs).specs:
+    for spec, run in Operator(loader, jobs, _declared).specs:
         yield acquire(commands.register, spec, run)

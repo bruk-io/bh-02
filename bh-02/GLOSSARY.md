@@ -119,7 +119,7 @@ As [cordis's README](../libs/cordis/README.md) defines them (its "Concepts").
 - **the modal**: where a question is put to you, with the code or the call shown whole: `y` runs it, `n` or Esc doesn't.
 - **host**: the side outside the jail: bh-02's own process and brig's host process, whose import paths, environment and files a jailed input can't reach.
 - **composer**: the box along the bottom of the app where you type a message or a command.
-- **ui** (row): `tui:ui`, the Textual app: it binds `input`, `output` and `frame`, and depends on nothing, so it never reloads.
+- **ui** (row): `tui:ui`, the Textual app: it binds `input`, `output` and `frame`, and depends on nothing, so nothing but restarting the program replaces it: `/restart ui` is refused, because `jobs` depends on `output` and the reload would cancel the restart.
 - **input**, **output** (keys): what the chat reads your lines from and shows replies, notes and questions through; the ui binds both.
 - **chat view**: the TUI widget that shows the conversation as a column of blocks, one per thing said (`ChatView`, `widgets/chat_view.py`); the `transcript` row is the conversation's record, not this widget.
 - **port**: a word in the tui plugin's code (`ports.py`): the values the ui binds for other rows, `input`, `output` and `frame`.
@@ -132,7 +132,7 @@ As [cordis's README](../libs/cordis/README.md) defines them (its "Concepts").
 - **prefix**: a character a row in a layer claims in `commands`, so every line you start with it is that row's, never a message to the model (`!`).
 - **`!COMMAND`**, **shell command** (row `shell-command`): `commands:shell_command`: a line starting with `!` runs in your shell, as you, not in the jail, and the model reads its output with your next message ([Commands](../docs/bh-02/using/commands.md#shell-commands-command)).
 - **operator** (row): `commands:operator`: the commands that act on the running program through the loader.
-- **jobs** (row and key): `commands:jobs`: the restarts commands ask for (`/clear`, `/compact`, `/model NAME`, `/restart`), run one at a time after the command answers.
+- **jobs** (row and key): `commands:jobs`: the restarts commands ask for (`/clear`, `/compact`, `/model NAME`, `/restart`), run one at a time after the command answers; `/restart` refuses `jobs` and every row it depends on (the ui, among them), which the restart would reload.
 - **switch** (row): `models:switch`: `/model`, which lists the models and switches by name in the session's layer.
 - **system** (row and key): `agent:system`: the system prompt, a broker of the sections rows add ([The prompt and asides](../docs/bh-02/how-it-works/prompt-and-asides.md)).
 - **memory** (row and key): `memory:files`: Claude Code's memory files, read as Claude Code reads them, as a section of the system prompt; `/memory` lists them ([Memory](../docs/bh-02/using/memory.md)).

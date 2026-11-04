@@ -31,7 +31,7 @@ their own:
 - **The namespace survives a new model or app.** The `python` row depends on the runner, the
   `approval` rule and brokers that never reload, so a new model or ui keeps the Python process
   and what it holds. A new runner starts a new one.
-- **The screen never reloads.** The `ui` row (`tui:ui`) depends on nothing but its config. Small
+- **The screen is never restarted from inside.** The `ui` row (`tui:ui`) depends on nothing but its config, so no reload elsewhere replaces it, and `/restart ui` is refused (the `jobs` row, which runs restarts, depends on `output`, so the restart would reload it and cancel itself). Small
   rows such as `status` and `grades` depend on what they show and push into the app's frame, so a
   change to what they show reloads them instead of the app. What they show is never replaced by
   `/clear` or `/model`, so neither reloads the status bar.
