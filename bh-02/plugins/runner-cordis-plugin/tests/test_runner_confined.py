@@ -50,6 +50,7 @@ from runner_cordis_plugin import (
     released_for,
     report_of,
     self_modify_denied,
+    socket_refusal,
     spec_for,
     to_brig,
     told_reads,
@@ -1763,7 +1764,7 @@ def test_brig_s_report_is_the_runner_s_in_lower_case_and_the_planned_one_is_no_s
         "network": "enforced",
         "channel_exclusivity": "violated",
     }
-    assert PLANNED["fs_write"] == "best_effort" and PLANNED["network"] == "enforced"
+    assert PLANNED["fs_write"] == "best_effort" and PLANNED["network"] == "best_effort"
 
 
 async def test_a_platform_brig_has_no_jail_for_is_refused_by_name(tmp_path: Path) -> None:
@@ -1919,8 +1920,8 @@ async def test_each_start_keeps_what_it_is_whatever_the_jail_starts_after_it(tmp
 async def test_a_start_s_grades_are_brig_s_and_the_planned_ones_are_no_stronger(tmp_path: Path) -> None:
     """Each axis a start reports is brig's grade of its jail, by name in lower case; the grades
     known before anything starts (what `approval` reads) are no stronger than a start's on any
-    axis they name, and the start is `confined` for `approval` (writes best-effort, the network
-    enforced)."""
+    axis they name, and the start is `confined` for `approval` (writes and the network
+    best-effort, with `egress` proxied)."""
     _needs_bwrap()
     project = tmp_path / "project"
     project.mkdir()
@@ -1929,13 +1930,14 @@ async def test_a_start_s_grades_are_brig_s_and_the_planned_ones_are_no_stronger(
     try:
         report = dict(started.report())
         assert report.pop("host_undo") == "tripwired"  # bh-02's own axis, which brig does not grade
+        assert report.pop("egress") == "proxied"  # bh-02's own, too: the start passed an egress policy
         order = ["violated", "unenforced", "best_effort", "enforced"]
         assert set(report.values()) <= set(order), report
-        assert report["network"] == report["env"] == "enforced" and report["fs_write"] == "best_effort"
+        assert report["env"] == "enforced" and report["network"] == report["fs_write"] == "best_effort"
         assert all(
             order.index(planned_grade) <= order.index(report[axis])
             for axis, planned_grade in one.report().items()
-            if axis != "host_undo"
+            if axis not in ("host_undo", "egress")
         )
         assert is_confined(started.report())
     finally:
@@ -2377,3 +2379,122 @@ async def test_the_owners_connection_still_reaches_the_jail_after_the_program_sw
         await started.stop()
         server.close()
         shutil.rmtree(short, ignore_errors=True)
+
+
+def test_a_root_at_or_under_a_place_hosts_keep_sockets_is_refused_with_why_and_what_to_do() -> None:
+    for place in ("/tmp", "/var/tmp", "/run", "/var/run", "/dev/shm", "/run/user/1000"):
+        said = socket_refusal([("the project", f"{place}/p")], "/run/user/1000")
+        assert f"the project {place}/p is under " in said, said
+        assert "sockets" in said and "network" in said and "XDG_STATE_HOME" in said and "--no-jail" in said
+    assert "is under /xdg" in socket_refusal([("the project", "/xdg/p")], "/xdg/")
+    assert "under /tmp" in socket_refusal([("the project", "/tmp")], "")  # the place itself
+    for fine in ("/home/me/p", "/tmpfoo/p", "/runner/p", "/var/tmpx", "/root/.cache/p"):
+        assert socket_refusal([("the project", fine)], "/run/user/1000") == "", fine
+    assert socket_refusal([("the project", "/tmp/p")], "relative") != ""  # a relative runtime dir is no place
+    assert socket_refusal([("the project", "/home/p")], "relative") == ""
+    both = socket_refusal([("the project", "/tmp/p"), ("the memory directory", "/run/m")], "")
+    assert "the project /tmp/p" in both and "the memory directory /run/m" in both
+
+
+async def test_a_start_with_a_project_under_tmp_is_refused_before_anything_starts(tmp_path: Path) -> None:
+    _needs_bwrap()
+    elsewhere = Path(tempfile.mkdtemp(prefix="bh-p-", dir="/tmp"))
+    try:
+        with pytest.raises(RuntimeError, match=rf"the project {elsewhere} is under /tmp.*--no-jail"):
+            await BrigJail(BrigConfig(), Host()).start(_listening, cwd=str(elsewhere))
+        assert (
+            list(Path(os.environ["XDG_STATE_HOME"], "bh-02", "jails").iterdir()) == []
+        )  # nothing left behind
+    finally:
+        shutil.rmtree(elsewhere, ignore_errors=True)
+
+
+async def test_a_memory_directory_under_the_runtime_directory_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _needs_bwrap()
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(runtime))
+    project = tmp_path / "project"
+    project.mkdir()
+    memory = runtime / "memory"
+    memory.mkdir()
+    with pytest.raises(RuntimeError, match=rf"the memory directory {memory} is under {runtime}"):
+        await BrigJail(BrigConfig(), Host(auto_memory=str(memory))).start(_listening, cwd=str(project))
+
+
+# Listens on argv[1]; then tries to reach the host's server at 127.0.0.1:argv[2] directly (a program that
+# ignores the proxy settings), through the proxy's HTTP route and through its CONNECT route, and to reach
+# a public address directly; writes what each did to argv[3] (renamed into place).
+_TRY_THE_NETWORK = """
+import json, os, socket, sys, time
+server = socket.socket(socket.AF_UNIX)
+server.bind(sys.argv[1])
+server.listen(4)
+port = int(sys.argv[2])
+
+def direct(host):
+    try:
+        s = socket.create_connection((host, port), timeout=3)
+    except OSError as error:
+        return "refused: " + type(error).__name__
+    s.close()
+    return "CONNECTED"
+
+def through_proxy(request):
+    proxy = os.environ["HTTP_PROXY"].rsplit(":", 1)
+    try:
+        s = socket.create_connection((proxy[0].split("//")[-1], int(proxy[1])), timeout=5)
+        s.sendall(request.encode())
+        return s.recv(200).split(b"\\r\\n")[0].decode()
+    except OSError as error:
+        return "refused: " + type(error).__name__
+
+seen = {
+    "direct_loopback": direct("127.0.0.1"),
+    "direct_public": direct("93.184.216.34"),
+    "proxy_variables": sorted(k for k in os.environ if k.upper().endswith("_PROXY")),
+    "http": through_proxy(f"GET http://127.0.0.1:{port}/ HTTP/1.1\\r\\nHost: 127.0.0.1:{port}\\r\\n\\r\\n"),
+    "connect": through_proxy(f"CONNECT 127.0.0.1:{port} HTTP/1.1\\r\\nHost: 127.0.0.1:{port}\\r\\n\\r\\n"),
+}
+with open(sys.argv[3] + ".part", "w") as out:
+    json.dump(seen, out)
+os.replace(sys.argv[3] + ".part", sys.argv[3])
+time.sleep(60)
+"""
+
+
+async def test_a_jailed_program_reaches_no_network_and_one_that_ignores_the_proxy_settings_reaches_nothing(
+    tmp_path: Path,
+) -> None:
+    """Every start passes an empty egress policy: with nothing granted the program has the proxy's
+    refusals and nothing else. A host server listens on loopback; the program (which ignores the
+    proxy settings for its direct attempts, and uses them for the others) never reaches it, nor a
+    public address."""
+    _needs_bwrap()
+    project = tmp_path / "project"
+    project.mkdir()
+    said = project / "net.json"
+    host_server = socket.socket()
+    host_server.bind(("127.0.0.1", 0))
+    host_server.listen(8)
+    host_server.settimeout(0.01)
+    port = host_server.getsockname()[1]
+
+    def argv(endpoint: str) -> list[str]:
+        return [sys.executable, "-I", "-c", _TRY_THE_NETWORK, endpoint, str(port), str(said)]
+
+    started = await BrigJail(BrigConfig(), Host()).start(argv, cwd=str(project))
+    try:
+        seen = json.loads(await _report(said, started))
+        assert seen["direct_loopback"].startswith("refused"), seen
+        assert seen["direct_public"].startswith("refused"), seen
+        assert {"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"} <= set(seen["proxy_variables"])
+        assert "200" not in seen["http"] and "200" not in seen["connect"], seen
+        assert "403" in seen["http"] and "403" in seen["connect"], seen  # the proxy's refusal, as data
+        with pytest.raises(OSError):  # the host server was never dialled, by any route
+            host_server.accept()
+    finally:
+        host_server.close()
+        await started.stop()

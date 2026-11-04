@@ -6,7 +6,16 @@ from runner_cordis_plugin import allowlist, grants, store
 from runner_cordis_plugin.approval import Approval, Graded, is_confined
 from runner_cordis_plugin.brig_spec import Brigged, report_of, to_brig
 from runner_cordis_plugin.facts import links_on_the_way
-from runner_cordis_plugin.jail import CHANNEL, HOST_UNDO, PLANNED, SYSTEM_READABLE, BrigJail, Host, planned
+from runner_cordis_plugin.jail import (
+    CHANNEL,
+    EGRESS,
+    HOST_UNDO,
+    PLANNED,
+    SYSTEM_READABLE,
+    BrigJail,
+    Host,
+    planned,
+)
 from runner_cordis_plugin.mounts import mountable, notice_for, released_for, tripwired
 from runner_cordis_plugin.policy import (
     BASELINE_ENV,
@@ -19,6 +28,7 @@ from runner_cordis_plugin.policy import (
     link_directories,
     readable_roots,
     self_modify_denied,
+    socket_refusal,
     spec_for,
     told_reads,
 )
@@ -30,6 +40,7 @@ from runner_cordis_plugin.wiring import approval, confined, release, unconfined
 __all__ = [
     "BASELINE_ENV",
     "CHANNEL",
+    "EGRESS",
     "HOST_UNDO",
     "PLANNED",
     "CREDENTIALS",
@@ -67,6 +78,7 @@ __all__ = [
     "report_of",
     "released_for",
     "self_modify_denied",
+    "socket_refusal",
     "spec_for",
     "store",
     "told_reads",

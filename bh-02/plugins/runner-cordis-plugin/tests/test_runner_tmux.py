@@ -9,7 +9,6 @@ started in each, from a process that has them set (stand-in values: never a real
 import asyncio
 import json
 import sys
-import tempfile
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -53,7 +52,6 @@ def _keys_exported(monkeypatch: pytest.MonkeyPatch) -> None:
 def _inside_tmux(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("TMUX", "/tmp/tmux-0/default,123,0")
     monkeypatch.setenv("TMUX_PANE", "%7")
-    monkeypatch.setenv("XDG_STATE_HOME", tempfile.mkdtemp(prefix="bh-s-", dir="/tmp"))
 
 
 async def _environment_of(

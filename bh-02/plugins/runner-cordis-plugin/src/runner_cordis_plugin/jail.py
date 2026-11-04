@@ -30,6 +30,12 @@ as confined only on the strength of this tripwire: a start that arms one reports
 secrets (`mounts.notice_for`). The tripwire is armed once brig has made the jail, so a host change in
 the moments between bubblewrap mounting a path and the watch being set is not seen.
 
+Every start passes brig an egress policy, empty until something is granted (`EGRESS`): the jail has
+loopback only, a proxy on the host is its one route out, and a program that ignores the proxy
+settings reaches nothing. Brig then grades `network` best-effort while the jail sees any host root
+(and violated where it sees a place hosts keep sockets, so a root at or under one is refused at
+start); `approval` counts best-effort as confined on the strength of the egress policy.
+
 The jail ends with bh-02, however it ends: brig starts bubblewrap with `--die-with-parent`.
 """
 
@@ -56,6 +62,7 @@ from brig import (
     ChannelNotReady,
     ChannelReady,
     ChannelRefused,
+    EgressPolicy,
     Jail,
     await_channel_ready,
     create_bwrap_jail,
@@ -74,6 +81,7 @@ from runner_cordis_plugin.policy import (
     allowlisted,
     git_author,
     readable_roots,
+    socket_refusal,
     spec_for,
     told_reads,
 )
@@ -81,7 +89,7 @@ from runner_cordis_plugin.runner import ArgvFor
 from runner_cordis_plugin.tripwire import Tripwire
 from runner_cordis_plugin.unconfined import UNENFORCED
 
-__all__ = ["CHANNEL", "HOST_UNDO", "PLANNED", "SYSTEM_READABLE", "BrigJail", "Host", "planned"]
+__all__ = ["CHANNEL", "EGRESS", "HOST_UNDO", "PLANNED", "SYSTEM_READABLE", "BrigJail", "Host", "planned"]
 
 #: The name of the one channel a program listens on: the socket its owner dials.
 CHANNEL = "program"
@@ -98,6 +106,14 @@ SYSTEM_READABLE: tuple[str, ...] = ("/usr", "/bin", "/sbin", "/lib", "/lib64", "
 #: best-effort `fs_write` count as confined (`approval.is_confined`). Brig does not grade it.
 HOST_UNDO = "host_undo"
 
+#: bh-02's own axis of a start's report, beside `host_undo`: `proxied` when the start passed brig an
+#: egress policy (`BrigJail._launched` passes one every time, empty until something is granted), so
+#: the jail has loopback only and a proxy on the host as its one route out, and a program that
+#: ignores the proxy settings reaches nothing. It is what makes `network: best_effort` count as
+#: confined (`approval.is_confined`): brig grades the network best-effort whenever the jail sees any
+#: host root, and `violated` where a socket place is visible, which never counts.
+EGRESS = "egress"
+
 #: The grades a start of the jail can earn at most, known before anything starts (what `approval`
 #: reads): `fs_write` is best-effort because bh-02's policy always holds write denies under the
 #: project (the layer files, `.git/hooks`, ...) with a mount the host can undo, and `fs_read` is
@@ -106,9 +122,10 @@ HOST_UNDO = "host_undo"
 PLANNED: Mapping[str, str] = {
     "fs_read": "best_effort",
     "fs_write": "best_effort",
-    "network": "enforced",
+    "network": "best_effort",
     "env": "enforced",
     HOST_UNDO: "tripwired",
+    EGRESS: "proxied",
 }
 
 
@@ -386,7 +403,9 @@ class BrigJail:
         alone) and connected to it by brig's verified connect (`started.connection`).
 
         Raises:
-            RuntimeError: this is not Linux, or there is no bubblewrap, or the program never
+            RuntimeError: this is not Linux, or there is no bubblewrap, or a root of the jail (the
+                project, a write root, the scratch or memory directory) is at or under a place hosts
+                keep sockets (`policy.socket_refusal`, which says what to do), or the program never
                 listened. brig's own refusals of the policy (`PolicyRootAbsent`, ...) cross as they are.
         """
         starting: asyncio.Future[None] = asyncio.get_running_loop().create_future()
@@ -418,6 +437,10 @@ class BrigJail:
             policy = planned(
                 self._config, self._host, scratch_root=scratch_root, cwd=cwd, argv=argv, author=author
             )
+            if refusal := socket_refusal(
+                self._roots(policy, cwd, scratch_root), os.environ.get("XDG_RUNTIME_DIR", "")
+            ):
+                raise RuntimeError(refusal)
             brigged = to_brig(
                 policy,
                 environ=os.environ,
@@ -434,6 +457,7 @@ class BrigJail:
                     channels=reservations,
                     cwd=cwd,
                     stdio=brigged.stdio,
+                    egress=EgressPolicy(),
                 )
             )
             try:
@@ -475,13 +499,27 @@ class BrigJail:
             raise
         return started
 
+    def _roots(self, policy: Policy, cwd: str, scratch_root: str) -> list[tuple[str, str]]:
+        """The roots a start has, each named for the person and resolved through links (a
+        link into `/tmp` is `/tmp`): the project, the scratch directory, the project's memory
+        directory and the write roots (`socket_refusal`)."""
+        named = {cwd: "the project", scratch_root: "the jail's scratch directory"}
+        if self._host.auto_memory:
+            named[self._host.auto_memory] = "the memory directory"
+        named.update(
+            (w, "a write root")
+            for w in policy.writable
+            if w not in named and not Path(w).is_relative_to(scratch_root)
+        )
+        return [(what, str(Path(path).resolve())) for path, what in named.items()]
+
     def _facts(self, policy: Policy, jail: Jail, scratch_root: str, armed: Sequence[str]) -> _Facts:
         """What a start of `policy` is, for whoever started it: brig's grades of the jail and the
         tripwire's `host_undo`, its notice (the masks among the `armed` paths), the trees it reads
         and the roots it may write but its scratch."""
         writes = tuple(w for w in policy.writable if not Path(w).is_relative_to(scratch_root))
         return _Facts(
-            {**report_of(jail.report), HOST_UNDO: "tripwired"},
+            {**report_of(jail.report), HOST_UNDO: "tripwired", EGRESS: "proxied"},
             "\n".join(filter(None, (self._note, notice_for([m for m in policy.masks if m in armed])))),
             told_reads((*policy.readable, *policy.writable), (scratch_root,)),
             writes,

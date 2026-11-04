@@ -96,7 +96,7 @@ bar along the bottom. The status bar shows the session's id, the model and its p
 well the jail holds, for example:
 
 ```text
-session: 20261008-225453-f7e7 │ model: claude/sonnet (claude-code) │ jail: jailed fs_write ✓ network ✓ fs_read ~ env ✓
+session: 20261008-225453-f7e7 │ model: claude/sonnet (claude-code) │ jail: jailed fs_write ~ network ~ fs_read ~ env ✓
 ```
 
 Type a message and press Enter. The model answers, and runs Python as it works: each call is an
