@@ -1,10 +1,21 @@
 """`approval`: the one rule for whether the model's code runs unasked, and its row."""
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 
 from cordis.loader import resolve
 from cordis.testing import drive
-from runner_cordis_plugin import UNENFORCED, Approval, BrigConfig, BrigJail, Host, Runner, approval, is_confined
+from runner_cordis_plugin import UNENFORCED, Approval, BrigConfig, BrigJail, Runner, approval, is_confined
+
+
+@dataclass(frozen=True)
+class _Host:
+    paths: tuple[str, ...] = ()
+    secrets: tuple[str, ...] = ()
+    trusted: tuple[str, ...] = ()
+    code: tuple[str, ...] = ()
+    auto_memory: str = ""
+
 
 _CONFINED = {**UNENFORCED, "fs_write": "enforced", "network": "enforced"}
 _QUESTION = {"name": "python", "input": {"code": "print(1)"}}
@@ -116,6 +127,6 @@ def test_the_row_depends_on_the_runner_alone() -> None:
 def test_a_confined_runner_that_cannot_jail_here_is_not_confined_before_any_start() -> None:
     """On darwin every start of `runner:confined` refuses, so nothing is ever jailed: the report
     that decides `confined` (and the status bar's `jailed`) says so before an input, not after one fails."""
-    runner = Runner(BrigJail(BrigConfig(), Host(), platform="darwin"))
+    runner = Runner(BrigJail(BrigConfig(), _Host(), platform="darwin"))
     assert Approval(runner).confined is False
     assert runner.report() == UNENFORCED
