@@ -1,9 +1,9 @@
 ---
-id: DRAFT-0024
+id: TASK-0187
 title: >-
   subagents hard-codes the shipped layer's rows and reads other plugins' configs
   by string
-status: Draft
+status: To Do
 assignee: []
 created_date: '2026-11-03T17:47:00Z'
 labels:
