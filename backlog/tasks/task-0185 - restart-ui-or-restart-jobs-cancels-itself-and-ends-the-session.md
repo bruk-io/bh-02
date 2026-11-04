@@ -1,7 +1,7 @@
 ---
 id: TASK-0185
 title: /restart ui or /restart jobs cancels itself and ends the session
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-11-03T17:47:00Z'
@@ -172,4 +172,6 @@ FAILED bh-02/plugins/commands-cordis-plugin/tests/test_restart.py::test_restarti
 ```
 
 Lead, 2026-11-04: the repro file was made stricter in c7e8e27 (an 'is refused' check on each answer, a /restart operator step). A new repro is recorded above: the test as it now stands, run on the code before the fix (2aa4b7d), committed in a throwaway local worktree so record-check could name it; it fails on '/restart ui' answering a restart instead of a refusal.
+
+Reviewer, 2026-11-04: closed. The new repro is sound: at c169fe9 test_restart.py is byte-identical to HEAD, and only the fix (operations.py, wiring.py, README) differs, so the test as it now stands fails on the pre-fix code and passes after. The original repro (2aa4b7d) shows the unmounted rows; the new one shows that /restart ui was accepted instead of refused. Caveat: c169fe9 exists only locally (a throwaway commit). Both criteria met; full check exit 0. Findings as in the note above: DRAFT-0026 (medium) for /model's reload and /clear's restart running in jobs' task; two low ones answered in the notes.
 <!-- SECTION:NOTES:END -->
