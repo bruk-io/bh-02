@@ -4,7 +4,7 @@ title: >-
   Capability grants: a grants broker in the runner plugin, kept per project
   outside every jail, asked once, for the session or always
 date: '2026-11-04T12:41:00Z'
-status: proposed
+status: accepted
 ---
 ## Context
 
@@ -136,3 +136,5 @@ What exists:
   - "once" is the session;
   - the Python process restarts for a path or env grant;
   - `network: best_effort` counts as confined with egress enforced.
+
+Accepted by @bruk, 2026-11-04.
