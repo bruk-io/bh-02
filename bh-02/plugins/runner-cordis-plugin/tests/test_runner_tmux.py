@@ -104,10 +104,10 @@ async def test_the_unconfined_runner_keeps_the_claude_token_out_and_passes_provi
 
 
 async def test_the_confined_runner_starts_programs_without_tmux_s_variables(tmp_path: Path) -> None:
-    if sys.platform not in ("darwin", "linux") or (
-        sys.platform == "linux" and not Path("/usr/bin/bwrap").exists()
-    ):
-        pytest.skip("the confined runner is brig's: darwin, or Linux with /usr/bin/bwrap")
+    if sys.platform != "linux" or not Path("/usr/bin/bwrap").exists():
+        pytest.skip(
+            "the confined runner jails only on Linux with /usr/bin/bwrap (darwin has no brig jail yet)"
+        )
     project = tmp_path / "project"
     project.mkdir()
     jail = BrigJail(BrigConfig(), _Host())
@@ -121,10 +121,10 @@ async def test_the_confined_runner_starts_programs_without_tmux_s_variables(tmp_
 
 
 async def test_the_confined_runner_passes_neither_the_claude_token_nor_a_provider_key(tmp_path: Path) -> None:
-    if sys.platform not in ("darwin", "linux") or (
-        sys.platform == "linux" and not Path("/usr/bin/bwrap").exists()
-    ):
-        pytest.skip("the confined runner is brig's: darwin, or Linux with /usr/bin/bwrap")
+    if sys.platform != "linux" or not Path("/usr/bin/bwrap").exists():
+        pytest.skip(
+            "the confined runner jails only on Linux with /usr/bin/bwrap (darwin has no brig jail yet)"
+        )
     project = tmp_path / "project"
     project.mkdir()
     jail = BrigJail(BrigConfig(), _Host())

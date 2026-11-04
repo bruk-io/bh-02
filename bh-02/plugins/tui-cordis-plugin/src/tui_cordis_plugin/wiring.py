@@ -84,7 +84,9 @@ async def grades(*, runner: Starts, approval: Confinement, frame: StatusSink, ou
     start, and whether the `approval` rule counts them as confined. A row of its own over the
     runner, which tells it each start: it never reloads with `/clear`, and follows a Python
     process started again in place. What a start says the person should know (on Linux, the
-    paths its jail holds with a mount the host can undo) is shown once as a note."""
+    paths its jail holds with a mount the host can undo) is shown once as a note, and so is the
+    runner's own notice before any start: `runner:confined` on a host it cannot jail (not Linux,
+    no `bwrap`) says so, and to use `runner:unconfined` or `--no-jail`, before the first input."""
     notes: asyncio.Queue[str] = asyncio.Queue()
 
     async def tell() -> None:
@@ -92,6 +94,10 @@ async def grades(*, runner: Starts, approval: Confinement, frame: StatusSink, ou
             await output.show(render.noted(await notes.get()))
 
     yield background(tell())
+    if (
+        before := runner.notice()
+    ):  # what is known before a start is said before one (a runner that can jail nothing here)
+        notes.put_nowait(before)
     field = GradesField(frame.status, approval, runner.report(), notes.put_nowait)
     yield acquire(field.show)
     yield acquire(runner.on_start, field.started)

@@ -77,6 +77,7 @@ class Mechanism(Protocol):
     on the host once no program of its runs, and says what that freed."""
 
     def report(self) -> Mapping[str, str]: ...
+    def notice(self) -> str: ...
     async def start(self, argv_for: ArgvFor, *, cwd: str) -> Started: ...
     async def release(self) -> str: ...
 
@@ -101,8 +102,9 @@ class Runner:
         return self._last.report() if self._last is not None else self._mechanism.report()
 
     def notice(self) -> str:
-        """What the person should know of the last start ("" before any, or when nothing)."""
-        return self._last.notice() if self._last is not None else ""
+        """What the person should know of the last start (before any, the mechanism's own: that it
+        can jail nothing here); "" when nothing."""
+        return self._last.notice() if self._last is not None else self._mechanism.notice()
 
     def released(self) -> bool:
         """Whether `/release` has stopped what runs and nothing has started since."""

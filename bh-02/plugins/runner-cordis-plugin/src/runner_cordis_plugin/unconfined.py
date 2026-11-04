@@ -132,6 +132,10 @@ class Unjailed:
     def report(self) -> Mapping[str, str]:
         return UNENFORCED
 
+    def notice(self) -> str:
+        """Nothing: the status bar says it is unjailed, and every input asks."""
+        return ""
+
     async def release(self) -> str:
         """Nothing: no jail holds anything on the host."""
         return ""

@@ -7,7 +7,7 @@ over it; and `/release`. The only package in the workspace that imports brig (th
 
 | Row | Binds | Consumes |
 |---|---|---|
-| `runner:confined` | `runner` over a brig jail (bruk-io/brig's `create_bwrap_jail`, bubblewrap: Linux only for now, darwin refuses and names `runner:unconfined`), a jail per start; config: `write` (default `["."]`), `deny`, `allow` (names taken off the self-modification list, `SELF_MODIFYING`; default `["CLAUDE.md", "AGENTS.md"]`), `hide` (files in the project inputs may not read; none by default), `env` (the names that survive the scrub; unset, they are the baseline `PATH`, `HOME`, `LANG`, `LC_ALL`, `TERM` plus the names in the person's `runner.toml`, below) | `host` (also `key_envs` and `models_file`, below) |
+| `runner:confined` | `runner` over a brig jail (bruk-io/brig's `create_bwrap_jail`, bubblewrap: Linux only for now, darwin, or Linux with no `bwrap`, reports every grade `unenforced` from the start and says before the first input to use `runner:unconfined`, and refuses each start), a jail per start; config: `write` (default `["."]`), `deny`, `allow` (names taken off the self-modification list, `SELF_MODIFYING`; default `["CLAUDE.md", "AGENTS.md"]`), `hide` (files in the project inputs may not read; none by default), `env` (the names that survive the scrub; unset, they are the baseline `PATH`, `HOME`, `LANG`, `LC_ALL`, `TERM` plus the names in the person's `runner.toml`, below) | `host` (also `key_envs` and `models_file`, below) |
 | `runner:unconfined` | `runner`: each program as a plain subprocess (`--no-jail`), every axis reported `unenforced`, its environment without `CLAUDE*` (`CLAUDE_CODE_OAUTH_TOKEN`, and what a Claude Code that launched bh-02 leaves, a messaging token among them), `ANTHROPIC_*`, `TMUX` or `TMUX_PANE` (hygiene, not a boundary: an input without a jail can find the tmux socket itself; the confined runner's `env` allowlist never passes them, `tests/test_runner_tmux.py` shows both) | |
 | `runner:approval` | `approval`: `confined` (whether the runner confines what runs in it), `unasked(question) -> bool` (whether it runs without asking the person) | `runner` (`report`) |
 | `runner:release` | (nothing: registers `/release`) | `runner` (`release`), `commands` (`register`) |
@@ -231,7 +231,8 @@ names (the program's own `worker.py`), bh-02's own code (`host.code`, read-only)
 may write. Everything else is not in the jail, the home directory included. A path outside every
 root is not read-only there but absent: a write to it lands in the jail's own scratch and is gone
 with it, and a masked directory is an empty one. **darwin**: brig has no jail type for it yet, so
-`runner:confined` refuses to start a program there, saying so and naming `runner:unconfined`
+`runner:confined` refuses to start a program there, saying so and naming `runner:unconfined`; before any start its report is `unenforced` throughout (so
+`approval` never says confined) and its notice says the same (`tui:grades` shows it as a note)
 (TASK-0176.05 is the seatbelt jail); this is what keeps the swap from landing before it does.
 
 **Placeholders.** bubblewrap holds a write-denied or masked path that doesn't exist with an empty

@@ -190,10 +190,10 @@ while True:
 
 @pytest.fixture
 def _jailable() -> None:
-    if sys.platform not in ("darwin", "linux") or (
-        sys.platform == "linux" and not Path("/usr/bin/bwrap").exists()
-    ):
-        pytest.skip("the confined runner is brig's: darwin, or Linux with /usr/bin/bwrap")
+    if sys.platform != "linux" or not Path("/usr/bin/bwrap").exists():
+        pytest.skip(
+            "the confined runner jails only on Linux with /usr/bin/bwrap (darwin has no brig jail yet)"
+        )
 
 
 async def _names_in_the_jail(runner: Runner, project: Path) -> list[str]:

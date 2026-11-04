@@ -27,6 +27,8 @@ from cordis.testing import drive
 from runner_cordis_plugin import (
     PLANNED,
     SYSTEM_READABLE,
+    UNENFORCED,
+    Approval,
     BrigConfig,
     BrigJail,
     Policy,
@@ -1660,6 +1662,24 @@ async def test_a_platform_brig_has_no_jail_for_is_refused_by_name(tmp_path: Path
         one = BrigJail(BrigConfig(), Host(), platform=platform)
         with pytest.raises(RuntimeError, match=rf"this is {platform}.*`runner:unconfined`"):
             await one.start(_listening, cwd=str(tmp_path))
+
+
+def test_a_host_that_cannot_jail_reports_nothing_enforced_and_says_so_before_any_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Decided as the jail is made: off Linux, or with no `bwrap`, the report is `UNENFORCED` (so
+    `approval` never says confined, whatever a start does) and the notice names what to use."""
+    for platform in ("darwin", "freebsd"):
+        one = BrigJail(BrigConfig(), Host(), platform=platform)
+        assert one.report() == UNENFORCED
+        assert Approval(Runner(one)).confined is False
+        assert "`runner:unconfined`" in Runner(one).notice() and "--no-jail" in Runner(one).notice()
+    monkeypatch.setattr("runner_cordis_plugin.jail.shutil.which", lambda name: None)
+    bare = BrigJail(BrigConfig(), Host(), platform="linux")
+    assert bare.report() == UNENFORCED and "no `bwrap` on PATH" in bare.notice()
+    monkeypatch.setattr("runner_cordis_plugin.jail.shutil.which", lambda name: "/usr/bin/bwrap")
+    ready = BrigJail(BrigConfig(), Host(), platform="linux")
+    assert ready.report() == PLANNED and ready.notice() == ""
 
 
 async def test_a_host_with_no_bubblewrap_is_refused_with_what_a_person_does(

@@ -44,12 +44,16 @@ class _Runner:
     """The `runner` value's grades before any start and its `on_start`, a start told by hand
     (`started`)."""
 
-    def __init__(self, report: Mapping[str, str]) -> None:
+    def __init__(self, report: Mapping[str, str], notice: str = "") -> None:
         self._report = report
+        self._notice = notice
         self.watches: list[Any] = []
 
     def report(self) -> Mapping[str, str]:
         return self._report
+
+    def notice(self) -> str:
+        return self._notice
 
     def on_start(self, watch: Any) -> Any:
         self.watches.append(watch)
@@ -195,6 +199,22 @@ async def test_the_grades_row_shows_each_start_s_grades_and_tells_a_new_notice_o
         stop_watching()
         remove()
         assert frame.fields() == {}
+    finally:
+        told.cancel()
+        await asyncio.gather(told, return_exceptions=True)
+
+
+async def test_the_grades_row_tells_what_a_runner_says_before_any_start() -> None:
+    """A runner that can jail nothing here says so (`runner:confined` off Linux, or with no
+    `bwrap`) before the first input, as a note, with the bar unjailed."""
+    said = "runner:confined cannot jail here: use `runner:unconfined` (or `bh-02 --no-jail`)"
+    frame, output = Frame(lambda message: True), _Output()
+    runner = _Runner({"fs_write": "unenforced"}, said)
+    effects = await drive(grades(runner=runner, approval=_Rule(runner), frame=frame, output=output))
+    told = asyncio.ensure_future(effects[0].args[0])
+    try:
+        await asyncio.sleep(0)
+        assert output.shown == [{"type": "note", "text": said}]
     finally:
         told.cancel()
         await asyncio.gather(told, return_exceptions=True)

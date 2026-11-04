@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-03T17:47:00Z'
-updated_date: '2026-11-04T12:41:00Z'
+updated_date: '2026-11-04T12:47:00Z'
 labels:
   - runner
   - size-1
@@ -22,10 +22,16 @@ Architecture review 2026-11-03: BrigJail.report() returns PLANNED on every platf
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Off Linux, or with no bwrap on PATH, runner:confined's report is not confined: approval.confined is false and the status bar never shows jailed, before or after a start; repro test: Approval(Runner(BrigJail(BrigConfig(), Host(), platform='darwin'))).confined is False
-- [ ] #2 The person is told before the first input that runner:confined cannot jail here and what to use instead (runner:unconfined, --no-jail)
-- [ ] #3 The darwin skip conditions in test_runner_tmux.py and test_runner_allowlist.py say what they now mean
+- [x] #1 Off Linux, or with no bwrap on PATH, runner:confined's report is not confined: approval.confined is false and the status bar never shows jailed, before or after a start; repro test: Approval(Runner(BrigJail(BrigConfig(), Host(), platform='darwin'))).confined is False
+- [x] #2 The person is told before the first input that runner:confined cannot jail here and what to use instead (runner:unconfined, --no-jail)
+- [x] #3 The darwin skip conditions in test_runner_tmux.py and test_runner_allowlist.py say what they now mean
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Repro test first; decide unjailable (platform, bwrap) once in BrigJail.__init__, report UNENFORCED then; Runner.notice() before a start = mechanism's notice; tui:grades row says it as a note at bind; fix skips; docs.
+<!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
 
@@ -87,4 +93,6 @@ bh-02/plugins/runner-cordis-plugin/tests/test_runner_approval.py:131: AssertionE
 FAILED bh-02/plugins/runner-cordis-plugin/tests/test_runner_approval.py::test_a_confined_runner_that_cannot_jail_here_is_not_confined_before_any_start
 1 failed, 9 passed in 2.48s
 ```
+
+Repro: Approval(Runner(BrigJail(BrigConfig(), host, platform='darwin'))).confined was True; recorded failing with record-check --repro (test_runner_approval.py; the task's Host() is a Protocol, so the test uses a small host dataclass). Fix: jail._why_unjailable(platform, shutil.which('bwrap')) decided once in BrigJail.__init__ (bind time); report() is UNENFORCED when non-empty, PLANNED otherwise, before and after (no start can succeed); start() raises the same text. Notice: chose the runner's notice, shown by the tui:grades row at bind as a note in the conversation, because notice() already is the channel for 'what the person should know of the jail' and the grades row already shows it; Mechanism gained notice() (Unjailed returns ''), Runner.notice() returns the mechanism's before any start; the text says to use runner:unconfined or --no-jail. Skips: test_runner_tmux.py (2) and test_runner_allowlist.py (1) now skip unless Linux with /usr/bin/bwrap. README/CONTRACTS updated. Tests added: test_runner_confined (platforms, no bwrap, ready), test_tui_wiring (note before any start). Results: scripts/check bh-02/plugins/runner-cordis-plugin exit 0 (all steps ok), scripts/check tui-cordis-plugin --no-gates --no-docs exit 0, scripts/arch-check --no-fix exit 0. scripts/linux-jail-check NOT run: 'docker is not answering' - the Docker daemon is not running in this sandbox (docker info: cannot connect to /var/run/docker.sock). scripts/check (full) left to the reviewer.
 <!-- SECTION:NOTES:END -->

@@ -79,6 +79,7 @@ from runner_cordis_plugin.policy import (
 )
 from runner_cordis_plugin.runner import ArgvFor
 from runner_cordis_plugin.tripwire import Tripwire
+from runner_cordis_plugin.unconfined import UNENFORCED
 
 __all__ = ["CHANNEL", "HOST_UNDO", "PLANNED", "SYSTEM_READABLE", "BrigJail", "Host", "planned"]
 
@@ -320,6 +321,25 @@ def _jails_root() -> Path:
     return Path(state_home(os.environ, Path.home()), "bh-02", "jails")
 
 
+def _why_unjailable(platform: str, bwrap: str | None) -> str:
+    """Why `runner:confined` can jail nothing on this host, for the person, with what to use
+    instead; "" when it can (Linux with `bwrap` on PATH, which `bwrap` is)."""
+    if platform != "linux":
+        return (
+            f"runner:confined runs on Linux (bubblewrap) for now; this is {platform}, and brig "
+            "has no jail for it yet (a seatbelt jail for darwin is TASK-0176.05). "
+            "Use `runner:unconfined` for the runner row (or `bh-02 --no-jail`), knowing it "
+            "confines nothing"
+        )
+    if bwrap is None:
+        return (
+            "runner:confined runs programs under bubblewrap on Linux, and there is no `bwrap` on "
+            "PATH: install the `bubblewrap` package, or use `runner:unconfined` for the runner row "
+            "(or `bh-02 --no-jail`), knowing it confines nothing"
+        )
+    return ""
+
+
 class BrigJail:
     """The confined runner's mechanism (`runner.Mechanism`): a bubblewrap jail through brig, on
     Linux. `platform` is where this runs (only tests pass it); anywhere else `start` refuses and
@@ -331,7 +351,8 @@ class BrigJail:
         self._config = config
         self._host = host
         self._note = note
-        self._platform = platform
+        # decided once, as the row binds: what is known before a start is said before one
+        self._cannot = _why_unjailable(platform, shutil.which("bwrap"))
         # every program this jail started that may still run, and the starts under way: what
         # `release` waits for (a start under way) and says still runs (an owner that kept its own)
         self._live: list[_Jailed] = []
@@ -339,8 +360,13 @@ class BrigJail:
 
     def report(self) -> Mapping[str, str]:
         """The grades, known before anything starts (what `approval` reads): the most a start can
-        earn (`PLANNED`). A started program's own are its `report()`."""
-        return PLANNED
+        earn (`PLANNED`), or `UNENFORCED` where no start can jail (`_why_unjailable`): the status bar
+        and `approval` then never say jailed. A started program's own are its `report()`."""
+        return UNENFORCED if self._cannot else PLANNED
+
+    def notice(self) -> str:
+        """What the person should know before the first input: `_why_unjailable`'s words, or ""."""
+        return self._cannot
 
     async def release(self) -> str:
         """For `/release`, once each owner has stopped its own program (`runner.Runner`): wait for
@@ -371,19 +397,8 @@ class BrigJail:
                 starting.set_result(None)
 
     async def _launched(self, argv_for: ArgvFor, *, cwd: str) -> _Jailed:
-        if self._platform != "linux":
-            raise RuntimeError(
-                f"runner:confined runs on Linux (bubblewrap) for now; this is {self._platform}, and brig "
-                "has no jail for it yet (a seatbelt jail for darwin is TASK-0176.05). "
-                "Use `runner:unconfined` for the runner row (or `bh-02 --no-jail`), knowing it "
-                "confines nothing"
-            )
-        if shutil.which("bwrap") is None:
-            raise RuntimeError(
-                "runner:confined runs programs under bubblewrap on Linux, and there is no `bwrap` on "
-                "PATH: install the `bubblewrap` package, or use `runner:unconfined` for the runner row "
-                "(or `bh-02 --no-jail`), knowing it confines nothing"
-            )
+        if self._cannot:
+            raise RuntimeError(self._cannot)
         root = _jails_root()
         root.mkdir(parents=True, exist_ok=True, mode=0o700)
         scratch_root = tempfile.mkdtemp(prefix="bh-j-", dir=root)

@@ -42,6 +42,9 @@ class _Mechanism:
     def report(self) -> Mapping[str, str]:
         return UNENFORCED
 
+    def notice(self) -> str:
+        return ""
+
     async def start(self, argv_for: Callable[[str], Sequence[str]], *, cwd: str) -> _Start:
         started = _Start(len(self.starts) + 1)
         self.starts.append(started)
