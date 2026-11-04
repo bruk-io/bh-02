@@ -587,6 +587,39 @@ condition (192 of 192 a band), so these kinds measure cost, not accuracy.
     rather than summarised, since the summary of it was empty and would have hidden the whole
     output. Layer-2 results before this were measured on the old renderers' text.
 
+## Real logs: HDFS (`l1-23-hdfs.md`, `dials-haiku-hdfs.md`, `dials/haiku-hdfs.toml`)
+
+Loghub's HDFS_v1 from Hugging Face (`./lab fetch hdfs`): a Hadoop cluster's log over two days, each
+block labelled anomalous or not by the people who ran it. The 7,940 blocks that start in the first
+100,000 lines are kept whole (every line of each, from all 11.2M; 313 anomalous). A task's log is
+the cluster's log filtered to chosen blocks in the original order: 10 blocks at M (about 8.5k
+estimated tokens), 80 at L (about 69k). Kinds: spot, absent, count, enumerate (truths from the
+labels) and lookup (the file a block was allocated for, read off its lines).
+
+70. **Real data broke two assumptions before any model ran.** Cut at the first 400,000 lines, the
+    anomalous blocks without an error word looked exactly like healthy ones: their labels rest on
+    lines hours later, so the excerpt had to hold whole lives. And error words sort nothing:
+    7,299 of the 7,627 healthy blocks have a line saying "exception" (routine "Got exception while
+    serving" read warnings). Spot tasks are split instead into distinct anomalies (254 of 313: a
+    kind of line under 1% of healthy blocks have) and subtle ones (what is wrong is the sequence).
+    Layer 1: no violations; the log fold is sufficient on 11 of 24 folds, on no subtle anomaly,
+    and on the absent tasks it shows windows around warnings in healthy blocks: it invents anomalies.
+    The guarantee test now covers the synthetic formats alone, whose anomalies were planted for the
+    rules.
+71. **Haiku and the fold answer identically, and the labels measure something else.** 80 runs,
+    $0.82, none failed: not one of 40 pairs disagrees. Lookups are right in all 16 runs. The
+    label questions are near zero under both conditions: distinct anomalies 5 of 8 (4 of 4 at L, 1
+    of 4 at M), subtle 0 of 8, absent 0 of 4, count 0 of 8, enumerate 0 of 4. Both read the routine
+    read warnings as the problem; native even named a labelled block ("does not belong to any file",
+    then deleted) and ranked the warning-heavy ones above it. The labels encode an operator's notion
+    of an anomaly that the log does not state, so these kinds measure agreement with the labellers,
+    which neither condition has; they cannot show a fold's effect on answers. The costs can: at M
+    the fold cuts the final context 8.3k [-10.6k, -5.5k] and the cost 12%, for 1.7 s (synthetic logs:
+    -10.1k, -15%); at L the median run saves 4.8k of context, 15% of the cost and 6.0 s, but one
+    folded session's context reached 190k tokens, more than the whole log, and cost $0.16, which
+    turns the mean cost change to +50% (-27% without it). Next for real data: tasks whose answers
+    were written for the question (MCP-Atlas), not borrowed from another task.
+
 ## Where the design stands
 
 | Piece | Evidence | Leaning |
