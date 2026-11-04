@@ -1,10 +1,11 @@
 ---
 id: TASK-0185
 title: /restart ui or /restart jobs cancels itself and ends the session
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@claude'
 created_date: '2026-11-03T17:47:00Z'
-updated_date: '2026-11-04T12:39:00Z'
+updated_date: '2026-11-04T13:44:00Z'
 labels:
   - commands
   - cordis
