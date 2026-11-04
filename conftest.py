@@ -8,7 +8,11 @@ members (a mark in each test file would repeat its name and its reason). A new t
 thing goes into the group, in this table.
 """
 
+import contextlib
 import os
+import shutil
+import tempfile
+import time
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -65,19 +69,39 @@ def _a_brig_home_of_its_own(tmp_path_factory: pytest.TempPathFactory) -> Iterato
         yield
 
 
+_RUN_TEMP = pytest.StashKey[Path]()
+_STALE_S = 24 * 3600  # a run's temp directory older than this is a run that is gone
+
+
 @pytest.hookimpl(tryfirst=True)
 def pytest_configure(config: pytest.Config) -> None:
-    """Every test's `tmp_path` is under `$XDG_CACHE_HOME/bh-02-pytest/<this checkout's name>` (else
-    `~/.cache/...`), not under `/tmp`, unless `--basetemp` says otherwise. A jail refuses a root at or
-    under a place hosts keep sockets (`/tmp`, `/var/tmp`, `/run`, `$XDG_RUNTIME_DIR`:
+    """Every test's `tmp_path` is under `$XDG_CACHE_HOME/bh-02-pytest/` (else `~/.cache/...`), in a
+    directory of this run's own, not under `/tmp`, unless `--basetemp` says otherwise. A jail refuses
+    a root at or under a place hosts keep sockets (`/tmp`, `/var/tmp`, `/run`, `$XDG_RUNTIME_DIR`:
     `runner_cordis_plugin.policy.socket_refusal`), and the tests that start real jails make their
     projects, state and memory under `tmp_path`. Not inside the checkout: a test's project there would
-    be a directory of a git repository, and bh-02's own project. One directory for each checkout, which
-    pytest empties before a run, so two checkouts' runs do not clear each other's."""
-    if config.option.basetemp is None:
-        cache = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
-        config.option.basetemp = cache / "bh-02-pytest" / _ROOT.name
-        config.option.basetemp.parent.mkdir(parents=True, exist_ok=True)  # pytest makes only the last
+    be a directory of a git repository, and bh-02's own project. One directory per run, never shared,
+    so two runs at once (a lead's and a worker's) never empty each other's; it is removed when the run
+    passes and kept when it fails, and one older than a day is swept. pytest-xdist's workers are handed
+    the controller's, so only the controller makes one."""
+    if config.option.basetemp is None and not hasattr(config, "workerinput"):
+        cache = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "bh-02-pytest"
+        cache.mkdir(parents=True, exist_ok=True)
+        now = time.time()
+        for old in cache.glob("run-*"):
+            with contextlib.suppress(OSError):
+                if now - old.stat().st_mtime > _STALE_S:
+                    shutil.rmtree(old, ignore_errors=True)
+        run = Path(tempfile.mkdtemp(prefix=f"run-{_ROOT.name}-", dir=cache))
+        config.option.basetemp = run / "t"  # pytest empties and makes the basetemp itself
+        config.stash[_RUN_TEMP] = run
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    """Remove this run's temp directory when the run passed; keep it to look at when it failed."""
+    run = session.config.stash.get(_RUN_TEMP, None)
+    if run is not None and exitstatus == 0:
+        shutil.rmtree(run, ignore_errors=True)
 
 
 def group_of(module: str) -> str | None:

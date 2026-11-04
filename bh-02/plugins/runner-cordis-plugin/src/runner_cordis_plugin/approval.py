@@ -37,8 +37,10 @@ __all__ = ["Approval", "Graded", "is_confined"]
 # `network` may be best-effort, but only with bh-02's own `egress` axis at `proxied`: brig grades the
 # network best-effort whenever the jail sees any host root, so no jail with a root is ever graded
 # enforced; what makes that count is that the start passed an egress policy (`jail.EGRESS`), which
-# leaves the jail loopback only and a host-side proxy as its one route out. The gap that remains is
-# a socket the host puts under a visible root, and brig grades that `violated`, which never counts.
+# leaves the jail loopback only and a host-side proxy as its one route out. brig grades `violated`,
+# which never counts, when a place hosts keep sockets is visible (`/run`, `/tmp` and the like, which
+# the runner also refuses as a root). The gap that remains, and decision-0012 item 9 accepts, is a
+# socket the host puts under the project itself (a database's, a container daemon's): best effort.
 _CONFINING = {"fs_write": ("enforced", "best_effort"), "network": ("enforced", "best_effort")}
 _HOST_UNDO = "host_undo"  # the report's axis for it (`jail.HOST_UNDO`)
 _TRIPWIRED = "tripwired"
