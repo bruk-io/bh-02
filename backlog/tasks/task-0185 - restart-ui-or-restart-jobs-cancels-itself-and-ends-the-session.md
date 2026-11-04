@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-03T17:47:00Z'
-updated_date: '2026-11-04T13:45:00Z'
+updated_date: '2026-11-04T13:50:00Z'
 labels:
   - commands
   - cordis
@@ -74,4 +74,6 @@ bh-02/plugins/commands-cordis-plugin/tests/test_restart.py:52: AssertionError
 FAILED bh-02/plugins/commands-cordis-plugin/tests/test_restart.py::test_restarting_the_ui_or_jobs_never_leaves_a_row_unmounted
 1 failed in 9.40s
 ```
+
+Fix (a), no cordis change: Operator.restart refuses the jobs row and every row it depends on, directly or transitively (computed from each entry's component inject/provides, resolved in wiring.py), with a message naming the row and why. Repro test bh-02/plugins/commands-cordis-plugin/tests/test_restart.py (real boot: commands, ui, jobs, operator rows) recorded failing before the fix (jobs and operator inactive, ui gone after /restart ui; commit 2aa4b7d); passes after, and /restart operator still restarts. scripts/check bh-02/plugins/commands-cordis-plugin exit 0. Docs: GLOSSARY ui and jobs entries, jobs wiring docstring, commands README, docs/bh-02 rows-and-layers. Criteria left unticked for the reviewer. Not fixed: Loader.restart still has no cancellation guard in cordis (any other caller running inside a dependent row's task would hit it); that is a cordis design question for the owner.
 <!-- SECTION:NOTES:END -->
