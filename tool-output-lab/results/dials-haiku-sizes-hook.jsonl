@@ -78,3 +78,7 @@
 {"tool": "mcp__fixture__list_pods", "tool_use_id": "toolu_015st28ho9peNcErDdx15KnV", "spilled": true, "raw_tokens": 135377, "branch": "json-schema", "out_tokens": 154}
 {"tool": "mcp__fixture__list_pods", "tool_use_id": "toolu_01SfDRecH5nvdPKwm33r3cSN", "spilled": true, "raw_tokens": 541445, "branch": "json", "out_tokens": 433}
 {"tool": "mcp__fixture__list_pods", "tool_use_id": "toolu_01NHbzEDMuT6VrDexUrYpqyR", "spilled": true, "raw_tokens": 541445, "branch": "json", "out_tokens": 433}
+{"tool": "mcp__fixture__list_pods", "tool_use_id": "toolu_01U1Ne63GtnnzhfVnrrQzMtn", "spilled": true, "raw_tokens": 541445, "branch": "json-schema", "out_tokens": 212}
+{"tool": "mcp__fixture__list_pods", "tool_use_id": "toolu_012KHpjRBQeL5VZQPZiybf3J", "spilled": true, "raw_tokens": 541412, "branch": "json", "out_tokens": 435}
+{"tool": "mcp__fixture__list_pods", "tool_use_id": "toolu_01VShgPxPND36MCushKCAouB", "spilled": true, "raw_tokens": 541412, "branch": "json", "out_tokens": 435}
+{"tool": "mcp__fixture__list_pods", "tool_use_id": "toolu_011hKHhoLcm8HySxygYTEm6t", "spilled": true, "raw_tokens": 541412, "branch": "json-schema", "out_tokens": 213}
