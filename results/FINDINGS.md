@@ -645,12 +645,24 @@ are JSON, 8 text).
     the gap does not show. The scorer, checked by hand on 5 smoke runs, was right four times and
     missed one answer that gave 4,109.4 metres as 4.1 km; misses like that fall on every condition.
 
+73. **Sonnet on the same tasks: the same answers, and 11% off a dearer run.** 354 runs, $43.50, none
+    failed. Native gets 50% of tasks wholly right and 72% of claims, at $0.131 and 25 s a run. The
+    sample view: accuracy +0% [-7%, +7%] (10 won, 10 lost), claim recall +0.027, final context -3.1k
+    [-4.3k, -2.0k], cost -11% ($0.014 a run), time -0.5 s; the schema view +1%, -2.6k, -9%. The views
+    disagree with native on 17% and 14% of pairs, native with itself on 15% of tasks: noise again.
+    At M the fold saves 4.1k and 14%, the schema view 4.0k and 13%; at L the sample view saves 4%
+    and the schema view costs 2% more. As with Haiku, the folded sessions read the saved raw more
+    often (46 and 55 of 118 runs, against 11 natively). Sonnet's answers vary less between runs
+    than Haiku's (15% against 19%), but not enough for 118 pairs to settle a small effect on
+    answers: on real tasks, on both models, the fold leaves them where they were and takes 8% to
+    11% off the cost.
+
 ## Where the design stands
 
 | Piece | Evidence | Leaning |
 |---|---|---|
 | Fold MCP results Claude Code spilled | P2 (Haiku, 104 pairs): accuracy +7% [+1%, +14%], 1.2 fewer requests, -9% cost, but the final context +800 tokens (34). P3 (Sonnet, 20 pairs): 20/20 against 18/20, cost -21%, final context -910 [-4.1k, +1.4k] (41). The size ladder (Haiku, L to XXL, 156 pairs): accuracy +6% [+3%, +11%], cost -12% to -15%, time saved growing to 9.7 s, final context unchanged (58-62); the schema view on JSON lowers it 1.2k to 1.4k (61) | cut for Haiku by the input criterion (37), at a price in answers, cost and time the ladder shows; open for Sonnet (undecided at 20 pairs); the schema view is the candidate to pass; `TOOL_OUTPUT_LAB_MODE=spilled` |
-| Fold MCP results under the spill threshold | P2 (Haiku): answers kept, final context -7.1k (35). P3 (Sonnet): 52/52 both, final context -8.8k, cost -20% (40). Real tasks (MCP-Atlas, Haiku, 118 pairs): answers kept within run-to-run noise, context -2.6k, cost -8% (72); a real log (HDFS): -8.3k, -12% (71) | keep; the hook's default (`inline`) |
+| Fold MCP results under the spill threshold | P2 (Haiku): answers kept, final context -7.1k (35). P3 (Sonnet): 52/52 both, final context -8.8k, cost -20% (40). Real tasks (MCP-Atlas, 118 pairs): answers kept within run-to-run noise on Haiku and Sonnet, context -2.6k and -3.1k, cost -8% and -11% (72, 73); a real log (HDFS, Haiku): -8.3k, -12% (71) | keep; the hook's default (`inline`) |
 | Force the fold on Bash (the hook on `Bash`) | 46-48: inline at M: final context -8.1k, cost -10%, +6 s, but 49/52 against 52/52 (undecided) and a regress (91 second looks folded); saved outputs at L: context +1.5k | inline: fix the regress, then decide; saved outputs: cut |
 | Fold a result the session will use again (under the threshold) | Sessions (Haiku, M, 32 pairs of six-turn sessions): context -8k through the session, but each follow-up that needs the data costs a fetch; cost +10%, +9 s, break-even after ~15 more requests (63-64); the schema view on JSON breaks even after two (65) | keep for long sessions; the schema view for data |
 | JSON folding with promotion | real MCP JSON to 13%; built anomaly kinds survive | keep |
