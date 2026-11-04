@@ -1,0 +1,19 @@
+# Real tasks: MCP-Atlas, replayed (evals.atlas, claude_code/replay_mcp.py), scored by the facts the
+# answer's claims state. The 59 tasks a replay can answer and a program can score: one large tool
+# output each (42 at M, 17 at L). Sonnet 5.5, native against the hook folding every result, by the
+# sample view (the default) and by the schema view.
+name = "sonnet-atlas"
+model = "claude-sonnet-5-5"
+bands = ["M", "L"]
+formats = ["atlas"]
+reps = 2
+max_cost = 55
+
+[[setting]]
+name = "fold"
+mode = "all"
+
+[[setting]]
+name = "schema"
+mode = "all"
+view = "schema"

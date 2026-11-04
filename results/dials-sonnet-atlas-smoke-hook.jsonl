@@ -1,0 +1,6 @@
+{"tool": "mcp__r__memory_read_graph", "tool_use_id": "toolu_01GwgUBeGRo49gtX6KpJFy7y", "spilled": false, "raw_tokens": 4272, "branch": "json", "out_tokens": 365}
+{"tool": "mcp__r__memory_read_graph", "tool_use_id": "toolu_01MAjRcvudQbXDnB3TEy4YkK", "spilled": false, "raw_tokens": 4272, "branch": "json", "out_tokens": 163}
+{"tool": "mcp__r__notion_API-post-search", "tool_use_id": "toolu_01PCoMnkBGXR8HGZ7BFwFKu6", "spilled": false, "raw_tokens": 1255, "branch": "passthrough", "out_tokens": null}
+{"tool": "mcp__r__notion_API-post-search", "tool_use_id": "toolu_01MHRTHMTb14JfNU4tuC3L1U", "spilled": false, "raw_tokens": 1255, "branch": "passthrough", "out_tokens": null}
+{"tool": "mcp__r__notion_API-post-database-query", "tool_use_id": "toolu_01WB1dJDaQxDRHWCCY3ipVTC", "spilled": false, "raw_tokens": 583, "branch": "passthrough", "out_tokens": null}
+{"tool": "mcp__r__notion_API-post-database-query", "tool_use_id": "toolu_018iSbuuvdwB1Xg1C9rVWASq", "spilled": false, "raw_tokens": 583, "branch": "passthrough", "out_tokens": null}
