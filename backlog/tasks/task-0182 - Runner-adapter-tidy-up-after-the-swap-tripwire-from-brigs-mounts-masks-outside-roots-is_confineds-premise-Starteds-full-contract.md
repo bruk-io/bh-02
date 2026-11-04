@@ -3,7 +3,7 @@ id: TASK-0182
 title: >-
   Runner adapter tidy-up after the swap: tripwire from brig's mounts, masks
   outside roots, is_confined's premise, Started's full contract
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-11-03T17:47:00Z'
@@ -110,4 +110,6 @@ INFO    -  Documentation built in 4.02 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+Reviewer 2026-11-04: closed. scripts/check (full tier, recorded) exit 0, no files changed; scripts/linux-jail-check and --as-root each 364 passed, 1 skipped, 1 xfailed (no DRAFT-0026 flake). Tripwire: brig's masks are READ_ONLY binds of /dev/null and its pins WRITABLE binds, so tripwired(Jail.mounts) covers denies, masks and pins; the pin-rename real-jail test ran (not skipped) and passed; with pins dropped only a/b/c would be watched and an ancestor rename sends its parent's watch nothing, so it would fail (matches the worker's planted run). is_confined refuses best_effort without host_undo: tripwired, tested directly and through Approval. App test: it no longer exercises a mask, since the state dir is under no root and now absent; it still proves an input in-process and via /bin/cat can't read or list a secret outside every root; the mask-inside-a-root case stays covered by test_a_jailed_input_can_neither_read_nor_forge_a_sub_agent_s_event_log. No ReadModel/DENYLIST/read_model/darwin references remain. Minor, not filed: BrigJail._facts takes an armed parameter and then recomputes it, so the parameter is dead; the pin test's docstring names a control (a can't be renamed from inside) it does not assert; the app test's docstring could say it now proves absence, not a mask.
 <!-- SECTION:NOTES:END -->
