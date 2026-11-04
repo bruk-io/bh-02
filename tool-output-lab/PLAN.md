@@ -66,7 +66,7 @@ point takes the same knobs: `./lab fold`, layer 1, layer 2, the hook, and the sp
 | M4 | Layer 2 on Haiku: native against the sample and schema recipes on MCP-Atlas (about $3) and on the synthetic JSON tasks at M and L (about $1) | yes | |
 | M5 | Layer 2 on compositions layer 1 cannot tell apart: a typical sample or none, no get more | yes | |
 | M6 | Sonnet on the compositions Haiku leaves standing | yes | |
-| M7 | Sessions: follow-up questions on one JSON result, native against the two recipes (`sessions/haiku.toml`, about $4) | yes | |
+| M7 | Sessions: follow-up questions on one JSON result, native against the two recipes (`sessions/haiku.toml`, about $2) | yes | |
 
 Later, other formats on the same protocol: trees (accessibility snapshots, Figma) with a nested
 envelope for each run of repeated siblings, and logs as templates (the templates and their counts
