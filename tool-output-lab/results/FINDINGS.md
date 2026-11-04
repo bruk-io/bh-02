@@ -199,3 +199,46 @@ anomaly's template.
   the lookups a tool call's query would name, and its model must fetch them. That is the bet the
   pattern makes, and its prediction stands as set before the run: lean keeps schema's answers at
   a smaller final context.
+
+## 6. The three patterns on Haiku: all keep the answers, none changes how often the model reads the raw, and none beats the schema recipe
+
+Run: `results/dials-haiku-patterns.md`, 520 sessions, $3.29, none failed: the 104 synthetic tasks
+(JSON, logs, accessibility snapshots, Figma XML; M and L), once each, native against the schema
+recipe (M4's control) and the three patterns of FINDINGS 5, the hook folding every result. The
+envelope acted in every folded session.
+
+- **Answers.** Native answers 101 of 104. Schema, full and index answer 104 (3 pairs won, none
+  lost: +3% [-1.2%, +8.1%]); lean 103 (3 won, 1 lost, a healthy pod list called anomalous: +2%
+  [-2.8%, +7.3%]). Pooled, every one of the four passes both kill criteria.
+- **Context, cost, and how the sessions read**, paired against native:
+
+  | Pattern | final context | cost | time | read the raw at M | at L | calls at M, L |
+  |---|---|---|---|---|---|---|
+  | native | | | | 0 of 52 (it holds the raw) | 52 of 52 | 1.0, 4.7 |
+  | schema | -6,693 [-8,040, -5,404] | -23% | -1.6 s | 36 | 39 | 2.0, 2.2 |
+  | full | -6,656 [-8,151, -5,206] | -23% | -1.9 s | 35 | 40 | 1.9, 2.2 |
+  | lean | -5,937 [-7,286, -4,770] | -19% | -0.9 s | 43 | 44 | 2.1, 2.4 |
+  | index | -5,973 [-7,262, -4,748] | -20% | -1.3 s | 37 | 40 | 2.1, 2.3 |
+
+- **The predictions, set in the spec before the run, are not borne out.**
+  - *Full lowers how often a session reads the saved raw*: 35 sessions against schema's 36 of 52
+    at M, 40 against 39 at L. A sample row did not change the habit.
+  - *Lean keeps schema's answers at a smaller final context*: it keeps the answers, but its
+    context falls less than schema's (-5.9k against -6.7k), since its sessions read the raw more
+    often (43 against 36 at M; for logs, 12 of 13 against 6). The 70 to 75 tokens it saves cost a
+    read.
+  - *Index makes the reads smaller, not fewer*: they are not fewer (37 against 36), and not smaller
+    either; the sessions that read the raw end with about the same context (median 47.9k against
+    47.2k).
+- **What decides the context is whether the model reads the raw output, not what the envelope
+  adds.** Every pattern's median final context is about 47k, most of it the session's prefix
+  (system prompt and tools). The patterns differ by 50 to 150 tokens; a read adds thousands.
+- **Figma XML at M is a coin flip.** With no query, a tree's schema and lean envelopes are the
+  same text (they differ only in the query's matches), yet the schema sessions' median context
+  was 10k higher. In both, a session either reads the 7k-token XML whole (about 59k) or not (about
+  47k): 7 and 5 of 13 sessions did. FINDINGS 4's Figma exception is better read as this coin flip
+  than as the recipe's doing.
+
+So the schema recipe stays the composition to carry forward, with full as good and no better;
+neither lean nor index earns its change. The lever left is the model's habit of checking the raw,
+which no composition moved on Haiku: whether Sonnet has the same habit (M6) is the next question.

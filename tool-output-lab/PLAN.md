@@ -81,9 +81,9 @@ knobs: `./lab fold`, layer 1, layer 2, the hook, and the specs in `dials/`, `ses
 | M2 | Layer-1 baseline: both recipes on every task | no | done (FINDINGS 1) |
 | M3 | Layer-1 sweeps over compositions: `sweeps/envelopes.toml`, `logs.toml`, `trees.toml` | no | done: anomalies decide the most; samples past the query's matches add nothing in layer 1 (FINDINGS 2) |
 | M4 | Layer 2 on Haiku: native against the two recipes on MCP-Atlas (about $3) and on the synthetic tasks of every format at M and L | yes | done: synthetic, both recipes pass (FINDINGS 4); MCP-Atlas where it acted, context passes, accuracy undecided (FINDINGS 3) |
-| M5 | Layer 2 on compositions layer 1 cannot tell apart: a typical sample or none, no get more | yes | as the patterns below |
+| M5 | Layer 2 on compositions layer 1 cannot tell apart: a typical sample or none, no get more | yes | done as the patterns below: a typical sample (full) and no samples (lean) change nothing a model does but lean's extra reads (FINDINGS 6) |
 | P1 | Three envelope patterns as recipes in every format: full (every part filled), lean (a terse shape, the anomalies, a command; no samples), index (a command for every group, a new get-more producer) | no | done: no claim fails (FINDINGS 5) |
-| P2 | Haiku: native, schema, full, lean and index on the synthetic tasks at M and L (`dials/haiku-patterns.toml`); predictions set in the spec | yes, about $3.60 | running |
+| P2 | Haiku: native, schema, full, lean and index on the synthetic tasks at M and L (`dials/haiku-patterns.toml`); predictions set in the spec | yes, about $3.60 | done: all keep the answers; no pattern changes how often the model reads the raw; schema stays (FINDINGS 6) |
 | M6 | Sonnet on the compositions Haiku leaves standing | yes | |
 | M7 | Sessions: follow-up questions on one result, native against the two recipes (`sessions/haiku.toml`, about $2) | yes | |
 
