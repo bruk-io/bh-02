@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-03T17:47:00Z'
-updated_date: '2026-11-04T13:25:00Z'
+updated_date: '2026-11-04T13:26:00Z'
 labels:
   - models
   - credentials
@@ -151,4 +151,6 @@ INFO    -  Documentation built in 2.85 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+Reviewer, 2026-11-04: verdict closes on the criteria, but close-task refused: the repro file bh-02/app/tests/test_host_values.py changed since 7d921d4. The repro function itself is unchanged; the file lost the tests of the removed key_variables/models_keys/host.key_envs and one assertion that the refusal names the models file. Status left In Progress; the lead decides whether to record a new repro (record-check --repro) or accept. Full check (scripts/check) exit 0, first line a uv UV_NATIVE_TLS deprecation warning, nothing reformatted; 2594 passed. AC1, AC2 met and ticked (repro test; catalog per-call read; runner re-check per program start; ! per command). AC3 met: DRAFT-0024, DRAFT-0025. Fail closed: a bad cwd's ModelsError propagates out of runner start and the ! run, so neither starts. Empty sets come only from a row that is not models:model, a file not read, and an invalid key table (DRAFT-0027). A project models file adds nothing, as before: the model row refuses to read it, so none of its keys is used, and the variable is in runner.toml by the person's own choice; accepted, not filed. No test uses a real credential. Findings: CONTRACTS.md host row still lists key_envs and models_file -> DRAFT-0026. key_envs() skips an env key whose table has another problem (ttl_ms, unknown field), against its docstring and the old parser -> DRAFT-0027. Minor, not filed: the refusal no longer names which models file; key_envs reads the file synchronously on the event loop at each start and ! command.
 <!-- SECTION:NOTES:END -->
