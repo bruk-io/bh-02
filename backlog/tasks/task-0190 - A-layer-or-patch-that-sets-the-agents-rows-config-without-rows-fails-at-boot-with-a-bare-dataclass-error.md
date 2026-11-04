@@ -1,9 +1,9 @@
 ---
-id: DRAFT-0028
+id: TASK-0190
 title: >-
   A layer or patch that sets the agents row's config without rows fails at boot
   with a bare dataclass error
-status: Draft
+status: To Do
 assignee: []
 created_date: '2026-11-04T14:18:00Z'
 labels:
