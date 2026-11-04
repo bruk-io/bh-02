@@ -829,3 +829,12 @@
 {"tool": "mcp__r__google-maps_maps_place_details", "tool_use_id": "toolu_01P2rDHuYAjeVCBx85cyDJuc", "spilled": false, "raw_tokens": 2015, "branch": "json", "out_tokens": 555}
 {"tool": "mcp__r__google-maps_maps_directions", "tool_use_id": "toolu_01H7pnrkhaoRMYuHAue7uH1q", "spilled": false, "raw_tokens": 403, "branch": "passthrough", "out_tokens": null}
 {"tool": "mcp__r__google-maps_maps_directions", "tool_use_id": "toolu_01LqfFueyAMJ6p4zUuFBxAZo", "spilled": false, "raw_tokens": 403, "branch": "passthrough", "out_tokens": null}
+{"tool": "mcp__r__airtable_list_bases", "tool_use_id": "toolu_0192Q3MtjpjBrXjPg2y86BVg", "spilled": false, "raw_tokens": 26, "branch": "passthrough", "out_tokens": null}
+{"tool": "mcp__r__airtable_list_tables", "tool_use_id": "toolu_01He4Bp65bQ1WogENUshS98B", "spilled": false, "raw_tokens": 7359, "branch": "json", "out_tokens": 694}
+{"tool": "mcp__r__airtable_search_records", "tool_use_id": "toolu_019EHMR9uvtSxmozhQ8sAkZF", "spilled": false, "raw_tokens": 281, "branch": "passthrough", "out_tokens": null}
+{"tool": "mcp__r__airtable_list_bases", "tool_use_id": "toolu_018i9gwKYvXSYWCdkRfdi7Ej", "spilled": false, "raw_tokens": 26, "branch": "passthrough", "out_tokens": null}
+{"tool": "mcp__r__airtable_list_tables", "tool_use_id": "toolu_01EfpacyH8hVZeKZeDkpyiHr", "spilled": false, "raw_tokens": 7359, "branch": "json", "out_tokens": 458}
+{"tool": "mcp__r__slack_channels_list", "tool_use_id": "toolu_01MmR6TW3WrNraNKrUdhZMPW", "spilled": false, "raw_tokens": 145, "branch": "passthrough", "out_tokens": null}
+{"tool": "mcp__r__slack_conversations_history", "tool_use_id": "toolu_01PS6zztiLyE78KsXywXfcSE", "spilled": false, "raw_tokens": 475, "branch": "passthrough", "out_tokens": null}
+{"tool": "mcp__r__slack_channels_list", "tool_use_id": "toolu_01WuRScc8eRvXmhn32mjYLcd", "spilled": false, "raw_tokens": 145, "branch": "passthrough", "out_tokens": null}
+{"tool": "mcp__r__slack_conversations_history", "tool_use_id": "toolu_015pYu2GcsoEt5MjPMdF7aQQ", "spilled": false, "raw_tokens": 475, "branch": "passthrough", "out_tokens": null}
