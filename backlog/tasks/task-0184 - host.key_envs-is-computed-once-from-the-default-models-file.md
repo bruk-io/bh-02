@@ -1,10 +1,11 @@
 ---
 id: TASK-0184
 title: host.key_envs is computed once from the default models file
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@claude'
 created_date: '2026-11-03T17:47:00Z'
-updated_date: '2026-11-04T12:39:00Z'
+updated_date: '2026-11-04T13:20:00Z'
 labels:
   - models
   - credentials
@@ -31,4 +32,55 @@ Architecture review 2026-11-03: bh_02/cli.py computes key_envs at boot from the 
 
 <!-- SECTION:NOTES:BEGIN -->
 Lead, 2026-11-04: promoted from a draft review; criteria written right after promotion (finish-moved for that reason only).
+
+Repro at 7d921d4b237a, test files: bh-02/app/tests/test_host_values.py; command: `uv run pytest bh-02/app/tests/test_host_values.py -q -k another_layer` exited 1
+
+```text
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+F                                                                        [100%]
+=================================== FAILURES ===================================
+_ test_the_runner_refuses_a_variable_a_key_reads_in_the_models_file_another_layer_names _
+
+composition = <function composition.<locals>.layer at 0x7fb58cad8670>
+tmp_path = PosixPath('/tmp/pytest-of-root/pytest-698/test_the_runner_refuses_a_vari0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fb58cac8770>
+
+    def test_the_runner_refuses_a_variable_a_key_reads_in_the_models_file_another_layer_names(
+        composition: Callable[..., Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """TASK-0184: the variables a key reads are those of every endpoint the model row can reach,
+        not only the default models file's. A layer pointing the row at another file, whose key reads
+        OTHER_KEY, with OTHER_KEY in runner.toml, stops the runner row."""
+        monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+        config = tmp_path / "xdg"
+        (config / "bh-02").mkdir(parents=True)
+        (config / "bh-02" / "runner.toml").write_text('env = ["OTHER_KEY"]\n')
+        other = tmp_path / "other.toml"
+        other.write_text(
+            '[elsewhere]\nprovider = "openai"\nbase_url = "http://localhost:1/v1"\nkey = { env = "OTHER_KEY" }\n'
+        )
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(config))
+        work = tmp_path / "work"
+        work.mkdir()
+        monkeypatch.chdir(work)
+        patch = composition(
+            '[[plugin]]\nid = "loop"\nuse = "fragile:echo_model"\n'
+            '[[plugin]]\nid = "ui"\nuse = "fragile:one_message_recorded_ui"\n'
+            f'[[plugin]]\nid = "model"\nconfig = {{ models = "{other}" }}\n'
+            '[[plugin]]\nid = "runner"\nuse = "runner:confined"\n'
+        )
+        result = CliRunner().invoke(main, ["--patch", str(patch)])
+>       assert result.exit_code == 1, result.output
+E       AssertionError: session 20261104-131000-480d  (uv run bh-02 --resume to continue it)
+E         
+E       assert 0 == 1
+E        +  where 0 = <Result okay>.exit_code
+
+/home/user/bh-02-keys/bh-02/app/tests/test_host_values.py:233: AssertionError
+=========================== short test summary info ============================
+FAILED bh-02/app/tests/test_host_values.py::test_the_runner_refuses_a_variable_a_key_reads_in_the_models_file_another_layer_names
+1 failed, 7 deselected in 2.70s
+```
+
+Fix: models:catalog.key_envs() (catalog.py) reads the model row's models file and extra fresh at each call; runner:confined depends on 'models' (not host.key_envs), refuses at row start and again at each program start (_Rechecked in runner wiring), commands:shell_command asks per command. host.key_envs/models_file, bootstrap.key_variables/models_keys and their cli computation removed (no duplicate parser). Catalog depends on loader only, so no new reloads. Tests: repro test_host_values (seen failing, exit 0 instead of 1, before the fix; recorded with record-check --repro; passes after); catalog key_envs tests; runner re-check test seen failing with the per-start check removed; shell_command mid-session test. A models file in the project adds nothing, its extra still counts; a bad row cwd makes key_envs raise ModelsError (fail closed). Checks: scripts/check for runner (with gates, docs) exit 0; --no-gates --no-docs for commands, models, app, subagents exit 0; arch-check --no-fix exit 0; mypy clean. AC1 and AC2 not ticked (reviewer). AC3: the two side rules (runs=memory/harness from any row; system/asides contributors needing the event loop) are not done here; no draft filed by me, see report.
 <!-- SECTION:NOTES:END -->

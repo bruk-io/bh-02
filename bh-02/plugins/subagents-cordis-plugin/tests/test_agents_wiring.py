@@ -13,7 +13,7 @@ import stat
 import sys
 import threading
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -156,8 +156,18 @@ class _Host:
     trusted: tuple[str, ...] = ()
     code: tuple[str, ...] = ()
     auto_memory: str = ""
-    key_envs: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
-    models_file: str = ""
+
+
+class _NoKeys:
+    """The `models` value of a composition whose endpoints read no variable."""
+
+    def key_envs(self) -> Mapping[str, Sequence[str]]:
+        return {}
+
+
+@component(provides=("models",))
+async def fake_models() -> Effects:
+    yield bind("models", _NoKeys())
 
 
 @component(provides=("host",))
@@ -685,6 +695,7 @@ async def test_a_child_s_python_runs_in_a_jail_of_its_own_under_the_confined_run
         _Screen(),
         loop=Row("loop", "agent:loop", {"requires": ["python"]}),
         host=Row("host", f"{__name__}:fake_host"),
+        models=Row("models", f"{__name__}:fake_models"),
         runner=Row("runner", "runner:confined"),
         approval=Row("approval", "runner:approval"),
         python=Row("python", "python:tool", {"root": str(tmp_path), "startup": []}),

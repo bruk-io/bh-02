@@ -32,8 +32,8 @@ takes every line the person starts with it and `!` runs them in the person's she
 `!COMMAND` (`shell_command.py`) runs as the person, since the person typed it: not in the jail
 and without asking, in the project (`cwd`), through `$SHELL -c`, in bh-02's environment less
 `ANTHROPIC_*` and `CLAUDE*` (as `runner:unconfined` drops them: what it prints goes to the
-model) and less the variables the models file's keys read (`key = { env = "NAME" }`, from
-`host.key_envs`): a key the person declared is a secret, and `!env` would show it to the model.
+model) and less the variables the keys of the model row's endpoints read (`key = { env = "NAME" }`, in its
+models file or its `extra`: `models.key_envs()`, asked at each command): a key the person declared is a secret, and `!env` would show it to the model.
 The app owns the terminal, so the command gets none of it: stdin is empty, stdout and
 stderr are captured as one stream (its start and end kept past 20,000 bytes, as an input's
 output is, each cut where a character begins), and it runs in a session of its own, so a

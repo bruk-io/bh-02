@@ -4,8 +4,9 @@ it printed waits for the model.
 The person typed it, so it runs as them: not in the jail, in the project (`cwd`), through their
 shell (`$SHELL -c`, else `/bin/sh -c`), in bh-02's own environment less what is the host's alone
 (`ANTHROPIC_*` and `CLAUDE*`: a Claude credential the person exported, what a launching Claude
-Code left), as `runner:unconfined` drops them, and less the variables the models file's keys read
-(`host.key_envs`: a key the person declared is a secret), since what it prints goes to the model.
+Code left), as `runner:unconfined` drops them, and less the variables the keys of the model row's
+endpoints read (`models.key_envs()`, asked at each command: a key the person declared is a
+secret), since what it prints goes to the model.
 
 The app owns the terminal, so the command gets none of it: no input, its output (stdout and
 stderr as one stream, as a terminal shows them) captured, and a session of its own, so the

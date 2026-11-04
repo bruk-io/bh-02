@@ -7,7 +7,7 @@ over it; and `/release`. The only package in the workspace that imports brig (th
 
 | Row | Binds | Consumes |
 |---|---|---|
-| `runner:confined` | `runner` over a brig jail (bruk-io/brig's `create_bwrap_jail`, bubblewrap: Linux only for now, darwin, or Linux with no `bwrap`, reports every grade `unenforced` from the start and says before the first input to use `runner:unconfined`, and refuses each start), a jail per start; config: `write` (default `["."]`), `deny`, `allow` (names taken off the self-modification list, `SELF_MODIFYING`; default `["CLAUDE.md", "AGENTS.md"]`), `hide` (files in the project inputs may not read; none by default), `env` (the names that survive the scrub; unset, they are the baseline `PATH`, `HOME`, `LANG`, `LC_ALL`, `TERM` plus the names in the person's `runner.toml`, below) | `host` (also `key_envs` and `models_file`, below) |
+| `runner:confined` | `runner` over a brig jail (bruk-io/brig's `create_bwrap_jail`, bubblewrap: Linux only for now, darwin, or Linux with no `bwrap`, reports every grade `unenforced` from the start and says before the first input to use `runner:unconfined`, and refuses each start), a jail per start; config: `write` (default `["."]`), `deny`, `allow` (names taken off the self-modification list, `SELF_MODIFYING`; default `["CLAUDE.md", "AGENTS.md"]`), `hide` (files in the project inputs may not read; none by default), `env` (the names that survive the scrub; unset, they are the baseline `PATH`, `HOME`, `LANG`, `LC_ALL`, `TERM` plus the names in the person's `runner.toml`, below) | `host`, `models` (`key_envs()`, below) |
 | `runner:unconfined` | `runner`: each program as a plain subprocess (`--no-jail`), every axis reported `unenforced`, its environment without `CLAUDE*` (`CLAUDE_CODE_OAUTH_TOKEN`, and what a Claude Code that launched bh-02 leaves, a messaging token among them), `ANTHROPIC_*`, `TMUX` or `TMUX_PANE` (hygiene, not a boundary: an input without a jail can find the tmux socket itself; the confined runner's `env` allowlist never passes them, `tests/test_runner_tmux.py` shows both) | |
 | `runner:approval` | `approval`: `confined` (whether the runner confines what runs in it), `unasked(question) -> bool` (whether it runs without asking the person) | `runner` (`report`) |
 | `runner:release` | (nothing: registers `/release`) | `runner` (`release`), `commands` (`register`) |
@@ -204,12 +204,13 @@ The modules:
   one that can't be read or is malformed stops the row with a message saying what to fix. A layer's
   `config` that sets `env` replaces the file's names (and the baseline: a layer's list is the
   whole list) and the `notice()` says so; one that omits it takes baseline plus the file. The row
-  refuses, at startup, a list (the file's or the layer's) that names a variable an endpoint's
-  `key = { env = ... }` reads, naming the variable, the endpoint and both files. That comparison is
-  here because this is where both values are visible without importing the models plugin: the
-  `host` value carries `key_envs` (variable to the endpoints that read it) and `models_file`, which
-  the command line fills from the default models file (`bh_02.bootstrap.models_keys`), a file in the
-  project adding nothing. `--no-jail` (`runner:unconfined`) never reads the file. The model cannot
+  refuses a list (the file's or the layer's) that names a variable an endpoint's
+  `key = { env = ... }` reads, naming the variable, the endpoint and the list: at startup, and again
+  at each program it starts, since a layer can point the model row at another models file or add an
+  endpoint without the runner row reloading. The endpoints are every one the model row can reach (its
+  models file's and its `extra`), asked of the `models` value (`key_envs()`, read fresh; it
+  depends on the loader alone, so the runner gains no reload from it); a models file in the project adds
+  nothing (its `extra` still counts). `--no-jail` (`runner:unconfined`) never reads the file. The model cannot
   write it: `host.trusted` is not writable in the jail.
 
 Without the jail (`runner:unconfined`, `--no-jail`) none of this holds but the scrub of

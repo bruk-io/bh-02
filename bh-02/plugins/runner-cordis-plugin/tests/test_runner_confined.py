@@ -16,7 +16,7 @@ import time
 import uuid
 from collections import namedtuple
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -67,8 +67,13 @@ class Host:
     trusted: tuple[str, ...] = ()
     code: tuple[str, ...] = ()
     auto_memory: str = ""
-    key_envs: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
-    models_file: str = ""
+
+
+class _NoKeys:
+    """The `models` value of a composition whose endpoints read no variable."""
+
+    def key_envs(self) -> Mapping[str, Sequence[str]]:
+        return {}
 
 
 def test_the_project_s_auto_memory_directory_is_a_root_an_input_may_write() -> None:
@@ -354,7 +359,7 @@ def test_allow_takes_names_off_the_self_modification_list_and_only_those() -> No
 
 
 async def test_the_row_binds_a_runner_over_a_brig_jail_over_the_layers_it_was_given() -> None:
-    effects = await drive(confined(config=BrigConfig(), host=Host()))
+    effects = await drive(confined(config=BrigConfig(), host=Host(), models=_NoKeys()))
     assert [(e.name, e.args[0]) for e in effects] == [("bind", "runner")]
     assert isinstance(effects[0].args[1], Runner)
 

@@ -9,7 +9,6 @@ import os
 import signal
 import time
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -28,19 +27,23 @@ from commands_cordis_plugin import (
 from cordis import Effects, Runtime, State, bind, component
 
 
-@dataclass(frozen=True, slots=True)
-class _Host:
-    """The `host` value, with what the shell-command row reads of it: the variables a key reads."""
+class _Models:
+    """The `models` value, as the shell-command row reads it: the variables a key reads, which a
+    test changes mid-session (an endpoint added) through `readers`."""
 
-    key_envs: Mapping[str, Sequence[str]] = field(default_factory=dict)
+    def __init__(self, readers: Mapping[str, Sequence[str]]) -> None:
+        self.readers = dict(readers)
+
+    def key_envs(self) -> Mapping[str, Sequence[str]]:
+        return self.readers
 
 
-def _host(key_envs: Mapping[str, Sequence[str]]) -> Callable[..., Any]:
-    @component(provides=("host",))
-    async def host() -> Effects:
-        yield bind("host", _Host(key_envs))
+def _models(value: _Models) -> Callable[..., Any]:
+    @component(provides=("models",))
+    async def models() -> Effects:
+        yield bind("models", value)
 
-    return host
+    return models
 
 
 _TOLD = "(Before this message the person ran a shell command themselves, in bh-02, not in your REPL:)"
@@ -273,7 +276,7 @@ async def test_the_row_claims_its_prefix_in_the_broker_once_and_takes_it_when_it
 ) -> None:
     rt = Runtime()
     rt.mount(registry, id="commands")
-    rt.mount(_host({}), id="host")
+    rt.mount(_models(_Models({})), id="models")
     row = rt.mount(shell_command, id="shell-command", config={"cwd": str(tmp_path), "shell": "/bin/sh"})
     await rt.settle()
     commands = rt.root.get("commands")
@@ -295,16 +298,20 @@ async def test_the_row_claims_its_prefix_in_the_broker_once_and_takes_it_when_it
     await rt.shutdown()
 
 
-async def test_the_row_withholds_the_variables_the_host_says_a_key_reads(
+async def test_the_row_withholds_the_variables_the_models_say_a_key_reads_asked_at_each_command(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("BH02_TEST_KEY", "a-secret")
     rt = Runtime()
     rt.mount(registry, id="commands")
-    rt.mount(_host({"BH02_TEST_KEY": ("work",)}), id="host")
+    models = _Models({})
+    rt.mount(_models(models), id="models")
     rt.mount(shell_command, id="shell-command", config={"cwd": str(tmp_path), "shell": "/bin/sh"})
     await rt.settle()
     commands = rt.root.get("commands")
+    [note] = await commands.run("!echo ${BH02_TEST_KEY:-withheld}")
+    assert note["text"].startswith("a-secret\n")  # no endpoint reads it yet
+    models.readers["BH02_TEST_KEY"] = ("added-mid-session",)  # asked at each command, not at the row's start
     [note] = await commands.run("!echo ${BH02_TEST_KEY:-withheld}")
     assert note["text"].startswith("withheld\n")
     await rt.shutdown()

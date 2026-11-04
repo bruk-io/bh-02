@@ -231,7 +231,6 @@ exclude = [
     "bh_02.cli:_run", "bh_02.cli:_writer.write",               # --trace FILE
     "bh_02.cli:_launch",                                      # makes the project's auto memory directory
     "bh_02.bootstrap:project_of",                             # reads .git: a worktree's main repository
-    "bh_02.bootstrap:models_keys",                            # reads the models file for the variables its keys read (host.key_envs); the pure part is key_variables
     "runner_cordis_plugin.allowlist:read",                    # reads the person's runner.toml (the jail's environment list); the pure parts are parsed and effective
     "runner_cordis_plugin.runner:reserved_endpoint",          # makes the directory a start's socket lives in (it moved here from the owners, whose methods were already in the budget)
     "runner_cordis_plugin.runner:unreserve_endpoint",         # removes it once the program is stopped
@@ -247,6 +246,7 @@ exclude = [
     # comes, its process group ended at its timeout; `run_line` is the prefix's run (run_command)
     "commands_cordis_plugin.shell_command:run_command", "commands_cordis_plugin.shell_command:_end",
     "commands_cordis_plugin.shell_command:_Output.read", "commands_cordis_plugin.shell_command:run_line",
+    "commands_cordis_plugin.wiring:shell_command.run",  # the claimed prefix's run: run_line, asking `models` at each command
     # the loops between input, output and the model
     "chat_cordis_plugin.chat:converse",
     "agent_cordis_plugin.loop:LoopModel.reply",
@@ -301,6 +301,7 @@ exclude = [
     "models_cordis_plugin.catalog:Catalog.path", "models_cordis_plugin.catalog:Catalog.listed",
     "models_cordis_plugin.catalog:Catalog.current", "models_cordis_plugin.catalog:Catalog.check",
     "models_cordis_plugin.catalog:Catalog.problem", "models_cordis_plugin.catalog:Catalog.default_problem",
+    "models_cordis_plugin.catalog:Catalog.key_envs",  # which `runner:confined` and `!` ask at each start
     # the same value's endpoints (`discover = true`): `endpoints` reads the models file afresh, as
     # `listed` does, and says what `refresh` kept; `refresh` reads it too, then asks each endpoint for
     # its models, the one place a server is asked; `_ask` makes one request, reading the key's variable

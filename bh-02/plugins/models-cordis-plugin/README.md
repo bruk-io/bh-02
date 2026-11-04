@@ -5,7 +5,7 @@ bh-02's model: named models over their providers, switched by name. Three rows:
 | Row | Binds / registers | Consumes |
 |---|---|---|
 | `models:model` | `model`: one model step per `complete(messages, tools)` (CONTRACTS.md: model), the model `default` names on its provider | |
-| `models:catalog` | `models`: the models there are (an endpoint's, as `/model` last heard them), the one the model row names now, why a name can't be switched to, and why the models file is not read (CONTRACTS.md: models) | `loader` |
+| `models:catalog` | `models`: the models there are (an endpoint's, as `/model` last heard them), the one the model row names now, why a name can't be switched to, why the models file is not read, and the variables the keys of its endpoints read (`key_envs()`, which `runner:confined` and `commands:shell_command` ask at each start) (CONTRACTS.md: models) | `loader` |
 | `models:switch` | registers `/model [NAME]`: lists the models, switches by name in the session's layer, the reload queued in `jobs`; config: `layer` (the session's), `model_row` (`model`) | `commands` (`register`), `loader`, `models`, `jobs` (`put`) |
 
 The model row's config (`ModelConfig`):

@@ -12,7 +12,7 @@ from runner_cordis_plugin import allowlist
 from runner_cordis_plugin.approval import Approval, Graded
 from runner_cordis_plugin.jail import BrigJail, Host
 from runner_cordis_plugin.policy import BrigConfig
-from runner_cordis_plugin.runner import Runner
+from runner_cordis_plugin.runner import ArgvFor, Runner, Started
 from runner_cordis_plugin.unconfined import Unjailed
 
 __all__ = ["approval", "confined", "release", "unconfined"]
@@ -35,34 +35,57 @@ class _Registrar(Protocol):
 
 
 @runtime_checkable
-class _Keyed(Host, Protocol):
-    """The `host` value with what the models file's keys read (CONTRACTS.md: host): `key_envs`,
-    each variable an endpoint's `key = { env = ... }` reads, to the endpoints that read it, and
-    `models_file`, the file they were read from."""
+class _KeyReaders(Protocol):
+    """What the confined runner needs of the `models` value (CONTRACTS.md: models): `key_envs()`,
+    each variable an endpoint the model row can reach reads as its key, to those endpoints, read
+    fresh."""
 
-    @property
     def key_envs(self) -> Mapping[str, Sequence[str]]: ...
-    @property
-    def models_file(self) -> str: ...
+
+
+class _Rechecked:
+    """The jail, which first asks `refuse` at each start: the variables the model row's keys read
+    change with the layers (another models file, an endpoint added), and the row does not
+    reload for that, so a list that was fine when the row came up is checked again."""
+
+    def __init__(self, jail: BrigJail, refuse: Callable[[], None]) -> None:
+        self._jail = jail
+        self._refuse = refuse
+
+    def report(self) -> Mapping[str, str]:
+        return self._jail.report()
+
+    def notice(self) -> str:
+        return self._jail.notice()
+
+    async def release(self) -> str:
+        return await self._jail.release()
+
+    async def start(self, argv_for: ArgvFor, *, cwd: str) -> Started:
+        self._refuse()
+        return await self._jail.start(argv_for, cwd=cwd)
 
 
 @component(provides=("runner",))
-async def confined(*, config: BrigConfig, host: _Keyed) -> Effects:
+async def confined(*, config: BrigConfig, host: Host, models: _KeyReaders) -> Effects:
     """Fills a `runner` row: `use = "runner:confined"`. A brig jail for each program it starts:
     writes confined to the project, no network, credentials unreadable, graded honestly. Depends
     on `host` so a program can never write the files the running composition is read from. The
     variables its programs see are the baseline, the names in the person's `runner.toml` and the
-    layer's `env` when it sets one (`allowlist`); a list that is refused (`allowlist.Refused`)
-    stops this row before a jail exists.
+    layer's `env` when it sets one (`allowlist`); a list that names a variable a key reads
+    (`models.key_envs()`: every endpoint the model row can reach, asked again at each start) is
+    refused (`allowlist.Refused`), the row before a jail exists and a start before its jail does.
 
     Raises:
         Refused: `runner.toml` can't be used, or the list holds a variable a key reads."""
     file = allowlist.location(os.environ, Path.home())
     standing = await asyncio.to_thread(allowlist.read, file, Path.cwd())
-    jailed, note = allowlist.effective(
-        config, standing, file=file, readers=host.key_envs, models_file=host.models_file
-    )
-    yield bind("runner", Runner(BrigJail(jailed, host, note=note)))
+
+    def refuse() -> None:
+        allowlist.effective(config, standing, file=file, readers=models.key_envs())
+
+    jailed, note = allowlist.effective(config, standing, file=file, readers=models.key_envs())
+    yield bind("runner", Runner(_Rechecked(BrigJail(jailed, host, note=note), refuse)))
 
 
 @component(provides=("runner",))

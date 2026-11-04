@@ -117,12 +117,11 @@ def effective(
     *,
     file: Path,
     readers: Mapping[str, Sequence[str]],
-    models_file: str,
 ) -> tuple[BrigConfig, str]:
     """The config the jail runs on and a line for the person: the layer's `env` when it sets one
     (it replaces the file's, and the line says so when the file had names), else the baseline
-    and the file's names. `readers` is what the models file's keys read, variable to endpoints
-    (the `host` value), in `models_file`.
+    and the file's names. `readers` is what the keys of the model row's endpoints read (its
+    models file's and its `extra`), variable to endpoints (`models.key_envs()`).
 
     Raises:
         Refused: a variable in the list that an endpoint's `key = { env = ... }` reads, naming the
@@ -142,8 +141,8 @@ def effective(
         if endpoints := readers.get(name):
             raise Refused(
                 f"{name} is in {where} and endpoint {', '.join(map(repr, endpoints))} reads it as its "
-                f"key (`key = {{ env = {name!r} }}` in {models_file}), which would hand that key to the "
-                f"model's code. Remove {name} from {'the layer' if config.env is not None else str(file)}, "
-                f"or change the key in {models_file}"
+                f"key (`key = {{ env = {name!r} }}` in the models file the model row reads, or in its "
+                f"`extra`), which would hand that key to the model's code. Remove {name} from "
+                f"{'the layer' if config.env is not None else str(file)}, or change that key"
             )
     return replace(config, env=tuple(dict.fromkeys(env))), note

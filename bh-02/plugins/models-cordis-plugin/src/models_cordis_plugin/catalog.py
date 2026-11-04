@@ -121,6 +121,30 @@ class Catalog:
             return error.message
         return None
 
+    def key_envs(self) -> dict[str, tuple[str, ...]]:
+        """The variables the model row's endpoints read as their key (`key = { env = "NAME" }`),
+        each to the endpoints that read it: those of the models file the row names (its default
+        place when `models` is unset) and of its `extra`, whatever the table's other problems,
+        since a key that reads a variable is a secret whether or not the endpoint can be used.
+        Read fresh at each call, so a layer that points the row elsewhere or adds an endpoint
+        counts at the next start. The runner refuses an environment list naming one
+        (decision-0010) and `!` leaves them out. Empty when the row is another component or the
+        models file is not read (in the project, unreadable, not TOML: `problem` says why).
+
+        Raises:
+            ModelsError: the row's own `cwd` is not a directory's name; whoever asks must treat that
+                as it would a key (refuse), as the endpoints are unknown.
+        """
+        config = self._config()
+        if config is None:
+            return {}
+        found: dict[str, list[str]] = {}
+        for host in known(config).models:
+            spec = key_spec(host.table.get("key")) if host.endpoint else None
+            if spec is not None and spec.source == "env":
+                found.setdefault(spec.value, []).append(host.name)
+        return {variable: tuple(names) for variable, names in found.items()}
+
     def listed(self) -> list[dict[str, Any]]:
         """Every model, in order (each endpoint's of the file, then of the row's `extra`): `name`,
         `provider`, `id`, `current` (the one the model row names), `default` (on the model a new

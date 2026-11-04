@@ -7,7 +7,7 @@ import asyncio
 import json
 import sys
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -24,8 +24,17 @@ class _Host:
     trusted: tuple[str, ...] = ()
     code: tuple[str, ...] = ()
     auto_memory: str = ""
-    key_envs: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
-    models_file: str = ""
+
+
+class _Models:
+    """The `models` value, as the confined runner reads it: the variables a key reads, which a test
+    changes mid-session (an endpoint added) through `readers`."""
+
+    def __init__(self, readers: Mapping[str, tuple[str, ...]] | None = None) -> None:
+        self.readers = dict(readers or {})
+
+    def key_envs(self) -> Mapping[str, tuple[str, ...]]:
+        return self.readers
 
 
 def _file(tmp_path: Path, text: str) -> Path:
@@ -68,7 +77,7 @@ def test_a_missing_file_leaves_the_baseline(tmp_path: Path) -> None:
     project.mkdir()
     standing = allowlist.read(tmp_path / "xdg" / "bh-02" / "runner.toml", project)
     assert standing == allowlist.Standing()
-    config, note = allowlist.effective(BrigConfig(), standing, file=tmp_path, readers={}, models_file="m")
+    config, note = allowlist.effective(BrigConfig(), standing, file=tmp_path, readers={})
     assert config.env == BASELINE_ENV and note == ""
 
 
@@ -77,7 +86,7 @@ def test_a_file_outside_the_project_is_read(tmp_path: Path) -> None:
     project = tmp_path / "project"
     project.mkdir()
     standing = allowlist.read(path, project)
-    config, _ = allowlist.effective(BrigConfig(), standing, file=path, readers={}, models_file="m")
+    config, _ = allowlist.effective(BrigConfig(), standing, file=path, readers={})
     assert config.env == (*BASELINE_ENV, "GITHUB_TOKEN")
 
 
@@ -87,7 +96,7 @@ def test_a_file_in_the_project_is_not_read_and_the_person_is_told_where_to_put_i
     path.write_text('env = ["GITHUB_TOKEN"]')
     standing = allowlist.read(path, tmp_path)
     assert standing.names == () and "is not read" in standing.unread and "XDG_CONFIG_HOME" in standing.unread
-    config, note = allowlist.effective(BrigConfig(), standing, file=path, readers={}, models_file="m")
+    config, note = allowlist.effective(BrigConfig(), standing, file=path, readers={})
     assert config.env == BASELINE_ENV  # the narrow direction: never a wider list
     assert note == standing.unread
 
@@ -117,7 +126,7 @@ def test_a_file_that_can_not_be_used_stops_the_read(tmp_path: Path) -> None:
 def test_a_layer_s_env_replaces_the_file_s_and_the_start_says_so() -> None:
     standing = allowlist.Standing(("GITHUB_TOKEN",))
     config, note = allowlist.effective(
-        BrigConfig(env=("PATH", "HOME")), standing, file=Path("/c/runner.toml"), readers={}, models_file="m"
+        BrigConfig(env=("PATH", "HOME")), standing, file=Path("/c/runner.toml"), readers={}
     )
     assert config.env == ("PATH", "HOME")
     assert "layer's runner `env` replaced the list in /c/runner.toml" in note
@@ -127,30 +136,29 @@ def test_a_layer_s_env_replaces_the_file_s_and_the_start_says_so() -> None:
 def test_a_layer_that_omits_env_takes_the_file_s() -> None:
     standing = allowlist.Standing(("GITHUB_TOKEN",))
     config, note = allowlist.effective(
-        BrigConfig(allow=("CLAUDE.md",)), standing, file=Path("/c/runner.toml"), readers={}, models_file="m"
+        BrigConfig(allow=("CLAUDE.md",)), standing, file=Path("/c/runner.toml"), readers={}
     )
     assert config.env == (*BASELINE_ENV, "GITHUB_TOKEN") and config.allow == ("CLAUDE.md",) and note == ""
 
 
 def test_a_layer_env_over_an_empty_file_has_nothing_to_say() -> None:
     _, note = allowlist.effective(
-        BrigConfig(env=("PATH",)), allowlist.Standing(), file=Path("/c/r.toml"), readers={}, models_file="m"
+        BrigConfig(env=("PATH",)), allowlist.Standing(), file=Path("/c/r.toml"), readers={}
     )
     assert note == ""
 
 
-def test_a_name_a_key_reads_is_refused_naming_the_variable_the_endpoint_and_both_files() -> None:
+def test_a_name_a_key_reads_is_refused_naming_the_variable_the_endpoint_and_the_list() -> None:
     with pytest.raises(allowlist.Refused) as raised:
         allowlist.effective(
             BrigConfig(),
             allowlist.Standing(("OPENROUTER_API_KEY",)),
             file=Path("/c/runner.toml"),
             readers={"OPENROUTER_API_KEY": ("openrouter",)},
-            models_file="/c/models.toml",
         )
     message = str(raised.value)
     assert "OPENROUTER_API_KEY" in message and "'openrouter'" in message
-    assert "/c/runner.toml" in message and "/c/models.toml" in message
+    assert "/c/runner.toml" in message and "`extra`" in message
 
 
 def test_a_layer_s_env_naming_a_key_is_refused_too() -> None:
@@ -160,7 +168,6 @@ def test_a_layer_s_env_naming_a_key_is_refused_too() -> None:
             allowlist.Standing(),
             file=Path("/c/runner.toml"),
             readers={"OPENROUTER_API_KEY": ("openrouter",)},
-            models_file="/c/models.toml",
         )
 
 
@@ -170,7 +177,6 @@ def test_a_file_name_the_layer_replaced_is_not_refused() -> None:
         allowlist.Standing(("OPENROUTER_API_KEY",)),
         file=Path("/c/runner.toml"),
         readers={"OPENROUTER_API_KEY": ("openrouter",)},
-        models_file="/c/models.toml",
     )
     assert config.env == ("PATH",)
 
@@ -214,7 +220,7 @@ async def _names_in_the_jail(runner: Runner, project: Path) -> list[str]:
 
 
 async def _runner_of(config: BrigConfig, host: _Host) -> Any:
-    effects = await drive(confined(config=config, host=host))
+    effects = await drive(confined(config=config, host=host, models=_Models()))
     return effects[0].args[1]
 
 
@@ -258,7 +264,7 @@ async def test_a_malformed_file_stops_the_row_before_a_jail_exists(
     (tmp_path / "project").mkdir()
     monkeypatch.chdir(tmp_path / "project")
     with pytest.raises(allowlist.Refused, match="bogus"):
-        await drive(confined(config=BrigConfig(), host=_Host()))
+        await drive(confined(config=BrigConfig(), host=_Host(), models=_Models()))
 
 
 async def test_a_name_a_key_reads_stops_the_row_at_startup(
@@ -269,6 +275,25 @@ async def test_a_name_a_key_reads_stops_the_row_at_startup(
     project = tmp_path / "project"
     project.mkdir()
     monkeypatch.chdir(project)
-    host = _Host(key_envs={"OPENROUTER_API_KEY": ("openrouter",)}, models_file="/m/models.toml")
-    with pytest.raises(allowlist.Refused, match="OPENROUTER_API_KEY"):
-        await drive(confined(config=BrigConfig(), host=host))
+    models = _Models({"OPENROUTER_API_KEY": ("openrouter",)})
+    with pytest.raises(allowlist.Refused, match="OPENROUTER_API_KEY") as raised:
+        await drive(confined(config=BrigConfig(), host=_Host(), models=models))
+    assert "'openrouter'" in str(raised.value)
+
+
+async def test_a_key_variable_added_after_the_row_came_up_refuses_the_next_start(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The variables are asked of `models` at each start: an endpoint a layer adds mid-session
+    (the row does not reload for it) counts at the next program the runner starts."""
+    _file(tmp_path, 'env = ["OTHER_KEY"]')
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.chdir(project)
+    models = _Models()
+    effects = await drive(confined(config=BrigConfig(), host=_Host(), models=models))
+    runner = effects[0].args[1]
+    models.readers["OTHER_KEY"] = ("added",)
+    with pytest.raises(allowlist.Refused, match="OTHER_KEY"):
+        await runner.start(lambda endpoint: [sys.executable, endpoint], cwd=str(project))
