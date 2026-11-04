@@ -48,9 +48,10 @@ folds of 251 tasks each (a task with a query is folded with it and without it).
   schema recipe's query matches. The ISO 3166 file without its query shows the list of countries
   counted but not the subdivisions inside each, since a run inside a run's items is not yet an
   envelope of its own.
-- **Size.** The median envelope of a synthetic M or L payload is 187 to 228 tokens, 0 to 4% of
-  the input; HDFS 537 to 629; MCP-Atlas 279 to 350; code 1.3k to 1.9k, since an outline of
-  definitions grows with the file.
+- **Size.** Under the schema recipe the median envelope of a synthetic M or L payload is 187 to 228
+  tokens, 0 to 4% of the input; HDFS 537 to 629; MCP-Atlas 279 to 350; code 1.3k to 1.9k, since
+  an outline of definitions grows with the file. The sample recipe's head and tail make them
+  larger: 281 to 454 tokens for the synthetic payloads, 596 to 781 for MCP-Atlas.
 
 This bounds what a model can answer from the envelope alone. Whether a model answers as well as
 native Claude Code, at less context, is layer 2's question (PLAN.md M4).
