@@ -1,0 +1,20 @@
+# Long sessions on Haiku 5.5: each conversation asks six questions about one tool result in one
+# session (the count, every planted item, four lookups), native against the fold. At M the result
+# stays in the context, raw or folded; at L Claude Code spills it, and `all` folds the saved output
+# (the shipped default, inline, leaves a spill alone). Two repetitions.
+name = "haiku"
+model = "claude-haiku-5-5"
+bands = ["M", "L"]
+formats = ["json", "log", "a11y", "figma"]
+reps = 2
+max_cost = 8
+
+[[setting]]   # the fold at the default budget
+name = "fold"
+mode = "all"
+
+[[setting]]   # data as its schema
+name = "schema"
+mode = "all"
+view = "schema"
+formats = ["json"]

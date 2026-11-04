@@ -157,6 +157,15 @@ def _needle(p: synthetic.Payload, *, fmt: str) -> Needle:
     return Needle(token, frozenset(_LOG_IDS.findall(line)) - {token})
 
 
+def _at(size: int, fraction: float) -> int:
+    return min(size - 1, round(fraction * (size - 1)))
+
+
+def _picked(fmt: str, band: str, tag: str, k: int) -> frozenset[int]:
+    size = _SIZES[fmt][band]
+    return frozenset(random.Random(f"{fmt}/{band}/{tag}").sample(range(size), min(k, size)))
+
+
 def _synthetic(fmt: str, band: str) -> list[Task]:
     """Spot (a rule-kind anomaly at three positions, and a quiet one the fold has no rule for),
     absent, count and enumerate (k under and, from M up, over the stand-out cap of 10), lookup."""
@@ -195,10 +204,10 @@ def _synthetic(fmt: str, band: str) -> list[Task]:
         )
 
     def at(fraction: float) -> int:
-        return min(size - 1, round(fraction * (size - 1)))
+        return _at(size, fraction)
 
     def pick(tag: str, k: int) -> frozenset[int]:
-        return frozenset(random.Random(f"{fmt}/{band}/{tag}").sample(range(size), min(k, size)))
+        return _picked(fmt, band, tag, k)
 
     for fraction in (0.1, 0.5, 0.9):
         add("spot", f"at{int(fraction * 100)}", frozenset({at(fraction)}), partial(_needle, fmt=fmt))
@@ -533,6 +542,78 @@ def skipped() -> dict[str, str]:
         if missing := [str(p) for p in paths if not p.is_file()]:
             out[source] = f"missing {', '.join(missing)}"
     return out
+
+
+# --- conversations ------------------------------------------------------------------------------
+
+_FOLLOW_UPS = (0.2, 0.4, 0.6, 0.8)  # where the looked-up items sit, as a share of the payload
+
+
+@dataclass(frozen=True)
+class Conversation:
+    """Questions about one tool result, asked in turn in one session. The first turn is a count task
+    of the registry: its prompt names the tool, and the fixture serves its payload. The others follow
+    up on the same payload without naming the tool: every planted item, then items looked up across
+    it, so a session that holds only a fold must fetch again where one holding the raw need not."""
+
+    conv_id: str  # the first turn's task id
+    turns: tuple[Task, ...]
+
+
+def _conversation(fmt: str, band: str, k: int) -> Conversation:
+    first = task(f"{fmt}-{band}-count-k{k}")
+    size = _SIZES[fmt][band]
+    p = _payload(fmt, size, _picked(fmt, band, f"count/{k}", k), f"{fmt}/{band}/count/k{k}")
+
+    def follow(kind: str, tag: str, truth: Truth, subject: str = "") -> Task:
+        return Task(
+            task_id=f"{first.task_id}+{kind}-{tag}",
+            fmt=fmt,
+            kind=kind,
+            band=band,
+            path="",
+            prompt=_question(fmt, kind, subject),
+            truth=truth,
+            query=subject,
+            load=first.load,
+            question=_question(fmt, kind, subject),
+        )
+
+    looked_up = [p.lookups[_at(size, f)] for f in _FOLLOW_UPS]
+    return Conversation(
+        first.task_id,
+        (
+            first,
+            follow("enumerate", "all", Items(frozenset(p.planted), frozenset(p.names))),
+            *(
+                follow("lookup", f"at{int(f * 100)}", Exact(v), n)
+                for f, (n, v) in zip(_FOLLOW_UPS, looked_up, strict=True)
+            ),
+        ),
+    )
+
+
+def conversations(bands: Iterable[str], formats: Iterable[str] = tuple(_SIZES)) -> list[Conversation]:
+    """A conversation on each count task's payload (k of 3 and 7, and from M up 12 and 20), for each
+    synthetic format and band asked for.
+
+    Raises:
+        ValueError: a band or format with no synthetic tasks.
+    """
+    want_b, want_f = set(bands), set(formats)
+    if unknown := (want_b - set(BANDS)) | (want_f - set(_SIZES)):
+        raise ValueError(
+            f"no synthetic {', '.join(sorted(unknown))}: the bands are {', '.join(BANDS)} and the formats "
+            f"{', '.join(_SIZES)}"
+        )
+    return [
+        _conversation(fmt, band, k)
+        for band in BANDS
+        if band in want_b
+        for fmt in _SIZES
+        if fmt in want_f
+        for k in ((3, 7) if band == "S" else (3, 7, 12, 20))
+    ]
 
 
 def tasks(bands: Iterable[str] = _USUAL) -> list[Task]:
