@@ -11,6 +11,7 @@ updated_date: '2026-11-04T14:23:00Z'
 labels:
   - subagents
   - size-1
+  - finish-moved
 dependencies: []
 type: bug
 ---
@@ -25,4 +26,12 @@ TASK-0187 made AgentsConfig.rows required. A patch's config replaces the layer's
 <!-- AC:BEGIN -->
 - [ ] #1 A layer naming subagents:parent without rows fails with a message that says to list the child's rows in the agents row's config and points to bh-02.toml's list
 - [ ] #2 A test pins that message
+- [ ] #3 The error for an agents row whose config has no rows says to list the child's rows in the agents row's rows, and points to the agents row in bh-02.toml for the shipped list
+- [ ] #4 A test pins that message
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+finish-moved: the lead asked for the acceptance criteria after promotion (the task had none when the worker began).
+<!-- SECTION:NOTES:END -->
