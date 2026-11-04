@@ -154,8 +154,12 @@ def test_the_agents_row_rewrites_those_fields_of_the_shipped_rows() -> None:
         model_row="model",
         place=Path("/s/agents/general-1"),  # type: ignore[arg-type]
         hand=None,
+        commands_row=rows["agents"].config["commands_row"],
+        refused=rows["agents"].config["refused"],
+        wants_commands=lambda use: "commands" in resolve(use).inject,
     )
     by_id = {r.id: dict(r.config) for r in made}
+    assert by_id["agents/general-1/commands"] == {}  # a registry of its own
     assert by_id["agents/general-1/transcript"]["path"] == "/s/agents/general-1/transcript.jsonl"
     assert by_id["agents/general-1/model"] == {
         **{k: v for k, v in (rows["model"].config or {}).items()},

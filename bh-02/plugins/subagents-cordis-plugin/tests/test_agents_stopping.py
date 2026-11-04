@@ -91,7 +91,7 @@ async def test_stopping_all_skips_a_child_that_ended_on_its_own_while_an_earlier
     """general-1 is being retired (slowly) when general-2 finishes by itself: the stop goes on to
     the children that are still there, and says it stopped only general-1."""
     mounts = _Mounts("general-1", "general-2")
-    agents = Agents(_NoRows(), mounts, _Screen(), _types, AgentsConfig(rows=()))
+    agents = Agents(_NoRows(), mounts, _Screen(), _types, AgentsConfig(rows=()), lambda use: False)
     for _ in range(2):
         await _bounded(agents.agent({"prompt": "p", "type": "general", "background": True}))
     await _bounded(asyncio.gather(*(reply.begun.wait() for reply in mounts.replies.values())))
@@ -111,7 +111,7 @@ async def _failing_in_the_background() -> None:
     """One background child whose loop has a bug, run to its end by an `Agents` nothing keeps."""
     mounts = _Mounts("general-1", fails=True)
     mounts.released["general-1"].set()
-    agents = Agents(_NoRows(), mounts, _Screen(), _types, AgentsConfig(rows=()))
+    agents = Agents(_NoRows(), mounts, _Screen(), _types, AgentsConfig(rows=()), lambda use: False)
     await _bounded(agents.agent({"prompt": "p", "type": "general", "background": True}))
     await _until(lambda: agents.running() == 0)  # the run ended, with the failure
     await asyncio.sleep(0)

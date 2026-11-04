@@ -251,6 +251,9 @@ def test_a_child_gets_the_tool_rows_its_type_grants_and_every_other_row() -> Non
             model_row="model",
             place=PurePath("/s/agents/t-1"),
             hand=None,
+            commands_row="commands",
+            refused=(),
+            wants_commands=lambda use: False,
         )
         return [r.id.removeprefix("agents/t-1/") for r in made]
 

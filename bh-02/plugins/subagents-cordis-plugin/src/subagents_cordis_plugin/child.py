@@ -12,15 +12,16 @@ own state directory, the model's Claude Code state beside it, and the model its 
 call, once the person said yes) names. Rows of the sub-agents plugin join them inside the
 realm: `subagents:output`, the child's `output` (a labelled `confirm`, nothing else), and
 `subagents:child`, its type's section of the prompt and the hand its `loop` is passed to the
-agents row by; and, beside a memory row, a `commands:registry` of the child's own, since the
-sealed realm reads no `commands` from outside. Never the auto memory row: children writing one
-directory would race the parent.
+agents row by; and, beside a row that injects `commands`, a registry of the child's own (the
+component of the parent's row the agents row's `commands_row` names), since the sealed realm reads
+no `commands` from outside. Never a row using a component the agents row's `refused` names (auto
+memory in bh-02.toml): children writing one directory would race the parent.
 """
 
 import contextlib
 import datetime
 import math
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import PurePath
 from typing import Any, Protocol
@@ -92,19 +93,10 @@ class Entry(Protocol):
 # The parent's agents row: a child is never given one, so it can start none of its own.
 _AGENTS_ROW = "agents"
 _AGENTS_USE = "subagents:parent"
-# The memory plugin's rows, by the component a row uses: the files row needs a `commands` key, which
-# the sealed realm has none of from outside, and the auto row is never a child's.
-_MEMORY_USE = "memory:files"
-_AUTO_USE = "memory:auto"
-_COMMANDS_USE = "commands:registry"
 
 
 def _is_agents(entry: Entry | None) -> bool:
     return entry is not None and entry.use == _AGENTS_USE
-
-
-def _is_auto(entry: Entry | None) -> bool:
-    return entry is not None and entry.use == _AUTO_USE
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,20 +149,24 @@ def child_rows(
     model_row: str,
     place: PurePath | None,
     hand: object,
+    commands_row: str,
+    refused: Collection[str],
+    wants_commands: Callable[[str], bool],
 ) -> tuple[ChildRow, ...]:
     """The rows of child `name`'s composition: each of the parent's rows named in `kept` that is
     up (in `kept`'s order), but the tool rows a type may grant (`tools`) that its type does not,
     prefixed, with the child's own transcript (`place/transcript.jsonl`, in memory without a
     `place`), its model's Claude Code state beside it (when the parent's model row keeps one)
-    and its type's model (when the type names one); then, beside a memory row, a registry of
-    commands of the child's own (a layer that already gave it one is not given a second), its
+    and its type's model (when the type names one); then, beside a row that injects `commands`
+    (`wants_commands(use)`), a registry of the child's own, of the same component as the parent's
+    `commands_row` (a layer that already gave the child one is not given a second), its
     `output` and the row that hands its `loop` to the agents row (`hand`) and tells it its type.
 
     Raises:
         ValueError: `kept` names the agents row (by its id, or any row that is `subagents:parent`):
             a child has no agents row, depth one (decision-0002), whatever a layer asks; or the
-            auto memory row (any row that is `memory:auto`): children writing one directory would
-            race the parent (decision-0002).
+            row using a component in `refused` (the agents row's config names them: auto memory
+            in bh-02.toml): children writing one directory would race the parent (decision-0002).
     """
     mounted = {e.id: e for e in entries if not e.disabled}
     if offending := [rid for rid in kept if rid == _AGENTS_ROW or _is_agents(mounted.get(rid))]:
@@ -178,11 +174,11 @@ def child_rows(
             f"a child has no agents row (depth one, decision-0002), but the agents row's `rows` names "
             f"{', '.join(map(repr, offending))}; take it out of `rows` (in your layer's agents row)"
         )
-    if offending := [rid for rid in kept if _is_auto(mounted.get(rid))]:
+    if offending := [rid for rid in kept if (e := mounted.get(rid)) is not None and e.use in refused]:
         raise ValueError(
-            f"a child has no auto memory (decision-0002: children writing one directory would race the "
-            f"parent), but the agents row's `rows` names {', '.join(map(repr, offending))}; take it out "
-            "of `rows` (in your layer's agents row)"
+            f"a child must not have {', '.join(sorted(refused))} (decision-0002: children writing one "
+            f"directory would race the parent), but the agents row's `rows` names "
+            f"{', '.join(map(repr, offending))}; take it out of `rows` (in your layer's agents row)"
         )
     withheld = set(tools) - set(kind.tools)
     rows: list[ChildRow] = []
@@ -198,9 +194,13 @@ def child_rows(
             if kind.model is not None:
                 config["default"] = kind.model
         rows.append(ChildRow(prefixed(name, rid), entry.use, config))
-    uses = {row.use for row in rows}
-    if _MEMORY_USE in uses and _COMMANDS_USE not in uses:
-        rows.append(ChildRow(prefixed(name, "commands"), _COMMANDS_USE, {}))
+    registry = mounted.get(commands_row)
+    if (
+        registry is not None
+        and any(wants_commands(row.use) for row in rows)
+        and not any(row.use == registry.use for row in rows)
+    ):
+        rows.append(ChildRow(prefixed(name, "commands"), registry.use, {}))
     rows.append(ChildRow(prefixed(name, "output"), "subagents:output", {"name": name, "type": kind.name}))
     section = name.join(kind.section.split("{name}"))
     rows.append(ChildRow(prefixed(name, "agent"), "subagents:child", {"hand": hand, "section": section}))

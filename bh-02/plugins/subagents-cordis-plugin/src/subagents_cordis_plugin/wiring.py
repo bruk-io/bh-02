@@ -167,6 +167,13 @@ def _agents_config(raw: Mapping[str, Any] | AgentsConfig) -> AgentsConfig:
         raise TypeError(f"invalid config for AgentsConfig: {e}") from e
 
 
+def _injects_commands(use: str) -> bool:
+    """Whether the component a row names takes the `commands` key, read from cordis's own record of
+    its parameters: a child's sealed realm reads no `commands` from outside, so such a row gets a
+    registry of the child's own."""
+    return "commands" in cordis.loader.resolve(use).inject
+
+
 @component(provides=("asker", "roster"))
 async def parent(
     *,
@@ -193,7 +200,7 @@ async def parent(
     performing: Performer = yield performer()
     yield bind("asker", Asker(output))
     types = partial(read_types, host.trusted, config.tools)
-    run = Agents(loader, partial(_mount, performing), output, types, config)
+    run = Agents(loader, partial(_mount, performing), output, types, config, _injects_commands)
     yield bind("roster", run.roster())
     yield acquire(run.held)
     yield acquire(tools.register, AGENT, run.agent, runs="harness")

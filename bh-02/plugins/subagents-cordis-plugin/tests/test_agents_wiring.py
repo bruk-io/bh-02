@@ -749,10 +749,14 @@ async def test_a_child_row_asking_for_the_parent_s_tools_does_not_mount() -> Non
     assert state == "inactive" and seen == []
 
 
-async def test_a_child_row_asking_for_the_parent_s_commands_does_not_mount() -> None:
+async def test_a_child_row_asking_for_commands_is_given_a_registry_of_the_child_s_own() -> None:
+    """The sealed realm reads no `commands` from outside, so wiring.py finds (from cordis's record
+    of the row's component) that the probe injects it, and the child gets a copy of the parent's
+    commands row's component, mounted in its realm: the parent's own value never reaches it."""
     state, seen, parent = await _asked_for("commands", _KEPT)
-    assert isinstance(parent, _FakeCommands)  # the parent has the key, so it was the seal that held
-    assert state == "inactive" and seen == []
+    assert isinstance(parent, _FakeCommands)
+    assert state == "active" and len(seen) == 1
+    assert isinstance(seen[0], _FakeCommands) and seen[0] is not parent
 
 
 async def test_a_child_row_asking_for_output_is_given_the_child_s_own_and_not_the_parent_s() -> None:
@@ -868,7 +872,9 @@ async def test_no_child_composition_includes_auto_memory_though_the_parent_has_i
     memory = tmp_path / "memory"
     memory.mkdir()
     host = Row("host", f"{__name__}:trusted_host", {"memory": str(memory)})
-    agents = Row("agents", "subagents:parent", {"rows": [*_KEPT, "memory", "on-touch"]})
+    agents = Row(
+        "agents", "subagents:parent", {"rows": [*_KEPT, "memory", "on-touch"], "refused": ["memory:auto"]}
+    )
     booted = await _booted(
         _rows(model, _Screen(), host=host, agents=agents, **_guidance(_project(tmp_path), **auto))
     )
@@ -899,13 +905,13 @@ async def test_a_layer_naming_the_auto_memory_row_among_the_child_s_rows_fails_t
     rows = _rows(
         model,
         _Screen(),
-        agents=Row("agents", "subagents:parent", {"rows": named}),
+        agents=Row("agents", "subagents:parent", {"rows": named, "refused": ["memory:auto"]}),
         **_guidance(_project(tmp_path), **{"memory-auto": Row("memory-auto", "memory:auto")}),
     )
     booted = await _booted(rows)
     rt = booted.runtime
     [result] = _results(await _bounded(_reply(rt, "go")))
-    assert "a child has no auto memory (decision-0002: " in result and "'memory-auto'" in result
+    assert "a child must not have memory:auto (decision-0002: " in result and "'memory-auto'" in result
     assert _children(rt) == [] and not any(_CHILD in p for p in model.prompts)
     await _bounded(rt.shutdown())
 

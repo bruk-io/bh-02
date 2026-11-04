@@ -8,7 +8,7 @@ foreground or, with `background`, to `agent_wait`. The design is decision-0002
 
 | Row | Binds | Consumes |
 |---|---|---|
-| `subagents:parent` | `asker`: `confirm(question)` over the parent's `output`, only for a question labelled with an agent; `roster`: how many children run and a way to hear it change (read-only); registers the `agent`, `agent_wait`, `agent_send` and `agent_stop` tools (`runs="harness"`), the command `/agents` (list, `stop [NAME]`, `watch NAME`) and a note for the stop notice and the `system` section `agents` (naming the types there are); config: `rows` (required: the parent's rows a child is made of, by id, which the layer names beside the rows themselves (the shipped `bh-02.toml`: `loop`, `tools`, `transcript`, `model`, `system`, `asides`, `access`, `memory`, `on-touch`, `executor`, `python`); never the agents row or auto memory), `tools` (those of `rows` a type may grant, `["python"]`; every other row each child has), `transcript_row` (`transcript`), `model_row` (`model`), `start` (seconds a child has to come up, 30), `max_running` (children at once, 4), `session_agents` (children started before each further start is asked, 16) | `tools` (`register`), `commands` (`register`, `on_stop`), `model` (its lifetime alone), `system` (`add`), `output` (`confirm`: behind `asker`, and a start it asks about; `show`: a note, one when a child's event log stopped being written among them, and each child's usage), `loader` (`rows`), `host` (`trusted`: where type files are read) |
+| `subagents:parent` | `asker`: `confirm(question)` over the parent's `output`, only for a question labelled with an agent; `roster`: how many children run and a way to hear it change (read-only); registers the `agent`, `agent_wait`, `agent_send` and `agent_stop` tools (`runs="harness"`), the command `/agents` (list, `stop [NAME]`, `watch NAME`) and a note for the stop notice and the `system` section `agents` (naming the types there are); config: `rows` (required: the parent's rows a child is made of, by id, which the layer names beside the rows themselves (the shipped `bh-02.toml`: `loop`, `tools`, `transcript`, `model`, `system`, `asides`, `access`, `memory`, `on-touch`, `executor`, `python`); never the agents row or auto memory), `tools` (those of `rows` a type may grant, `["python"]`; every other row each child has), `transcript_row` (`transcript`), `model_row` (`model`), `commands_row` (`commands`: the row whose component is the registry a child gets its own of), `refused` (components a child never has; the shipped `bh-02.toml` names `memory:auto`), `start` (seconds a child has to come up, 30), `max_running` (children at once, 4), `session_agents` (children started before each further start is asked, 16) | `tools` (`register`), `commands` (`register`, `on_stop`), `model` (its lifetime alone), `system` (`add`), `output` (`confirm`: behind `asker`, and a start it asks about; `show`: a note, one when a child's event log stopped being written among them, and each child's usage), `loader` (`rows`), `host` (`trusted`: where type files are read) |
 | `subagents:status` | the status bar's `agents` field: `agents: N running` while a sub-agent runs, absent at none; config: none | `roster` (`running`, `watch`), `frame` (`status`) |
 | `subagents:output` | a child's `output`, inside its realm: `confirm(question)` through `asker`, the question labelled `agent: {name, type}`; nothing else; config: `name`, `type` | `asker` |
 | `subagents:child` | nothing: a child's own row, inside its realm: its type's section of the prompt (`agent`) and its `loop` passed to the call that mounted it; config: `hand`, `section` | `loop`, `system`, `asides` (`add`: what `agent_send` left) |
@@ -82,7 +82,7 @@ input, which the loop serves as it does the model's own calls) starts one child:
    (`agents/NAME/claude`, when the parent's model row keeps one) and the model its type (or the
    call) names (the shipped types name none: the session's). Of the rows in `tools`, only those
    its type grants. The project's guidance is among them (`memory` and `on-touch`, below), with a
-   `commands:registry` of the child's own beside it; no auto memory, no `chat`, no `input`, no
+   registry of the child's own (`commands_row`'s component) beside any row that injects `commands`; no auto memory, no `chat`, no `input`, no
    `agents` row: a child can't start one of its own (depth one). A layer whose `rows` names the
    agents row (by its id, or any row using `subagents:parent`) gets an error from the call saying
    so, not a child with one (decision-0002); one that names the auto memory row (any row using
@@ -259,17 +259,18 @@ own, so it is told afresh what the parent was told; its `access` row refuses its
 file whose instructions it has not been told, as the parent's does. A layer with no memory rows
 gives a child none.
 
-`memory:files` registers `/memory` with `commands`, which the sealed realm does not read from
-outside. So the agents row writes a `commands:registry` into each child's realm beside the memory
-row (`agents/NAME/commands`, unless the layer's `rows` already gave it one): the child's own
+A row such as `memory:files` (it registers `/memory`) injects `commands`, which the sealed realm
+does not read from outside. wiring.py reads which rows do from cordis's record of their components,
+and the agents row writes a registry (the component of its `commands_row`) into each child's realm
+beside them (`agents/NAME/commands`, unless the layer's `rows` already gave it one): the child's own
 value, which nobody runs a line through (a child has no `chat`), so the parent's registry never
 holds the child's `/memory` and the child never reaches the parent's `/agents`. The exposed set is
 still `runner`, `approval`, `host` and `asker`.
 
 **No auto memory in a child.** N children writing one auto memory directory would race the
 parent (decision-0002), and the child is a task's worker, not a conversation the person has with
-the model. A `rows` that names a row using `memory:auto` is refused as one naming the agents row
-is: the call answers `a child has no auto memory ...; take it out of `rows``, and mounts nothing
+the model. A `rows` that names a row using a component in `refused` (`memory:auto` in `bh-02.toml`) is refused as one naming the agents row
+is: the call answers `a child must not have memory:auto ...; take it out of `rows``, and mounts nothing
 (`test_no_child_composition_includes_auto_memory_though_the_parent_has_it`,
 `test_a_layer_naming_the_auto_memory_row_among_the_child_s_rows_fails_the_call_and_mounts_no_child`).
 The `memory` tool, which writes that directory from bh-02's own process, is `memory:auto`'s, so a

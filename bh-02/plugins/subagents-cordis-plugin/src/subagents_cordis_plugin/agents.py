@@ -352,7 +352,10 @@ class Hand:
 class AgentsConfig:
     """The `agents` row's config. `rows`: the parent's rows a child's conversation is made of,
     by id; `tools`: those of them a type may grant (tool rows), the rest every child has;
-    `transcript_row` and `model_row`: which of them is the transcript and the model; `start`:
+    `transcript_row`, `model_row` and `commands_row`: which of them is the transcript, the model
+    and the commands registry (a child whose row injects `commands` gets one of its own, of that
+    row's component); `refused`: the components (`plugin:component`) a child never has, so a `rows`
+    naming a row that uses one is refused (bh-02.toml names auto memory); `start`:
     how long, in seconds, a child's loop has to come up; `max_running`: how many children run at
     once (a further one waits for a slot); `session_agents`: how many children start before
     each further start is put to the person. `rows` has no default: the layer names them beside
@@ -367,6 +370,8 @@ class AgentsConfig:
     tools: Sequence[str] = ("python",)
     transcript_row: str = "transcript"
     model_row: str = "model"
+    commands_row: str = "commands"
+    refused: Sequence[str] = ()
     start: float = 30.0
     max_running: int = 4
     session_agents: int = 16
@@ -432,13 +437,20 @@ class Agents:
     slots of the children running, and its background runs."""
 
     def __init__(
-        self, loader: Rows, mount: Mount, output: Output, types: Types, config: AgentsConfig
+        self,
+        loader: Rows,
+        mount: Mount,
+        output: Output,
+        types: Types,
+        config: AgentsConfig,
+        wants_commands: Callable[[str], bool],
     ) -> None:
         self._loader = loader
         self._mount = mount
         self._output = output
         self._types = types
         self._config = config
+        self._wants_commands = wants_commands
         self._taken: list[str] = []
         self._started = 0
         self._slots = asyncio.Semaphore(config.max_running)
@@ -516,6 +528,9 @@ class Agents:
                 model_row=self._config.model_row,
                 place=place,
                 hand=hand,
+                commands_row=self._config.commands_row,
+                refused=self._config.refused,
+                wants_commands=self._wants_commands,
             )
         except BaseException:  # re-raised: no child exists, so the start is not spent
             self._started -= 1

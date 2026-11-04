@@ -52,6 +52,11 @@ _KEPT = ("loop", "tools", "transcript", "model", "python")
 _PLACE = PurePath("/s/abc/agents/general-1")
 
 
+def _wants_commands(use: str) -> bool:
+    """What cordis's metadata says in a booted layer: the memory files row injects `commands`."""
+    return use == "memory:files"
+
+
 def _rows(kind: AgentType = GENERAL, place: PurePath | None = _PLACE, kept: Any = _KEPT) -> Any:
     return child_rows(
         _PARENT,
@@ -63,6 +68,9 @@ def _rows(kind: AgentType = GENERAL, place: PurePath | None = _PLACE, kept: Any 
         model_row="model",
         place=place,
         hand="the hand",
+        commands_row="commands",
+        refused=("memory:auto",),
+        wants_commands=_wants_commands,
     )
 
 
@@ -178,6 +186,9 @@ def test_a_child_never_gets_an_agents_row_whatever_the_layer_names() -> None:
                 model_row="model",
                 place=_PLACE,
                 hand="the hand",
+                commands_row="commands",
+                refused=("memory:auto",),
+                wants_commands=_wants_commands,
             )
         assert repr(named) in str(why.value) and "take it out of `rows`" in str(why.value)
 
@@ -203,6 +214,9 @@ def _guided(kept: Any = _GUIDED, parent: Any = _SHIPPED) -> Any:
         model_row="model",
         place=_PLACE,
         hand="the hand",
+        commands_row="commands",
+        refused=("memory:auto",),
+        wants_commands=_wants_commands,
     )
 
 
@@ -251,7 +265,7 @@ def test_a_child_never_gets_auto_memory_whatever_the_layer_names() -> None:
     no error."""
     parent = [*_SHIPPED, _Entry("remembering", "memory:auto")]
     for named in ("memory-auto", "remembering"):
-        with pytest.raises(ValueError, match=r"a child has no auto memory \(decision-0002: ") as why:
+        with pytest.raises(ValueError, match=r"a child must not have memory:auto \(decision-0002: ") as why:
             _guided(kept=(*_GUIDED, named), parent=parent)
         assert repr(named) in str(why.value) and "take it out of `rows`" in str(why.value)
     off = [
