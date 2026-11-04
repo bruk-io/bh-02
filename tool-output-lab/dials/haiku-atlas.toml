@@ -7,7 +7,7 @@ model = "claude-haiku-5-5"
 bands = ["M", "L"]
 formats = ["atlas"]
 reps = 2
-max_cost = 8
+max_cost = 4
 
 [[setting]]   # shape summary, anomalies standouts, samples head-tail, get more rows
 name = "sample"
