@@ -1,9 +1,9 @@
 ---
-id: DRAFT-0022
+id: TASK-0182
 title: >-
   Runner adapter tidy-up after the swap: tripwire from brig's mounts, masks
   outside roots, is_confined's premise, Started's full contract
-status: Draft
+status: To Do
 assignee: []
 created_date: '2026-11-03T17:47:00Z'
 labels:
