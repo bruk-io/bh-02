@@ -4,6 +4,7 @@
 
     name = "schema-rare"
     only = ["json", "pypi"]       # formats (all of them when left out)
+    by = "band"                   # a row per point and size band (optional): how a dial scales
     [base]                        # what every point sets: knobs, and budget or view
     view = "schema"
     [grid]                        # each axis's values; the points are every combination
@@ -78,10 +79,14 @@ def _share(rows: Sequence[Row]) -> str:
     return f"{sum(r.sufficient for r in rows)}/{len(rows)}" if rows else "-"
 
 
-def report(name: str, results: list[tuple[Point, list[Row]]]) -> str:
+_BANDS = ("S", "M", "L", "XL", "XXL")
+
+
+def report(name: str, results: list[tuple[Point, list[Row]]], by_band: bool = False) -> str:
     axes = [a for a, _ in results[0][0].axes] if results else []
     kinds = [k for k in KINDS if any(r.kind == k for _, rows in results for r in rows)]
-    head = [*axes, "sufficient", "of folded", *kinds, "quiet", "median out", "violations"]
+    band = ["band", "median in"] if by_band else []
+    head = [*axes, *band, "sufficient", "of folded", *kinds, "quiet", "median out", "violations"]
     out = [
         f"# Sweep {name}: layer 1 over {len(results)} points",
         "",
@@ -93,9 +98,18 @@ def report(name: str, results: list[tuple[Point, list[Row]]]) -> str:
         "| " + " | ".join(head) + " |",
         "|" + "---|" * len(head),
     ]
-    for point, rows in results:
+    groups = [
+        (point, b, [r for r in rows if r.band == b])
+        for point, rows in results
+        for b in (_BANDS if by_band else ("",))
+        if not by_band or any(r.band == b for r in rows)
+    ]
+    for point, b, group in groups:
+        rows = group if by_band else next(rs for p, rs in results if p is point)
         folded = [r for r in rows if r.branch != "passthrough"]
         cells = [str(v) for _, v in point.axes]
+        if by_band:
+            cells += [b, f"{int(statistics.median(r.raw_tokens for r in rows)):,}"]
         cells += [_share(rows), _share(folded)]
         cells += [_share([r for r in rows if r.kind == k]) for k in kinds]
         cells += [_share([r for r in rows if "quiet" in r.task_id])]
@@ -132,7 +146,7 @@ def main(argv: list[str] | None = None) -> int:
         for point, rows in results:
             for r in rows:
                 f.write(json.dumps({"point": dict(point.axes), "budget": point.budget} | asdict(r)) + "\n")
-    text = report(name, results)
+    text = report(name, results, by_band=spec.get("by") == "band")
     (results_dir / f"sweep-{name}.md").write_text(text, encoding="utf-8")
     print(text, end="")
     return 0
