@@ -1,7 +1,7 @@
 ---
 id: TASK-0184
 title: host.key_envs is computed once from the default models file
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-11-03T17:47:00Z'
@@ -247,4 +247,6 @@ INFO    -  Documentation built in 3.66 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+Reviewer, 2026-11-04 (second pass): closed. Full check (scripts/check) exit 0 again, first line the uv UV_NATIVE_TLS deprecation warning, nothing reformatted; 2595 passed. AC1-3 met (ticked in the first pass). Findings from the first pass: DRAFT-0027 (an env key whose table has another problem counted no variable) fixed in c14eaf9 by _env_variable, which reads key.env as written, with a test that fails without it; DRAFT-0026 (stale host fields in CONTRACTS.md) fixed in c14eaf9; both drafts archived. A new repro was recorded for the changed test file. Not filed, still open as minor: the refusal does not name which models file, and key_envs reads the file synchronously on the event loop.
 <!-- SECTION:NOTES:END -->
