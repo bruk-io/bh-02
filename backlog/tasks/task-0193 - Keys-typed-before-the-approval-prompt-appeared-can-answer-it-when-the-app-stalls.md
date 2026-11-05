@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-04T16:59:00Z'
-updated_date: '2026-11-05T04:43:00Z'
+updated_date: '2026-11-05T04:45:00Z'
 labels:
   - tui
   - approval
@@ -182,6 +182,50 @@ warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be remo
 INFO    -  Cleaning site directory
 INFO    -  Building documentation to directory: /home/user/bh-02/.claude/worktrees/agent-a09be7ed4005c7078/site
 INFO    -  Documentation built in 2.06 seconds
+   ok
+== tokens
+   skipped: no /home/user/bh-02/.claude/worktrees/bh-01/dist (bh-01, built, beside this repository)
+```
+
+Check `scripts/check bh-02/plugins/tui-cordis-plugin` exited 0
+
+```text
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+== format
+48 files already formatted
+   ok
+== lint
+All checks passed!
+   ok
+== types
+Success: no issues found in 23 source files
+   ok
+== tests
+bringing up nodes...
+bringing up nodes...
+
+........................................................................ [ 20%]
+........................................................................ [ 40%]
+........................................................................ [ 60%]
+........................................................................ [ 80%]
+.......................................................................  [100%]
+359 passed in 36.11s
+   ok
+== gates
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+== (root)
+   ok
+== libs/cordis
+   ok
+== libs/cordis-helpers
+   ok
+== libs/host-paths
+   ok
+   ok
+== docs
+INFO    -  Cleaning site directory
+INFO    -  Building documentation to directory: /home/user/bh-02/.claude/worktrees/agent-a09be7ed4005c7078/site
+INFO    -  Documentation built in 2.31 seconds
    ok
 == tokens
    skipped: no /home/user/bh-02/.claude/worktrees/bh-01/dist (bh-01, built, beside this repository)
