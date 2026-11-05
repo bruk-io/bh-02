@@ -3,7 +3,7 @@ id: TASK-0195
 title: >-
   The Working line's first tick can say 0s: Textual's timer wakes early and the
   widget floors
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-11-04T18:32:00Z'
@@ -194,4 +194,6 @@ Review (reviewer): the change is sound and all four criteria are met and ticked 
 finish-moved: the criteria were rewritten after promotion (2140d73) once the cause was found. The draft guessed the line was drawn before 0.4 s. The failure was the first line reading 'Working · 0s' (Textual's timer wakes 0.5 ms early and the widget floored), so the criteria now name that defect and its fix.
 
 No repro: the repro test (test_a_tick_that_comes_a_hair_early_says_the_second_it_is_for) and the fix landed in one commit, 7e67f6c, so no commit holds the test without the fix for record-check --repro to run. Its failure before the fix was seen and is in the notes above ('what the test waited for never happened': the line never read 1s), as is the real-clock test's failure before the fix (1 of 10, the first line 'Working · 0s'). Lesson kept: commit the repro before the fix.
+
+Reviewed: closed. Diagnosis confirmed (textual/_time.py sleep wakes 0.5 ms early; timer.py _run targets whole intervals; render floors). Rounding in Working._tick is the right place; render's floor stays. Conditional absence check is sound and conservative. Real-clock test 10/10 here; full scripts/check exit 0, no files changed. No repro note accepted: test and fix landed together in 7e67f6c, before-fix failures are recorded in the notes. Minor, not filed: the absence check skips silently on a slow machine; a tick >0.5 s late shows the next second.
 <!-- SECTION:NOTES:END -->
