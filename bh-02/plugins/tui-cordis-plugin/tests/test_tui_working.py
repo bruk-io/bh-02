@@ -8,6 +8,7 @@ tick."""
 
 import asyncio
 import re
+import time
 from collections.abc import AsyncIterator, Callable, Mapping
 from typing import Any
 
@@ -17,7 +18,7 @@ from textual.pilot import Pilot
 
 from tui_cordis_plugin import BhApp, TuiOutput, render
 from tui_cordis_plugin.messages import Asked, ReplyEnded, ReplyStarted, Shown
-from tui_cordis_plugin.widgets import ApprovalScreen, ChatView, Completions, Composer, Working
+from tui_cordis_plugin.widgets import WORKING_EVERY, ApprovalScreen, ChatView, Completions, Composer, Working
 
 _SIZE = (80, 20)
 _FAST = 0.05  # seconds between ticks in the tests that set the clock themselves
@@ -105,6 +106,20 @@ async def test_while_a_reply_runs_the_screen_says_so_and_for_how_long() -> None:
         await _until(pilot, lambda: _line(app) == "Working · 7s")  # redrawn by the timer
         clock.now += 58
         await _until(pilot, lambda: _line(app) == "Working · 1m 05s")  # then minutes
+
+
+async def test_a_tick_that_comes_a_hair_early_says_the_second_it_is_for() -> None:
+    """Textual's timer wakes half a millisecond before each interval (`textual._time.sleep`
+    sleeps short on purpose), so a tick a second after the reply began reads 0.9995 s on the
+    clock. It is the first second's tick, and says so, never `0s` (TASK-0195)."""
+    clock = _Clock()
+    app = _app(clock)
+    async with app.run_test(size=_SIZE) as pilot:
+        await _started(app, pilot)
+        clock.now += 0.9995
+        await _until(pilot, lambda: _line(app) == "Working · 1s")
+        clock.now += 1.0
+        await _until(pilot, lambda: _line(app) == "Working · 2s")
 
 
 async def test_the_line_sits_between_the_chat_view_and_the_composer_and_is_one_row() -> None:
@@ -312,9 +327,13 @@ async def test_at_the_real_clock_and_interval_it_appears_after_a_second_and_coun
     the seconds."""
     app = BhApp()
     async with app.run_test(size=_SIZE) as pilot:
+        posted = time.monotonic()
         app.post_message(ReplyStarted())
         await pilot.pause(0.4)
-        assert _line(app) is None
+        # the pause is evidence only if it ended within the first second (a loaded machine can
+        # stretch it past one, and then the line is rightly up)
+        if time.monotonic() - posted < WORKING_EVERY:
+            assert _line(app) is None
         await _until(pilot, lambda: _line(app) is not None, within=3.0)
         assert re.fullmatch(r"Working · [12]s", _line(app) or "")
         await _until(pilot, lambda: _line(app) == "Working · 2s", within=3.0)
