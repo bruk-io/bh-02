@@ -3,7 +3,7 @@ id: TASK-0193
 title: >-
   Keys typed before the approval prompt appeared can answer it when the app
   stalls
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-11-04T16:59:00Z'
@@ -341,4 +341,6 @@ INFO    -  Documentation built in 2.76 seconds
 == tokens
    skipped: no /home/user/bh-02/.claude/worktrees/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+Reviewed: closed. Full scripts/check exit 0 (2794 passed), nothing reformatted. Clock: Message.time and the stamp are both textual._time.get_time (monotonic); the Linux driver builds Key in its input thread, so time is arrival. Repro fails at e121e6f because the early key answers (choice's ScreenStackError is the second early key dismissing an already-dismissed screen, a consequence of the same defect). Every judged key is stopped and default-prevented; _answered guards a double dismiss; Ctrl-C is an app priority binding, checked before the screen's on_key, existing tests pass. Low findings, not filed: approval.py imports get_time from private textual._time (commented; a Textual upgrade could move it); y/n now also match shift-Y/N via lower(); AC3's 50/50 is the worker's prose, not record-check output, but 50 passes against a 3-of-8 failure rate is strong. Jail checks left to the merge.
 <!-- SECTION:NOTES:END -->
