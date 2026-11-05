@@ -33,10 +33,10 @@ A sub-agent's conversation is made of the agents row's rows (bh-02.toml: loop, t
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A sub-agent has the grant tool and its system section; a call asks the person under the agent's label (agent NAME (TYPE)), never as input python
-- [ ] #2 The session's grant tool still asks as input python, and there is still one prompt and one /grants per session
-- [ ] #3 The docs and READMEs no longer say a sub-agent has no grant tool, and say a sub-agent's grant applies to the session
-- [ ] #4 scripts/check and scripts/linux-jail-check (both modes) pass
+- [x] #1 A sub-agent has the grant tool and its system section; a call asks the person under the agent's label (agent NAME (TYPE)), never as input python
+- [x] #2 The session's grant tool still asks as input python, and there is still one prompt and one /grants per session
+- [x] #3 The docs and READMEs no longer say a sub-agent has no grant tool, and say a sub-agent's grant applies to the session
+- [x] #4 scripts/check and scripts/linux-jail-check (both modes) pass
 <!-- AC:END -->
 
 ## Implementation Plan
