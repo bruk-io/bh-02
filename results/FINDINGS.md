@@ -135,8 +135,9 @@ Run: `results/dials-haiku-patterns.md` (520 runs, $3.29).
   - `lean` was meant to give the smallest context. The model re-read more with it (43 against 36),
     so its context ended larger.
   - `index` was meant to make re-reads smaller. They weren't.
-- What decides the final context is whether the model reads the full output. The recipes differ
-  by 50 to 150 tokens; one read adds thousands.
+- What decides the final context is mostly whether the model reads the full output. The recipes
+  differ by 50 to 150 tokens; a re-read adds about 1,000 at the median, and much more when the
+  model reads a whole file. (Corrected in entry 10: this said "thousands".)
 - Figma XML at medium size is a coin flip: the model either reads the whole 7k-token file or
   doesn't. `schema` and `lean` gave the exact same envelope for those tasks, and the context still
   differed by 10,000 tokens. Entry 4's odd Figma numbers were this, not the recipe.
@@ -192,3 +193,37 @@ From the transcripts of the runs in entries 6 and 7.
 What it means: the "get more" commands, as written, are mostly ignored. The model re-reads the
 full output to check the envelope, even when the answer is already there. To save more context,
 the next thing to try is getting the model to trust what the envelope says, not adding more to it.
+
+## 10. Saying the counts are exact makes Haiku re-read much less, but saves almost no context
+
+Run: `results/dials-haiku-banner.md` (312 runs, $2.00). Haiku on the 104 test tasks: native, the
+`schema` envelope with the usual banner, and the same envelope with one more sentence in the
+banner: "Every count and value in the envelope is exact, worked out over the whole output, not a
+sample: read the file only for what the envelope does not show."
+
+| | usual banner | exact-counts banner |
+|---|---|---|
+| Runs that went back to the full output | 70 of 104 | 51 of 104 |
+| …when the answer was already in the envelope | 55 of 85 | 33 of 85 |
+| Answers right (native: 100 of 104) | 104 | 104 |
+| Final context, against native | 6,458 smaller | 6,158 smaller |
+| Cost, against native | 25% less | 25% less |
+
+- **The drop in re-reading is real.** 23 tasks were re-read only under the usual banner, and 4
+  only under the new one. That is very unlikely to be chance (p = 0.0003). It fell for every kind
+  of output except Figma XML (JSON 11 to 6 of 26, logs 16 to 11, snapshots 18 to 10, Figma 25 to
+  24).
+- **Answers didn't suffer**: both got all 104 right.
+- **But the context didn't shrink.** Most re-reads are small checks, like a `grep -c`, and add
+  only about 1,000 tokens. Runs that re-read ended at 47,400 tokens at the median, runs that
+  didn't at 46,400. So 19 fewer re-reads save about 200 tokens a run on average, too little to see.
+  This corrects entry 6, which said a re-read adds thousands: that only happens when the model
+  reads a whole file, as it does with Figma.
+- We predicted the new banner would cut re-reading, keep the answers, and shrink the context.
+  The first two happened; the third didn't.
+
+What it means: the model can be talked into trusting the envelope, and it costs nothing in
+answers here. But on these tasks the envelope already saves most of what can be saved, and the
+checks the model drops are cheap ones. One risk to keep in mind: a model that trusts the envelope
+more would be hurt more by a miss like the $0.00 invoice (entry 7), which is why entry 8's
+"none found by its rules, which is not proof there are none" matters alongside this banner.
