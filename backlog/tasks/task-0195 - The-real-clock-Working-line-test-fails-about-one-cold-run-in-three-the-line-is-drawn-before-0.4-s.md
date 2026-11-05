@@ -1,9 +1,9 @@
 ---
-id: DRAFT-0028
+id: TASK-0195
 title: >-
   The real-clock Working-line test fails about one cold run in three: the line
   is drawn before 0.4 s
-status: Draft
+status: To Do
 assignee: []
 created_date: '2026-11-04T18:32:00Z'
 labels:
