@@ -3,10 +3,11 @@ id: TASK-0193
 title: >-
   Keys typed before the approval prompt appeared can answer it when the app
   stalls
-status: To Do
-assignee: []
+status: Done
+assignee:
+  - '@claude'
 created_date: '2026-11-04T16:59:00Z'
-updated_date: '2026-11-05T04:07:00Z'
+updated_date: '2026-11-05T04:56:00Z'
 labels:
   - tui
   - approval
@@ -28,9 +29,9 @@ Found by TASK-0191's worker, 2026-11-04 (test_keys_typed_as_the_modal_comes_up_d
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A key that arrived before the approval modal was visible plus its grace period never answers it, however late it is processed; a test that holds the event loop while keys are queued, then releases it, shows the modal unanswered; repro recorded failing before the fix
-- [ ] #2 A key that arrived after the grace period still answers at once
-- [ ] #3 test_keys_typed_as_the_modal_comes_up_do_not_answer_it passes 50 of 50 under the load that failed it (12 CPU burners)
+- [x] #1 A key that arrived before the approval modal was visible plus its grace period never answers it, however late it is processed; a test that holds the event loop while keys are queued, then releases it, shows the modal unanswered; repro recorded failing before the fix
+- [x] #2 A key that arrived after the grace period still answers at once
+- [x] #3 test_keys_typed_as_the_modal_comes_up_do_not_answer_it passes 50 of 50 under the load that failed it (12 CPU burners)
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -64,4 +65,282 @@ Judge each key by when it arrived, not when it is processed. Textual 8.2.8's Lin
 
 <!-- SECTION:NOTES:BEGIN -->
 Plan note: AC3's test is test_keys_typed_as_the_modal_comes_up_do_not_answer_it in bh-02/app/tests/test_real_launch.py (real_launch: the real app in a pty, so its keys come through the driver's input thread, as a person's do).
+
+Repro at e121e6f758af, test files: bh-02/plugins/tui-cordis-plugin/tests/test_tui_key_time.py; command: `uv run pytest bh-02/plugins/tui-cordis-plugin/tests/test_tui_key_time.py -q` exited 1
+
+(94 earlier lines omitted)
+```text
+╭───────────────────── Traceback (most recent call last) ──────────────────────╮
+│ /home/user/bh-02/.claude/worktrees/agent-a09be7ed4005c7078/bh-02/plugins/tui │
+│ -cordis-plugin/src/tui_cordis_plugin/widgets/choice.py:52 in on_key          │
+│                                                                              │
+│   49 │   │   │   self.action_answer(str(self.question.get("escape", "")))    │
+│   50 │   │   elif key in self._values:                                       │
+│   51 │   │   │   event.stop()                                                │
+│ ❱ 52 │   │   │   self.action_answer(self._values[key])                       │
+│   53                                                                         │
+│                                                                              │
+│ ╭───────────────────────────── locals ─────────────────────────────╮         │
+│ │ event = Key(key='n', character='n', name='n', is_printable=True) │         │
+│ │   key = 'n'                                                      │         │
+│ │  self = ChoiceScreen()                                           │         │
+│ ╰──────────────────────────────────────────────────────────────────╯         │
+│                                                                              │
+│ /home/user/bh-02/.claude/worktrees/agent-a09be7ed4005c7078/bh-02/plugins/tui │
+│ -cordis-plugin/src/tui_cordis_plugin/widgets/approval.py:142 in              │
+│ action_answer                                                                │
+│                                                                              │
+│   139 │   def action_answer(self, answer: T) -> None:                        │
+│   140 │   │   """Answer, unless the modal was shown too recently for the key │
+│   141 │   │   if self._armed:                                                │
+│ ❱ 142 │   │   │   self.dismiss(answer)                                       │
+│   143                                                                        │
+│                                                                              │
+│ ╭──────── locals ─────────╮                                                  │
+│ │ answer = 'no'           │                                                  │
+│ │   self = ChoiceScreen() │                                                  │
+│ ╰─────────────────────────╯                                                  │
+│                                                                              │
+│ /home/user/bh-02/.claude/worktrees/agent-a09be7ed4005c7078/.venv/lib/python3 │
+│ .15/site-packages/textual/app.py:3105 in pop_screen                          │
+│                                                                              │
+│   3102 │   │                                                                 │
+│   3103 │   │   screen_stack = self._screen_stack                             │
+│   3104 │   │   if len(screen_stack) <= 1:                                    │
+│ ❱ 3105 │   │   │   raise ScreenStackError(                                   │
+│   3106 │   │   │   │   "Can't pop screen; there must be at least one screen  │
+│   3107 │   │   │   )                                                         │
+│   3108                                                                       │
+│                                                                              │
+│ ╭──────────────────────────── locals ─────────────────────────────╮          │
+│ │ screen_stack = [Screen(id='_default')]                          │          │
+│ │         self = BhApp(                                           │          │
+│ │                │   title='bh-02',                               │          │
+│ │                │   classes={                                    │          │
+│ │                │   │   '-theme-bh-01-dark',                     │          │
+│ │                │   │   '-dark-mode'                             │          │
+│ │                │   },                                           │          │
+│ │                │   pseudo_classes={'focus', 'dark'}             │          │
+│ │                )                                                │          │
+│ ╰─────────────────────────────────────────────────────────────────╯          │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ScreenStackError: Can't pop screen; there must be at least one screen on the 
+stack
+=========================== short test summary info ============================
+FAILED bh-02/plugins/tui-cordis-plugin/tests/test_tui_key_time.py::test_keys_queued_before_the_grace_ended_do_not_answer_the_approval_when_read_late
+FAILED bh-02/plugins/tui-cordis-plugin/tests/test_tui_key_time.py::test_keys_queued_before_the_grace_ended_do_not_answer_the_choice_when_read_late
+2 failed in 1.94s
+```
+
+Check `scripts/check bh-02/plugins/tui-cordis-plugin` exited 1
+
+```text
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+== format
+48 files already formatted
+   ok
+== lint
+line-too-long: Line too long (153 > 110)
+  --> bh-02/plugins/tui-cordis-plugin/src/tui_cordis_plugin/widgets/choice.py:23:111
+   |
+21 | …'s key answers its `value`, and
+22 | …after the grace period (as
+23 | …ore are dropped. Ctrl-C withdraws it, and the answer is then '' (nothing was chosen)."""
+   |                                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+24 | …
+25 | …at = GRACE) -> None:
+   |
+
+Found 1 error.
+   FAILED: lint
+== types
+Success: no issues found in 23 source files
+   ok
+== tests
+bringing up nodes...
+bringing up nodes...
+
+........................................................................ [ 20%]
+........................................................................ [ 40%]
+........................................................................ [ 60%]
+........................................................................ [ 80%]
+.......................................................................  [100%]
+359 passed in 36.17s
+   ok
+== gates
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+== (root)
+   ok
+== libs/cordis
+   ok
+== libs/cordis-helpers
+   ok
+== libs/host-paths
+   ok
+   ok
+== docs
+INFO    -  Cleaning site directory
+INFO    -  Building documentation to directory: /home/user/bh-02/.claude/worktrees/agent-a09be7ed4005c7078/site
+INFO    -  Documentation built in 2.06 seconds
+   ok
+== tokens
+   skipped: no /home/user/bh-02/.claude/worktrees/bh-01/dist (bh-01, built, beside this repository)
+```
+
+Check `scripts/check bh-02/plugins/tui-cordis-plugin` exited 0
+
+```text
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+== format
+48 files already formatted
+   ok
+== lint
+All checks passed!
+   ok
+== types
+Success: no issues found in 23 source files
+   ok
+== tests
+bringing up nodes...
+bringing up nodes...
+
+........................................................................ [ 20%]
+........................................................................ [ 40%]
+........................................................................ [ 60%]
+........................................................................ [ 80%]
+.......................................................................  [100%]
+359 passed in 36.11s
+   ok
+== gates
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+== (root)
+   ok
+== libs/cordis
+   ok
+== libs/cordis-helpers
+   ok
+== libs/host-paths
+   ok
+   ok
+== docs
+INFO    -  Cleaning site directory
+INFO    -  Building documentation to directory: /home/user/bh-02/.claude/worktrees/agent-a09be7ed4005c7078/site
+INFO    -  Documentation built in 2.31 seconds
+   ok
+== tokens
+   skipped: no /home/user/bh-02/.claude/worktrees/bh-01/dist (bh-01, built, beside this repository)
+```
+
+Check `scripts/linux-jail-check --ca /root/.ccr/ca-bundle.crt` exited 0
+
+```text
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+Installed 1 package in 1ms
+== image bh-02-linux-jail (ubuntu 24.04, bubblewrap, uv, Python 3.15)
+sha256:6b4985a834c4dc43a67dba8a671ce8cffc1c435c0c537a1a30dac45b2e50353b
+== uv run --locked pytest -q -p no:cacheprovider bh-02/plugins/runner-cordis-plugin bh-02/plugins/python-cordis-plugin bh-02/plugins/extensions-cordis-plugin bh-02/app/tests/test_python_repl.py
+bubblewrap 0.9.0
+uv 0.13.7 (x86_64-unknown-linux-gnu)
+Python 3.15.2 (main, Oct 26 2026, 14:06:56) [Clang 23.1.3 ]
+........................................................................ [ 13%]
+...............................x........................................ [ 26%]
+........................................................................ [ 40%]
+........................................................................ [ 53%]
+........................................................................ [ 67%]
+........................................................................ [ 80%]
+........................................................................ [ 93%]
+..............s..................                                        [100%]
+535 passed, 1 skipped, 1 xfailed in 120.57s (0:02:00)
+```
+
+Check `scripts/linux-jail-check --as-root --ca /root/.ccr/ca-bundle.crt` exited 0
+
+```text
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+== image bh-02-linux-jail (ubuntu 24.04, bubblewrap, uv, Python 3.15)
+sha256:a944d242c9ab5429d81fd8d54176df386d350564249c2422a11d1523eb993b8f
+== uv run --locked pytest -q -p no:cacheprovider bh-02/plugins/runner-cordis-plugin bh-02/plugins/python-cordis-plugin bh-02/plugins/extensions-cordis-plugin bh-02/app/tests/test_python_repl.py
+bubblewrap 0.9.0
+uv 0.13.7 (x86_64-unknown-linux-gnu)
+Python 3.15.2 (main, Oct 26 2026, 14:06:56) [Clang 23.1.3 ]
+........................................................................ [ 13%]
+...............................x........................................ [ 26%]
+........................................................................ [ 40%]
+........................................................................ [ 53%]
+........................................................................ [ 67%]
+........................................................................ [ 80%]
+........................................................................ [ 93%]
+..............s..................                                        [100%]
+535 passed, 1 skipped, 1 xfailed in 122.04s (0:02:02)
+```
+
+Repro: bh-02/plugins/tui-cordis-plugin/tests/test_tui_key_time.py (keys made before a time.sleep stall past the grace, posted after; ApprovalScreen and ChoiceScreen). Recorded failing at the repro commit (both tests failed: the modal was answered). Fix: ApprovalScreen.on_key judges event.time against a stamp taken in call_after_refresh from on_mount (_answers(arrived, shown, grace)); ChoiceScreen supplies only _key_answer; y/n/Escape BINDINGS removed; armed reads the same rule; a second queued answer key no longer dismisses twice. AC3: 12 background 'python3 -c "while True: pass"' burners (stress-ng not installed, 4 CPUs), 50 runs of test_keys_typed_as_the_modal_comes_up_do_not_answer_it, 50 passed 0 failed; burners killed, pgrep -f 'while True' empty. Checks recorded: scripts/check bh-02/plugins/tui-cordis-plugin (an earlier run failed on one line-too-long, fixed; then exit 0, 359 passed), linux-jail-check default and --as-root both exit 0. ACs left unticked for the reviewer.
+
+Check `scripts/check` exited 0
+
+(13 earlier lines omitted)
+```text
+
+........................................................................ [  2%]
+........................................................................ [  5%]
+..............s......................................................... [  7%]
+..............................x......................................... [ 10%]
+........................................................................ [ 12%]
+........................................................................ [ 15%]
+........................................................................ [ 18%]
+................s....................................................... [ 20%]
+........................................................................ [ 23%]
+........................................................................ [ 25%]
+........................................................................ [ 28%]
+........................................................................ [ 30%]
+........................................................................ [ 33%]
+..................................s........s............................ [ 36%]
+........................................................................ [ 38%]
+........................................................................ [ 41%]
+........................................................................ [ 43%]
+........................................................................ [ 46%]
+........................................................................ [ 48%]
+........................................................................ [ 51%]
+........................................................................ [ 54%]
+........................................................................ [ 56%]
+........................................................................ [ 59%]
+........................................................................ [ 61%]
+........................................................................ [ 64%]
+........................................................................ [ 66%]
+........................................................................ [ 69%]
+........................................................................ [ 72%]
+........................................................................ [ 74%]
+........................................................................ [ 77%]
+........................................................................ [ 79%]
+........................................................................ [ 82%]
+........................................................................ [ 84%]
+........................................................................ [ 87%]
+........................................................................ [ 90%]
+........................................................................ [ 92%]
+........................................................................ [ 95%]
+........................................................................ [ 97%]
+...............................................................          [100%]
+2794 passed, 6 skipped, 1 xfailed in 134.51s (0:02:14)
+   ok
+== gates
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+== (root)
+   ok
+== libs/cordis
+   ok
+== libs/cordis-helpers
+   ok
+== libs/host-paths
+   ok
+   ok
+== docs
+INFO    -  Cleaning site directory
+INFO    -  Building documentation to directory: /home/user/bh-02/.claude/worktrees/agent-a09be7ed4005c7078/site
+INFO    -  Documentation built in 2.76 seconds
+   ok
+== tokens
+   skipped: no /home/user/bh-02/.claude/worktrees/bh-01/dist (bh-01, built, beside this repository)
+```
+
+Reviewed: closed. Full scripts/check exit 0 (2794 passed), nothing reformatted. Clock: Message.time and the stamp are both textual._time.get_time (monotonic); the Linux driver builds Key in its input thread, so time is arrival. Repro fails at e121e6f because the early key answers (choice's ScreenStackError is the second early key dismissing an already-dismissed screen, a consequence of the same defect). Every judged key is stopped and default-prevented; _answered guards a double dismiss; Ctrl-C is an app priority binding, checked before the screen's on_key, existing tests pass. Low findings, not filed: approval.py imports get_time from private textual._time (commented; a Textual upgrade could move it); y/n now also match shift-Y/N via lower(); AC3's 50/50 is the worker's prose, not record-check output, but 50 passes against a 3-of-8 failure rate is strong. Jail checks left to the merge.
 <!-- SECTION:NOTES:END -->
