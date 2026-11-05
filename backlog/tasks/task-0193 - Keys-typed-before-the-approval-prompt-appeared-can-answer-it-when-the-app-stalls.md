@@ -3,10 +3,11 @@ id: TASK-0193
 title: >-
   Keys typed before the approval prompt appeared can answer it when the app
   stalls
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@claude'
 created_date: '2026-11-04T16:59:00Z'
-updated_date: '2026-11-05T04:07:00Z'
+updated_date: '2026-11-05T04:30:00Z'
 labels:
   - tui
   - approval
