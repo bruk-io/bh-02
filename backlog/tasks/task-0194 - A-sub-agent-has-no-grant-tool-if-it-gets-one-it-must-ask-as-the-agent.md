@@ -1,11 +1,11 @@
 ---
 id: TASK-0194
 title: Sub-agents get the grant tool, asking as the agent
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-11-04T22:39:00Z'
-updated_date: '2026-11-05T04:19:00Z'
+updated_date: '2026-11-05T04:20:00Z'
 labels:
   - runner
   - subagents
@@ -266,4 +266,6 @@ INFO    -  Documentation built in 2.58 seconds
 Review of 6a2bf5d (reviewer): the code meets every criterion (ticked; full scripts/check green, 2791 passed, nothing reformatted; jail checks both modes recorded green by the worker). One prompt holds: grant_prompt alone serves, grant_tool only asks, the shipped agents rows name grant and not grant-prompt, and a child given grant-prompt hits Broker.serve's RuntimeError. requesting.asker reuses egress.asked_as, so tool, needs and refusals share one label. python_row gone, no alias. Docs match. close-task refused, so the task stays open on two board facts, not code: (1) the acceptance criteria were rewritten after acceptance in f5e9bae without the finish-moved label and a note saying why (the owner's 2026-11-05 decision); (2) a bug needs a recorded repro (record-check TASK-0194 --repro -- <test>, or a 'No repro:' note). Minor, not filed: no single end-to-end test of a child's grant call reaching the question; GrantToolConfig out of order in runner __init__ __all__.
 
 finish-moved: the criteria were rewritten after promotion (f5e9bae) by the owner's decision of 2026-11-05, 'Yes, give sub-agents the grant tool'. The draft, filed as a bug, asked only that a sub-agent's grant call be labelled. The decision made it a feature, giving sub-agents the tool, so the type is now task and there is no defect to reproduce. The proof that the label holds is the planted failure in the worker's notes (no agent written into the grant row: test_child_boot KeyError 'agent').
+
+Closed by the reviewer. Code reviewed at 6a2bf5d: every criterion met (full scripts/check green, 2791 passed, nothing reformatted; jail checks both modes recorded green by the worker). One prompt and one /grants per session (grant_prompt alone serves; a second serve raises); a child's grant asks as agent NAME (TYPE) through egress.asked_as, the label its needs and refusals use; python_row gone with no alias; docs match. Board blockers fixed in f68d6cf: finish-moved label with the owner's 2026-11-05 decision, and type task, accepted: before this change a child had no grant tool, so the mislabelled question could not occur and there is no defect to reproduce. Minor, not filed: no single end-to-end test of a child's grant call reaching the question; GrantToolConfig out of order in runner __init__ __all__.
 <!-- SECTION:NOTES:END -->
