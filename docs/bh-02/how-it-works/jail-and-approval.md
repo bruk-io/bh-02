@@ -82,7 +82,9 @@ The policy is not the last word: the person can give the jail more, one grant at
   up) and anything else with `ask`. It depends on `host` alone, which never reloads, so a grant changes
   what the broker holds and reloads no row.
 - **`runner:grant_prompt`** serves the broker its prompt (once, always, no, through `output.choose`),
-  tells the model each answer in an aside, and registers `/grants` and the `grant` tool.
+  tells the model each answer in an aside, and registers `/grants`. There is one per session.
+- **`runner:grant_tool`** registers the `grant` tool and its prompt section. It only asks, so a
+  sub-agent's realm mounts it too, and its requests are asked under the agent's label.
 
 `approval` depends on `runner` alone, so a grant, an always, or a requester coming and going leaves the
 rule up. A grant never changes whether the code is confined; it changes what the confined code can reach.
@@ -107,7 +109,8 @@ and about every 0.2 s it reads the proxy's refusals and asks about each one as t
 (`python`, `extensions`, or a sub-agent's label). A name that resolved to a private address is asked as
 that address alone, and a name that did not resolve is not asked. The proxy judges a connection once, so
 a revoke refuses from the next connection and never cuts one already open. A sub-agent's realm reads the
-one broker; it has no `grant` tool of its own.
+one broker, and it has the `grant` tool: a request is asked under its label, and what is granted
+applies to the whole session.
 
 **The honest grade.** A grant opens the proxy's door and nothing else: a program that ignores the proxy
 settings and connects directly reaches nothing, because the jail has loopback only. Even so brig cannot

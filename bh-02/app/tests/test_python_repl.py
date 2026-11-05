@@ -1721,6 +1721,7 @@ async def _granting(
             Row("runner", "runner:confined"),
             Row("approval", "runner:approval"),
             Row("grant-prompt", "runner:grant_prompt"),
+            Row("grant", "runner:grant_tool", {"agent": (python or {}).get("agent", "")}),
             Row("python", "python:tool", {"root": str(project), "startup": [], **(python or {})}),
         ],
         watch=None,

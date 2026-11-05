@@ -23,7 +23,7 @@ use = "agent:tools"
 [[plugin]]
 id = "agents"
 use = "subagents:parent"
-config = { rows = ["loop", "tools", "transcript", "model", "system", "asides", "access", "memory", "on-touch", "executor", "python"], commands_row = "commands" }
+config = { rows = ["loop", "tools", "transcript", "model", "system", "asides", "access", "memory", "on-touch", "executor", "python", "grant"], commands_row = "commands" }
 
 # The status bar's agents field, `agents: N running`, while a sub-agent runs (absent at none).
 [[plugin]]
@@ -110,11 +110,18 @@ use = "runner:approval"
 id = "grants"
 use = "runner:grants"
 
-# The grants prompt, `/grants` (lists what is granted and takes a grant back; `bh-02 grants` does the same outside a
-# session) and the `grant` tool an input calls to ask for a path, a variable or a destination.
+# The grants prompt, the session's only one, and `/grants` (lists what is granted and takes a grant back;
+# `bh-02 grants` does the same outside a session).
 [[plugin]]
 id = "grant-prompt"
 use = "runner:grant_prompt"
+
+# The `grant` tool an input or the model calls to ask for a path, a variable or a destination. A row of
+# its own, so a sub-agent has it too (the agents row's `rows`), asking as the agent; it only asks, through
+# the one prompt above.
+[[plugin]]
+id = "grant"
+use = "runner:grant_tool"
 
 # `/release`: each row stops its own program, then the runner frees what its jails held.
 [[plugin]]

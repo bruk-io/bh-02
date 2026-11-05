@@ -6,6 +6,7 @@ import asyncio
 import os
 from collections import deque
 from collections.abc import Awaitable, Callable, Mapping, Sequence
+from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
@@ -22,7 +23,16 @@ from runner_cordis_plugin.prompting import answer_of, decided, question
 from runner_cordis_plugin.runner import ArgvFor, Runner, Started
 from runner_cordis_plugin.unconfined import Unjailed
 
-__all__ = ["approval", "confined", "grant_prompt", "grants", "release", "unconfined"]
+__all__ = [
+    "GrantToolConfig",
+    "approval",
+    "confined",
+    "grant_prompt",
+    "grant_tool",
+    "grants",
+    "release",
+    "unconfined",
+]
 
 
 @runtime_checkable
@@ -51,13 +61,19 @@ class _KeyReaders(Protocol):
 
 
 @runtime_checkable
+class _Asking(Protocol):
+    """What the grant tool needs of the `grants` value (CONTRACTS.md: grants): `ask`."""
+
+    async def ask(self, request: Request) -> Outcome: ...
+
+
+@runtime_checkable
 class _Serving(Listing, Protocol):
     """What the prompt needs of the `grants` value (CONTRACTS.md: grants): `serve`, and what
     `/grants` lists and revokes."""
 
     def serve(self, prompt: Prompt) -> Callable[[], None]: ...
     def told(self) -> tuple[str, ...]: ...
-    async def ask(self, request: Request) -> Outcome: ...
 
 
 @runtime_checkable
@@ -181,15 +197,7 @@ async def grants(*, host: Host) -> Effects:
 
 @component
 async def grant_prompt(
-    *,
-    grants: _Serving,
-    output: _Choosing,
-    asides: _Telling,
-    commands: _Registrar,
-    tools: _Registering,
-    system: _Sections,
-    runner: _Refusing,
-    approval: _Confining,
+    *, grants: _Serving, output: _Choosing, asides: _Telling, commands: _Registrar
 ) -> Effects:
     """Fills a `grant-prompt` row: `use = "runner:grant_prompt"`. Puts what the broker asks to the
     person through `output.choose` (once, always or no: the words are `prompting.question`), tells
@@ -199,12 +207,9 @@ async def grant_prompt(
     project: the next start no longer applies it. A question under way when the row reloads or
     leaves is withdrawn: its asker is answered no and nothing is recorded.
 
-    It also registers the `grant` tool (`requesting`, `runs="harness"`, so `approval` asks nothing
-    more of it than of any tool in the jail: its only effect is a question to the person, put by the
-    broker) and tells the model of it in the `system` section `grants`. A call is a request from the
-    python tool's input: a request the floor refuses (`runner.refusal`) is answered, with why, before
-    anyone is asked, and under `--no-jail` (`approval.confined` false) it says there is nothing to
-    grant and asks nothing. It depends on `runner` and `approval` besides, so it reloads with them."""
+    There is one per session: the broker serves one prompt, and a sub-agent's realm reads the
+    broker from the parent's, so a child's `grant_tool` asks through this prompt and does not mount
+    a second. The `grant` tool is `grant_tool`'s."""
     told: deque[str] = deque()  # the answers decided since the last call, as lines for the model
 
     async def prompt(request: Request) -> Answer | None:
@@ -222,16 +227,6 @@ async def grant_prompt(
         lines.extend(grants.told())
         return "\n".join(lines)
 
-    async def grant(call: Mapping[str, Any]) -> dict[str, Any]:
-        if not approval.confined:
-            return {"content": requesting.NOTHING}
-        made = requesting.requested(call, requesting.ASKER, lambda path: str(Path(path).resolve()))
-        if isinstance(made, str):
-            return {"content": made}
-        if why := runner.refusal(made.grant):
-            return {"content": requesting.refused(made, why)}
-        return {"content": requesting.answered(made, await grants.ask(made))}
-
     spec = {
         "name": "grants",
         "help": "list what is granted to the jail, or `revoke ID` to take one back",
@@ -240,6 +235,47 @@ async def grant_prompt(
     yield acquire(grants.serve, prompt)
     yield acquire(asides.add, aside)
     yield acquire(commands.register, spec, partial(grants_command, grants))
+
+
+@dataclass(frozen=True, slots=True)
+class GrantToolConfig:
+    """The `grant` row's config. `agent`: the label of the sub-agent whose tool it is (the agents row
+    writes it, as it does the python row's), else empty: the session's own."""
+
+    agent: str = ""
+
+
+@component
+async def grant_tool(
+    *,
+    grants: _Asking,
+    tools: _Registering,
+    system: _Sections,
+    runner: _Refusing,
+    approval: _Confining,
+    config: GrantToolConfig,
+) -> Effects:
+    """Fills a `grant` row: `use = "runner:grant_tool"`. Registers the `grant` tool (`requesting`,
+    `runs="harness"`, so `approval` asks nothing more of it than of any tool in the jail: its only
+    effect is a question to the person, put by the broker) and tells the model of it in the `system`
+    section `grants`. A call is a request from the python tool's input or, with config `agent`, from
+    that sub-agent by its label. A request the floor refuses (`runner.refusal`) is answered, with
+    why, before anyone is asked, and under `--no-jail` (`approval.confined` false) it says there is
+    nothing to grant and asks nothing. A grant applies to the whole session. The row only asks, so
+    a sub-agent's realm can mount it, while the prompt (`grant_prompt`) is the session's alone. It
+    depends on `runner` and `approval`, so it reloads with them."""
+    asker = requesting.asker(config.agent)
+
+    async def grant(call: Mapping[str, Any]) -> dict[str, Any]:
+        if not approval.confined:
+            return {"content": requesting.NOTHING}
+        made = requesting.requested(call, asker, lambda path: str(Path(path).resolve()))
+        if isinstance(made, str):
+            return {"content": made}
+        if why := runner.refusal(made.grant):
+            return {"content": requesting.refused(made, why)}
+        return {"content": requesting.answered(made, await grants.ask(made))}
+
     yield acquire(tools.register, requesting.GRANT, grant, runs="harness")
     yield acquire(system.add, "grants", lambda: requesting.section(approval.confined))
 

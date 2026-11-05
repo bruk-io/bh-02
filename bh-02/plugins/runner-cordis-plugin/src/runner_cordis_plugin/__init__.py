@@ -38,7 +38,16 @@ from runner_cordis_plugin.policy import (
 from runner_cordis_plugin.runner import Mechanism, Runner, Started
 from runner_cordis_plugin.tripwire import Tripwire, decoded, lifted, tripped_for, unended_for, wires
 from runner_cordis_plugin.unconfined import UNENFORCED, Unjailed
-from runner_cordis_plugin.wiring import approval, confined, grant_prompt, grants, release, unconfined
+from runner_cordis_plugin.wiring import (
+    GrantToolConfig,
+    approval,
+    confined,
+    grant_prompt,
+    grant_tool,
+    grants,
+    release,
+    unconfined,
+)
 
 __all__ = [
     "BASELINE_ENV",
@@ -72,12 +81,14 @@ __all__ = [
     "Unjailed",
     "admitted",
     "allowlist",
+    "GrantToolConfig",
     "allowlisted",
     "approval",
     "confined",
     "decoded",
     "git_author",
     "grant_prompt",
+    "grant_tool",
     "grants",
     "is_confined",
     "lifted",

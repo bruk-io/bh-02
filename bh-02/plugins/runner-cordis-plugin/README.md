@@ -11,7 +11,8 @@ over it; and `/release`. The only package in the workspace that imports brig (th
 | `runner:unconfined` | `runner`: each program as a plain subprocess (`--no-jail`), every axis reported `unenforced`, its environment without `CLAUDE*` (`CLAUDE_CODE_OAUTH_TOKEN`, and what a Claude Code that launched bh-02 leaves, a messaging token among them), `ANTHROPIC_*`, `TMUX` or `TMUX_PANE` (hygiene, not a boundary: an input without a jail can find the tmux socket itself; the confined runner's `env` allowlist never passes them, `tests/test_runner_tmux.py` shows both) | |
 | `runner:approval` | `approval`: `confined` (whether the runner confines what runs in it), `unasked(question) -> bool` (whether it runs without asking the person) | `runner` (`report`) |
 | `runner:grants` | `grants`: the broker of what the person granted the jail (`need`, `ask`, `granted`, `generation`, `ready`, `on_change`, `serve`, `list`, `revoke`) | `host` |
-| `runner:grant_prompt` | (nothing: serves the grants prompt, tells the model each answer through an aside, registers `/grants`, which lists and revokes, and the `grant` tool with its `system` section) | `grants` (`serve`, `list`, `revoke`, `ask`), `output` (`choose`), `asides` (`add`), `commands` (`register`), `tools` (`register`: `grant`), `system` (`add`: `grants`), `runner` (`refusal`), `approval` (`confined`) |
+| `runner:grant_prompt` | (nothing: serves the grants prompt, the session's only one, tells the model each answer through an aside, and registers `/grants`, which lists and revokes) | `grants` (`serve`, `list`, `revoke`, `told`), `output` (`choose`), `asides` (`add`), `commands` (`register`) |
+| `runner:grant_tool` | (nothing: registers the `grant` tool with its `system` section; config `agent`: the label of the sub-agent whose tool it is, else the session's) | `grants` (`ask`), `tools` (`register`: `grant`), `system` (`add`: `grants`), `runner` (`refusal`), `approval` (`confined`) |
 | `runner:release` | (nothing: registers `/release`) | `runner` (`release`), `commands` (`register`) |
 
 `runner.py`'s `Runner` is the `runner` value both rows bind, over a mechanism (`BrigJail` in
@@ -400,16 +401,17 @@ why) and `/grants revoke ID` takes one back. `bh-02 grants` and `bh-02 grants re
 session: the command line boots the `host` and `grants` rows alone, by name, and reads the value through a
 Protocol of its own (`bh_02.granting`), since the app imports no plugin. An id is the first 8 hex digits of the
 SHA-256 of the grant's text, so the two agree. A sub-agent's realm reads `grants` from outside (its rows
-ask the one broker).
+ask the one broker); it mounts no prompt of its own, since the broker serves one, but it does mount
+`runner:grant_tool`, which only asks.
 
 ## Requesters
 
 Who asks, and how an answer reaches a program (decision-0012 items 4 and 5, TASK-0181.08).
 
-- **`grant`, a tool** (`requesting.py`, registered by `runner:grant_prompt` with `runs="harness"`, so `approval`
+- **`grant`, a tool** (`requesting.py`, registered by `runner:grant_tool` with `runs="harness"`, so `approval`
   gains no case: bh-02's own tool acting only on the jail and the broker, unasked exactly when the runner
   confines). An input calls it across the socket (`tools.grant(kind=..., target=..., reason=...)`, the worker's
-  `op: call`) and the model may call it directly; it is asked as `Asker(input, "python")`. A path is resolved on
+  `op: call`) and the model may call it directly; it is asked as `Asker(input, "python")`, or, in a sub-agent's realm (the row's config `agent`, written by the agents row), as `Asker(agent, LABEL)`, the label its python row's needs are asked under (`requesting.asker`), so the person sees one label per agent. The grant applies to the whole session, every jail. A path is resolved on
   the host first (a grant holds for what the jail sees); a request the floor refuses (`runner.refusal`, the same
   `floor_of` and `admitted` the start uses), one with a bad kind, a missing port or a relative path, is answered
   with why and nobody is asked. Its result says when the answer holds: a destination now, a path or variable from

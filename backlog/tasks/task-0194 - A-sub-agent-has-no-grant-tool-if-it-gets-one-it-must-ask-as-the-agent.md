@@ -1,10 +1,11 @@
 ---
 id: TASK-0194
 title: Sub-agents get the grant tool, asking as the agent
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@claude'
 created_date: '2026-11-04T22:39:00Z'
-updated_date: '2026-11-05T03:52:00Z'
+updated_date: '2026-11-05T04:14:00Z'
 labels:
   - runner
   - subagents
@@ -69,4 +70,129 @@ scripts/check; scripts/linux-jail-check in both modes. Plant a failure: with the
 
 <!-- SECTION:NOTES:BEGIN -->
 Owner's decision, 2026-11-05: yes, give sub-agents the grant tool.
+
+Check `scripts/check` exited 1
+
+(35 earlier lines omitted)
+```text
+........................................................................ [ 56%]
+........................................................................ [ 59%]
+........................................................................ [ 61%]
+........................................................................ [ 64%]
+........................................................................ [ 66%]
+........................................................................ [ 69%]
+........................................................................ [ 72%]
+........................................................................ [ 74%]
+........................................................................ [ 77%]
+........................................................................ [ 79%]
+........................................................................ [ 82%]
+........................................................................ [ 84%]
+...............................................F........................ [ 87%]
+........................................................................ [ 90%]
+........................................................................ [ 92%]
+........................................................................ [ 95%]
+........................................................................ [ 97%]
+............................................................             [100%]
+=================================== FAILURES ===================================
+___ test_at_the_real_clock_and_interval_it_appears_after_a_second_and_counts ___
+[gw1] linux -- Python 3.15.0 /home/user/bh-02/.claude/worktrees/agent-ae0759bc028fa5a40/.venv/bin/python
+
+    async def test_at_the_real_clock_and_interval_it_appears_after_a_second_and_counts() -> None:
+        """The defaults, undriven: about once a second, so nothing for the first moments, then
+        the seconds."""
+        app = BhApp()
+        async with app.run_test(size=_SIZE) as pilot:
+            app.post_message(ReplyStarted())
+            await pilot.pause(0.4)
+            assert _line(app) is None
+            await _until(pilot, lambda: _line(app) is not None, within=3.0)
+>           assert re.fullmatch(r"Working · [12]s", _line(app) or "")
+E           AssertionError: assert None
+E            +  where None = <function fullmatch at 0x7f725e3519b0>('Working · [12]s', ('Working · 0s'))
+E            +    where <function fullmatch at 0x7f725e3519b0> = re.fullmatch
+E            +    and   'Working · 0s' = _line(BhApp(title='bh-02', classes={'-dark-mode', '-theme-bh-01-dark'}, pseudo_classes={'focus', 'dark'}))
+
+bh-02/plugins/tui-cordis-plugin/tests/test_tui_working.py:319: AssertionError
+=========================== short test summary info ============================
+FAILED bh-02/plugins/tui-cordis-plugin/tests/test_tui_working.py::test_at_the_real_clock_and_interval_it_appears_after_a_second_and_counts
+1 failed, 2790 passed, 6 skipped, 1 xfailed in 130.76s (0:02:10)
+   FAILED: tests
+== gates
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+== (root)
+   ok
+== libs/cordis
+   ok
+== libs/cordis-helpers
+   ok
+== libs/host-paths
+   ok
+   ok
+== docs
+INFO    -  Cleaning site directory
+INFO    -  Building documentation to directory: /home/user/bh-02/.claude/worktrees/agent-ae0759bc028fa5a40/site
+INFO    -  Documentation built in 2.76 seconds
+   ok
+== tokens
+   skipped: no /home/user/bh-02/.claude/worktrees/bh-01/dist (bh-01, built, beside this repository)
+```
+
+Check `scripts/linux-jail-check --ca /root/.ccr/ca-bundle.crt` exited 1
+
+```text
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+Installed 1 package in 1ms
+Error: docker is not answering: this check needs a running Docker daemon
+```
+
+Check `scripts/linux-jail-check --ca /root/.ccr/ca-bundle.crt` exited 1
+
+```text
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+Error: docker is not answering: this check needs a running Docker daemon
+```
+
+Check `scripts/linux-jail-check --ca /root/.ccr/ca-bundle.crt` exited 0
+
+```text
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+== image bh-02-linux-jail (ubuntu 24.04, bubblewrap, uv, Python 3.15)
+sha256:9a69e522a6048e53106ebe3e868f30c136ec18fd02411955fa2b7b4a24ad109b
+== uv run --locked pytest -q -p no:cacheprovider bh-02/plugins/runner-cordis-plugin bh-02/plugins/python-cordis-plugin bh-02/plugins/extensions-cordis-plugin bh-02/app/tests/test_python_repl.py
+bubblewrap 0.9.0
+uv 0.13.7 (x86_64-unknown-linux-gnu)
+Python 3.15.2 (main, Oct 26 2026, 14:06:56) [Clang 23.1.3 ]
+........................................................................ [ 13%]
+...............................x........................................ [ 26%]
+........................................................................ [ 40%]
+........................................................................ [ 53%]
+........................................................................ [ 67%]
+........................................................................ [ 80%]
+........................................................................ [ 93%]
+..............s..................                                        [100%]
+535 passed, 1 skipped, 1 xfailed in 122.30s (0:02:02)
+```
+
+Check `scripts/linux-jail-check --as-root --ca /root/.ccr/ca-bundle.crt` exited 0
+
+```text
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+== image bh-02-linux-jail (ubuntu 24.04, bubblewrap, uv, Python 3.15)
+sha256:cf277ec11ca111723ceef38a55f3161d4ec7db6d65b60ca7a2a98593edc90e7c
+== uv run --locked pytest -q -p no:cacheprovider bh-02/plugins/runner-cordis-plugin bh-02/plugins/python-cordis-plugin bh-02/plugins/extensions-cordis-plugin bh-02/app/tests/test_python_repl.py
+bubblewrap 0.9.0
+uv 0.13.7 (x86_64-unknown-linux-gnu)
+Python 3.15.2 (main, Oct 26 2026, 14:06:56) [Clang 23.1.3 ]
+........................................................................ [ 13%]
+...............................x........................................ [ 26%]
+........................................................................ [ 40%]
+........................................................................ [ 53%]
+........................................................................ [ 67%]
+........................................................................ [ 80%]
+........................................................................ [ 93%]
+..............s..................                                        [100%]
+535 passed, 1 skipped, 1 xfailed in 137.25s (0:02:17)
+```
+
+Implemented: runner:grant_tool (config agent) split from runner:grant_prompt; requesting.asker(agent) replaces ASKER (via egress.asked_as); bh-02.toml grant row, added to the agents row's rows; AgentsConfig.python_row replaced by agent_rows=(python, grant); docs updated. Planted failure seen: with the grant row skipped when writing the child's agent label, test_child_boot::test_the_agents_row_rewrites_those_fields_of_the_shipped_rows failed (KeyError 'agent'), restored and green. scripts/check: only the known flake DRAFT-0028 failed (2790 passed). scripts/linux-jail-check both modes: 535 passed each (the Docker daemon had to be started with dockerd). ACs left unticked for the reviewer.
 <!-- SECTION:NOTES:END -->

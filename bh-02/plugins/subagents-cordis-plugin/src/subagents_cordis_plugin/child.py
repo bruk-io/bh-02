@@ -150,7 +150,7 @@ def child_rows(
     place: PurePath | None,
     hand: object,
     commands_row: str,
-    python_row: str,
+    agent_rows: Collection[str],
     refused: Collection[str],
     wants_commands: Callable[[str], bool],
 ) -> tuple[ChildRow, ...]:
@@ -160,8 +160,8 @@ def child_rows(
     `place`), its model's Claude Code state beside it (when the parent's model row keeps one)
     and its type's model (when the type names one); then, beside a row that injects `commands`
     (`wants_commands(use)`), a registry of the child's own, of the same component as the parent's
-    `commands_row` (a layer that already gave the child one is not given a second), the row named
-    `python_row` given the child's label as its `agent`, its
+    `commands_row` (a layer that already gave the child one is not given a second), each row
+    named in `agent_rows` that the child has given the child's label as its `agent`, its
     `output` and the row that hands its `loop` to the agents row (`hand`) and tells it its type.
 
     Raises:
@@ -190,7 +190,7 @@ def child_rows(
         config = dict(entry.config)
         if rid == transcript_row:
             config["path"] = str(place / "transcript.jsonl") if place is not None else None
-        if rid == python_row:
+        if rid in agent_rows:
             config["agent"] = _agent_label(name, kind.name)
         if rid == model_row:
             if "state" in config:

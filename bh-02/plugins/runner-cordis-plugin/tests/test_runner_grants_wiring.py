@@ -142,7 +142,9 @@ async def _settled() -> None:
     await asyncio.sleep(0.3)
 
 
-async def _booted(store: Path, *values: str, holding: bool = False, runner: str = "confined") -> Booted:
+async def _booted(
+    store: Path, *values: str, holding: bool = False, runner: str = "confined", agent: str = ""
+) -> Booted:
     """The rows over a store; the person answers `values` in turn (the first is the answer to a
     row's need, asked as the prompt is served), or holds each question open."""
     booted = await boot(
@@ -158,6 +160,9 @@ async def _booted(store: Path, *values: str, holding: bool = False, runner: str 
             _row("requester", "_requester"),
             Row("grants", "runner_cordis_plugin.wiring:grants"),
             Row("grant-prompt", "runner_cordis_plugin.wiring:grant_prompt"),
+            Row(
+                "grant", "runner_cordis_plugin.wiring:grant_tool", config={"agent": agent} if agent else None
+            ),
             Row("runner", f"runner_cordis_plugin.wiring:{runner}"),
             Row("approval", "runner_cordis_plugin.wiring:approval"),
         ],
@@ -255,8 +260,10 @@ def test_the_broker_depends_on_host_alone_and_approval_on_neither_it_nor_a_reque
     binding, reloads no row (the tests above watch it not)."""
     assert resolve("runner:grants").inject == frozenset({"host"})
     assert resolve("runner:approval").inject == frozenset({"runner"})
-    assert resolve("runner:grant_prompt").inject == frozenset(
-        {"grants", "output", "asides", "commands", "tools", "system", "runner", "approval"}
+    assert resolve("runner:grant_prompt").inject == frozenset({"grants", "output", "asides", "commands"})
+    # a sub-agent's realm reads only these from the parent's; the tool needs nothing else from outside
+    assert resolve("runner:grant_tool").inject == frozenset(
+        {"grants", "tools", "system", "runner", "approval"}
     )
     # the rows that take `grants` for a need or a restart take the binding, which never reloads
     assert "grants" in resolve("python:tool").inject and "grants" in resolve("extensions:process").inject
@@ -466,6 +473,22 @@ async def test_a_call_is_asked_as_the_input_and_says_when_each_kind_holds(tmp_pa
     assert net["content"].startswith("Granted for this project: net: example.com:443; it holds now")
     again = await run({"kind": "read", "target": str(data), "reason": "reads the data"})
     assert "is already granted" in again["content"] and len(output.asked) == 2  # not asked twice
+    await rt.shutdown()
+
+
+async def test_a_sub_agent_s_call_is_asked_as_the_agent_by_its_label(tmp_path: Path) -> None:
+    store = tmp_path / "grants"
+    store.mkdir(mode=0o700)
+    booted = await _booted(store, agent="general-1 (general)")
+    rt = booted.runtime
+    output = rt.root.get("output")
+    output.asked.clear()
+    output.values[:] = ["once"]
+    said = await (await _grant_tool(rt)).run(
+        {"kind": "net", "target": "example.com", "port": 443, "reason": "docs"}
+    )
+    assert said["content"].startswith("Granted for this session: net: example.com:443")
+    assert output.asked[0]["lines"][1] == "Asked by: agent general-1 (general), because: docs"
     await rt.shutdown()
 
 
