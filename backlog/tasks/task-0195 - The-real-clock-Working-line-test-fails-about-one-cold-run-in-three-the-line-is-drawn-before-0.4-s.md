@@ -29,7 +29,7 @@ test_tui_working.py::test_at_the_real_clock_and_interval_it_appears_after_a_seco
 <!-- AC:BEGIN -->
 - [x] #1 A tick that comes a hair before a whole second says that second (a driven-clock test at 0.9995 s says 1s), seen failing before the fix
 - [x] #2 The real-clock test's absence check holds only when its pause ended within the first second
-- [ ] #3 The real-clock test passes 20 of 20 in a row, where it failed 1 of 10 before
+- [x] #3 The real-clock test passes 20 of 20 in a row, where it failed 1 of 10 before
 - [ ] #4 scripts/check passes
 <!-- AC:END -->
 
