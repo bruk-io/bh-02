@@ -6,14 +6,19 @@ up would otherwise answer it with whatever they typed next (the `n` of "Run now"
 input). Keys pressed in that moment are dropped: the modal holds focus, so they never reach the
 composer beneath either, and once it is answered the composer has exactly what was typed before
 it came up. Ctrl-C, the app's own priority binding, still stops the reply at once.
+
+A key is judged by when it arrived (Textual stamps it where the driver reads it), against when
+the modal was first painted, not by when the app gets round to it: a stalled app can read a key
+typed ahead after the grace period is over by the clock, and it must still be dropped.
 """
 
 from collections.abc import Mapping
 from typing import Any
 
+from textual._time import get_time  # the clock a Key's `time` is read from
 from textual.app import ComposeResult
-from textual.binding import Binding
 from textual.containers import Vertical, VerticalScroll
+from textual.events import Key
 from textual.screen import ModalScreen
 from textual.widgets import Static
 
@@ -26,22 +31,22 @@ __all__ = ["GRACE", "ApprovalScreen"]
 GRACE = 0.4
 
 
+def _answers(arrived: float, shown: float | None, grace: float) -> bool:
+    """Whether a key that arrived at `arrived` may answer a modal first painted at `shown`
+    (None: not painted yet, so no key may)."""
+    return shown is not None and arrived >= shown + grace
+
+
 class ApprovalScreen[T = bool](ModalScreen[T]):
     """Yes or no about one call (CONTRACTS.md: question). `y` allows; `n` or Escape declines,
-    once it is `armed`: `grace` seconds after it is shown (`GRACE` unless the app says
-    otherwise). Until then its keys line is dimmed and those keys are dropped.
+    when the key arrived `grace` seconds or more after the modal was shown (`GRACE` unless the
+    app says otherwise). Before then its keys line is dimmed and those keys are dropped.
 
     Ctrl-C (the app's priority binding) withdraws it, as a no, and interrupts the reply.
 
     The arming, the layout and the keys line are shared with `ChoiceScreen`, which answers a
     choice's value instead of a bool: `T` is what the modal dismisses with.
     """
-
-    BINDINGS = [
-        Binding("y", "answer(True)", "Allow"),
-        Binding("n", "answer(False)", "Decline"),
-        Binding("escape", "answer(False)", "Decline", show=False),
-    ]
 
     DEFAULT_CSS = """
     ApprovalScreen {
@@ -101,7 +106,8 @@ class ApprovalScreen[T = bool](ModalScreen[T]):
         super().__init__()
         self.question = question
         self._grace = grace
-        self._armed = False
+        self._shown: float | None = None
+        self._answered = False
 
     def compose(self) -> ComposeResult:
         code = render.approval_lines(self.question)
@@ -125,18 +131,41 @@ class ApprovalScreen[T = bool](ModalScreen[T]):
         # the code scrolls with the arrow keys; y and n still reach the screen
         for scroll in self.query("#approval-code"):
             scroll.focus()
-        self.set_timer(self._grace, self._arm)
+        self.call_after_refresh(self._stamp)
+
+    def _stamp(self) -> None:
+        """The modal is on screen: the grace period runs from here."""
+        self._shown = get_time()
+        self.set_timer(self._grace, self._undim)
+
+    def _undim(self) -> None:
+        # display only: keys are judged by `_answers`, not by this timer
+        self.query_one("#approval-keys").remove_class("-arming")
 
     @property
     def armed(self) -> bool:
-        """Whether y, n and Escape answer yet (`grace` after the modal was shown)."""
-        return self._armed
+        """Whether a key arriving now would answer (`grace` after the modal was shown)."""
+        return _answers(get_time(), self._shown, self._grace)
 
-    def _arm(self) -> None:
-        self._armed = True
-        self.query_one("#approval-keys").remove_class("-arming")
+    def _key_answer(self, key: str) -> T | None:
+        """What `key` answers, or None when it is no answer's key."""
+        match key:
+            case "y":
+                return True  # type: ignore[return-value]
+            case "n" | "escape":
+                return False  # type: ignore[return-value]
+            case _:
+                return None
 
-    def action_answer(self, answer: T) -> None:
-        """Answer, unless the modal was shown too recently for the key to be meant for it."""
-        if self._armed:
+    def on_key(self, event: Key) -> None:
+        """An answer's key answers if it arrived after the grace period; either way it goes no
+        further (a key dropped while arming must not reach the app's bindings, Escape's among
+        them)."""
+        answer = self._key_answer(event.key.lower())
+        if answer is None:
+            return
+        event.stop()
+        event.prevent_default()
+        if not self._answered and _answers(event.time, self._shown, self._grace):
+            self._answered = True
             self.dismiss(answer)

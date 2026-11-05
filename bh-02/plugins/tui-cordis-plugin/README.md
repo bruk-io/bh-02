@@ -40,15 +40,17 @@ says so, and that leaving does. Esc stops a running reply exactly as Ctrl-C does
 commands closes on it, a question is declined by it and the palette closed by it, and only
 that); with no reply running, a command included, it does nothing and says nothing. `choose()` puts a
 choice (CONTRACTS.md: choice) in `ChoiceScreen`, which is the approval modal with other answers: the same
-layout, the same grace period and dimmed keys line (its arming is `ApprovalScreen`'s, not a copy), its keys
+layout, the same grace period and dimmed keys line (its judging of keys is `ApprovalScreen`'s, not a copy), its keys
 drawn from the question's `choices`, Escape giving its `escape`; Ctrl-C and a cancelled asker answer ''.
 `confirm()` and `choose()` come from
 plain coroutines (not Textual workers), so the modal is `push_screen` with a callback resolving a future. Questions are
 shown one at a time, the rest queued; an interrupted reply cancels its future and its modal
 comes down wherever it is (anything shown over it is popped first); Ctrl-C with a question up
 answers every open one no and interrupts the reply. No palette opens over a question. A
-question just shown answers nothing for 0.4 s (`GRACE`; `BhApp(grace=...)`), its keys line
-dimmed meanwhile: a person typing when it comes up ("Run n...") must not decline it with the
+question just shown answers no key that arrived within 0.4 s of its first paint (`GRACE`;
+`BhApp(grace=...)`), its keys line dimmed meanwhile. Each key is judged by when it arrived (Textual's
+`Key.time`, stamped where the driver reads it), not when the app processes it, so a stalled app
+cannot let a key typed ahead answer once the clock says the grace is over: a person typing when it comes up ("Run n...") must not decline it with the
 `n`. Those keys are dropped, not handed to the composer: the modal holds focus, and a message
 half-typed around a question is less surprising cut short than finished with stray letters.
 Ctrl-C still stops the reply at once. A sub-agent's question (one carrying `agent`, its
