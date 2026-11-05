@@ -105,7 +105,7 @@ def test_a_number_of_six_digits_or_more_measures_something_and_is_no_field():
     sizes = [67108864] * 50 + [3543612, 3536626]
     raw = "\n".join(f"INFO Received block blk_{i} of size {s}" for i, s in enumerate(sizes)) + "\n"
     env = envelope(raw, frozenset(), 2000)
-    assert env.level(Role.ANOMALIES).head == "none" and "[<*>" not in env.text()
+    assert env.level(Role.ANOMALIES).head.startswith("none found by its rules") and "[<*>" not in env.text()
 
 
 def test_each_log_part_knob_names_exactly_the_producers_there_are():
@@ -124,3 +124,22 @@ def test_a_pattern_that_starts_with_a_dash_is_passed_after_e():
     env = envelope(raw, frozenset(), 2000, view="schema")
     assert "grep -nF -e '-- yarn-error.log written' FILE" in env.text()
     assert text_problems(raw, env, run_tools=False) == []
+
+
+def test_a_number_far_from_the_rest_is_an_anomaly_and_a_timestamps_zero_is_not():
+    lines = [f"2026-11-03T10:{i % 60:02d}:00Z pool available={10 + i % 40} of 50" for i in range(300)]
+    lines[150] = "2026-11-03T10:30:00Z pool available=0 of 50"  # a zero where every other is 10 or more
+    lines[220] = lines[220].replace("of 50", "of 5000")  # a spike past three interquartile ranges
+    raw = "\n".join(lines) + "\n"
+    env = envelope(raw, frozenset(), 2000, view="schema")
+    anomalies = env.level(Role.ANOMALIES)
+    titles = [line for line in anomalies.body if " is " in line]
+    assert any("is 0 in 1 line like:" in t and "a number far from the rest" in t for t in titles)
+    assert any("is 5000 in 1 line like:" in t for t in titles)
+    assert not any("is 00 in" in t for t in titles)  # minutes run 00 to 59: zero is one of them
+    assert text_problems(raw, env, run_tools=False) == []
+
+
+def test_finding_nothing_says_which_rules_looked_and_that_it_is_no_proof():
+    head = envelope(_log(failed=()), frozenset(), 2000).level(Role.ANOMALIES).head
+    assert head.startswith("none found by its rules (a template few lines say") and "not proof" in head

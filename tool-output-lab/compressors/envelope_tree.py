@@ -50,12 +50,15 @@ from compressors.envelope import (
     recipe_of,
 )
 from compressors.envelope_text import (
+    FAR,
     SED,
     Group,
     few_valued,
     grep_for,
     groups,
+    none_found,
     numbered,
+    outlying,
     query_rows,
     slots,
     template,
@@ -240,6 +243,7 @@ class _Odd:
     items: tuple[int, ...]  # the items holding them, by index in the run
     slot: int = 0
     value: str = ""
+    why: str = ""  # said after the title when the rule is not plain from it
 
 
 def _owners(run: Run, rows: tuple[int, ...]) -> tuple[int, ...]:
@@ -275,6 +279,12 @@ def _odd_values(data: TreeData, run: Run, g: Group) -> list[_Odd]:
         for v in s.rare:
             rows = tuple(i for i in g.rows if slots(data.lines[i], _QUOTED)[s.k - 1] == v)
             out.append(_Odd(run, g.template, rows, _owners(run, rows), s.k, v))
+    done = {(o.slot, o.value) for o in out}
+    for x in outlying(data.lines, g, _QUOTED, rare=k.rare, min_rows=k.min_items):
+        for v in x.values:
+            if (x.k, v) not in done:
+                rows = tuple(i for i in g.rows if slots(data.lines[i], _QUOTED)[x.k - 1] == v)
+                out.append(_Odd(run, g.template, rows, _owners(run, rows), x.k, v, FAR))
     return out
 
 
@@ -287,7 +297,8 @@ _ODD_LEVELS = ((20, 300), (10, 200), (5, 160), (2, 120))  # items shown in all, 
 
 def _title(o: _Odd) -> tuple[str, Alike]:
     a, b = o.run.first + 1, o.run.last + 1
-    where = f"  (in {len(o.items)} of {len(o.run.items)} items)"
+    why = f"; {o.why}" if o.why else ""
+    where = f"  (in {len(o.items)} of {len(o.run.items)} items{why})"
     if o.slot:
         title = f"<*>{o.slot} is {o.value} in {_lines(len(o.rows))} like: {o.template.strip()}{where}"
         return title, Alike(o.template, len(o.rows), a, b, quoted=_QUOTED, slot=o.slot, value=o.value)
@@ -306,20 +317,30 @@ def _dealt(sizes: tuple[int, ...], cap: int) -> tuple[int, ...]:
     return tuple(share)
 
 
+_WHOLE = 6  # an anomalous item of at most this many lines is shown whole, so its name is in view
+
+
 def _shown(data: TreeData, o: _Odd, k: int, clip: int) -> tuple[list[str], list[Claim]]:
-    """The first k items of an anomaly: each item's first line, then its odd lines."""
+    """The first k items of an anomaly: each by its first line and its odd lines, and a short item
+    whose odd line is not its first (which names it) whole, so what names it is in view."""
     picked = set(o.items[:k])
     rows: set[int] = set()
     for i in o.rows:
         if (j := bisect.bisect_right([n.first for n in o.run.items], i) - 1) in picked:
-            rows |= {o.run.items[j].first, i}
+            item = o.run.items[j]
+            whole = item.last - item.first < _WHOLE and i != item.first
+            rows |= set(range(item.first, item.last + 1)) if whole else {item.first, i}
     body, claims = numbered(data.lines, tuple(sorted(rows)), clip)
     return [f"  {line}" for line in body], list(claims)
 
 
-def _anomalies(data: TreeData, odd: list[_Odd]) -> Part:
+_RULES = "a line or a value few items hold, an error word few items hold, a number far from the rest"
+_ERROR_RULE = "an error word few items hold"
+
+
+def _anomalies(data: TreeData, odd: list[_Odd], rules: str) -> Part:
     if not odd:
-        return Part(Role.ANOMALIES, (Level("none", ()),))
+        return Part(Role.ANOMALIES, (Level(none_found(rules), ()),))
     marked = {(id(o.run), j) for o in odd for j in o.items}
     items = sum(len(r.items) for r in data.runs if any(o.run is r for o in odd))
     runs = len({id(o.run) for o in odd})
@@ -348,12 +369,12 @@ def _anomalies(data: TreeData, odd: list[_Odd]) -> Part:
 
 def rare(data: TreeData, _shape: Part, /) -> Part:
     """Items holding a line template few items hold, an error word, or a rare value in a hole."""
-    return _anomalies(data, _odd(data, rare=True))
+    return _anomalies(data, _odd(data, rare=True), _RULES)
 
 
 def errors(data: TreeData, _shape: Part, /) -> Part:
     """Items holding a line that names an error, when few items do."""
-    return _anomalies(data, _odd(data, rare=False))
+    return _anomalies(data, _odd(data, rare=False), _ERROR_RULE)
 
 
 def no_anomalies(_data: TreeData, _shape: Part, /) -> Part:

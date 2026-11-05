@@ -53,6 +53,7 @@ from compressors.envelope import (
     nothing,
     recipe_of,
 )
+from compressors.envelope_text import none_found
 from compressors.json_items import promote
 from compressors.schema import Collection, Found, collections, describe, lists_values, query, shape_levels
 
@@ -186,6 +187,13 @@ def _lists(c: Collection, k: SchemaKnobs) -> list[Claim]:
 _ROWS = ((25, 60), (12, 48), (6, 36), (3, 24))  # rows listed per collection, and characters of a name
 
 
+_EXCEPTION_RULES = (
+    "a value few rows hold where one dominates, a number far outside the rest, a key few rows have or lack, "
+    "a value of another type"
+)
+_STANDOUT_RULES = "a rare value where one dominates, an error key, a failing status"
+
+
 def exceptions(data: JsonData, _shape: Part, /) -> Part:
     """Every row that breaks its collection's shape, with what breaks it: a value few rows hold where
     one dominates, a number far outside the rest, a key few rows have or one nearly all have missing,
@@ -196,7 +204,7 @@ def exceptions(data: JsonData, _shape: Part, /) -> Part:
     total = sum(len(c.exceptions) for c in every)
     complete = [x for c in every for x in _lists(c, data.knobs)]
     if total == 0:
-        return Part(Role.ANOMALIES, (Level("none", (), tuple(complete)),))
+        return Part(Role.ANOMALIES, (Level(none_found(_EXCEPTION_RULES), (), tuple(complete)),))
     levels = []
     for cap, clip in _ROWS:
         body: list[str] = []
@@ -234,7 +242,7 @@ def standouts(data: JsonData, _shape: Part, /) -> Part:
     picks = [(f, promote(list(f.items), data.terms, len(f.items), set())) for f in read]
     total = sum(len(p) for _, p in picks)
     if total == 0:
-        return Part(Role.ANOMALIES, (Level("none", ()),))
+        return Part(Role.ANOMALIES, (Level(none_found(_STANDOUT_RULES), ()),))
     levels = []
     for cap, clip in _STANDOUTS:
         body: list[str] = []

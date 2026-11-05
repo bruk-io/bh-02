@@ -88,7 +88,8 @@ knobs: `./lab fold`, layer 1, layer 2, the hook, and the specs in `dials/`, `ses
 | M7 | Sessions: follow-up questions on one result, native against the two recipes (`sessions/haiku.toml`, about $2) | yes | |
 
 Later: a run nested in a run's items as an envelope of its own (a country's subdivisions inside the
-list of countries); a numeric outlier in a hole, which no rule finds yet (the $0.00 invoice).
+list of countries); JSON's exceptions to take the zero-among-positives rule logs and trees now have
+(FINDINGS 8).
 
 ## Decisions
 
