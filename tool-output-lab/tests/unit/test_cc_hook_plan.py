@@ -72,6 +72,18 @@ def test_the_banner_names_the_file_for_a_command_and_reads_json_lines_as_one_arr
     assert "by jq path (jq). FILE in a command is /s/out.txt" in render(doc, "/s/out.txt")
 
 
+def test_the_exact_banner_says_the_counts_are_exact_and_the_plain_one_does_not():
+    pods = [{"name": f"pod-{i:04d}", "phase": "Running"} for i in range(300)]
+    doc = fold(json.dumps({"pods": pods}), budget_tokens=200)
+    assert doc is not None
+    exact = render(doc, "/s/out.txt", banner="exact").splitlines()[0]
+    assert exact.endswith(
+        "Every count and value in the envelope is exact, worked out over the whole output, not a sample: "
+        "read the file only for what the envelope does not show.]"
+    )
+    assert "exact" not in render(doc, "/s/out.txt").splitlines()[0]
+
+
 _PODS = json.dumps([{"name": f"pod-{i:04d}", "phase": "Running"} for i in range(400)])
 _PACKED_XML = "<a>" + "".join(f'<b id="{i}"><c/><c/><c/><c/></b>' for i in range(300)) + "</a>"
 _SESSION = Path("/s/session/tool-results")

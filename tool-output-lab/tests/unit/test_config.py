@@ -17,7 +17,8 @@ def test_knobs_are_set_by_dotted_name_and_typed_by_their_default():
 
 def test_a_wrong_knob_or_value_says_what_would_be_right():
     with pytest.raises(
-        ValueError, match=re.escape("no knob 'schema.rarity'; the knobs are: worth_it, schema.dominant")
+        ValueError,
+        match=re.escape("no knob 'schema.rarity'; the knobs are: worth_it, banner, schema.dominant"),
     ):
         with_sets(DEFAULT, ["schema.rarity=0.1"])
     with pytest.raises(ValueError, match=re.escape("tree_envelope.min_items takes a int, not 'many'")):

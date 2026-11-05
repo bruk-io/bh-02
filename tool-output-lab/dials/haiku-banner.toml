@@ -1,0 +1,25 @@
+# Does telling the model the envelope's counts are exact make it re-read the full output less?
+# Haiku 5.5 on the synthetic tasks of every format (JSON, logs, accessibility snapshots, Figma XML)
+# at medium and large sizes, once each: native, the schema recipe with the usual banner, and the
+# same with a banner that adds "Every count and value in the envelope is exact, worked out over the
+# whole output, not a sample: read the file only for what the envelope does not show."
+# Prediction, set before the run: the exact banner lowers how often Haiku reads the full output
+# (72% of runs under the plain banner in the last run), keeps the answers, and makes the final
+# context smaller still.
+name = "haiku-banner"
+model = "claude-haiku-5-5"
+bands = ["M", "L"]
+formats = ["json", "log", "a11y", "figma"]
+reps = 1
+max_cost = 4
+
+[[setting]]   # the usual banner
+name = "schema"
+mode = "all"
+view = "schema"
+
+[[setting]]   # the banner that says the counts are exact
+name = "exact"
+mode = "all"
+view = "schema"
+set = ["banner=exact"]

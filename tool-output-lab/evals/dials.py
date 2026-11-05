@@ -145,15 +145,16 @@ def dial_table(rows: list[dict[str, Any]], chosen: list[Setting], acted_only: bo
     read = 0.1 * statistics.median(implied) if implied else None
     native = [r for r in scored if r["condition"] == "native"]
     out = [
-        "| setting | pairs | acted | accuracy | final context | summed input | cache writes | cache reads "
-        "| each later request | cost | time |",
-        "|---|---|---|---|---|---|---|---|---|---|---|",
+        "| setting | pairs | acted | re-read | accuracy | final context | summed input | cache writes "
+        "| cache reads | each later request | cost | time |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     if native:
         cells = [
             "native (absolute)",
             str(len(native)),
             "-",
+            f"{sum(bool(r.get('read_saved_file')) for r in native)}/{len(native)}",
             f"{sum(r['correct'] for r in native) / len(native):.0%}",
             f"{statistics.median(r['final_context'] for r in native):,.0f}",
             f"{statistics.mean(r['input_tokens'] + r['cache_read'] + r['cache_write'] for r in native):,.0f}",
@@ -167,10 +168,11 @@ def dial_table(rows: list[dict[str, Any]], chosen: list[Setting], acted_only: bo
     for s in chosen:
         every = [r for r in scored if r["condition"] == s.name]
         hit = f"{sum(bool(r.get('large_folded')) for r in every)}/{len(every)}"
+        reread = f"{sum(bool(r.get('read_saved_file')) for r in every)}/{len(every)}"
         base, runs = _pairs(scored, s.name, acted_only)
         keys = base.keys() & runs.keys()
         if not keys:
-            out.append(f"| {s.name} | 0 | {hit} | - | - | - | - | - | - | - | - |")
+            out.append(f"| {s.name} | 0 | {hit} | {reread} | - | - | - | - | - | - | - | - |")
             continue
         both = sum(1 for k in keys if runs[k]["correct"] and base[k]["correct"])
         gains = sum(1 for k in keys if runs[k]["correct"] and not base[k]["correct"])
@@ -183,6 +185,7 @@ def dial_table(rows: list[dict[str, Any]], chosen: list[Setting], acted_only: bo
             s.name,
             str(len(keys)),
             hit,
+            reread,
             f"{change:+.0%} [{lo:+.0%}, {hi:+.0%}], {gains}/{losses}",
             _mean(_change(base, runs, "final_context"), "+,.0f"),
             _mean(_change(base, runs, "all_input"), "+,.0f"),
@@ -200,6 +203,7 @@ def dial_table(rows: list[dict[str, Any]], chosen: list[Setting], acted_only: bo
         *out,
         "",
         "Acted: the setting's runs whose hook folded the task's large output (matched by digest). "
+        "Re-read: the runs that opened the saved full output. "
         "Each setting against native on the same tasks and repetitions: accuracy as the change with its "
         "95% interval (Newcombe) and the pairs won and lost; the rest as mean changes per run with bootstrap "
         "intervals. Final context: the input of the session's last request. Summed input: every input token "

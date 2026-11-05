@@ -103,6 +103,7 @@ class TreeEnvelopeKnobs:
 @dataclass(frozen=True)
 class FoldConfig:
     worth_it: float = 0.9  # a fold that keeps more than this share of the input passes it through instead
+    banner: str = "plain"  # exact: the hook's banner also says the envelope's counts are exact, not a sample
     schema: SchemaKnobs = SchemaKnobs()
     json_envelope: JsonEnvelopeKnobs = JsonEnvelopeKnobs()
     log_envelope: LogEnvelopeKnobs = LogEnvelopeKnobs()
@@ -119,6 +120,7 @@ _SECTIONS = {
 # The knobs that name a producer: the names each takes (each format's `compressors.envelope_*` holds
 # its producers). "" is the view's.
 CHOICES = {
+    "banner": ("plain", "exact"),
     "json_envelope.shape": ("", "fields", "summary"),
     "json_envelope.anomalies": ("", "exceptions", "standouts", "none"),
     "json_envelope.samples": ("", "matches", "typical", "head-tail", "none"),

@@ -161,11 +161,18 @@ def trusted_spill(resolved: str, session_resolved: str, from_field: bool = False
     return from_field or _SPILL_NAME.match(name) is not None
 
 
-def render(folded: Folded, path: str, raw_path: str = "") -> str:
+_EXACT = (
+    " Every count and value in the envelope is exact, worked out over the whole output, not a sample:"
+    " read the file only for what the envelope does not show"
+)
+
+
+def render(folded: Folded, path: str, raw_path: str = "", banner: str = "plain") -> str:
     """The folded view, under a banner that says where the full output is and how to read it.
 
     `path` is the file the envelope's line numbers or jq paths refer to; `raw_path`, when different,
-    the raw."""
+    the raw. With `banner` "exact" the banner also says the envelope's counts are exact (it says
+    nothing about checks: layer 1 checks the envelope's claims, and the hook does not)."""
     quoted = shlex.quote(path)
     raw_note = f" (the raw output: {raw_path})" if raw_path and raw_path != path else ""
     size = f"~{folded.raw_tokens} tokens -> ~{estimate_tokens(folded.body)}"
@@ -189,7 +196,8 @@ def render(folded: Folded, path: str, raw_path: str = "") -> str:
                 "that break a run, samples, and how to get more, by line number. FILE in a command is "
                 f"{quoted}"
             )
-    return f"{head}. {how}.]\n{folded.body}"
+    exact = f"{_EXACT}." if banner == "exact" else ""
+    return f"{head}. {how}.{exact}]\n{folded.body}"
 
 
 def session_dir(event: dict[str, Any]) -> Path:
@@ -298,7 +306,7 @@ def decide(
         copy = session / f"folded-{call}.view.txt"
         saves.append((copy, folded.source))
         path = str(copy)
-    text = render(folded, path, raw_path)
+    text = render(folded, path, raw_path, config.banner)
     reply = {
         "hookSpecificOutput": {"hookEventName": "PostToolUse", "updatedToolOutput": _in_shape(event, text)}
     }
