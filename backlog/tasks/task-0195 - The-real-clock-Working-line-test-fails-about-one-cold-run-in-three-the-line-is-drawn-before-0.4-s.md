@@ -1,20 +1,58 @@
 ---
 id: TASK-0195
 title: >-
-  The real-clock Working-line test fails about one cold run in three: the line
-  is drawn before 0.4 s
-status: To Do
-assignee: []
+  The Working line's first tick can say 0s: Textual's timer wakes early and the
+  widget floors
+status: In Progress
+assignee:
+  - '@claude'
 created_date: '2026-11-04T18:32:00Z'
+updated_date: '2026-11-05T04:12:00Z'
 labels:
   - size-1
   - tui
   - bug
 dependencies: []
+modified_files:
+  - bh-02/plugins/tui-cordis-plugin/src/tui_cordis_plugin/widgets/working.py
+  - bh-02/plugins/tui-cordis-plugin/tests/test_tui_working.py
+type: bug
 ---
 
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-test_tui_working.py::test_at_the_real_clock_and_interval_it_appears_after_a_second_and_counts asserts the Working line is still absent 0.4 s after ReplyStarted (line 319). Run alone on a quiet machine (load 1.9) it failed 1 of 3 runs, and it failed once inside scripts/check on 2026-11-04. Either the line appears before the first second on a cold start (a real defect: the widget's first tick is not a second after the reply began) or the test's 0.4 s pause outlasts its budget. Repro: run that test id five times in a row with uv run pytest -q; at least one fails.
+test_tui_working.py::test_at_the_real_clock_and_interval_it_appears_after_a_second_and_counts failed about one run in ten. Diagnosed 2026-11-05: it failed at the first line's text, which read 'Working · 0s', not at the 0.4 s absence check. Textual's timer wakes half a millisecond before each interval (textual/_time.py sleep: 'reduce the sleep to compensate'), so the first tick after a reply began reads 0.9995 s, and Working._tick passed that to render.working_line, which floors: 0s, and every later tick could say a second behind. A real display defect, not a slow test. Separately, the test's 0.4 s absence check is evidence only if the pause ended within the first second; on a loaded machine it can run past.
 <!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [ ] #1 A tick that comes a hair before a whole second says that second (a driven-clock test at 0.9995 s says 1s), seen failing before the fix
+- [ ] #2 The real-clock test's absence check holds only when its pause ended within the first second
+- [ ] #3 The real-clock test passes 20 of 20 in a row, where it failed 1 of 10 before
+- [ ] #4 scripts/check passes
+<!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+### Order of work
+
+1. Repro: test_a_tick_that_comes_a_hair_early_says_the_second_it_is_for in bh-02/plugins/tui-cordis-plugin/tests/test_tui_working.py (driven clock: began, then +0.9995 s must read 1s, +1 s more 2s). Seen failing before the fix.
+2. widgets/working.py _tick: round the elapsed time to the nearest second before render.working_line. render's floor stays (59.9 s reads 59s, its tests pin that); the tick is what is a hair early, so the widget corrects it.
+3. The real-clock test asserts absence after its 0.4 s pause only if the pause really ended within WORKING_EVERY.
+
+### Risks
+
+A driven test that moves the clock by a fraction would now round where it floored; every driven clock in the tui tests moves by whole seconds (checked).
+
+### Proof
+
+The repro failing before and passing after; the real-clock test 20 of 20; scripts/check.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Repro before the fix: test_a_tick_that_comes_a_hair_early_says_the_second_it_is_for failed (the line never read 1s). The real-clock test before: 1 failed of 10 runs, the failure 'Working · 0s' at the first line's text. After the fix: the repro passes, the real-clock test 20 of 20 (uv run pytest -q -p no:randomly on that test id, 20 runs in a row), test_tui_working.py and test_tui_command_working.py 38 passed.
+<!-- SECTION:NOTES:END -->
