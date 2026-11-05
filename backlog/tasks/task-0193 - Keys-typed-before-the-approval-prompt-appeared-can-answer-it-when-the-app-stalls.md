@@ -6,7 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-11-04T16:59:00Z'
-updated_date: '2026-11-05T04:06:00Z'
+updated_date: '2026-11-05T04:07:00Z'
 labels:
   - tui
   - approval
@@ -59,3 +59,9 @@ Judge each key by when it arrived, not when it is processed. Textual 8.2.8's Lin
 - `test_keys_typed_as_the_modal_comes_up_do_not_answer_it` 50 of 50 under 12 CPU burners (`stress-ng` if it's installed, otherwise 12 `python -c 'while 1: pass'`), recorded on the task with the command and the count.
 - scripts/check; scripts/linux-jail-check in both modes.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Plan note: AC3's test is test_keys_typed_as_the_modal_comes_up_do_not_answer_it in bh-02/app/tests/test_real_launch.py (real_launch: the real app in a pty, so its keys come through the driver's input thread, as a person's do).
+<!-- SECTION:NOTES:END -->
