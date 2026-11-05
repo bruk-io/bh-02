@@ -10,6 +10,7 @@ labels:
   - runner
   - subagents
   - size-2
+  - finish-moved
 dependencies: []
 modified_files:
   - bh-02/plugins/runner-cordis-plugin/src/runner_cordis_plugin/wiring.py
@@ -22,7 +23,7 @@ modified_files:
   - bh-02/GLOSSARY.md
   - docs/bh-02/using/jail.md
   - docs/bh-02/how-it-works/jail-and-approval.md
-type: bug
+type: task
 ---
 
 ## Description
@@ -263,4 +264,6 @@ INFO    -  Documentation built in 2.58 seconds
 ```
 
 Review of 6a2bf5d (reviewer): the code meets every criterion (ticked; full scripts/check green, 2791 passed, nothing reformatted; jail checks both modes recorded green by the worker). One prompt holds: grant_prompt alone serves, grant_tool only asks, the shipped agents rows name grant and not grant-prompt, and a child given grant-prompt hits Broker.serve's RuntimeError. requesting.asker reuses egress.asked_as, so tool, needs and refusals share one label. python_row gone, no alias. Docs match. close-task refused, so the task stays open on two board facts, not code: (1) the acceptance criteria were rewritten after acceptance in f5e9bae without the finish-moved label and a note saying why (the owner's 2026-11-05 decision); (2) a bug needs a recorded repro (record-check TASK-0194 --repro -- <test>, or a 'No repro:' note). Minor, not filed: no single end-to-end test of a child's grant call reaching the question; GrantToolConfig out of order in runner __init__ __all__.
+
+finish-moved: the criteria were rewritten after promotion (f5e9bae) by the owner's decision of 2026-11-05, 'Yes, give sub-agents the grant tool'. The draft, filed as a bug, asked only that a sub-agent's grant call be labelled. The decision made it a feature, giving sub-agents the tool, so the type is now task and there is no defect to reproduce. The proof that the label holds is the planted failure in the worker's notes (no agent written into the grant row: test_child_boot KeyError 'agent').
 <!-- SECTION:NOTES:END -->
