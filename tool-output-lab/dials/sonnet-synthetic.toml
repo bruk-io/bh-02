@@ -1,6 +1,6 @@
 # The schema recipe against native on Sonnet 5.5: the synthetic MCP tasks of every format (JSON,
 # logs, accessibility snapshots, Figma XML) at M and L, once each, the hook folding every result
-# (mode "all"). On Haiku no composition moved how often a session reads the saved raw (FINDINGS 6);
+# (mode "all"). On Haiku no composition moved how often a session reads the saved raw (results/dials-haiku-patterns.md);
 # this asks whether a stronger model trusts the envelope more. Prediction, set before the run:
 # Sonnet keeps the answers, reads the raw less often than Haiku did (69% at M, 75% at L), and so
 # saves more of the final context.
