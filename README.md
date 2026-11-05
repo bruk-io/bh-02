@@ -75,5 +75,5 @@ evals/         truth, synthetic, real, atlas, tasks; envelope_check, schema_chec
 harness/       fetch (real corpora); extract, stats (Claude Code transcripts)
 tests/         unit (pure functions) and functional (files and processes)
 dials/ sessions/ sweeps/   run specs
-results/       one file per run, never edited after; FINDINGS.md is the running summary
+results/       one file per run, never edited after; FINDINGS.md is what we found, kept current
 ```

@@ -76,22 +76,22 @@ knobs: `./lab fold`, layer 1, layer 2, the hook, and the specs in `dials/`, `ses
 
 | # | Stage | Needs a model | Status |
 |---|---|---|---|
-| E1 | Every format folds as an envelope: logs by line templates, trees (outlines, XML, pages, text, code) by runs of like items | no | done: no claim fails on any task (FINDINGS 1) |
+| E1 | Every format folds as an envelope: logs by line templates, trees (outlines, XML, pages, text, code) by runs of like items | no | done: no claim fails on any task (`results/l1-1-*.md`) |
 | M1 | Log each fold with its session, so every layer-2 row says whether the envelope acted on the task's large output, and the report splits on it | no | done: rows carry `large_seen` and `large_folded`; a Haiku smoke matched inline, spilled and replayed outputs by digest (`results/dials-haiku-m1-smoke.md`) |
-| M2 | Layer-1 baseline: both recipes on every task | no | done (FINDINGS 1) |
-| M3 | Layer-1 sweeps over compositions: `sweeps/envelopes.toml`, `logs.toml`, `trees.toml` | no | done: anomalies decide the most; samples past the query's matches add nothing in layer 1 (FINDINGS 2) |
-| M4 | Layer 2 on Haiku: native against the two recipes on MCP-Atlas (about $3) and on the synthetic tasks of every format at M and L | yes | done: synthetic, both recipes pass (FINDINGS 4); MCP-Atlas where it acted, context passes, accuracy undecided (FINDINGS 3) |
-| M5 | Layer 2 on compositions layer 1 cannot tell apart: a typical sample or none, no get more | yes | done as the patterns below: a typical sample (full) and no samples (lean) change nothing a model does but lean's extra reads (FINDINGS 6) |
-| P1 | Three envelope patterns as recipes in every format: full (every part filled), lean (a terse shape, the anomalies, a command; no samples), index (a command for every group, a new get-more producer) | no | done: no claim fails (FINDINGS 5) |
-| P2 | Haiku: native, schema, full, lean and index on the synthetic tasks at M and L (`dials/haiku-patterns.toml`); predictions set in the spec | yes, about $3.60 | done: all keep the answers; no pattern changes how often the model reads the raw; schema stays (FINDINGS 6) |
-| B1 | A banner that says the envelope's counts are exact (`banner=exact`), on Haiku | yes, about $2 | done: re-reading falls from 70 to 51 of 104 runs, answers kept, context unchanged (FINDINGS 10) |
-| B2 | Both fixes together (the none wording, the odd-number rule, the exact-counts banner) on Haiku and Sonnet, on the spot and absent tasks | yes, about $10 | done: the $0.00 invoice found in every run, no answer lost; Haiku 80 of 80 against native's 72 (FINDINGS 11) |
-| M6 | Sonnet on the compositions Haiku leaves standing | yes | in part: the schema recipe on the synthetic tasks (FINDINGS 7): context passes, accuracy undecided at one loss, the $0.00 invoice |
+| M2 | Layer-1 baseline: both recipes on every task | no | done (`results/l1-1-*.md`) |
+| M3 | Layer-1 sweeps over compositions: `sweeps/envelopes.toml`, `logs.toml`, `trees.toml` | no | done: anomalies decide the most; samples past the query's matches add nothing in layer 1 (`results/sweep-*.md`) |
+| M4 | Layer 2 on Haiku: native against the two recipes on MCP-Atlas (about $3) and on the synthetic tasks of every format at M and L | yes | done: synthetic, both recipes pass (`results/dials-haiku-synthetic.md`); MCP-Atlas where it acted, context passes, accuracy undecided (`results/dials-haiku-atlas.md`) |
+| M5 | Layer 2 on compositions layer 1 cannot tell apart: a typical sample or none, no get more | yes | done as the patterns below: a typical sample (full) and no samples (lean) change nothing a model does but lean's extra reads (`results/dials-haiku-patterns.md`) |
+| P1 | Three envelope patterns as recipes in every format: full (every part filled), lean (a terse shape, the anomalies, a command; no samples), index (a command for every group, a new get-more producer) | no | done: no claim fails (`results/l1-2-*.md`) |
+| P2 | Haiku: native, schema, full, lean and index on the synthetic tasks at M and L (`dials/haiku-patterns.toml`); predictions set in the spec | yes, about $3.60 | done: all keep the answers; no pattern changes how often the model reads the raw; schema stays (`results/dials-haiku-patterns.md`) |
+| B1 | A banner that says the envelope's counts are exact (`banner=exact`), on Haiku | yes, about $2 | done: re-reading falls from 70 to 51 of 104 runs, answers kept, context unchanged (`results/dials-haiku-banner.md`) |
+| B2 | Both fixes together (the none wording, the odd-number rule, the exact-counts banner) on Haiku and Sonnet, on the spot and absent tasks | yes, about $10 | done: the $0.00 invoice found in every run, no answer lost; Haiku 80 of 80 against native's 72 (`results/dials-haiku-fixes.md`, `results/dials-sonnet-fixes.md`) |
+| M6 | Sonnet on the compositions Haiku leaves standing | yes | in part: the schema recipe on the synthetic tasks (`results/dials-sonnet-synthetic.md`): context passes, accuracy undecided at one loss, the $0.00 invoice |
 | M7 | Sessions: follow-up questions on one result, native against the two recipes (`sessions/haiku.toml`, about $2) | yes | |
 
 Later: a run nested in a run's items as an envelope of its own (a country's subdivisions inside the
 list of countries); JSON's exceptions to take the zero-among-positives rule logs and trees now have
-(FINDINGS 8).
+(`results/l1-3-*.md`).
 
 ## Decisions
 
