@@ -275,3 +275,30 @@ recipe, the hook folding every result. The envelope acted in every folded sessio
   raw that Read returns whole (Figma at about 7k tokens) is read whatever the model.
 - **Each session costs $0.028 less**, a quarter of native's $0.12: on Sonnet the saving is in
   dollars what Haiku's was in cents.
+
+## 8. "None" now says whose finding it is, and a number far from the rest is an anomaly (layer 1)
+
+Runs: `results/l1-3-schema.md` and `l1-3-sample.md`, against FINDINGS 1's runs of the same recipes.
+
+FINDINGS 7's one lost answer came from an anomalies part that said `none`: true of its rules, not
+of the data, and Sonnet read it as a fact. Two changes answer it:
+
+- **An anomalies part that finds nothing names its rules and says it is no proof**, in every
+  format: `anomalies: none found by its rules (a line or a value few items hold, an error word few
+  items hold, a number far from the rest), which is not proof there are none`.
+- **A number far from the rest is an anomaly**, in logs and trees, for a hole whose values are all
+  whole numbers of fewer than six digits (longer ones are times, sizes and ids, as for the
+  few-valued holes): one beyond three interquartile ranges of the middle half, as JSON's
+  exceptions already do, or a zero or a negative where every other value is at least 10. The
+  second is what finds a $0.00 amount among 20 to 900, which the interquartile rule cannot, while
+  a timestamp's `:00`, whose neighbours run from 1 to 59, is not flagged. An anomalous item of a
+  few lines whose odd line is not its first is now shown whole, so what names it is in view.
+
+Results, against FINDINGS 1: under both recipes the two zero-amount invoices (M and L) are now
+sufficient, no task is lost, and no claim fails. The first draft of the rule flagged HDFS's times
+of day (`103101` among evening times) in a healthy log and, by showing every hidden Figma card
+whole, pushed 20 of them past the budget; both were fixed before these runs, by leaving six-digit
+numbers out and showing an item whole only when its first line does not already name it. Envelopes
+grew by a median 23 tokens (schema) and 30 (sample), the longer heading of an anomalies part that
+finds nothing. One false flag remains from before: HDFS's healthy log at M, for a rare thread id.
+JSON keeps its own rules for now, so a zero amount among positive ones in JSON is still not found.

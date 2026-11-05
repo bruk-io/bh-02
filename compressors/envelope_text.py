@@ -26,6 +26,18 @@ _TOKEN = re.compile(r"[A-Za-z0-9_-]+")
 _QUOTED_TOKEN = re.compile(r'"[^"\n]*"|[A-Za-z0-9_-]+')
 _HOLE = re.compile(r"[0-9]|(?:^|[-_])[0-9a-fA-F]{6,}(?:$|[-_])")  # a digit, or a hex id: u-ebbadf
 SED = "sed -n 'A,Bp' FILE  (any lines above, by number)"
+FAR = "a number far from the rest"  # why an outlier is listed
+
+
+_NOT_PROOF = "which is not proof there are none"
+
+
+def none_found(rules: str) -> str:
+    """The head of an anomalies part that found nothing: what its rules looked for, and that their
+    finding nothing does not mean the data holds nothing (a model read a bare "none" as a fact)."""
+    return f"none found by its rules ({rules}), {_NOT_PROOF}"
+
+
 _MEASURE = re.compile(r"-?[0-9]{6,}")
 
 
@@ -103,6 +115,66 @@ def few_valued(
         cut = max(1, int(rare * n))
         odd = tuple(v for v, c in top if c <= cut) if top[0][1] / n >= dominant else ()
         out.append(Slot(k + 1, tuple(top), odd))
+    return tuple(out)
+
+
+_INT = re.compile(r"-?[0-9]+")
+_OUTLIER_IQR = 3.0  # a number beyond this many interquartile ranges of the middle half stands out,
+_OUTLIER_FLOOR = 10  # as does a zero or a negative where every other value is at least this
+
+
+@dataclass(frozen=True)
+class Outlier:
+    """A hole of a group's template whose numbers include some far from the rest."""
+
+    k: int  # counted from 1
+    values: tuple[str, ...]  # the outlying values, as written
+
+
+def _quartiles(xs: list[int]) -> tuple[float, float]:
+    s = sorted(xs)
+    n = len(s)
+
+    def at(q: float) -> float:
+        i = q * (n - 1)
+        lo = int(i)
+        return s[lo] + (s[min(lo + 1, n - 1)] - s[lo]) * (i - lo)
+
+    return at(0.25), at(0.75)
+
+
+def outlying(
+    lines: tuple[str, ...], g: Group, quoted: bool, *, rare: float, min_rows: int
+) -> tuple[Outlier, ...]:
+    """The holes of a group whose every value is a whole number of fewer than six digits (longer
+    ones are times, sizes and ids), in a group of at least `min_rows` lines, where few lines (at most
+    `rare` of them) hold a number far from the rest: beyond three interquartile ranges of the middle
+    half, or a zero or a negative where every other value is at least 10 (a $0.00 amount, a pool at
+    0; a timestamp's :00 has neighbours from 1 to 59)."""
+    n = len(g.rows)
+    if n < min_rows:
+        return ()
+    held = [slots(lines[i], quoted) for i in g.rows]
+    cut = max(1, int(rare * n))
+    out = []
+    for k in range(min(len(h) for h in held)):
+        texts = [h[k] for h in held]
+        if not all(_INT.fullmatch(x) and not _MEASURE.fullmatch(x) for x in texts):
+            continue  # not numbers, or numbers of six digits or more: times, sizes and ids
+        xs = [int(x) for x in texts]
+        q1, q3 = _quartiles(xs)
+        spread = q3 - q1
+        odd: set[str] = set()
+        if spread > 0:
+            lo, hi = q1 - _OUTLIER_IQR * spread, q3 + _OUTLIER_IQR * spread
+            odd |= {x for x, v in zip(texts, xs, strict=True) if v < lo or v > hi}
+        positive = [v for v in xs if v > 0]
+        if 0 < len(positive) < len(xs) and min(positive) >= _OUTLIER_FLOOR:
+            odd |= {x for x, v in zip(texts, xs, strict=True) if v <= 0}
+        counts = Counter(texts)
+        flagged = tuple(sorted((x for x in odd if counts[x] <= cut), key=texts.index))
+        if flagged and sum(counts[x] for x in flagged) <= cut:
+            out.append(Outlier(k + 1, flagged))
     return tuple(out)
 
 

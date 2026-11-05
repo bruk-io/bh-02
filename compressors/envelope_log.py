@@ -43,13 +43,16 @@ from compressors.envelope import (
     recipe_of,
 )
 from compressors.envelope_text import (
+    FAR,
     SED,
     Group,
     Slot,
     few_valued,
     grep_for,
     groups,
+    none_found,
     numbered,
+    outlying,
     query_rows,
     slots,
 )
@@ -141,11 +144,13 @@ class _Odd:
     rows: tuple[int, ...]
     slot: int = 0
     value: str = ""
+    why: str = ""  # said after the title when the rule is not plain from it
 
 
 def _odd(data: LogData, rare: bool) -> list[_Odd]:
     """Rare templates, while common ones cover most lines (with `rare`), templates naming an error
-    that few lines say, and rare values in a hole (with `rare`), in the order the log says them."""
+    that few lines say, and rare values in a hole and numbers far from the rest (with `rare`), in the
+    order the log says them."""
     k, n = data.knobs, data.filled
     cut = max(1, int(k.rare * n))
     common = sum(len(g.rows) for g in data.groups if len(g.rows) > cut)
@@ -159,6 +164,12 @@ def _odd(data: LogData, rare: bool) -> list[_Odd]:
                 for v in s.rare:
                     rows = tuple(i for i in g.rows if slots(data.lines[i])[s.k - 1] == v)
                     out.append(_Odd(g, rows, s.k, v))
+            done = {(o.slot, o.value) for o in out if o.group is g}
+            for x in outlying(data.lines, g, False, rare=k.value_rare, min_rows=10):
+                for v in x.values:
+                    if (x.k, v) not in done:
+                        rows = tuple(i for i in g.rows if slots(data.lines[i])[x.k - 1] == v)
+                        out.append(_Odd(g, rows, x.k, v, FAR))
     return sorted(out, key=lambda o: o.rows[0])
 
 
@@ -168,7 +179,8 @@ _ODD_LEVELS = ((25, 300), (12, 200), (5, 160), (1, 120))  # lines shown in all, 
 def _title(o: _Odd, last: int) -> tuple[str, Alike]:
     n = len(o.rows)
     if o.slot:
-        return f"<*>{o.slot} is {o.value} in {_lines(n)} like: {o.group.template}", Alike(
+        why = f"  ({o.why})" if o.why else ""
+        return f"<*>{o.slot} is {o.value} in {_lines(n)} like: {o.group.template}{why}", Alike(
             o.group.template, n, 1, last, slot=o.slot, value=o.value
         )
     return f"{_lines(n)} like: {o.group.template}", Alike(o.group.template, n, 1, last)
@@ -185,9 +197,16 @@ def _dealt(sizes: tuple[int, ...], cap: int) -> tuple[int, ...]:
     return tuple(share)
 
 
-def _anomalies(data: LogData, odd: list[_Odd]) -> Part:
+_RULES = (
+    "a template few lines say, an error word few lines say, a value few lines hold where one dominates, "
+    "a number far from the rest"
+)
+_ERROR_RULE = "an error word few lines say"
+
+
+def _anomalies(data: LogData, odd: list[_Odd], rules: str) -> Part:
     if not odd:
-        return Part(Role.ANOMALIES, (Level("none", ()),))
+        return Part(Role.ANOMALIES, (Level(none_found(rules), ()),))
     last = len(data.lines)
     total = sum(len(o.rows) for o in odd)
     what = f"{_lines(total)} in {len(odd)} group{'s' if len(odd) > 1 else ''}"
@@ -214,12 +233,12 @@ def _anomalies(data: LogData, odd: list[_Odd]) -> Part:
 
 def rare(data: LogData, _shape: Part, /) -> Part:
     """Rare templates, error words few lines say, and rare values in a few-valued hole."""
-    return _anomalies(data, _odd(data, rare=True))
+    return _anomalies(data, _odd(data, rare=True), _RULES)
 
 
 def errors(data: LogData, _shape: Part, /) -> Part:
     """Templates naming an error that few lines say."""
-    return _anomalies(data, _odd(data, rare=False))
+    return _anomalies(data, _odd(data, rare=False), _ERROR_RULE)
 
 
 def no_anomalies(_data: LogData, _shape: Part, /) -> Part:

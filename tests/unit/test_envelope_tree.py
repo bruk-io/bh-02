@@ -61,7 +61,10 @@ def test_the_query_shows_its_items_whole_and_each_once():
 def test_a_tree_with_no_run_is_its_outline():
     raw = "".join(f"- section {chr(65 + i)}:\n  - para about {chr(65 + i)}\n" for i in range(4)) * 1
     env = _outline(raw)
-    assert env.level(Role.ANOMALIES).head == "none" and "1: - section A:" in env.text()
+    assert (
+        env.level(Role.ANOMALIES).head.startswith("none found by its rules")
+        and "1: - section A:" in env.text()
+    )
 
 
 def test_each_tree_part_knob_names_exactly_the_producers_there_are():
@@ -94,6 +97,29 @@ def test_code_is_its_definitions_a_class_with_all_its_methods():
     src = f"class Server:\n{methods}\n{helpers}"
     env, source = lines_envelope(src, "code", frozenset(), 2000, language="python")
     text = env.text()
-    assert env.level(Role.ANOMALIES).head == "none"  # definitions with their own names are no run
+    assert env.level(Role.ANOMALIES).head.startswith(
+        "none found by its rules"
+    )  # definitions with their own names are no run
     assert "1: class Server:" in text and all(f"def {w}(self):" in text for w in words[:12])
     assert text_problems(source, env, run_tools=False) == []
+
+
+def test_a_zero_amount_among_positive_ones_marks_its_item_and_shows_it_whole():
+    lines = ["- list:"]
+    for i in range(40):
+        amount = "0.00" if i == 17 else f"{20 + (i * 37) % 800}.{i % 100:02d}"
+        lines += [
+            f"  - item {i}:",
+            f"    - text: Invoice INV-{i:04d}",
+            f"    - text: ${amount} due 1{i % 9} Nov",
+        ]
+    raw = "\n".join(lines) + "\n"
+    src = tuple(split_lines(raw))
+    env = envelope(src, indent_tree(list(src)), frozenset(), 2000, view="schema")
+    text = env.text()
+    assert (
+        "is 0 in 1 line like: - text: $<*>.<*> due <*> Nov  (in 1 of 40 items; a number far from the rest)"
+        in text
+    )
+    assert "54:     - text: Invoice INV-0017" in text  # the short item whole: its name is in view
+    assert text_problems(raw, env, run_tools=False) == []
