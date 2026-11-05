@@ -20,7 +20,8 @@ __all__ = ["ChoiceScreen"]
 class ChoiceScreen(ApprovalScreen[str]):
     """One question with the answers `choices` names. Each choice's key answers its `value`, and
     Escape answers the question's `escape`, when the key arrived after the grace period (as
-    `ApprovalScreen`, whose `on_key` judges it); keys pressed before are dropped. Ctrl-C withdraws it, and the answer is then '' (nothing was chosen)."""
+    `ApprovalScreen`, whose `on_key` judges it); keys pressed before are dropped.
+    Ctrl-C withdraws it, and the answer is then '' (nothing was chosen)."""
 
     def __init__(self, question: Mapping[str, Any], *, grace: float = GRACE) -> None:
         super().__init__(question, grace=grace)
