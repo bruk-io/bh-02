@@ -29,9 +29,9 @@ Found by TASK-0191's worker, 2026-11-04 (test_keys_typed_as_the_modal_comes_up_d
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A key that arrived before the approval modal was visible plus its grace period never answers it, however late it is processed; a test that holds the event loop while keys are queued, then releases it, shows the modal unanswered; repro recorded failing before the fix
-- [ ] #2 A key that arrived after the grace period still answers at once
-- [ ] #3 test_keys_typed_as_the_modal_comes_up_do_not_answer_it passes 50 of 50 under the load that failed it (12 CPU burners)
+- [x] #1 A key that arrived before the approval modal was visible plus its grace period never answers it, however late it is processed; a test that holds the event loop while keys are queued, then releases it, shows the modal unanswered; repro recorded failing before the fix
+- [x] #2 A key that arrived after the grace period still answers at once
+- [x] #3 test_keys_typed_as_the_modal_comes_up_do_not_answer_it passes 50 of 50 under the load that failed it (12 CPU burners)
 <!-- AC:END -->
 
 ## Implementation Plan
