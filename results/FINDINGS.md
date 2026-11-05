@@ -6,7 +6,8 @@ summary of it (an *envelope*) instead, and still get the same answers with less 
 **So far: yes.** On both Haiku and Sonnet, the envelope keeps the answers and shrinks the final
 context by about 6,500 tokens, which makes each run about 23% cheaper. The model often goes back to
 the full output anyway, mostly to double-check; telling it the counts are exact cuts that by a
-quarter. We found one wrong answer (a $0.00 invoice) and fixed its cause.
+quarter. We found one wrong answer (a $0.00 invoice) and fixed its cause; with the fixes, both
+models found it every time and lost no answer (entry 11).
 
 Each entry below has the same parts: the result in one sentence, what we tried, what happened (a
 table with the same columns every time), what it means, caveats, and the run it comes from
@@ -307,3 +308,37 @@ already saves most of what can be saved.
   wording of entry 8 matters alongside this banner.
 
 **Run.** `results/dials-haiku-banner.md` (312 runs, $2.00).
+
+## 11. With both fixes, the $0.00 invoice was found every time and no answer was lost
+
+**What we tried.** Haiku (each task twice) and Sonnet (once) on the 40 tasks where trusting the
+envelope could hurt: every "find what's wrong" task, with both $0.00 invoices among them, and
+every "nothing is wrong" task, for JSON, logs, accessibility snapshots and Figma XML at medium and
+large sizes. Native against `schema` with both fixes: the "none" wording and the odd-number rule
+of entry 8, and the exact-counts banner of entry 10.
+
+**What happened.**
+
+| Model | answers right | context | cost | re-read |
+|---|---|---|---|---|
+| Haiku | 80 of 80 (native 72) | 7,267 tokens smaller | 29% cheaper | 42 of 80 (native 40) |
+| Sonnet | 40 of 40 (native 39) | 8,164 tokens smaller | 26% cheaper | 19 of 40 (native 20) |
+
+The $0.00 invoice was found in all six runs (four on Haiku, two on Sonnet); Sonnet answered both
+without opening the full output. On the "nothing is wrong" tasks there were no false alarms: 16 of
+16 on Haiku, 8 of 8 on Sonnet.
+
+**What it means.** The fixes work on both models. The miss of entry 7 is gone, no new miss
+appeared, and Haiku got more tasks right than native. On Haiku both rules pass. On Sonnet the
+context rule passes and the answers rule is not settled, since 40 runs are too few.
+
+**Caveats.**
+- Haiku's gain is not chance: its answers were 10 points better than native's, with a range of 3
+  to 19 points. The tasks native missed are large snapshots and Figma files, where native sees
+  only a preview and has to search the file itself.
+- Re-reading is compared with earlier runs on the same 40 tasks, not within this run: Haiku 42 of
+  80 (53%) against 29 of 40 (73%) under the usual banner; Sonnet 19 of 40 against 25 of 40.
+- Sonnet ran each task once, so there is one $0.00 run per size.
+
+**Run.** `results/dials-haiku-fixes.md` (160 runs, $1.18), `results/dials-sonnet-fixes.md` (80
+runs, $9.41).
