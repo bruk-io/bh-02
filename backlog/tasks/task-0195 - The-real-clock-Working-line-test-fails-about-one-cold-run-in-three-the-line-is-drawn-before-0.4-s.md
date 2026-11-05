@@ -7,11 +7,12 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-04T18:32:00Z'
-updated_date: '2026-11-05T04:19:00Z'
+updated_date: '2026-11-05T04:20:00Z'
 labels:
   - size-1
   - tui
   - bug
+  - finish-moved
 dependencies: []
 modified_files:
   - bh-02/plugins/tui-cordis-plugin/src/tui_cordis_plugin/widgets/working.py
@@ -189,4 +190,8 @@ INFO    -  Documentation built in 11.14 seconds
 ```
 
 Review (reviewer): the change is sound and all four criteria are met and ticked (diagnosis confirmed in textual/_time.py sleep and timer.py _run; rounding in Working._tick is the right place, render's floor stays; the conditional absence check is conservative; real-clock test 10/10 here; full check exit 0, no files changed). close-task refused on process only: (1) the bug has no recorded repro: record-check TASK-0195 --repro -- the hair-early test, or a 'No repro:' note; (2) the criteria changed since acceptance in 2140d73 without the finish-moved label and a note saying why. Status left In Progress.
+
+finish-moved: the criteria were rewritten after promotion (2140d73) once the cause was found. The draft guessed the line was drawn before 0.4 s. The failure was the first line reading 'Working · 0s' (Textual's timer wakes 0.5 ms early and the widget floored), so the criteria now name that defect and its fix.
+
+No repro: the repro test (test_a_tick_that_comes_a_hair_early_says_the_second_it_is_for) and the fix landed in one commit, 7e67f6c, so no commit holds the test without the fix for record-check --repro to run. Its failure before the fix was seen and is in the notes above ('what the test waited for never happened': the line never read 1s), as is the real-clock test's failure before the fix (1 of 10, the first line 'Working · 0s'). Lesson kept: commit the repro before the fix.
 <!-- SECTION:NOTES:END -->
