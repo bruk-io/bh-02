@@ -1,7 +1,7 @@
 ---
-id: DRAFT-0029
+id: TASK-0194
 title: A sub-agent has no grant tool; if it gets one, it must ask as the agent
-status: Draft
+status: To Do
 assignee: []
 created_date: '2026-11-04T22:39:00Z'
 updated_date: '2026-11-04T22:40:00Z'
