@@ -1,6 +1,6 @@
 """The `grant` tool, as pure functions (decision-0012 items 1, 4 and 5): its spec, the section that
 tells the model of it, a call's arguments as a `Request`, and the words of what came of it. The
-caller (`wiring.grant_prompt`) holds the broker, the runner and what is not pure (does this runner
+caller (`wiring.grant_tool`) holds the broker, the runner and what is not pure (does this runner
 confine, where a path leads); nothing here asks, reads the filesystem or knows cordis.
 
 An input calls it across the socket as every tool is called (`tools.grant(kind=..., target=...,
@@ -13,13 +13,19 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from runner_cordis_plugin.broker import Outcome
-from runner_cordis_plugin.grants import Asker, Grant, Invalid, Kind, Request, Source
+from runner_cordis_plugin.egress import asked_as
+from runner_cordis_plugin.grants import Asker, Grant, Invalid, Kind, Request
 from runner_cordis_plugin.prompting import applies
 
-__all__ = ["ASKER", "GRANT", "NOTHING", "answered", "refused", "requested", "section"]
+__all__ = ["GRANT", "NOTHING", "answered", "asker", "refused", "requested", "section"]
 
-#: Who asks when the model calls `grant`, from an input or directly: the python tool's input.
-ASKER = Asker(Source.INPUT, "python")
+
+def asker(agent: str) -> Asker:
+    """Who asks when the model calls `grant`, from an input or directly: the sub-agent whose tool it is,
+    by its label (`general-1 (general)`, the label its python row's needs are asked under), else the
+    python tool's input."""
+    return asked_as("python", agent)
+
 
 #: The tool's spec. What the model is told of how to use it is the `system` section's, not this.
 GRANT: Mapping[str, Any] = {

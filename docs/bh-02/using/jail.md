@@ -129,8 +129,10 @@ Nothing is granted without you being asked, and every question says who asks and
 - **An extension**: the model's own extension asks with `grants.ask(...)`, shown as `extension NAME`.
   An extension's request is not checked against the never-granted list (below) before you are
   asked; if it is on the list, the start leaves it out and its notice says so.
-- **A sub-agent**: a program a sub-agent runs asks for its `needs`, and its refused connections are
-  asked, shown by its label (`general-1 (general)`). A sub-agent has no `grant` tool of its own.
+- **A sub-agent**: it has the `grant` tool too, and a program it runs asks for its `needs` and has its
+  refused connections asked. Each is shown by its label (`general-1 (general)`), never as `input python`.
+  What you allow a sub-agent applies to the whole session, to every jail, the same as any other grant,
+  and the question names the agent so you decide knowing that.
 - **A refused connection**: a program's connection the proxy refused (below).
 
 Under `--no-jail` there is nothing to grant: the jail is not there, the `grant` tool says so and asks

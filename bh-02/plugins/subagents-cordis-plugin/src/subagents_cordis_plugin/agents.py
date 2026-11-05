@@ -368,10 +368,11 @@ ALWAYS_REFUSED: tuple[str, ...] = ("memory:auto",)
 class AgentsConfig:
     """The `agents` row's config. `rows`: the parent's rows a child's conversation is made of,
     by id; `tools`: those of them a type may grant (tool rows), the rest every child has;
-    `transcript_row`, `model_row`, `commands_row` and `python_row`: which of them is the transcript,
-    the model, the commands registry (a child whose row injects `commands` gets one of its own, of
-    that row's component) and the python tool, whose config the child's label is written into
-    (`agent`) so what it needs and what its program is refused are asked as that agent; `refused`:
+    `transcript_row`, `model_row` and `commands_row`: which of them is the transcript, the model and
+    the commands registry (a child whose row injects `commands` gets one of its own, of that row's
+    component); `agent_rows`: the rows (the python tool, the grant tool) whose config the child's
+    label is written into (`agent`), so what they need, what their program is refused and what they
+    ask for are asked as that agent; `refused`:
     components (`plugin:component`) a child never has, beyond
     `ALWAYS_REFUSED` (auto memory, decision-0002), which no config can drop, so a `rows` naming a row
     that uses one is refused; `start`:
@@ -390,7 +391,7 @@ class AgentsConfig:
     transcript_row: str = "transcript"
     model_row: str = "model"
     commands_row: str = "commands"
-    python_row: str = "python"
+    agent_rows: Sequence[str] = ("python", "grant")
     refused: Sequence[str] = ()
     start: float = 30.0
     max_running: int = 4
@@ -549,7 +550,7 @@ class Agents:
                 place=place,
                 hand=hand,
                 commands_row=self._config.commands_row,
-                python_row=self._config.python_row,
+                agent_rows=self._config.agent_rows,
                 refused=tuple(dict.fromkeys((*ALWAYS_REFUSED, *self._config.refused))),
                 wants_commands=self._wants_commands,
             )

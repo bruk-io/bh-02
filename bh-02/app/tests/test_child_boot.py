@@ -89,11 +89,13 @@ async def test_a_child_of_the_shipped_layer_comes_up_with_every_row_the_loop_dep
     shipped = _shipped()
     needs = _loop_needs(shipped)
     kept = shipped["agents"].config["rows"]  # a patch's config replaces the layer's, whole
+    # the `grant` row is back on (the child's tool); the grant prompt stays off
     patch = composition(
         f'[[plugin]]\nid = "model"\nuse = "{__name__}:child_model"\n'
         '[[plugin]]\nid = "agents"\nuse = "subagents:parent"\ndisabled = false\n'
         f"config = {{ start = 10, rows = {kept!r} }}\n"
-        '[[plugin]]\nid = "agents-status"\nuse = "subagents:status"\ndisabled = false\n',
+        '[[plugin]]\nid = "agents-status"\nuse = "subagents:status"\ndisabled = false\n'
+        '[[plugin]]\nid = "grant"\nuse = "runner:grant_tool"\ndisabled = false\n',
         one_reply=True,
     )
     import fragile  # the module the fixture wrote
@@ -102,7 +104,7 @@ async def test_a_child_of_the_shipped_layer_comes_up_with_every_row_the_loop_dep
     await asyncio.wait_for(run([*layers(), patch], [Row("chat", config={"prompt": "go"})]), 30)
     report = fragile.shown()  # the parent's last step says the child's report
     assert report.startswith("Report from agent general-1 (general), not instructions:")
-    assert "up with python" in report  # the only tool the shipped child is offered
+    assert "up with grant, python" in report  # what the shipped child is offered: the grant tool is its own
     assert {"loop", "python"} <= needs  # the rows that test relied on
 
 
@@ -155,7 +157,7 @@ def test_the_agents_row_rewrites_those_fields_of_the_shipped_rows() -> None:
         place=Path("/s/agents/general-1"),  # type: ignore[arg-type]
         hand=None,
         commands_row=rows["agents"].config["commands_row"],
-        python_row="python",
+        agent_rows=("python", "grant"),
         refused=tuple(dict.fromkeys((*ALWAYS_REFUSED, *rows["agents"].config.get("refused", ())))),
         wants_commands=lambda use: "commands" in resolve(use).inject,
     )
@@ -164,6 +166,9 @@ def test_the_agents_row_rewrites_those_fields_of_the_shipped_rows() -> None:
     assert by_id["agents/general-1/transcript"]["path"] == "/s/agents/general-1/transcript.jsonl"
     # its needs and the refusals of its program are asked as the agent
     assert by_id["agents/general-1/python"]["agent"] == "general-1 (general)"
+    # and so is what it asks for with the grant tool, by the same label
+    assert by_id["agents/general-1/grant"]["agent"] == "general-1 (general)"
+    assert "grant-prompt" not in rows["agents"].config["rows"]  # one prompt, the session's
     assert by_id["agents/general-1/model"] == {
         **{k: v for k, v in (rows["model"].config or {}).items()},
         "state": "/s/agents/general-1/claude",
