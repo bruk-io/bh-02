@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-04T16:59:00Z'
-updated_date: '2026-11-05T04:52:00Z'
+updated_date: '2026-11-05T04:53:00Z'
 labels:
   - tui
   - approval
@@ -273,4 +273,6 @@ Python 3.15.2 (main, Oct 26 2026, 14:06:56) [Clang 23.1.3 ]
 ..............s..................                                        [100%]
 535 passed, 1 skipped, 1 xfailed in 122.04s (0:02:02)
 ```
+
+Repro: bh-02/plugins/tui-cordis-plugin/tests/test_tui_key_time.py (keys made before a time.sleep stall past the grace, posted after; ApprovalScreen and ChoiceScreen). Recorded failing at the repro commit (both tests failed: the modal was answered). Fix: ApprovalScreen.on_key judges event.time against a stamp taken in call_after_refresh from on_mount (_answers(arrived, shown, grace)); ChoiceScreen supplies only _key_answer; y/n/Escape BINDINGS removed; armed reads the same rule; a second queued answer key no longer dismisses twice. AC3: 12 background 'python3 -c "while True: pass"' burners (stress-ng not installed, 4 CPUs), 50 runs of test_keys_typed_as_the_modal_comes_up_do_not_answer_it, 50 passed 0 failed; burners killed, pgrep -f 'while True' empty. Checks recorded: scripts/check bh-02/plugins/tui-cordis-plugin (an earlier run failed on one line-too-long, fixed; then exit 0, 359 passed), linux-jail-check default and --as-root both exit 0. ACs left unticked for the reviewer.
 <!-- SECTION:NOTES:END -->
