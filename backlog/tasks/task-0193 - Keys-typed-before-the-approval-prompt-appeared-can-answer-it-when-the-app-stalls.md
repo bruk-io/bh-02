@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-04T16:59:00Z'
-updated_date: '2026-11-05T04:45:00Z'
+updated_date: '2026-11-05T04:49:00Z'
 labels:
   - tui
   - approval
@@ -229,5 +229,27 @@ INFO    -  Documentation built in 2.31 seconds
    ok
 == tokens
    skipped: no /home/user/bh-02/.claude/worktrees/bh-01/dist (bh-01, built, beside this repository)
+```
+
+Check `scripts/linux-jail-check --ca /root/.ccr/ca-bundle.crt` exited 0
+
+```text
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+Installed 1 package in 1ms
+== image bh-02-linux-jail (ubuntu 24.04, bubblewrap, uv, Python 3.15)
+sha256:6b4985a834c4dc43a67dba8a671ce8cffc1c435c0c537a1a30dac45b2e50353b
+== uv run --locked pytest -q -p no:cacheprovider bh-02/plugins/runner-cordis-plugin bh-02/plugins/python-cordis-plugin bh-02/plugins/extensions-cordis-plugin bh-02/app/tests/test_python_repl.py
+bubblewrap 0.9.0
+uv 0.13.7 (x86_64-unknown-linux-gnu)
+Python 3.15.2 (main, Oct 26 2026, 14:06:56) [Clang 23.1.3 ]
+........................................................................ [ 13%]
+...............................x........................................ [ 26%]
+........................................................................ [ 40%]
+........................................................................ [ 53%]
+........................................................................ [ 67%]
+........................................................................ [ 80%]
+........................................................................ [ 93%]
+..............s..................                                        [100%]
+535 passed, 1 skipped, 1 xfailed in 120.57s (0:02:00)
 ```
 <!-- SECTION:NOTES:END -->
