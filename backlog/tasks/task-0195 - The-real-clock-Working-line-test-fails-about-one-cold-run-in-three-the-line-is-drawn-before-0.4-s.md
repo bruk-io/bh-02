@@ -187,4 +187,6 @@ INFO    -  Documentation built in 11.14 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+Review (reviewer): the change is sound and all four criteria are met and ticked (diagnosis confirmed in textual/_time.py sleep and timer.py _run; rounding in Working._tick is the right place, render's floor stays; the conditional absence check is conservative; real-clock test 10/10 here; full check exit 0, no files changed). close-task refused on process only: (1) the bug has no recorded repro: record-check TASK-0195 --repro -- the hair-early test, or a 'No repro:' note; (2) the criteria changed since acceptance in 2140d73 without the finish-moved label and a note saying why. Status left In Progress.
 <!-- SECTION:NOTES:END -->
