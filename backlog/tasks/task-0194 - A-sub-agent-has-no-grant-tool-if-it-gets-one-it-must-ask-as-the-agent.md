@@ -261,4 +261,6 @@ INFO    -  Documentation built in 2.58 seconds
 == tokens
    skipped: no /home/user/bh-02/.claude/worktrees/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+Review of 6a2bf5d (reviewer): the code meets every criterion (ticked; full scripts/check green, 2791 passed, nothing reformatted; jail checks both modes recorded green by the worker). One prompt holds: grant_prompt alone serves, grant_tool only asks, the shipped agents rows name grant and not grant-prompt, and a child given grant-prompt hits Broker.serve's RuntimeError. requesting.asker reuses egress.asked_as, so tool, needs and refusals share one label. python_row gone, no alias. Docs match. close-task refused, so the task stays open on two board facts, not code: (1) the acceptance criteria were rewritten after acceptance in f5e9bae without the finish-moved label and a note saying why (the owner's 2026-11-05 decision); (2) a bug needs a recorded repro (record-check TASK-0194 --repro -- <test>, or a 'No repro:' note). Minor, not filed: no single end-to-end test of a child's grant call reaching the question; GrantToolConfig out of order in runner __init__ __all__.
 <!-- SECTION:NOTES:END -->
