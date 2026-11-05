@@ -1,0 +1,20 @@
+# Both fixes together against native: an envelope that, when it finds no anomalies, lists what it
+# checked and says there may be others; the rule for a number far from the rest; and the banner
+# that says the counts are exact. On the tasks where trusting the envelope could hurt: every "find
+# what's wrong" task (both $0.00 invoices among them) and every "nothing is wrong" task, for JSON,
+# logs, accessibility snapshots and Figma XML, at medium and large sizes.
+# Prediction, set before the run: the envelope finds the $0.00 invoice, loses no answer against
+# native, and re-reads the full output less than the usual banner did.
+name = "haiku-fixes"
+model = "claude-haiku-5-5"
+bands = ["M", "L"]
+formats = ["json", "log", "a11y", "figma"]
+reps = 2
+max_cost = 2
+ids = ["json-M-spot-at10", "json-M-spot-at50", "json-M-spot-at90", "json-M-spot-quiet-at50", "json-M-absent-none", "json-L-spot-at10", "json-L-spot-at50", "json-L-spot-at90", "json-L-spot-quiet-at50", "json-L-absent-none", "log-M-spot-at10", "log-M-spot-at50", "log-M-spot-at90", "log-M-spot-quiet-at50", "log-M-absent-none", "log-L-spot-at10", "log-L-spot-at50", "log-L-spot-at90", "log-L-spot-quiet-at50", "log-L-absent-none", "a11y-M-spot-at10", "a11y-M-spot-at50", "a11y-M-spot-at90", "a11y-M-spot-quiet-at50", "a11y-M-absent-none", "a11y-L-spot-at10", "a11y-L-spot-at50", "a11y-L-spot-at90", "a11y-L-spot-quiet-at50", "a11y-L-absent-none", "figma-M-spot-at10", "figma-M-spot-at50", "figma-M-spot-at90", "figma-M-spot-quiet-at50", "figma-M-absent-none", "figma-L-spot-at10", "figma-L-spot-at50", "figma-L-spot-at90", "figma-L-spot-quiet-at50", "figma-L-absent-none"]
+
+[[setting]]
+name = "fixed"
+mode = "all"
+view = "schema"
+set = ["banner=exact"]
