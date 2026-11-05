@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-04T16:59:00Z'
-updated_date: '2026-11-05T04:32:00Z'
+updated_date: '2026-11-05T04:43:00Z'
 labels:
   - tui
   - approval
@@ -130,5 +130,60 @@ stack
 FAILED bh-02/plugins/tui-cordis-plugin/tests/test_tui_key_time.py::test_keys_queued_before_the_grace_ended_do_not_answer_the_approval_when_read_late
 FAILED bh-02/plugins/tui-cordis-plugin/tests/test_tui_key_time.py::test_keys_queued_before_the_grace_ended_do_not_answer_the_choice_when_read_late
 2 failed in 1.94s
+```
+
+Check `scripts/check bh-02/plugins/tui-cordis-plugin` exited 1
+
+```text
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+== format
+48 files already formatted
+   ok
+== lint
+line-too-long: Line too long (153 > 110)
+  --> bh-02/plugins/tui-cordis-plugin/src/tui_cordis_plugin/widgets/choice.py:23:111
+   |
+21 | …'s key answers its `value`, and
+22 | …after the grace period (as
+23 | …ore are dropped. Ctrl-C withdraws it, and the answer is then '' (nothing was chosen)."""
+   |                                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+24 | …
+25 | …at = GRACE) -> None:
+   |
+
+Found 1 error.
+   FAILED: lint
+== types
+Success: no issues found in 23 source files
+   ok
+== tests
+bringing up nodes...
+bringing up nodes...
+
+........................................................................ [ 20%]
+........................................................................ [ 40%]
+........................................................................ [ 60%]
+........................................................................ [ 80%]
+.......................................................................  [100%]
+359 passed in 36.17s
+   ok
+== gates
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+== (root)
+   ok
+== libs/cordis
+   ok
+== libs/cordis-helpers
+   ok
+== libs/host-paths
+   ok
+   ok
+== docs
+INFO    -  Cleaning site directory
+INFO    -  Building documentation to directory: /home/user/bh-02/.claude/worktrees/agent-a09be7ed4005c7078/site
+INFO    -  Documentation built in 2.06 seconds
+   ok
+== tokens
+   skipped: no /home/user/bh-02/.claude/worktrees/bh-01/dist (bh-01, built, beside this repository)
 ```
 <!-- SECTION:NOTES:END -->
