@@ -1,229 +1,309 @@
 # Findings
 
-What we have learned about envelopes, oldest first. Each entry starts with the result in one line,
-then the numbers, then what it means. Each names the run it comes from (`results/<name>.md`).
+**The question.** When a tool returns a large output, can Claude Code show the model a short
+summary of it (an *envelope*) instead, and still get the same answers with less context?
 
-Everything measured before 2026-11-04 was dropped: it tested older designs. Git keeps it, up to
-commit `ea8c2e5`.
+**So far: yes.** On both Haiku and Sonnet, the envelope keeps the answers and shrinks the final
+context by about 6,500 tokens, which makes each run about 23% cheaper. The model often goes back to
+the full output anyway, mostly to double-check; telling it the counts are exact cuts that by a
+quarter. We found one wrong answer (a $0.00 invoice) and fixed its cause.
 
-**Words used here**
+Each entry below has the same parts: the result in one sentence, what we tried, what happened (a
+table with the same columns every time), what it means, caveats, and the run it comes from
+(`results/<name>.md`). Results measured before 2026-11-04 tested older designs and were dropped;
+git keeps them, up to commit `ea8c2e5`.
 
-- **Native**: Claude Code as it is, with no envelope.
-- **Envelope**: our short summary of a large tool output. Claude Code shows the model the envelope
-  instead of the output, and the full output is saved to a file the model can read.
-- **Recipe**: one way to build an envelope. `schema` and `sample` are the first two; `full`, `lean`
-  and `index` came later (entry 5).
-- **Medium and large outputs**: medium ones (about 4k to 12k tokens) fit within Claude Code's limit,
-  so native shows them in full. Large ones are over it (here about 19k to 70k tokens), so native
-  Claude Code saves them to a file and shows only a preview.
-- **Layer 1**: a check with no model. It folds every test output and asks whether the answer can be
-  read off the envelope, and whether everything the envelope states is true.
-- **Layer 2**: real Claude Code runs. Each task runs once natively and once with the envelope, and
-  the two are compared.
-- **The pass rules**, set before any run: the envelope must not lose more than 3 points of
-  answers, and it must make the model's final context smaller. "Not settled" means the runs were
-  too few to tell.
+## Words used
 
-## 1. Envelopes never state anything false (layer 1)
+- **Native**: Claude Code as it is, with no envelope. Every model run compares against it, on the
+  same tasks.
+- **Envelope**: the short summary the model gets instead of a large tool output. The full output
+  is saved to a file the model can still read.
+- **Recipe**: one way of building the envelope. `schema` is the one we carry forward; the others
+  are `sample`, `full`, `lean` and `index`.
+- **Medium and large outputs**: a medium output (about 4k to 12k tokens) fits within Claude Code's
+  limit, so native shows it to the model in full. A large one (here about 19k to 70k tokens) is
+  over the limit, so native saves it to a file and shows only a preview; native then has to read
+  the file.
+- **Re-read**: the model opened the saved full output. For native this happens with every large
+  output, because it only has a preview.
+- **No-model check**: we fold every test output and check, with no model, whether the answer can
+  be read off the envelope and whether everything the envelope states is true.
+- **Model run**: real Claude Code sessions, each task once natively and once with the envelope.
+- **The pass rules**, set before any run: answers may not fall by more than 3 points against
+  native, and the final context must be smaller. *Not settled* means the runs were too few to
+  rule out a fall of more than 3 points.
 
-Runs: `results/l1-1-sample.md`, `results/l1-1-schema.md`.
+How to read the model-run tables: **answers right** counts tasks answered correctly, with native's
+count on the same tasks beside it. **Context** and **cost** are the average change against native
+on the same tasks. **Re-read** counts runs that opened the saved full output.
 
-- We folded all 251 test outputs with both recipes. Every number, line and row an envelope states
-  was recomputed from the output, and every command it suggests was run. None was wrong.
-- How often the answer could be read off the envelope, out of the outputs that were folded:
+---
 
-  | Kind of output | sample | schema |
-  |---|---|---|
-  | JSON (list of pods) | 23/30 | 25/30 |
-  | Logs | 26/30 | 26/30 |
-  | Accessibility snapshots | 24/30 | 24/30 |
-  | Figma XML | 26/30 | 26/30 |
-  | Python files | 12/15 | 12/15 |
-  | Rust files | 6/6 | 6/6 |
-  | XML file (ISO 3166) | 3/6 | 3/6 |
-  | PyPI JSON | 3/5 | 4/5 |
-  | HDFS log (real) | 12/24 | 12/24 |
-  | MCP-Atlas (real) | 21/59 | 17/59 |
+## 1. Envelopes never state anything false
 
+**What we tried.** We folded all 251 test outputs with the `sample` and `schema` recipes, and
+checked everything each envelope states against the output, with no model.
+
+**What happened.**
+
+| Kind of output | answerable from the envelope: sample | schema |
+|---|---|---|
+| JSON (list of pods) | 23 of 30 | 25 of 30 |
+| Logs | 26 of 30 | 26 of 30 |
+| Accessibility snapshots | 24 of 30 | 24 of 30 |
+| Figma XML | 26 of 30 | 26 of 30 |
+| Python files | 12 of 15 | 12 of 15 |
+| Rust files | 6 of 6 | 6 of 6 |
+| XML file (ISO 3166) | 3 of 6 | 3 of 6 |
+| PyPI JSON | 3 of 5 | 4 of 5 |
+| HDFS log (real) | 12 of 24 | 12 of 24 |
+| MCP-Atlas (real) | 21 of 59 | 17 of 59 |
+
+No envelope stated anything false: every number, line and row was recomputed, and every suggested
+command was run.
+
+**What it means.** The envelope is safe to read: what it says is true. Most tasks can be answered
+from it alone.
+
+**Caveats.**
 - Most misses on the test outputs are lookups of one row ("what is the IP of pod X?") when the
   tool call doesn't name the row. With the name, every lookup is answerable.
-- `schema` also missed two cases: a $0.00 invoice (fixed in entry 8) and listing 12 failing pods
-  out of 100. `sample` also missed a pod with 97 restarts.
-- The envelope is small: about 190 to 230 tokens for a test output under `schema` (0 to 4% of the
-  output), about 280 to 450 under `sample`.
+- `schema` missed a $0.00 invoice (fixed in entry 8) and a list of 12 failing pods out of 100.
+- The envelope is small: about 190 to 230 tokens for a test output under `schema`, 280 to 450
+  under `sample`.
 
-## 2. What part of the envelope matters most (layer 1)
+**Run.** `results/l1-1-sample.md`, `results/l1-1-schema.md`.
 
-Runs: `results/sweep-envelopes.md` (JSON), `results/sweep-logs.md`, `results/sweep-trees.md`.
+## 2. The anomalies part matters most
 
-We tried 72 combinations of the envelope's parts. None stated anything false.
+**What we tried.** We swapped the envelope's parts one at a time (72 combinations) and ran the
+no-model check on each.
 
-- **The anomalies part matters most.** It is what finds the odd rows. JSON's full exception list
-  found all 12 planted problems and all 3 subtle ones; the simpler rules found 9 or 10 and at most
-  1. The same held for logs and trees.
-- **Showing the rows that match the question answers the lookups.** Extra sample rows answered
-  almost nothing more and cost 65 to 200 tokens.
-- **500 tokens is too small** for some tasks: it halved the log counting tasks.
+**What happened.**
 
-## 3. Haiku on real tasks (MCP-Atlas): answers held where the envelope was used, and the context shrank by about 3,800 tokens
+| Part changed | effect on the tasks answerable from the envelope |
+|---|---|
+| Anomalies: full exception list instead of simpler rules (JSON) | finds 12 of 12 planted problems instead of 9 or 10, and 3 of 3 subtle ones instead of at most 1 |
+| Samples: the rows that match the question | answers 5 to 13 more lookups |
+| Samples: extra example rows | answer almost nothing more, cost 65 to 200 tokens |
+| Budget: 500 tokens instead of 2,000 | halves the log counting tasks |
 
-Run: `results/dials-haiku-atlas.md` (354 runs, $3.10).
+No combination stated anything false.
 
-- The envelope was used in only about half the runs. In the rest, the replayed tool gave the
-  model a different, smaller output, so there was nothing to fold.
-- Where it was used:
+**What it means.** The anomalies part is what finds the odd rows, so it is the part to keep at
+its fullest. Extra example rows are not worth their tokens, as far as a no-model check can tell.
 
-  | Recipe | runs compared | answers | final context | cost |
-  |---|---|---|---|---|
-  | sample | 63 | 2 points lower (5 better, 6 worse) | 3,928 tokens smaller | 5% less |
-  | schema | 59 | the same (7 better, 7 worse) | 3,788 tokens smaller | 3% less |
+**Run.** `results/sweep-envelopes.md`, `results/sweep-logs.md`, `results/sweep-trees.md`.
 
-- Both changed answers about as often as native changes its own answers between two runs (19%).
-- The context rule passes. The answers rule is not settled: with about 60 runs, the true change
-  could be anywhere within about 12 points either way.
-- Counting all runs, `sample` looked 10 points worse at medium size. But those losses came from
-  runs where the envelope was never used, which are native runs in all but name, so they were
-  chance.
+## 3. On real tasks, Haiku keeps its answers where the envelope is used
 
-## 4. Haiku on test tasks: same answers, 7,000 tokens less context, 23% cheaper
+**What we tried.** Haiku on 59 real tasks from MCP-Atlas, replayed from recorded tool calls, each
+twice: native, `sample` and `schema`.
 
-Run: `results/dials-haiku-synthetic.md` (312 runs, $2.04).
+**What happened.** The envelope was used in only about half the runs: in the rest, the replayed
+tool gave the model a different, smaller output, so there was nothing to fold. On the runs where
+it was used:
 
-- Native got 103 of 104 tasks right; both recipes got 104.
-- Both pass both rules.
+| Recipe | answers right | context | cost | re-read |
+|---|---|---|---|---|
+| sample | 37 of 63 (native 38) | 3,928 tokens smaller | 5% cheaper | 47 of 63 (native 14) |
+| schema | 39 of 59 (native 39) | 3,788 tokens smaller | 3% cheaper | 47 of 59 (native 12) |
 
-  | Output size | recipe | final context | cost | time |
-  |---|---|---|---|---|
-  | medium | sample | 9,522 smaller | 18% less | 2.1 s slower |
-  | medium | schema | 8,488 smaller | 17% less | 1.5 s slower |
-  | large | sample | 5,258 smaller | 27% less | 5.0 s faster |
-  | large | schema | 4,888 smaller | 28% less | 4.8 s faster |
+**What it means.** On real tasks the envelope keeps the answers and shrinks the context, as on
+the test tasks. The context rule passes; the answers rule is not settled.
 
-- The model still read the full output in 73 to 87% of runs at medium size, one more step than
-  native, which is why those runs are slower. Entry 9 looks at what it read.
-- These tasks are easy for Haiku (native gets 99%), so they can show a loss but not much of a
-  gain.
+**Caveats.**
+- With about 60 runs, the true change in answers could be anywhere within about 12 points either
+  way.
+- Counting every run, not just those where the envelope was used, made `sample` look 10 points
+  worse at medium size. Those losses came from runs with no envelope, which are native runs in
+  all but name, so they were chance.
 
-## 5. Three more recipes (layer 1)
+**Run.** `results/dials-haiku-atlas.md` (354 runs, $3.10).
 
-Runs: `results/l1-2-full.md`, `results/l1-2-lean.md`, `results/l1-2-index.md`.
+## 4. On test tasks, Haiku keeps its answers, with 7,000 tokens less context
+
+**What we tried.** Haiku on 104 test tasks (JSON, logs, accessibility snapshots and Figma XML, at
+medium and large sizes): native, `sample` and `schema`.
+
+**What happened.**
+
+| Recipe | answers right | context | cost | re-read |
+|---|---|---|---|---|
+| sample | 104 of 104 (native 103) | 7,390 tokens smaller | 23% cheaper | 87 of 104 (native 52) |
+| schema | 104 of 104 (native 103) | 6,688 tokens smaller | 23% cheaper | 72 of 104 (native 52) |
+
+By size, under `schema`: medium outputs 8,488 tokens smaller and 1.5 seconds slower; large
+outputs 4,888 tokens smaller and 4.8 seconds faster.
+
+**What it means.** Both recipes pass both rules. The envelope saves most at medium size, where
+native holds the whole output, and saves time at large size, where native must read the file.
+
+**Caveats.**
+- Native gets 99% of these tasks right, so they can show a loss but hardly a gain.
+- The runs are slower at medium size because the model often re-reads the full output (entry 9).
+
+**Run.** `results/dials-haiku-synthetic.md` (312 runs, $2.04).
+
+## 5. Three more recipes
+
+**What we tried.** Three more ways of building the envelope, checked with no model:
 
 - **full**: everything in `schema`, plus one ordinary row as an example.
 - **lean**: a shorter summary, the anomalies and one command; no example rows.
-- **index**: everything in `schema`, plus a ready command for every group in the output (for
-  example, one `jq` command per value of each field, one `grep` per kind of log line).
+- **index**: everything in `schema`, plus a ready command for every group in the output (one `jq`
+  command per value of each field, one `grep` per kind of log line, a line range per run of
+  items).
 
-Layer 1: none stated anything false. `full` and `index` answer what `schema` answers, at 45 to 150
-tokens more. `lean` is the smallest, but without example rows it shows none of the rows a
-question names, so it answers no lookups unless the model fetches them.
+**What happened.**
 
-## 6. The three recipes on Haiku: none beats schema, and none changes how often the model re-reads
+| Recipe | test tasks answerable | lookups answerable, when the tool call names the row | size against schema |
+|---|---|---|---|
+| schema | 85 of 104 | 16 of 16 | |
+| full | 85 of 104 | 16 of 16 | 45 to 90 tokens more |
+| lean | 85 of 104 | 0 of 16 | up to 75 tokens less |
+| index | 85 of 104 | 16 of 16 | 40 to 150 tokens more |
 
-Run: `results/dials-haiku-patterns.md` (520 runs, $3.29).
+None stated anything false.
 
-| Recipe | answers right (of 104) | final context | cost | runs that read the full output, medium / large (of 52) |
+**What it means.** `full` and `index` answer what `schema` answers, for a few more tokens. `lean`
+is smallest, but without example rows it shows none of the rows a question names, so the model
+has to fetch them.
+
+**Run.** `results/l1-2-full.md`, `results/l1-2-lean.md`, `results/l1-2-index.md`.
+
+## 6. On Haiku, no other recipe beats schema
+
+**What we tried.** Haiku on the 104 test tasks: native, `schema` and the three recipes of entry 5.
+
+**What happened.**
+
+| Recipe | answers right | context | cost | re-read |
 |---|---|---|---|---|
-| native | 101 | | | 0 / 52 |
-| schema | 104 | 6,693 smaller | 23% less | 36 / 39 |
-| full | 104 | 6,656 smaller | 23% less | 35 / 40 |
-| lean | 103 | 5,937 smaller | 19% less | 43 / 44 |
-| index | 104 | 5,973 smaller | 20% less | 37 / 40 |
+| schema | 104 of 104 (native 101) | 6,693 tokens smaller | 23% cheaper | 75 of 104 (native 52) |
+| full | 104 of 104 (native 101) | 6,656 tokens smaller | 23% cheaper | 75 of 104 (native 52) |
+| lean | 103 of 104 (native 101) | 5,937 tokens smaller | 19% cheaper | 87 of 104 (native 52) |
+| index | 104 of 104 (native 101) | 5,973 tokens smaller | 20% cheaper | 77 of 104 (native 52) |
 
-- All four pass both rules.
-- We predicted before the run what each would change. None of it happened:
-  - `full` was meant to make the model re-read less. It didn't (35 against 36).
-  - `lean` was meant to give the smallest context. The model re-read more with it (43 against 36),
-    so its context ended larger.
-  - `index` was meant to make re-reads smaller. They weren't.
-- What decides the final context is mostly whether the model reads the full output. The recipes
-  differ by 50 to 150 tokens; a re-read adds about 1,000 at the median, and much more when the
-  model reads a whole file. (Corrected in entry 10: this said "thousands".)
+**What it means.** All four pass both rules, and none does better than `schema`. Before the run
+we predicted that `full` would make the model re-read less, that `lean` would give the smallest
+context, and that `index` would make re-reads smaller. None of these happened: `lean` made the
+model re-read more, so its context ended larger.
+
+**Caveats.**
 - Figma XML at medium size is a coin flip: the model either reads the whole 7k-token file or
-  doesn't. `schema` and `lean` gave the exact same envelope for those tasks, and the context still
-  differed by 10,000 tokens. Entry 4's odd Figma numbers were this, not the recipe.
+  doesn't. `schema` and `lean` gave the exact same envelope for those tasks, yet their contexts
+  differed by 10,000 tokens.
+- An earlier version of this entry said one re-read adds thousands of tokens. Entry 10 corrects
+  it: a re-read adds about 1,000 at the median, and thousands only when the model reads a whole
+  file.
 
-## 7. Sonnet: it trusts the envelope more than Haiku, and lost one answer
+**Run.** `results/dials-haiku-patterns.md` (520 runs, $3.29).
 
-Run: `results/dials-sonnet-synthetic.md` (208 runs, $22.25), `schema` against native.
+## 7. Sonnet re-reads less than Haiku, and lost one answer
 
-- Native got 104 of 104 right; `schema` got 103.
-- The one miss was the $0.00 invoice that layer 1 had already flagged. The envelope said
-  "anomalies: none". Sonnet read the file and still answered "none". Native, reading everything,
-  found it.
-- The context rule passes. The answers rule is not settled: one miss in 104 runs leaves room for
-  a drop of up to 5 points.
-- The final context was 6,365 tokens smaller (10,401 at medium size, 2,329 at large). Cost was 23%
-  less, about 3 cents a run.
-- Sonnet read the full output in half its runs; Haiku did in 72%. At medium size it read it for 3
-  of 13 JSON tasks and 4 of 13 logs (Haiku: 6 and 6), but for 12 of 13 Figma files, like Haiku.
+**What we tried.** Sonnet on the 104 test tasks: native and `schema`.
 
-## 8. Fixing the "none" mistake, and a rule for odd numbers (layer 1)
+**What happened.**
 
-Runs: `results/l1-3-schema.md`, `results/l1-3-sample.md`.
+| Recipe | answers right | context | cost | re-read |
+|---|---|---|---|---|
+| schema | 103 of 104 (native 104) | 6,365 tokens smaller | 23% cheaper (about 3 cents a run) | 53 of 104 (native 52) |
+
+The one miss was a $0.00 invoice among normal ones. The envelope said "anomalies: none". Sonnet
+read the file and still answered "none". Native, reading everything, found it.
+
+**What it means.** The context rule passes; the answers rule is not settled (one miss in 104 runs
+leaves room for a fall of up to 5 points). The miss was the envelope's fault: the gap the no-model
+check had already flagged in entry 1, fixed in entry 8.
+
+**Caveats.**
+- At medium size, Sonnet re-read the full output for 3 of 13 JSON tasks and 4 of 13 logs (Haiku: 6
+  and 6), but for 12 of 13 Figma files, like Haiku.
+
+**Run.** `results/dials-sonnet-synthetic.md` (208 runs, $22.25).
+
+## 8. The $0.00 invoice is now found
+
+**What we tried.** Two changes, checked with no model on every test output:
 
 - When the envelope finds no anomalies, it no longer says just "none". It lists what it checked
   and says there may be others: "none found by its rules (a line or a value few items hold, an
   error word few items hold, a number far from the rest), which is not proof there are none".
-- A new rule for logs and snapshots flags a number far from the others: either far outside the
-  usual range, or a zero where every other value is 10 or more. That catches a $0.00 amount among
+- A new rule for logs and snapshots flags a number far from the others: far outside the usual
+  range, or a zero where every other value is 10 or more. That catches a $0.00 amount among
   amounts of 20 to 900, but not the :00 in a timestamp, since minutes run from 0 to 59.
-- Layer 1: both $0.00 invoice tasks are now answerable, nothing else got worse, and nothing false
-  was stated. The envelope grew by about 25 tokens.
-- Not yet done: JSON doesn't have the zero rule. No model has seen the fix yet.
 
-## 9. When the model goes back to the full output, it mostly runs its own checks, not our commands
+**What happened.**
 
-From the transcripts of the runs in entries 6 and 7.
+| | before | after |
+|---|---|---|
+| $0.00 invoice tasks answerable from the envelope | 0 of 2 | 2 of 2 |
+| Other tasks that got worse | | none |
+| False statements | none | none |
+| Envelope size | | about 25 tokens larger |
+
+**What it means.** The envelope now shows the $0.00 invoice, and says plainly when it found
+nothing. Entry 11 checks whether models act on it.
+
+**Caveats.**
+- JSON does not have the zero rule yet.
+- A first draft flagged times of day in a log and hid some hidden Figma cards; both were fixed
+  before these checks.
+
+**Run.** `results/l1-3-schema.md`, `results/l1-3-sample.md`.
+
+## 9. When the model re-reads, it runs its own checks, not our commands
+
+**What we tried.** We read the transcripts of the runs in entries 6 and 7, and sorted every call
+the model made to the saved full output after it got the envelope.
+
+**What happened.**
 
 | | Sonnet | Haiku |
 |---|---|---|
-| Runs that went back to the full output | 51% | 72% |
-| …when the answer was already in the envelope | 40% | 66% |
+| Runs that re-read the full output | 53 of 104 | 75 of 104 |
+| …when the answer was already in the envelope | 34 of 85 | 56 of 85 |
 | Calls that ran a command the envelope suggested | 0% | 4% |
 | Calls that used the envelope's line numbers or paths, with the model's own command | 25% | 12% |
 | Calls that were the model's own search | 69% | 81% |
 | Calls that read the whole file | 1% | 3% |
 
-- Even when we offered a command for every group (`index`), Haiku ran one in only 8% of its calls.
-- Most of the model's own searches re-check what the envelope already said. For example, it
-  recounts the hidden Figma cards with `grep -c 'hidden="true"'` after the envelope counted them.
-- The line numbers do get used. For example, the model prints the lines around an anomaly the
-  envelope pointed to.
+**What it means.** The model mostly re-reads to double-check what the envelope said. For example,
+after the envelope counted the hidden Figma cards, it counted them again with
+`grep -c 'hidden="true"'`. It uses the envelope's line numbers, but hardly ever the commands we
+suggest: even when we offered one for every group (`index`), Haiku used one in only 8% of calls.
 
-What it means: the "get more" commands, as written, are mostly ignored. The model re-reads the
-full output to check the envelope, even when the answer is already there. To save more context,
-the next thing to try is getting the model to trust what the envelope says, not adding more to it.
+**Run.** The transcripts of `results/dials-sonnet-synthetic.md` and `results/dials-haiku-patterns.md`.
 
-## 10. Saying the counts are exact makes Haiku re-read much less, but saves almost no context
+## 10. Saying the counts are exact makes Haiku re-read less, but saves little context
 
-Run: `results/dials-haiku-banner.md` (312 runs, $2.00). Haiku on the 104 test tasks: native, the
-`schema` envelope with the usual banner, and the same envelope with one more sentence in the
-banner: "Every count and value in the envelope is exact, worked out over the whole output, not a
-sample: read the file only for what the envelope does not show."
+**What we tried.** Haiku on the 104 test tasks: native, `schema` with the usual banner, and
+`schema` with one more sentence in the banner: "Every count and value in the envelope is exact,
+worked out over the whole output, not a sample: read the file only for what the envelope does not
+show."
 
-| | usual banner | exact-counts banner |
-|---|---|---|
-| Runs that went back to the full output | 70 of 104 | 51 of 104 |
-| …when the answer was already in the envelope | 55 of 85 | 33 of 85 |
-| Answers right (native: 100 of 104) | 104 | 104 |
-| Final context, against native | 6,458 smaller | 6,158 smaller |
-| Cost, against native | 25% less | 25% less |
+**What happened.**
 
-- **The drop in re-reading is real.** 23 tasks were re-read only under the usual banner, and 4
-  only under the new one. That is very unlikely to be chance (p = 0.0003). It fell for every kind
-  of output except Figma XML (JSON 11 to 6 of 26, logs 16 to 11, snapshots 18 to 10, Figma 25 to
-  24).
-- **Answers didn't suffer**: both got all 104 right.
-- **But the context didn't shrink.** Most re-reads are small checks, like a `grep -c`, and add
-  only about 1,000 tokens. Runs that re-read ended at 47,400 tokens at the median, runs that
-  didn't at 46,400. So 19 fewer re-reads save about 200 tokens a run on average, too little to see.
-  This corrects entry 6, which said a re-read adds thousands: that only happens when the model
-  reads a whole file, as it does with Figma.
-- We predicted the new banner would cut re-reading, keep the answers, and shrink the context.
-  The first two happened; the third didn't.
+| Banner | answers right | context | cost | re-read |
+|---|---|---|---|---|
+| usual | 104 of 104 (native 100) | 6,458 tokens smaller | 25% cheaper | 70 of 104 (native 52) |
+| exact counts | 104 of 104 (native 100) | 6,158 tokens smaller | 25% cheaper | 51 of 104 (native 52) |
 
-What it means: the model can be talked into trusting the envelope, and it costs nothing in
-answers here. But on these tasks the envelope already saves most of what can be saved, and the
-checks the model drops are cheap ones. One risk to keep in mind: a model that trusts the envelope
-more would be hurt more by a miss like the $0.00 invoice (entry 7), which is why entry 8's
-"none found by its rules, which is not proof there are none" matters alongside this banner.
+When the answer was already in the envelope, 55 of 85 runs re-read under the usual banner, and 33
+under the new one.
+
+**What it means.** The model can be talked into trusting the envelope, at no cost in answers. But
+the re-reads it drops are cheap ones, so the context barely changes: on these tasks the envelope
+already saves most of what can be saved.
+
+**Caveats.**
+- The drop in re-reading is not chance: 23 tasks were re-read only under the usual banner, and 4
+  only under the new one (p = 0.0003). It fell for every kind of output except Figma XML.
+- Most re-reads are small checks: runs that re-read ended only about 1,000 tokens larger at the
+  median.
+- A model that trusts the envelope more is hurt more when the envelope misses something, so the
+  wording of entry 8 matters alongside this banner.
+
+**Run.** `results/dials-haiku-banner.md` (312 runs, $2.00).
