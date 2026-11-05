@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-04T16:59:00Z'
-updated_date: '2026-11-05T04:30:00Z'
+updated_date: '2026-11-05T04:32:00Z'
 labels:
   - tui
   - approval
@@ -65,4 +65,70 @@ Judge each key by when it arrived, not when it is processed. Textual 8.2.8's Lin
 
 <!-- SECTION:NOTES:BEGIN -->
 Plan note: AC3's test is test_keys_typed_as_the_modal_comes_up_do_not_answer_it in bh-02/app/tests/test_real_launch.py (real_launch: the real app in a pty, so its keys come through the driver's input thread, as a person's do).
+
+Repro at e121e6f758af, test files: bh-02/plugins/tui-cordis-plugin/tests/test_tui_key_time.py; command: `uv run pytest bh-02/plugins/tui-cordis-plugin/tests/test_tui_key_time.py -q` exited 1
+
+(94 earlier lines omitted)
+```text
+╭───────────────────── Traceback (most recent call last) ──────────────────────╮
+│ /home/user/bh-02/.claude/worktrees/agent-a09be7ed4005c7078/bh-02/plugins/tui │
+│ -cordis-plugin/src/tui_cordis_plugin/widgets/choice.py:52 in on_key          │
+│                                                                              │
+│   49 │   │   │   self.action_answer(str(self.question.get("escape", "")))    │
+│   50 │   │   elif key in self._values:                                       │
+│   51 │   │   │   event.stop()                                                │
+│ ❱ 52 │   │   │   self.action_answer(self._values[key])                       │
+│   53                                                                         │
+│                                                                              │
+│ ╭───────────────────────────── locals ─────────────────────────────╮         │
+│ │ event = Key(key='n', character='n', name='n', is_printable=True) │         │
+│ │   key = 'n'                                                      │         │
+│ │  self = ChoiceScreen()                                           │         │
+│ ╰──────────────────────────────────────────────────────────────────╯         │
+│                                                                              │
+│ /home/user/bh-02/.claude/worktrees/agent-a09be7ed4005c7078/bh-02/plugins/tui │
+│ -cordis-plugin/src/tui_cordis_plugin/widgets/approval.py:142 in              │
+│ action_answer                                                                │
+│                                                                              │
+│   139 │   def action_answer(self, answer: T) -> None:                        │
+│   140 │   │   """Answer, unless the modal was shown too recently for the key │
+│   141 │   │   if self._armed:                                                │
+│ ❱ 142 │   │   │   self.dismiss(answer)                                       │
+│   143                                                                        │
+│                                                                              │
+│ ╭──────── locals ─────────╮                                                  │
+│ │ answer = 'no'           │                                                  │
+│ │   self = ChoiceScreen() │                                                  │
+│ ╰─────────────────────────╯                                                  │
+│                                                                              │
+│ /home/user/bh-02/.claude/worktrees/agent-a09be7ed4005c7078/.venv/lib/python3 │
+│ .15/site-packages/textual/app.py:3105 in pop_screen                          │
+│                                                                              │
+│   3102 │   │                                                                 │
+│   3103 │   │   screen_stack = self._screen_stack                             │
+│   3104 │   │   if len(screen_stack) <= 1:                                    │
+│ ❱ 3105 │   │   │   raise ScreenStackError(                                   │
+│   3106 │   │   │   │   "Can't pop screen; there must be at least one screen  │
+│   3107 │   │   │   )                                                         │
+│   3108                                                                       │
+│                                                                              │
+│ ╭──────────────────────────── locals ─────────────────────────────╮          │
+│ │ screen_stack = [Screen(id='_default')]                          │          │
+│ │         self = BhApp(                                           │          │
+│ │                │   title='bh-02',                               │          │
+│ │                │   classes={                                    │          │
+│ │                │   │   '-theme-bh-01-dark',                     │          │
+│ │                │   │   '-dark-mode'                             │          │
+│ │                │   },                                           │          │
+│ │                │   pseudo_classes={'focus', 'dark'}             │          │
+│ │                )                                                │          │
+│ ╰─────────────────────────────────────────────────────────────────╯          │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ScreenStackError: Can't pop screen; there must be at least one screen on the 
+stack
+=========================== short test summary info ============================
+FAILED bh-02/plugins/tui-cordis-plugin/tests/test_tui_key_time.py::test_keys_queued_before_the_grace_ended_do_not_answer_the_approval_when_read_late
+FAILED bh-02/plugins/tui-cordis-plugin/tests/test_tui_key_time.py::test_keys_queued_before_the_grace_ended_do_not_answer_the_choice_when_read_late
+2 failed in 1.94s
+```
 <!-- SECTION:NOTES:END -->
