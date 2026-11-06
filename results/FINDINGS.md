@@ -2,10 +2,26 @@
 
 When a tool returns a large output, such as a long log or a big JSON response, Claude Code either
 puts all of it into the model's context or, if it is larger than Claude Code's limit, saves it to a
-file and shows the model a short preview. We tested a third option. A Claude Code hook, a
-script that runs after every tool call, replaces each large output with a short summary, which we
-call an envelope, and saves the full output to a file that the model can still open. We wanted to know whether the model still answers correctly with the
-envelope, and how much context it saves.
+file and shows the model a short preview. We tested a third option. A Claude Code hook, a script
+that runs after every tool call, replaces each large output with a short summary, which we call an
+envelope, and saves the full output to a file that the model can still open. We wanted to know
+whether the model still answers correctly with the envelope, and how much context it saves.
+
+## Summary
+
+<!-- stats: 104 of 104=questions answered correctly with the envelope, against 100 without it; 6,158=fewer tokens of context per run; 25%=lower cost per run | Haiku on all 104 test tasks, with the final version of the envelope -->
+
+- With the envelope, Haiku and Sonnet answered at least as many questions correctly as without it,
+  and every run used less context and cost less. [Results](#results)
+- The envelope is a short summary in four labelled sections: exact counts, the items that differ
+  from the rest, items copied from the output, and commands for reading the rest.
+  [How the envelope works](#how-the-envelope-works)
+- A separate program checks every envelope against the full output before a model sees it, and it
+  has found no mistakes. [How we check the envelope](#how-we-check-the-envelope)
+- Fixed rules decide what goes into the envelope, so it can miss a problem that no rule describes.
+  [Heuristics](#heuristics)
+- The model still opens the full output in about half the runs, mostly to check what the envelope
+  said. [How often the model opens the full output](#how-often-the-model-opens-the-full-output)
 
 ## Results
 
@@ -20,7 +36,9 @@ does not. Forty of the tasks ask the model to find a problem in the output, whic
 summary is most likely to hide something.
 
 Each task ran twice in Claude Code, once with the hook and once without it, and we compared the two
-runs task by task. We ran the final version of the envelope three times:
+runs task by task. We ran the final version of the envelope three times.
+
+<!-- chart: paired | Questions answered correctly -->
 
 | Answers right | With the envelope | Without |
 |---|---|---|
@@ -28,14 +46,16 @@ runs task by task. We ran the final version of the envelope three times:
 | Haiku, 40 find-the-problem tasks, each run twice | 80 of 80 | 72 of 80 |
 | Sonnet, 40 find-the-problem tasks | 40 of 40 | 39 of 40 |
 
+<!-- chart: bars 1 | Tokens of context the envelope saved per run -->
+
 | What the envelope saved per run | Context | Cost |
 |---|---|---|
 | Haiku, all 104 tasks | 6,158 tokens | 25% |
 | Haiku, 40 find-the-problem tasks, each run twice | 7,267 tokens | 29% |
 | Sonnet, 40 find-the-problem tasks | 8,164 tokens | 26% |
 
-Context here is the number of tokens the model read on its last request, and cost is what the API
-charged for the run.
+Context here is the number of tokens the model read on its last request. Each run also cost 25 to
+29% less, as charged by the API.
 
 Before the runs, we decided that the envelope would pass if correct answers fell by no more than 3
 percentage points and the context got smaller. Haiku passed on both counts. Sonnet used less
@@ -51,22 +71,24 @@ to search the saved file.
 How much the envelope saves depends on the size of the output. Without the envelope, the model holds
 a medium output in full, so replacing it saves more. A large output is already replaced by a
 preview, and the model searches the file for what it needs. These are Haiku's 104 tasks split by
-size:
+size.
+
+<!-- chart: bars 1 | Tokens saved per run, by output size -->
 
 | Output size | Tokens saved per run | Cost saved | Time per run |
 |---|---|---|---|
 | Medium | 9,185 | 18% | 3.0 s slower |
 | Large | 3,131 | 31% | 8.9 s faster |
 
-Medium runs took longer because the model often opened the full output after reading the envelope.
+Medium runs cost 18% less but took about 3 seconds longer, because the model often opened the full
+output after reading the envelope. Large runs cost 31% less and were about 9 seconds faster.
 
 ## How the envelope works
 
 <!-- figure: envelope-flow -->
 
 When a tool's output is larger than 2,000 tokens, the hook saves the output to a file and gives the
-model an envelope in its place. The envelope has four sections, each
-labelled in the text:
+model an envelope in its place. The envelope has four sections, each labelled in the text:
 
 - `shape:` describes the output and gives exact counts, worked out over the whole output.
 - `anomalies:` lists the items that differ from the rest, with the position of each in the output.
@@ -76,13 +98,16 @@ labelled in the text:
 A banner above the four sections says where the full output is saved. It also tells the model that
 every count is exact and that it should open the file only for what the envelope does not show.
 
-Here is a real envelope. A tool returned a list of 100 invoices as JSON, about 2,800 tokens long,
-and the tool call asked about invoice INV-1024. The hook's own code turned it into this banner and
-envelope, about 140 tokens in all:
+Here is a real envelope. A tool returned a list of 100 invoices as JSON, and the tool call asked
+about invoice INV-1024. The hook's own code turned the list into this banner and envelope.
+
+<!-- chart: scale The list of invoices=2772; The banner and envelope=143 | Size in tokens -->
 
 ```
 [Folded: ~2772 tokens -> ~143. Full output: /tmp/tool-results/invoices.json. This is the data's envelope: its shape (fields, values and counts), the rows that break it, samples, and how to get more, by jq path (jq). FILE in a command is /tmp/tool-results/invoices.json. Every count and value in the envelope is exact, worked out over the whole output, not a sample: read the file only for what the envelope does not show.]
 ```
+
+<!-- annotated -->
 
 ```
 shape:
@@ -101,12 +126,13 @@ get more:
   jq '.invoices[16]' FILE  (reads any path above)
 ```
 
-Read from the top, it says that the list holds 100 invoices with four fields each, that every
-customer has 20 invoices, and that 98 invoices are paid and 2 are overdue. The two overdue invoices
-are listed with their positions in the list, and "all listed" means there are no others. Invoice
-INV-1024 is copied exactly as it appears, because the tool call named it. The first command prints
-the id of every unpaid invoice, the second reads any single invoice, and `FILE` stands for the
-saved file.
+- `shape:` The list holds 100 invoices with four fields each. Every customer has 20 invoices, and
+  98 invoices are paid while 2 are overdue.
+- `anomalies:` The two overdue invoices, with their positions in the list. "All listed" means
+  there are no others.
+- `samples:` Invoice INV-1024, copied exactly as it appears, because the tool call named it.
+- `get more:` A command that prints the id of every unpaid invoice, and one that reads any single
+  invoice. `FILE` stands for the saved file.
 
 When nothing in the output stands out, the `anomalies:` section says which checks it ran, and that
 passing them does not prove there is no problem. This is what it says for the same list with every
@@ -118,9 +144,16 @@ anomalies: none found by its rules (a value few rows hold where one dominates, a
 
 ### Logs, page snapshots and other outputs
 
+The hook builds envelopes with the same four sections for logs, page snapshots, XML, web pages,
+plain text and source code.
+
+<!-- more: Show the envelopes of a web server log and a page snapshot -->
+
 A log is read line by line. The envelope groups lines that follow the same pattern, where a pattern
 is a line with every word that contains a digit or an id replaced by `<*>`. This is the envelope of
-a web server log of 300 lines:
+a web server log of 300 lines.
+
+<!-- pair -->
 
 ```
 shape: 300 lines, 5 line templates (<*> is a token holding a digit, or a hex id)
@@ -145,7 +178,9 @@ command that prints exactly those three.
 
 For an output with an indented structure, such as an accessibility snapshot of a web page, the
 envelope shows the outline and counts groups of similar items. This is the envelope of a snapshot
-of a page that lists 150 invoices:
+of a page that lists 150 invoices.
+
+<!-- pair -->
 
 ```
 shape: 610 lines, 15 line templates (<*> is a token holding a digit, a hex id or a quoted string)
@@ -183,8 +218,9 @@ The outline shows the top of the page, then says that lines 9 to 608 hold a list
 items. Three of the items have a disabled Pay button, so the envelope shows those three items in
 full.
 
-The hook builds envelopes in the same way for XML, web pages, plain text and source code. For source
-code, the outline is the code's classes and functions.
+For source code, the outline is the code's classes and functions.
+
+<!-- /more -->
 
 ### How the envelope fits its budget
 
@@ -215,8 +251,12 @@ the saved file. These are the counts for the medium and large test outputs:
 | A question about one item the tool call names | 16 of 16 |
 
 The envelope cannot answer a question about a particular item unless that item stands out or the
-tool call names it, because those are the only items it copies. Real outputs are less regular than
-our test outputs, so fewer questions about them can be answered from the envelope alone:
+tool call names it, because those are the only items it copies.
+
+<!-- more: Show how many questions about real outputs the envelope answers alone -->
+
+Real outputs are less regular than our test outputs, so fewer questions about them can be answered
+from the envelope alone:
 
 | Real output | Answerable from the envelope alone |
 |---|---|
@@ -229,35 +269,69 @@ our test outputs, so fewer questions about them can be answered from the envelop
 
 For the list of countries, all 3 questions can be answered when the tool call names the country.
 
+<!-- /more -->
+
 ## Heuristics
 
 The hook decides everything in an envelope with fixed rules, and no model is involved. We set the
 thresholds by hand and checked them on our test outputs, but we have not tuned them
 systematically.
 
-| Decision | Rule |
-|---|---|
-| When to build an envelope | When the output is over 2,000 tokens, and only if the envelope is at most 90% of the output's size |
-| When lines follow the same pattern | When they match after every word that contains a digit, or an id of six or more hex characters, is replaced by `<*>` |
-| Which numbers are measurements | Numbers of six or more digits, such as sizes and timestamps, which are never treated as categories or as outliers |
-| Which log lines are unusual | A pattern on 1% of the lines or fewer, or a pattern with an error word on 10% of the lines or fewer |
-| Which JSON rows are unusual | When 75% or more of the rows share a value, the rows whose own value is on 10% of the rows or fewer. Also rows that have a key only 10% of rows have, lack a key 90% have, or hold a value of another type |
-| Which items in a page snapshot are unusual | Items that hold a line or a value found in 20% of the items or fewer |
-| Which numbers are unusual | Numbers more than three interquartile ranges outside the middle half. In logs and page snapshots, also a zero or a negative where every other value is 10 or more |
-| Which words mark an error | A fixed list that includes error, failed, fatal, exception, traceback, panic, crash, timeout, denied and invalid |
-| Which items are copied | Items that contain a word from the tool call, skipping words that more than 5% of the lines, or 20% of JSON rows, contain |
-| How many unusual items are listed | Up to 25 per JSON list, and fewer when the budget is tight. The envelope gives the total and says how many it lists |
-| What is cut | Lines longer than 300 characters, and the envelope says how many characters it cut. JSON values are cut at 60 characters |
+<!-- grid -->
+
+### Every output
+
+- **When to build an envelope.** When the output is over 2,000 tokens, and only if the envelope is
+  at most 90% of the output's size.
+- **Measurements.** Numbers of six or more digits, such as sizes and timestamps, are never treated
+  as categories or as outliers.
+- **Unusual numbers.** A number more than three interquartile ranges outside the middle half.
+- **Error words.** A fixed list that includes error, failed, fatal, exception, traceback, panic,
+  crash, timeout, denied and invalid.
+- **Copied items.** Items that contain a word from the tool call, skipping words that more than 5%
+  of the lines, or 20% of JSON rows, contain.
+
+### Logs and other line-by-line output
+
+- **Patterns.** Two lines follow the same pattern when they match after every word that contains a
+  digit, or an id of six or more hex characters, is replaced by `<*>`.
+- **Unusual lines.** A pattern on 1% of the lines or fewer, or a pattern with an error word on 10%
+  of the lines or fewer.
+- **Unusual values.** In a `<*>` that holds six values or fewer, where one value is on 80% or more
+  of the pattern's lines, a value on 2% of its lines or fewer.
+- **Zeros.** A zero or a negative where every other value is 10 or more.
+- **Long lines.** Cut at 300 characters, and the envelope says how many characters it cut.
+
+### JSON
+
+- **Unusual rows.** When 75% or more of the rows share a value, the rows whose own value is on 10%
+  of the rows or fewer.
+- **Unusual keys.** Rows that have a key only 10% of rows have, or lack a key 90% have.
+- **Unusual types.** A value of another type than the rest of its field.
+- **How many are listed.** Up to 25 unusual rows per list, and fewer when the budget is tight. The
+  envelope gives the total and says how many it lists.
+- **Long values.** Cut at 60 characters.
+
+### Page snapshots and other outlines
+
+- **Groups.** A node with five or more children, 60% or more of whose first lines follow one
+  pattern, is a group of similar items. Quoted text also counts as `<*>`.
+- **Unusual items.** Items that hold a line or a value found in 20% of the items or fewer.
+- **Error lines.** A line with an error word, when 10% of the items or fewer have one.
+- **Zeros.** A zero or a negative where every other value is 10 or more.
+
+<!-- /grid -->
 
 Because the rules are fixed, the envelope finds the kinds of problem they describe and can miss
 others. The checking program shows that what an envelope says is true, but it cannot show that the
 envelope found everything. We planted the problems in our test outputs ourselves, knowing the
 rules, so the test tasks are likely kinder to the envelope than real outputs are.
 
-The $0.00 invoice described below was a problem that no rule covered until we added the rule for zeros, and on a real
-Hadoop server log, whose problems were labelled by the people who published it, only 10 of 20
-questions could be answered from the envelope alone. This is why, when the envelope finds nothing
-unusual, it lists the checks it ran and says that they do not prove there is no problem.
+The $0.00 invoice described below was a problem that no rule covered until we added the rule for
+zeros, and on a real Hadoop server log, whose problems were labelled by the people who published
+it, only 10 of 20 questions could be answered from the envelope alone. This is why, when the
+envelope finds nothing unusual, it lists the checks it ran and says that they do not prove there is
+no problem.
 
 ## Other measurements
 
@@ -297,6 +371,8 @@ opens it anyway. Without the envelope, it opens the file for each of the 52 larg
 it only has a preview. Adding a sentence to the banner that says every count is exact made Haiku
 open the file less often, and it lost no answers.
 
+<!-- chart: paired | Runs that opened the full output -->
+
 | Runs that opened the full output | With the envelope | Without |
 |---|---|---|
 | Haiku, banner without the sentence | 70 of 104 | 52 of 104 |
@@ -308,20 +384,27 @@ searches that add about 1,000 tokens.
 
 When the model opened the file, it mostly ran its own searches to check what the envelope had said.
 For example, after the envelope had counted the hidden cards in a Figma file, the model counted
-them again with `grep`. It seldom used the commands in `get more:`.
+them again with `grep`. It used line numbers from the envelope in 12 to 27% of its reads, and it
+seldom ran the commands in `get more:`.
 
-| What the model's read of the file did | Sonnet | Haiku |
+<!-- chart: stacked | What the model's reads of the saved file did -->
+
+| What the read did | Sonnet, 88 reads | Haiku, 113 reads |
 |---|---|---|
 | Ran a command from `get more:` | 0% | 4% |
-| Used line numbers from the envelope in its own command | 25% | 12% |
-| Ran its own search | 69% | 81% |
+| Used line numbers from the envelope | 27% | 12% |
+| Ran its own search | 72% | 81% |
 | Read the whole file | 1% | 3% |
 
 ### Other versions of the envelope
 
-We compared four versions of the envelope on Haiku, all built by the same code. The base version is
-the final version before the two changes for the $0.00 invoice and the banner sentence. The others
-change it in one way each:
+We compared the final version's base with four other versions on Haiku, and none did clearly
+better.
+
+<!-- more: Show the five versions and how each did -->
+
+All five versions are built by the same code. The base version is the final version before the two
+changes for the $0.00 invoice and the banner sentence. The others change it in one way each:
 
 - The version with an example item also copies one ordinary item.
 - The shorter version has a shorter `shape:` section and copies no items.
@@ -341,6 +424,8 @@ output where the base version copies the items the tool call names. In that run,
 tasks correctly and saved 7,390 tokens per run, against 6,688 for the base version, but it opened
 the file in 87 runs against 72. The shorter version made Haiku open the file more often, so it saved
 less than the base version. The differences were small, so we kept the base version.
+
+<!-- /more -->
 
 ## What is not settled
 
@@ -371,9 +456,13 @@ less than the base version. The differences were small, so we kept the base vers
 
 ## How we tested
 
+<!-- more: Headless Claude Code with Haiku and Sonnet, about $43 of model runs in all -->
+
 The model runs used headless Claude Code (`claude -p`) with Haiku and with Sonnet, and cost about
 $43 in all. Token counts and costs come from the API's own figures. The 95% ranges for correct
 answers use Newcombe's method for paired results, and those for tokens and cost use the bootstrap.
 The checking program runs without a model, so it costs nothing, and it ran on every version of the
 envelope before any model saw it. The example envelopes on this page were made by the hook's own
 code.
+
+<!-- /more -->
