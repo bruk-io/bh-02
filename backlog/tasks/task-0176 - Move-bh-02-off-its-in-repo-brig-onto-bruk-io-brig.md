@@ -1,7 +1,7 @@
 ---
 id: TASK-0176
 title: Move bh-02 off its in-repo brig onto bruk-io/brig
-status: To Do
+status: Done
 assignee:
   - '@bruk'
 created_date: '2026-10-31T03:54:00Z'
@@ -128,4 +128,6 @@ INFO    -  Documentation built in 2.02 seconds
 == tokens
    skipped: no /home/user/bh-01/dist (bh-01, built, beside this repository)
 ```
+
+Closed by reviewer 2026-11-06 on 0d010b0. AC1: libs/ has only cordis, cordis-helpers, host-paths; no docs/brig; no line naming libs/brig, docs/brig or the old brig's modules outside backlog/ and ignored caches (.hypothesis, .pypeeker, site); uv.lock and pyproject pin bruk-io/brig 695a12b. AC2: test_runner_confined.py:2224 test_interrupting_a_running_input_reaches_the_program_and_the_program_survives_it. AC3: test_runner_confined.py:2180 test_one_jail_cannot_dial_another_jail_s_channel (planted dial). AC4: SELF_MODIFYING in runner_cordis_plugin.policy, credential paths in grants.py/policy.py. AC5: record-check full, scripts/check exit 0, 2794 passed; linux-jail-check per 4406a45 evidence (535 passed each mode), only board commits since. AC6: jail.py:420-444 refuses on darwin naming runner:unconfined, tested at test_runner_confined.py:1771; grades from brig with planned no stronger, test_runner_confined.py:1924. Carried-forward open question: settled, the swap pins 695a12b and was planned and re-checked against it. Finding (low): the darwin refusal and docs still name archived TASK-0176.05 instead of TASK-0196 (jail.py:7, :428, runner README:252, test :1771); filed as a draft.
 <!-- SECTION:NOTES:END -->
