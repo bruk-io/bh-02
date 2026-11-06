@@ -102,7 +102,7 @@ of problem, and the seal on the test set.
 | # | Stage | Needs a model | Status |
 |---|---|---|---|
 | V0 | The design, and the seal: sealed seeds from a key kept outside the repository, its SHA-256 committed, a ledger of builds and runs, each set run once (`scenarios/seal.py`, `./lab seal`) | no | done: no key made yet |
-| V1 | Which large outputs real sessions produce: tools, formats and sizes, from Claude Code transcripts (`harness/extract`) | no | |
+| V1 | Which large outputs real sessions produce: tools, formats and sizes, from Claude Code transcripts (`harness/extract`) | no | in part: one session (`results/v1-survey.md`): 64 of 84 large outputs are file views, all under 9,000 tokens; other people's sessions needed |
 | V2 | The code-and-tests family: a generated package and history with a seeded regression, real `pytest` and `git` | no | |
 | V3 | A pilot without the hook on the open seeds; keep the templates Claude Code alone gets right 20 to 80% of the time | yes | |
 | V4 | The failure-mode set: problems no rule sees, with and without the exact-counts banner | yes | |

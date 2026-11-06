@@ -36,6 +36,19 @@ the generator writes the repository, and the tools are the real commands. Its tr
 construction (which commit broke which tests) and confirmed by running the tests when the world is
 built.
 
+## The mix, from real sessions
+
+One real session so far (`results/v1-survey.md`, this research's own): 84 of its 2,364 tool results
+were over the hook's threshold, and 64 of those were file views (Bash `sed -n`, `cat` and `head`,
+and the Read tool), at 2,000 to 9,000 tokens. Claude Code cuts long Bash output and pages long
+files, so outputs past 12,500 tokens come from MCP tools, which it saves to a file.
+
+So the code-and-tests family leans on reading files (source, docs, generated reports) and acting on
+what was read: a question about a file, then an edit to it, which needs the exact text and is where
+folding a file view could cost more than it saves. Test runs, searches and git history come next,
+at the sizes the survey found. Incident triage covers the larger MCP outputs. One session by one
+agent is not a mix to settle on: other people's sessions come next.
+
 ## Difficulty
 
 Every task template states each of these, so tasks can be chosen where Claude Code without the hook
