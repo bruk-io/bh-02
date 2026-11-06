@@ -43,7 +43,7 @@ bh-02 still jails the model's code with its own copy of brig (`libs/brig`, the o
 - [x] #1 bh-02's runner jails through brig from bruk-io/brig, a git dependency pinned to one commit, and nothing in the workspace imports, tests, gates or documents the old brig: libs/brig, docs/brig and every line naming them are gone
 - [x] #2 Must not break: interrupting a running input reaches the program in the jail (SIGINT), as today
 - [x] #3 Must not break: no jail can reach another jail's channel, another session's included, with a test that plants the attempt
-- [ ] #4 What bh-02 alone knows (the self-modification list, the credential paths) lives in the runner plugin, not in brig
+- [x] #4 What bh-02 alone knows (the self-modification list, the credential paths) lives in the runner plugin, not in brig
 - [ ] #5 scripts/check and scripts/linux-jail-check pass
 - [ ] #6 Must not break: runner:confined confines on Linux, and on darwin refuses to start and names runner:unconfined until TASK-0176.05 lands Seatbelt; each of the status bar's four axes (fs_write, network, fs_read, env) is graded by brig, with no axis stronger than what a test shows
 <!-- AC:END -->
