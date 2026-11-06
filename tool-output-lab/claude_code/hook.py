@@ -44,6 +44,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+from compressors.code import language_for
 from compressors.common import estimate_tokens, query_terms
 from compressors.config import DEFAULT, FoldConfig, load, with_sets
 from compressors.route import Folded, fold
@@ -262,6 +263,22 @@ class Outcome:
     reply: dict[str, Any] | None
 
 
+_VIEW = re.compile(
+    r"^\s*(?:cd\s+\S+\s*&&\s*)?"  # a change of directory first is still a view of one file
+    r"(?:cat|head(?:\s+-n\s*\d+|\s+-\d+)?|sed\s+-n\s+['\"]?1,\d+p['\"]?)"
+    r"\s+(?P<path>[^\s|;&<>'\"]+)\s*$"
+)
+
+
+def viewed_file(command: str) -> str | None:
+    """The file a Bash command prints whole from its first line (`cat F`, `head [-n N] F`,
+    `sed -n '1,Np' F`), or None. Its line numbers are the file's, so a view of source code can fold
+    as code. A view that starts further in (`tail`, `sed -n '120,200p'`) is not one: its numbers
+    would not be the file's, and an edit made from them would land in the wrong place."""
+    m = _VIEW.match(command)
+    return m["path"] if m else None
+
+
 def digest(text: str) -> str:
     """A short digest of a result's text, for the log: enough to tell one output from another."""
     return hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest()[:16]
@@ -278,8 +295,11 @@ def decide(
 ) -> Outcome:
     """The fold, and where its banner points: Claude Code's own file for a spill, a saved copy of
     the raw for an inline result, and a saved view when the line numbers refer to one."""
-    terms = query_terms(event.get("tool_input") or {})
-    folded = fold(raw, budget_tokens=budget, terms=terms, view=view, config=config)
+    tool_input = event.get("tool_input") or {}
+    terms = query_terms(tool_input)
+    viewed = viewed_file(str(tool_input.get("command", ""))) if event.get("tool_name") == "Bash" else None
+    language = (language_for(viewed) or "") if viewed else ""
+    folded = fold(raw, budget_tokens=budget, terms=terms, view=view, config=config, language=language)
     log = {
         "tool": event.get("tool_name"),
         "tool_use_id": event.get("tool_use_id"),

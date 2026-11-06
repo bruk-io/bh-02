@@ -36,6 +36,34 @@ the generator writes the repository, and the tools are the real commands. Its tr
 construction (which commit broke which tests) and confirmed by running the tests when the world is
 built.
 
+## The code-and-tests family, as built
+
+`scenarios/code.py` builds a world from a seed and a size (M or L): rule modules (one or two of
+them big, so reading a whole file makes a large output), totals modules that call the rules, tests
+with cases below, at and above each threshold, and a git history with one regression commit. Its
+five tasks, each with the commands its answer usually needs:
+
+| Task | What it asks | Commands | Truth |
+|---|---|---|---|
+| failing | every failing test, by pytest id | `./run-tests`, `./run-tests -v` | the tests the regression breaks, worked out from the rules and confirmed by running them |
+| commit | the commit that broke them | `git log`, `git log -p`, `git log --stat` | the regression's hash (any 7 or more characters of it) |
+| callers | the functions that call the broken rule | `grep -rn` | from the totals modules' calls; a control, since its outputs are small |
+| lookup | a rule's threshold, read from the code | `cat` or `sed -n '1,400p'` of the big module | the constant |
+| edit | add a keyword-only parameter to a rule | `cat` of the big module | checked with `ast`: the parameter is there, and nothing else changed |
+
+`./lab scenarios --size M` (or L) builds five open seeds and runs layer 1 on every command's real
+output (`results/scenarios-l1-code-M.md` and `-L.md`). No fold stated anything false. The
+envelopes name every failing test; they never point to the breaking commit in `git log -p`, where
+the regression is a changed operator in a diff that no rule sees; and before the fix below, a whole
+file read with `cat` folded as a log, with no definitions in it.
+
+The fix, found on open seeds: the hook now folds a Bash command that prints a whole file from its
+first line (`cat F`, `head F`, `sed -n '1,Np' F`) as code when the file's extension names a
+language, so the envelope lists the definitions with their line numbers. Edits then always find
+their start in the envelope. A view that starts further in is left as it was, since its line
+numbers are not the file's. Lookups mostly still need a fetch: the thresholds are module constants,
+which the code envelope does not list.
+
 ## The mix, from real sessions
 
 One real session so far (`results/v1-survey.md`, this research's own): 84 of its 2,364 tool results
