@@ -20,7 +20,8 @@ def test_a_source_whose_file_is_missing_is_left_out_and_named_with_the_reason(mo
 
 def test_every_source_this_host_has_is_in_the_registry():
     built = {t.fmt for t in tasks()}
-    assert {"python", "rust", "xml", "pypi"} - built == set(skipped())
+    sources = {"python", "rust", "xml", "pypi", "hdfs", "atlas"}  # python-edit reads the python files
+    assert sources - built == set(skipped()) - {"python-edit"}
 
 
 def test_a_planted_log_line_is_named_by_its_order_or_its_request_not_its_user():
