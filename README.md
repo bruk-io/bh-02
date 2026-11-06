@@ -59,6 +59,8 @@ intervals.
 ./lab check                                       # green: format and lint checked, strict mypy, tests (Python 3.15 through uv)
 ./lab fix                                         # apply the formatter and ruff's safe fixes
 ./lab fetch mcp-atlas                             # the MCP-Atlas tasks into corpus/real/ (untracked)
+./lab fetch hdfs                                  # the HDFS log and its labels into corpus/real/ (untracked)
+curl -sSo corpus/real/pypi-click.json https://pypi.org/pypi/click/json   # the PyPI release JSON (untracked)
 ./lab evals l1 --only json pypi atlas [--view schema] [--set KNOB=VALUE]   # layer 1: fold and check (free)
 ./lab evals sweep sweeps/envelopes.toml           # layer 1 over a grid of compositions (free; logs.toml, trees.toml)
 ./lab evals dials dials/haiku-atlas.toml --dry-run   # layer 2: native against each composition (paid)

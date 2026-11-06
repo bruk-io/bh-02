@@ -5,7 +5,7 @@ import pytest
 
 from compressors.config import DEFAULT, with_sets
 from evals.l1 import check, report
-from evals.tasks import tasks
+from evals.tasks import skipped, tasks
 
 _BY_ID = {t.task_id: t for t in tasks()}
 
@@ -55,6 +55,9 @@ def test_an_anomaly_the_fold_has_a_rule_for_is_in_view_and_none_is_ever_invented
     ],
 )
 def test_cases_the_layer_1_fixes_made_sufficient(task_id, query_on):
+    source = task_id.split("-", 1)[0]
+    if source in skipped():
+        pytest.skip(f"{skipped()[source]}: fetch it as README.md's Running section says")
     assert check(_BY_ID[task_id], 2000, query_on).sufficient
 
 
