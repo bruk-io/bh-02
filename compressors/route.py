@@ -133,6 +133,7 @@ def _body(
     budget_tokens: int,
     config: FoldConfig,
     view: str = "sample",
+    language: str = "",
 ) -> tuple[str, str | None]:
     """The folded text, and the text its line numbers refer to when that is not `raw`.
 
@@ -157,6 +158,10 @@ def _body(
             return env.text(), source
         case (("lines" | "outline" | "text"), None):
             return lines_envelope(raw, branch, terms, budget_tokens, config, view)[0].text(), None
+        case "code", None:
+            return lines_envelope(raw, "code", terms, budget_tokens, config, view, language=language)[
+                0
+            ].text(), None
         case _:
             raise AssertionError(f"branch {branch!r} reached the fold without what it parses")
 
@@ -179,6 +184,7 @@ def fold(
     force: str | None = None,
     view: str = "sample",
     config: FoldConfig = DEFAULT,
+    language: str = "",
 ) -> Folded | None:
     """The folded body of a large result, or None when it should pass through untouched.
 
@@ -187,7 +193,8 @@ def fold(
     arguments); `force` names the branch instead of detecting it; `view` says how a data branch
     shows its data: the recipe of a JSON envelope (`compressors.envelope_json`), sample or schema,
     whose parts the `json_envelope` knobs can change one by one; `config` holds the knobs
-    (`compressors.config`). A `force` the text cannot
+    (`compressors.config`); `language` folds the text as source code in that language, by its
+    definitions (a whole file whose path names the language). A `force` the text cannot
     take (JSON that does not parse, XML that is not well formed) or that is no branch at all raises
     ValueError, from `_parse_as`.
 
@@ -200,8 +207,11 @@ def fold(
     raw = raw.removeprefix(_BOM)  # it defeats JSON and XML detection, and dropping it moves no line
     if view not in VIEWS:
         raise ValueError(f"unknown view {view!r}: use {' or '.join(VIEWS)}")
-    branch, parsed = _parse_as(force, raw) if force else _detect(raw)
-    body, source = _body(branch, parsed, raw, terms, budget_tokens, config, view)
+    if language:
+        branch, parsed = "code", None
+    else:
+        branch, parsed = _parse_as(force, raw) if force else _detect(raw)
+    body, source = _body(branch, parsed, raw, terms, budget_tokens, config, view, language)
     if not body.strip() or estimate_tokens(body) > raw_tokens * config.worth_it:  # shows nothing, or too much
         return None
     return Folded(branch, body, raw_tokens, source)

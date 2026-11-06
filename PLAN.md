@@ -103,7 +103,7 @@ of problem, and the seal on the test set.
 |---|---|---|---|
 | V0 | The design, and the seal: sealed seeds from a key kept outside the repository, its SHA-256 committed, a ledger of builds and runs, each set run once (`scenarios/seal.py`, `./lab seal`) | no | done: no key made yet |
 | V1 | Which large outputs real sessions produce: tools, formats and sizes, from Claude Code transcripts (`harness/extract`) | no | in part: one session (`results/v1-survey.md`): 64 of 84 large outputs are file views, all under 9,000 tokens; other people's sessions needed |
-| V2 | The code-and-tests family: a generated package and history with a seeded regression, real `pytest` and `git` | no | |
+| V2 | The code-and-tests family: a generated package and history with a seeded regression, real `pytest` and `git` | no | done: five tasks; layer 1 on five open seeds at M and L, no fold false (`results/scenarios-l1-code-M.md`, `-L.md`); it found that a whole file read with `cat` folded as a log, and the hook now folds it as code |
 | V3 | A pilot without the hook on the open seeds; keep the templates Claude Code alone gets right 20 to 80% of the time | yes | |
 | V4 | The failure-mode set: problems no rule sees, with and without the exact-counts banner | yes | |
 | V5 | The incident-triage family, served with FastMCP; sessions of follow-up questions | yes | |
