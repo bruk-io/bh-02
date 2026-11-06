@@ -229,6 +229,36 @@ our test outputs, so fewer questions about them can be answered from the envelop
 
 For the list of countries, all 3 questions can be answered when the tool call names the country.
 
+## Heuristics
+
+The hook decides everything in an envelope with fixed rules, and no model is involved. We set the
+thresholds by hand and checked them on our test outputs, but we have not tuned them
+systematically.
+
+| Decision | Rule |
+|---|---|
+| When to build an envelope | When the output is over 2,000 tokens, and only if the envelope is at most 90% of the output's size |
+| When lines follow the same pattern | When they match after every word that contains a digit, or an id of six or more hex characters, is replaced by `<*>` |
+| Which numbers are measurements | Numbers of six or more digits, such as sizes and timestamps, which are never treated as categories or as outliers |
+| Which log lines are unusual | A pattern on 1% of the lines or fewer, or a pattern with an error word on 10% of the lines or fewer |
+| Which JSON rows are unusual | When 75% or more of the rows share a value, the rows whose own value is on 10% of the rows or fewer. Also rows that have a key only 10% of rows have, lack a key 90% have, or hold a value of another type |
+| Which items in a page snapshot are unusual | Items that hold a line or a value found in 20% of the items or fewer |
+| Which numbers are unusual | Numbers more than three interquartile ranges outside the middle half. In logs and page snapshots, also a zero or a negative where every other value is 10 or more |
+| Which words mark an error | A fixed list that includes error, failed, fatal, exception, traceback, panic, crash, timeout, denied and invalid |
+| Which items are copied | Items that contain a word from the tool call, skipping words that more than 5% of the lines, or 20% of JSON rows, contain |
+| How many unusual items are listed | Up to 25 per JSON list, and fewer when the budget is tight. The envelope gives the total and says how many it lists |
+| What is cut | Lines longer than 300 characters, and the envelope says how many characters it cut. JSON values are cut at 60 characters |
+
+Because the rules are fixed, the envelope finds the kinds of problem they describe and can miss
+others. The checking program shows that what an envelope says is true, but it cannot show that the
+envelope found everything. We planted the problems in our test outputs ourselves, knowing the
+rules, so the test tasks are likely kinder to the envelope than real outputs are.
+
+The $0.00 invoice described below was a problem that no rule covered until we added the rule for zeros, and on a real
+Hadoop server log, whose problems were labelled by the people who published it, only 10 of 20
+questions could be answered from the envelope alone. This is why, when the envelope finds nothing
+unusual, it lists the checks it ran and says that they do not prove there is no problem.
+
 ## Other measurements
 
 ### Changing one section at a time
