@@ -1,0 +1,641 @@
+<title>Envelope Findings</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+@font-face { font-family: 'DSEG14Classic'; src: url(data:font/woff2;base64,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) format('woff2'); font-weight: 400; font-style: normal; font-display: block; }
+:root {
+  --bh-shadow-none: none;
+  --bh-shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --bh-shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  --bh-shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+  --bh-shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+  --bh-radius-none: 0;
+  --bh-radius-sm: 0.125rem;
+  --bh-radius-md: 0.375rem;
+  --bh-radius-lg: 0.5rem;
+  --bh-radius-xl: 0.75rem;
+  --bh-radius-2xl: 1rem;
+  --bh-radius-full: 9999px;
+  --bh-spacing-0: 0;
+  --bh-spacing-0-5: 0.125rem;
+  --bh-spacing-1: 0.25rem;
+  --bh-spacing-1-5: 0.375rem;
+  --bh-spacing-2: 0.5rem;
+  --bh-spacing-2-5: 0.625rem;
+  --bh-spacing-3: 0.75rem;
+  --bh-spacing-3-5: 0.875rem;
+  --bh-spacing-4: 1rem;
+  --bh-spacing-5: 1.25rem;
+  --bh-spacing-6: 1.5rem;
+  --bh-spacing-7: 1.75rem;
+  --bh-spacing-8: 2rem;
+  --bh-spacing-9: 2.25rem;
+  --bh-spacing-10: 2.5rem;
+  --bh-spacing-11: 2.75rem;
+  --bh-spacing-12: 3rem;
+  --bh-spacing-14: 3.5rem;
+  --bh-spacing-16: 4rem;
+  --bh-spacing-20: 5rem;
+  --bh-spacing-24: 6rem;
+  --bh-spacing-28: 7rem;
+  --bh-spacing-32: 8rem;
+  --bh-text-2xs: 0.625rem;
+  --bh-text-xs: 0.75rem;
+  --bh-text-sm: 0.875rem;
+  --bh-text-base: 1rem;
+  --bh-text-lg: 1.125rem;
+  --bh-text-xl: 1.25rem;
+  --bh-text-2xl: 1.5rem;
+  --bh-text-3xl: 1.875rem;
+  --bh-text-4xl: 2.25rem;
+  --bh-font-normal: 400;
+  --bh-font-medium: 500;
+  --bh-font-semibold: 600;
+  --bh-font-bold: 700;
+  --bh-leading-none: 1;
+  --bh-leading-tight: 1.25;
+  --bh-leading-snug: 1.375;
+  --bh-leading-normal: 1.5;
+  --bh-leading-relaxed: 1.625;
+  --bh-tracking-tighter: -0.5px;
+  --bh-tracking-tight: -0.3px;
+  --bh-tracking-normal: 0;
+  --bh-tracking-wide: 0.5px;
+  --bh-tracking-wider: 1px;
+  --bh-tracking-widest: 2px;
+  --bh-border-0: 0px;
+  --bh-border-1: 1px;
+  --bh-border-2: 2px;
+  --bh-border-4: 4px;
+  --bh-duration-frame: 83ms;
+  --bh-duration-fast: 100ms;
+  --bh-duration-pixel: 150ms;
+  --bh-duration-normal: 200ms;
+  --bh-duration-sweep: 300ms;
+  --bh-duration-slow: 400ms;
+  --bh-ease-default: cubic-bezier(0.4, 0, 0.2, 1);
+  --bh-ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --bh-ease-out: cubic-bezier(0, 0, 0.2, 1);
+  --bh-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --bh-ease-linear: linear;
+  --bh-font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --bh-font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+  --bh-font-seg: 'DSEG14Classic', 'DSEG14', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+  --bh-color-bg: #f0ece4;
+  --bh-color-surface: #e8e4dc;
+  --bh-color-surface-raised: #f5f2ec;
+  --bh-color-surface-overlay: #ffffff;
+  --bh-color-surface-recessed: #ddd9d1;
+  --bh-color-text: #1a1a1a;
+  --bh-color-text-muted: #5a5754;
+  --bh-color-text-tertiary: #5a5754;
+  --bh-color-text-inverse: #ffffff;
+  --bh-color-text-bright: #000000;
+  --bh-color-primary: #ff6b35;
+  --bh-color-primary-hover: #e85a28;
+  --bh-color-primary-active: #c4461c;
+  --bh-color-primary-text: #ffffff;
+  --bh-color-primary-glow: rgba(255, 107, 53, 0.12);
+  --bh-color-secondary: #e8e4dc;
+  --bh-color-secondary-hover: #ddd9d1;
+  --bh-color-secondary-active: #ccc7bd;
+  --bh-color-secondary-text: #1a1a1a;
+  --bh-color-accent: #ff6b35;
+  --bh-color-accent-secondary: #28654d;
+  --bh-color-accent-tertiary: #e92c63;
+  --bh-color-success: #5dafd6;
+  --bh-color-success-dim: rgba(93, 175, 214, 0.15);
+  --bh-color-warning: #f83e1f;
+  --bh-color-warning-dim: rgba(248, 62, 31, 0.15);
+  --bh-color-danger: #e92c63;
+  --bh-color-danger-hover: #d11a50;
+  --bh-color-danger-active: #b8163f;
+  --bh-color-danger-text: #ffffff;
+  --bh-color-border: #ccc7bd;
+  --bh-color-border-muted: #ddd9d1;
+  --bh-color-border-bright: #a8a39b;
+  --bh-color-ring: #ff6b35;
+  --bh-color-link: #28654d;
+  --bh-color-link-hover: #ff6b35;
+  --bh-color-link-subtle: #5a5754;
+  --bh-color-link-subtle-hover: #28654d;
+  --bh-shadow-surface: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --bh-shadow-inset: inset 0 1px 3px rgba(0, 0, 0, 0.08);
+  --bh-shadow-raised: 0 1px 0 rgba(255, 255, 255, 0.6), 0 2px 6px rgba(0, 0, 0, 0.06);
+  --bh-shadow-emboss: inset 0 -1px 0 rgba(255, 255, 255, 0.5), inset 0 1px 0 rgba(0, 0, 0, 0.06);
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bh-color-bg: #0d0c0a;
+  --bh-color-surface: #151412;
+  --bh-color-surface-raised: #222120;
+  --bh-color-surface-overlay: #222120;
+  --bh-color-surface-recessed: #111110;
+  --bh-color-text: #c8c4bc;
+  --bh-color-text-muted: #5a5754;
+  --bh-color-text-tertiary: #5a5754;
+  --bh-color-text-inverse: #0d0c0a;
+  --bh-color-text-bright: #ffffff;
+  --bh-color-primary: #ff6b35;
+  --bh-color-primary-hover: #ff8b4d;
+  --bh-color-primary-active: #ffaa75;
+  --bh-color-primary-text: #0d0c0a;
+  --bh-color-primary-glow: rgba(255, 107, 53, 0.15);
+  --bh-color-secondary: #222120;
+  --bh-color-secondary-hover: #2a2826;
+  --bh-color-secondary-active: #5a5754;
+  --bh-color-secondary-text: #c8c4bc;
+  --bh-color-accent: #ff6b35;
+  --bh-color-accent-secondary: #75bc9d;
+  --bh-color-accent-tertiary: #e92c63;
+  --bh-color-success: #5dafd6;
+  --bh-color-success-dim: rgba(93, 175, 214, 0.15);
+  --bh-color-warning: #f83e1f;
+  --bh-color-warning-dim: rgba(248, 62, 31, 0.15);
+  --bh-color-danger: #e92c63;
+  --bh-color-danger-hover: #f04e77;
+  --bh-color-danger-active: #f47090;
+  --bh-color-danger-text: #0d0c0a;
+  --bh-color-border: #2a2826;
+  --bh-color-border-muted: #1e1d1b;
+  --bh-color-border-bright: #5a5754;
+  --bh-color-ring: #ff6b35;
+  --bh-color-link: #75bc9d;
+  --bh-color-link-hover: #ff6b35;
+  --bh-color-link-subtle: #c8c4bc;
+  --bh-color-link-subtle-hover: #75bc9d;
+  --bh-shadow-surface: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  --bh-shadow-inset: inset 0 1px 3px rgba(0, 0, 0, 0.25);
+  --bh-shadow-raised: 0 1px 0 rgba(255, 255, 255, 0.04), 0 2px 6px rgba(0, 0, 0, 0.2);
+  --bh-shadow-emboss: inset 0 -1px 0 rgba(255, 255, 255, 0.04), inset 0 1px 0 rgba(0, 0, 0, 0.2);
+  color-scheme: dark;
+} }
+:root[data-theme="dark"] {
+  --bh-color-bg: #0d0c0a;
+  --bh-color-surface: #151412;
+  --bh-color-surface-raised: #222120;
+  --bh-color-surface-overlay: #222120;
+  --bh-color-surface-recessed: #111110;
+  --bh-color-text: #c8c4bc;
+  --bh-color-text-muted: #5a5754;
+  --bh-color-text-tertiary: #5a5754;
+  --bh-color-text-inverse: #0d0c0a;
+  --bh-color-text-bright: #ffffff;
+  --bh-color-primary: #ff6b35;
+  --bh-color-primary-hover: #ff8b4d;
+  --bh-color-primary-active: #ffaa75;
+  --bh-color-primary-text: #0d0c0a;
+  --bh-color-primary-glow: rgba(255, 107, 53, 0.15);
+  --bh-color-secondary: #222120;
+  --bh-color-secondary-hover: #2a2826;
+  --bh-color-secondary-active: #5a5754;
+  --bh-color-secondary-text: #c8c4bc;
+  --bh-color-accent: #ff6b35;
+  --bh-color-accent-secondary: #75bc9d;
+  --bh-color-accent-tertiary: #e92c63;
+  --bh-color-success: #5dafd6;
+  --bh-color-success-dim: rgba(93, 175, 214, 0.15);
+  --bh-color-warning: #f83e1f;
+  --bh-color-warning-dim: rgba(248, 62, 31, 0.15);
+  --bh-color-danger: #e92c63;
+  --bh-color-danger-hover: #f04e77;
+  --bh-color-danger-active: #f47090;
+  --bh-color-danger-text: #0d0c0a;
+  --bh-color-border: #2a2826;
+  --bh-color-border-muted: #1e1d1b;
+  --bh-color-border-bright: #5a5754;
+  --bh-color-ring: #ff6b35;
+  --bh-color-link: #75bc9d;
+  --bh-color-link-hover: #ff6b35;
+  --bh-color-link-subtle: #c8c4bc;
+  --bh-color-link-subtle-hover: #75bc9d;
+  --bh-shadow-surface: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  --bh-shadow-inset: inset 0 1px 3px rgba(0, 0, 0, 0.25);
+  --bh-shadow-raised: 0 1px 0 rgba(255, 255, 255, 0.04), 0 2px 6px rgba(0, 0, 0, 0.2);
+  --bh-shadow-emboss: inset 0 -1px 0 rgba(255, 255, 255, 0.04), inset 0 1px 0 rgba(0, 0, 0, 0.2);
+  color-scheme: dark;
+}
+
+/* Layout: one reading column on warm paper. Instrument labels head each section, segment readouts
+   carry the few headline numbers, and tables and code sit in their own wells that scroll sideways. */
+*, *::before, *::after { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bh-color-bg);
+  color: var(--bh-color-text);
+  font-family: var(--bh-font-sans);
+  font-size: var(--bh-text-base);
+  line-height: var(--bh-leading-normal);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: var(--bh-spacing-6) var(--bh-spacing-16);
+  -webkit-text-size-adjust: 100%;
+}
+main { max-width: 44rem; margin-inline: auto; display: flex; flex-direction: column; gap: var(--bh-spacing-10); }
+header.top { display: flex; flex-direction: column; gap: var(--bh-spacing-3); }
+section { display: flex; flex-direction: column; gap: var(--bh-spacing-4); min-width: 0; scroll-margin-top: var(--bh-spacing-4); }
+
+h1 { margin: 0; font-size: var(--bh-text-3xl); line-height: var(--bh-leading-tight); font-weight: var(--bh-font-bold); letter-spacing: var(--bh-tracking-tight); text-wrap: balance; }
+h3 { margin: 0; font-size: var(--bh-text-lg); line-height: var(--bh-leading-snug); font-weight: var(--bh-font-semibold); text-wrap: balance; }
+p { margin: 0; max-width: 65ch; }
+.lede { font-size: var(--bh-text-lg); line-height: var(--bh-leading-relaxed); }
+.small { font-size: var(--bh-text-sm); }
+.label { font-family: var(--bh-font-mono); font-size: var(--bh-text-2xs); letter-spacing: var(--bh-tracking-widest); text-transform: uppercase; color: var(--bh-color-text-muted); }
+.meta { font-family: var(--bh-font-mono); font-size: var(--bh-text-xs); line-height: var(--bh-leading-relaxed); }
+.source { font-family: var(--bh-font-mono); font-size: var(--bh-text-xs); line-height: var(--bh-leading-relaxed); overflow-wrap: anywhere; }
+.source::before { content: "Source: "; }
+code { font-family: var(--bh-font-mono); font-size: 0.875em; background: var(--bh-color-surface); border: var(--bh-border-1) solid var(--bh-color-border-muted); border-radius: var(--bh-radius-sm); padding: 0 0.25em; overflow-wrap: anywhere; }
+a { color: var(--bh-color-link); text-underline-offset: 0.15em; }
+a:hover { color: var(--bh-color-link-hover); }
+:focus-visible { outline: var(--bh-border-2) solid var(--bh-color-ring); outline-offset: 2px; }
+
+/* Section header: an instrument label and a rule that fills the row. */
+.sh { display: flex; align-items: center; gap: var(--bh-spacing-2); }
+.sh h2 { margin: 0; font-family: var(--bh-font-mono); font-size: var(--bh-text-xs); font-weight: var(--bh-font-semibold); letter-spacing: var(--bh-tracking-widest); text-transform: uppercase; color: var(--bh-color-text-muted); white-space: nowrap; }
+.sh::after { content: ""; flex: 1; border-top: var(--bh-border-1) solid var(--bh-color-border-muted); }
+
+/* Contents: chips, Title Case nouns. */
+nav.toc { display: flex; flex-wrap: wrap; gap: var(--bh-spacing-2); }
+nav.toc a { font-size: var(--bh-text-sm); font-weight: var(--bh-font-medium); line-height: var(--bh-leading-none); color: var(--bh-color-secondary-text); background: var(--bh-color-secondary); border: var(--bh-border-1) solid var(--bh-color-border); border-radius: var(--bh-radius-full); padding: var(--bh-spacing-2) var(--bh-spacing-3); text-decoration: none; }
+nav.toc a:hover { background: var(--bh-color-secondary-hover); }
+
+/* Readouts: label, a segment reading, one line of why. */
+.readouts { display: grid; grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr)); gap: var(--bh-spacing-3); }
+.tile { background: var(--bh-color-surface-raised); border: var(--bh-border-1) solid var(--bh-color-border); border-radius: var(--bh-radius-lg); box-shadow: var(--bh-shadow-surface); padding: var(--bh-spacing-4); display: flex; flex-direction: column; gap: var(--bh-spacing-2); min-width: 0; }
+.seg { font-family: var(--bh-font-seg); font-size: var(--bh-text-2xl); line-height: var(--bh-leading-none); letter-spacing: var(--bh-tracking-wider); color: var(--bh-color-text); white-space: nowrap; }
+.seg .unit { font-family: var(--bh-font-mono); font-size: var(--bh-text-xs); letter-spacing: 0; margin-left: 0.4em; }
+.tile p { font-size: var(--bh-text-sm); }
+/* Rows: on a phone each tile is one row, the reading beside its note, so an odd count leaves no tile alone. */
+@media (max-width: 34rem) {
+  .readouts.rows { grid-template-columns: minmax(0, 1fr); }
+  .readouts.rows .tile { display: grid; grid-template-columns: 6.5rem minmax(0, 1fr); column-gap: var(--bh-spacing-3); row-gap: var(--bh-spacing-1); align-items: center; }
+  .readouts.rows .tile .label { grid-column: 1 / -1; }
+}
+
+/* Verdicts: a word and an LED, never colour alone. */
+.verdicts { list-style: none; margin: 0; padding: 0; background: var(--bh-color-surface-raised); border: var(--bh-border-1) solid var(--bh-color-border); border-radius: var(--bh-radius-lg); overflow: hidden; }
+.verdicts li { display: grid; grid-template-columns: 7rem minmax(0, 1fr); gap: var(--bh-spacing-3); padding: var(--bh-spacing-3) var(--bh-spacing-4); border-top: var(--bh-border-1) solid var(--bh-color-border); }
+.verdicts li:first-child { border-top: 0; }
+.verdicts .what { display: flex; flex-direction: column; gap: var(--bh-spacing-1); min-width: 0; }
+.verdicts .what strong { font-weight: var(--bh-font-semibold); }
+.verdicts .what span { font-size: var(--bh-text-sm); }
+.state { display: flex; align-items: center; gap: var(--bh-spacing-2); align-self: start; padding-top: 0.25em; font-family: var(--bh-font-mono); font-size: var(--bh-text-xs); font-weight: var(--bh-font-semibold); letter-spacing: var(--bh-tracking-wider); text-transform: uppercase; }
+.led { width: 8px; height: 8px; border-radius: var(--bh-radius-full); flex: none; background: var(--led); box-shadow: 0 0 6px var(--glow); }
+.led.ok { --led: var(--bh-color-success); --glow: var(--bh-color-success-dim); }
+.led.open { --led: var(--bh-color-warning); --glow: var(--bh-color-warning-dim); }
+.led.cut { --led: var(--bh-color-danger); --glow: transparent; }
+.led.signal { --led: var(--bh-color-primary); --glow: var(--bh-color-primary-glow); }
+@media (max-width: 30rem) { .verdicts li { grid-template-columns: minmax(0, 1fr); gap: var(--bh-spacing-1); } }
+
+/* The one signal on a page: a raised card with a mandarin corner accent. */
+.signal { position: relative; background: var(--bh-color-surface-raised); border: var(--bh-border-1) solid var(--bh-color-border); border-radius: var(--bh-radius-lg); box-shadow: var(--bh-shadow-md); padding: var(--bh-spacing-4) var(--bh-spacing-4) var(--bh-spacing-4) var(--bh-spacing-5); display: flex; flex-direction: column; gap: var(--bh-spacing-2); }
+.signal::before { content: ""; position: absolute; top: -1px; left: -1px; width: 14px; height: 14px; border-top: var(--bh-border-2) solid var(--bh-color-primary); border-left: var(--bh-border-2) solid var(--bh-color-primary); border-top-left-radius: var(--bh-radius-lg); }
+.signal .head { display: flex; align-items: center; gap: var(--bh-spacing-2); }
+
+/* Tables: raised fill, surface header, rules between rows; the well scrolls on a narrow screen. */
+figure { margin: 0; display: flex; flex-direction: column; gap: var(--bh-spacing-2); min-width: 0; }
+figcaption { font-size: var(--bh-text-sm); max-width: 65ch; }
+.well { overflow-x: auto; background: var(--bh-color-surface-raised); border: var(--bh-border-1) solid var(--bh-color-border); border-radius: var(--bh-radius-lg); }
+table { border-collapse: collapse; width: 100%; font-size: var(--bh-text-sm); font-variant-numeric: tabular-nums; }
+th { background: var(--bh-color-surface); color: var(--bh-color-text-muted); font-weight: var(--bh-font-semibold); text-align: left; white-space: nowrap; }
+th, td { padding: var(--bh-spacing-2) var(--bh-spacing-3); border-bottom: var(--bh-border-1) solid var(--bh-color-border); vertical-align: top; }
+tbody tr:last-child td { border-bottom: 0; }
+.n { text-align: right; white-space: nowrap; }
+td.n { font-family: var(--bh-font-mono); font-size: var(--bh-text-xs); padding-top: calc(var(--bh-spacing-2) + 0.12em); }
+td code { white-space: nowrap; overflow-wrap: normal; }
+/* Compact density on a phone: tighter cells, and headers may wrap. */
+@media (max-width: 34rem) {
+  th, td { padding: var(--bh-spacing-1-5) var(--bh-spacing-2); }
+  th { white-space: normal; }
+  td.n { padding-top: calc(var(--bh-spacing-1-5) + 0.12em); }
+}
+tr.mark td { background: var(--bh-color-surface); }
+
+/* Running lists. */
+.points, .steps { margin: 0; padding-left: 1.25rem; display: flex; flex-direction: column; gap: var(--bh-spacing-2); max-width: 65ch; }
+.points li::marker { color: var(--bh-color-text-muted); }
+.steps li::marker { font-family: var(--bh-font-mono); font-size: var(--bh-text-sm); color: var(--bh-color-text-muted); }
+
+/* Code and envelopes: a recessed well. */
+pre { margin: 0; overflow-x: auto; font-family: var(--bh-font-mono); font-size: var(--bh-text-xs); line-height: var(--bh-leading-relaxed); color: var(--bh-color-text); background: var(--bh-color-surface-recessed); box-shadow: var(--bh-shadow-inset); border-radius: var(--bh-radius-lg); padding: var(--bh-spacing-4); }
+pre .t { color: var(--bh-color-text-muted); font-weight: var(--bh-font-semibold); }
+
+footer { display: flex; flex-direction: column; gap: var(--bh-spacing-2); padding-top: var(--bh-spacing-4); border-top: var(--bh-border-1) solid var(--bh-color-border-muted); }
+
+@media (prefers-reduced-motion: no-preference) {
+  nav.toc a, a { transition: background-color var(--bh-duration-fast) var(--bh-ease-default), color var(--bh-duration-fast) var(--bh-ease-default); }
+}
+
+/* Layout: one reading column on a phone; on a wide screen the section list stays in view on the left.
+   Envelope = the accent (orange); without it = warm grey; the four sections keep one hue each. */
+:root {
+  --ink-2: #5f5a53;
+  --viz-acc: #d4521d; --viz-acc2: #f0a581; --viz-mut: #8a8378; --viz-mut2: #c4bdb1; --viz-track: #e2ddd3;
+  --on-acc: #ffffff; --on-acc2: #1a1a1a; --on-mut: #1a1a1a; --on-mut2: #1a1a1a;
+  --sec-shape: #2a78d6; --sec-anom: #1baf7a; --sec-samp: #6250d6; --sec-more: #e87ba4;
+  --hl-k: #a8401a; --hl-p: #1d5a85; --hl-s: #28654d; --hl-n: #6a3d9a; --hl-x: #a3214f; --hl-c: #6e6963;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --ink-2: #a39d94;
+  --viz-acc: #ff6b35; --viz-acc2: #9c4a2a; --viz-mut: #8f897f; --viz-mut2: #4d4943; --viz-track: #1c1b19;
+  --on-acc: #1a1a1a; --on-acc2: #ffffff; --on-mut: #1a1a1a; --on-mut2: #ffffff;
+  --sec-shape: #3987e5; --sec-anom: #199e70; --sec-samp: #9085e9; --sec-more: #d55181;
+  --hl-k: #ff8f5e; --hl-p: #82c6ee; --hl-s: #75bc9d; --hl-n: #c7a6ff; --hl-x: #ff86b0; --hl-c: #9d978e;
+  color-scheme: dark;
+} }
+:root[data-theme="dark"] {
+  --ink-2: #a39d94;
+  --viz-acc: #ff6b35; --viz-acc2: #9c4a2a; --viz-mut: #8f897f; --viz-mut2: #4d4943; --viz-track: #1c1b19;
+  --on-acc: #1a1a1a; --on-acc2: #ffffff; --on-mut: #1a1a1a; --on-mut2: #ffffff;
+  --sec-shape: #3987e5; --sec-anom: #199e70; --sec-samp: #9085e9; --sec-more: #d55181;
+  --hl-k: #ff8f5e; --hl-p: #82c6ee; --hl-s: #75bc9d; --hl-n: #c7a6ff; --hl-x: #ff86b0; --hl-c: #9d978e;
+  color-scheme: dark;
+}
+
+/* The page */
+.layout main { max-width: 46rem; }
+.side { display: none; }
+@media (min-width: 76rem) {
+  .layout { display: grid; grid-template-columns: 12rem minmax(0, 52rem); column-gap: var(--bh-spacing-12); justify-content: center; }
+  .layout main { max-width: none; margin-inline: 0; }
+  .side { display: block; position: sticky; top: calc(env(safe-area-inset-top, 0px) + var(--bh-spacing-6)); align-self: start; max-height: calc(100vh - var(--bh-spacing-12)); overflow-y: auto; }
+  header.top nav.toc { display: none; }
+}
+.side nav { display: flex; flex-direction: column; gap: var(--bh-spacing-3); }
+.side ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.side a { display: block; padding: var(--bh-spacing-1-5) var(--bh-spacing-3); border-left: 2px solid var(--bh-color-border); color: var(--ink-2); text-decoration: none; font-size: var(--bh-text-sm); line-height: var(--bh-leading-snug); }
+.side a:hover { color: var(--bh-color-text); }
+.side a[aria-current] { color: var(--bh-color-text); border-left-color: var(--viz-acc); font-weight: var(--bh-font-medium); }
+.label { color: var(--ink-2); }
+.sh h2 { color: var(--ink-2); font-size: var(--bh-text-sm); }
+main h3 { margin-top: var(--bh-spacing-4); scroll-margin-top: var(--bh-spacing-4); }
+th { white-space: normal; color: var(--ink-2); }
+th.n { white-space: normal; text-align: right; }
+.points li { max-width: 65ch; }
+a.go { white-space: nowrap; font-size: var(--bh-text-sm); font-weight: var(--bh-font-medium); margin-left: 0.25em; }
+a.go::after { content: " \2192"; }
+
+/* Headline figures */
+.stats { display: flex; flex-direction: column; gap: var(--bh-spacing-2); }
+.stats .sv { font-size: var(--bh-text-2xl); font-weight: var(--bh-font-semibold); line-height: var(--bh-leading-tight); letter-spacing: var(--bh-tracking-tight); color: var(--bh-color-text); white-space: nowrap; }
+.stats .tile p { color: var(--ink-2); }
+.stats .note { font-size: var(--bh-text-xs); color: var(--ink-2); font-family: var(--bh-font-mono); }
+@media (max-width: 34rem) { .stats .readouts.rows .tile { grid-template-columns: 8.75rem minmax(0, 1fr); } }
+
+/* Envelope text */
+main pre { margin: 0; border: var(--bh-border-1) solid var(--bh-color-border); }
+pre.wrap { white-space: pre-wrap; overflow-wrap: anywhere; }
+pre .k { color: var(--hl-k); font-weight: var(--bh-font-semibold); }
+pre .p { color: var(--hl-p); }
+pre .s { color: var(--hl-s); }
+pre .n { color: var(--hl-n); }
+pre .x { color: var(--hl-x); font-weight: var(--bh-font-semibold); }
+pre .h, pre .c { color: var(--hl-c); }
+pre .h { font-weight: var(--bh-font-semibold); }
+pre .c { font-style: italic; }
+
+/* Charts: thin bars from one baseline, values in text ink beside them */
+figure { margin: 0; }
+.chart { display: flex; flex-direction: column; gap: var(--bh-spacing-3); background: var(--bh-color-surface-raised); border: var(--bh-border-1) solid var(--bh-color-border); border-radius: var(--bh-radius-lg); padding: var(--bh-spacing-4); }
+.ct { font-weight: var(--bh-font-semibold); font-size: var(--bh-text-base); }
+.legend { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--bh-spacing-1) var(--bh-spacing-4); font-size: var(--bh-text-sm); color: var(--ink-2); }
+.legend li { display: flex; align-items: center; gap: var(--bh-spacing-1-5); }
+.sw { display: inline-block; width: 0.75rem; height: 0.75rem; border-radius: 3px; flex: none; }
+.crows { display: flex; flex-direction: column; gap: var(--bh-spacing-4); }
+.row { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--bh-spacing-1-5); }
+@media (min-width: 40rem) { .row { grid-template-columns: 13rem minmax(0, 1fr); column-gap: var(--bh-spacing-4); align-items: center; } }
+.rl { font-size: var(--bh-text-sm); line-height: var(--bh-leading-snug); }
+.bars { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.bar { display: grid; grid-template-columns: minmax(0, 1fr) 6.5rem; align-items: center; column-gap: var(--bh-spacing-2); }
+.track { display: block; height: 14px; background: var(--viz-track); border-radius: 0 4px 4px 0; }
+.track.bare { background: none; }
+.fill { display: block; height: 100%; border-radius: 0 4px 4px 0; }
+.val { font-family: var(--bh-font-mono); font-size: var(--bh-text-xs); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.segs { display: flex; gap: 2px; height: 28px; min-width: 0; }
+.sg { flex-basis: 0; min-width: 0; border-radius: 4px; display: flex; align-items: center; padding-left: var(--bh-spacing-1-5); font-family: var(--bh-font-mono); font-size: var(--bh-text-xs); overflow: hidden; white-space: nowrap; }
+.acc { background: var(--viz-acc); color: var(--on-acc); }
+.acc2 { background: var(--viz-acc2); color: var(--on-acc2); }
+.mut { background: var(--viz-mut); color: var(--on-mut); }
+.mut2 { background: var(--viz-mut2); color: var(--on-mut2); }
+[data-tip]:hover { filter: brightness(1.08); }
+.tip { position: fixed; z-index: 20; pointer-events: none; background: var(--bh-color-surface-raised); color: var(--bh-color-text); border: var(--bh-border-1) solid var(--bh-color-border); border-radius: var(--bh-radius-md); box-shadow: var(--bh-shadow-md); padding: var(--bh-spacing-1-5) var(--bh-spacing-2-5); font-size: var(--bh-text-sm); font-weight: var(--bh-font-medium); max-width: 18rem; }
+
+/* The flow figure */
+figure.flow svg { display: block; width: 100%; max-width: 26rem; height: auto; margin: 0 auto; color: var(--bh-color-text); }
+figure.flow figcaption { margin-top: var(--bh-spacing-3); font-size: var(--bh-text-sm); color: var(--ink-2); max-width: 65ch; }
+
+/* The annotated envelope: a section at a time, its hue on the edge */
+.annot { border: var(--bh-border-1) solid var(--bh-color-border); border-radius: var(--bh-radius-lg); background: var(--bh-color-surface-recessed); overflow: hidden; }
+.ar { display: grid; grid-template-columns: minmax(0, 1fr); border-left: 4px solid var(--sec); }
+.ar + .ar { border-top: var(--bh-border-1) solid var(--bh-color-border); }
+.ar pre { border: 0; border-radius: 0; box-shadow: none; background: transparent; padding: var(--bh-spacing-3) var(--bh-spacing-4); }
+.an { margin: 0; padding: 0 var(--bh-spacing-4) var(--bh-spacing-3); font-size: var(--bh-text-sm); line-height: var(--bh-leading-relaxed); max-width: none; }
+.ak { display: flex; align-items: center; gap: var(--bh-spacing-1-5); font-family: var(--bh-font-mono); font-size: var(--bh-text-2xs); letter-spacing: var(--bh-tracking-widest); text-transform: uppercase; color: var(--ink-2); margin-bottom: var(--bh-spacing-1); }
+.ak .sw { background: var(--sec); }
+.ar.shape { --sec: var(--sec-shape); } .ar.anom { --sec: var(--sec-anom); } .ar.samp { --sec: var(--sec-samp); } .ar.more { --sec: var(--sec-more); }
+@media (min-width: 52rem) {
+  .ar { grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); }
+  .an { padding: var(--bh-spacing-3) var(--bh-spacing-4); border-left: var(--bh-border-1) solid var(--bh-color-border); background: var(--bh-color-surface-raised); }
+}
+
+/* An example beside its explanation, on a wide screen */
+.pairing { display: grid; gap: var(--bh-spacing-3); }
+@media (min-width: 76rem) { .pairing { grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr); align-items: start; column-gap: var(--bh-spacing-5); } }
+
+/* Folds */
+details.more { border: var(--bh-border-1) solid var(--bh-color-border); border-radius: var(--bh-radius-lg); background: var(--bh-color-surface-raised); }
+details.more > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: var(--bh-spacing-2); padding: var(--bh-spacing-3) var(--bh-spacing-4); font-weight: var(--bh-font-medium); }
+details.more > summary::-webkit-details-marker { display: none; }
+details.more > summary::before { content: ""; flex: none; width: 0.45rem; height: 0.45rem; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(-45deg); margin-right: var(--bh-spacing-1); }
+details.more[open] > summary::before { transform: rotate(45deg); }
+details.more > .mi { display: flex; flex-direction: column; gap: var(--bh-spacing-4); padding: 0 var(--bh-spacing-4) var(--bh-spacing-4); }
+@media (prefers-reduced-motion: no-preference) { details.more > summary::before { transition: transform 120ms ease; } }
+
+/* Cards */
+.cards { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--bh-spacing-3); }
+@media (min-width: 44rem) { .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.card { background: var(--bh-color-surface-raised); border: var(--bh-border-1) solid var(--bh-color-border); border-radius: var(--bh-radius-lg); padding: var(--bh-spacing-4); display: flex; flex-direction: column; gap: var(--bh-spacing-3); min-width: 0; }
+.card h3 { margin-top: 0; font-size: var(--bh-text-base); }
+.card .points { font-size: var(--bh-text-sm); }
+
+</style>
+<div class="layout">
+<aside class="side"><nav aria-label="Sections"><p class="label">On this page</p><ol><li><a href="#summary">Summary</a></li><li><a href="#results">Results</a></li><li><a href="#how-the-envelope-works">How the envelope works</a></li><li><a href="#heuristics">Heuristics</a></li><li><a href="#other-measurements">Other measurements</a></li><li><a href="#what-is-not-settled">What is not settled</a></li><li><a href="#next">Next</a></li><li><a href="#how-we-tested">How we tested</a></li></ol></nav></aside>
+<main>
+  <header class="top">
+    <span class="label">Findings · 6 November 2026</span>
+    <h1>Summarising large tool outputs for Claude Code</h1>
+    <div class="lede"><p>When a tool returns a large output, such as a long log or a big JSON response, Claude Code either puts all of it into the model's context or, if it is larger than Claude Code's limit, saves it to a file and shows the model a short preview. We tested a third option. A Claude Code hook, a script that runs after every tool call, replaces each large output with a short summary, which we call an envelope, and saves the full output to a file that the model can still open. We wanted to know whether the model still answers correctly with the envelope, and how much context it saves.</p></div>
+    <nav class="toc" aria-label="Sections"><a href="#summary">Summary</a><a href="#results">Results</a><a href="#how-the-envelope-works">How the envelope works</a><a href="#heuristics">Heuristics</a><a href="#other-measurements">Other measurements</a><a href="#what-is-not-settled">What is not settled</a><a href="#next">Next</a><a href="#how-we-tested">How we tested</a></nav>
+  </header>
+
+  <section id="summary" aria-labelledby="summary-h">
+    <div class="sh"><h2 id="summary-h">Summary</h2></div>
+    <div class="stats"><div class="readouts rows"><div class="tile"><span class="sv">104 of 104</span><p>questions answered correctly with the envelope, against 100 without it</p></div><div class="tile"><span class="sv">6,158</span><p>fewer tokens of context per run</p></div><div class="tile"><span class="sv">25%</span><p>lower cost per run</p></div></div><p class="note">Haiku on all 104 test tasks, with the final version of the envelope</p></div><ul class="points"><li>With the envelope, Haiku and Sonnet answered at least as many questions correctly as without it, and every run used less context and cost less. <a class="go" href="#results">Results</a></li><li>The envelope is a short summary in four labelled sections: exact counts, the items that differ from the rest, items copied from the output, and commands for reading the rest. <a class="go" href="#how-the-envelope-works">How the envelope works</a></li><li>A separate program checks every envelope against the full output before a model sees it, and it has found no mistakes. <a class="go" href="#how-we-check-the-envelope">How we check the envelope</a></li><li>Fixed rules decide what goes into the envelope, so it can miss a problem that no rule describes. <a class="go" href="#heuristics">Heuristics</a></li><li>The model still opens the full output in about half the runs, mostly to check what the envelope said. <a class="go" href="#how-often-the-model-opens-the-full-output">How often the model opens the full output</a></li></ul>
+  </section>
+  <section id="results" aria-labelledby="results-h">
+    <div class="sh"><h2 id="results-h">Results</h2></div>
+    <p>The model answered at least as well with the envelope as without it in every test, and it used less context each time.</p><p>We tested on 104 tasks that we built. Each task is a tool output with a question about it, and we planted the answer in the output, so we know what the right answer is. The outputs are lists of Kubernetes pods in JSON, web server logs, accessibility snapshots of web pages, and Figma design files. Each comes in a medium size, which fits within Claude Code's limit, and a large size, which does not. Forty of the tasks ask the model to find a problem in the output, which is where a summary is most likely to hide something.</p><p>Each task ran twice in Claude Code, once with the hook and once without it, and we compared the two runs task by task. We ran the final version of the envelope three times.</p><figure class="chart"><figcaption class="ct">Questions answered correctly</figcaption><ul class="legend"><li><i class="sw acc"></i>With the envelope</li><li><i class="sw mut"></i>Without</li></ul><div class="crows"><div class="row"><div class="rl">Haiku, all 104 tasks</div><div class="bars"><div class="bar"><span class="track"><span class="fill acc" style="width:100.0%" data-tip="With the envelope: 104 of 104"></span></span><span class="val">104 of 104</span></div><div class="bar"><span class="track"><span class="fill mut" style="width:96.2%" data-tip="Without: 100 of 104"></span></span><span class="val">100 of 104</span></div></div></div><div class="row"><div class="rl">Haiku, 40 find-the-problem tasks, each run twice</div><div class="bars"><div class="bar"><span class="track"><span class="fill acc" style="width:100.0%" data-tip="With the envelope: 80 of 80"></span></span><span class="val">80 of 80</span></div><div class="bar"><span class="track"><span class="fill mut" style="width:90.0%" data-tip="Without: 72 of 80"></span></span><span class="val">72 of 80</span></div></div></div><div class="row"><div class="rl">Sonnet, 40 find-the-problem tasks</div><div class="bars"><div class="bar"><span class="track"><span class="fill acc" style="width:100.0%" data-tip="With the envelope: 40 of 40"></span></span><span class="val">40 of 40</span></div><div class="bar"><span class="track"><span class="fill mut" style="width:97.5%" data-tip="Without: 39 of 40"></span></span><span class="val">39 of 40</span></div></div></div></div></figure><figure class="chart"><figcaption class="ct">Tokens of context the envelope saved per run</figcaption><div class="crows"><div class="row"><div class="rl">Haiku, all 104 tasks</div><div class="bars"><div class="bar"><span class="track bare"><span class="fill acc" style="width:75.4%" data-tip="Haiku, all 104 tasks: 6,158 tokens"></span></span><span class="val">6,158 tokens</span></div></div></div><div class="row"><div class="rl">Haiku, 40 find-the-problem tasks, each run twice</div><div class="bars"><div class="bar"><span class="track bare"><span class="fill acc" style="width:89.0%" data-tip="Haiku, 40 find-the-problem tasks, each run twice: 7,267 tokens"></span></span><span class="val">7,267 tokens</span></div></div></div><div class="row"><div class="rl">Sonnet, 40 find-the-problem tasks</div><div class="bars"><div class="bar"><span class="track bare"><span class="fill acc" style="width:100.0%" data-tip="Sonnet, 40 find-the-problem tasks: 8,164 tokens"></span></span><span class="val">8,164 tokens</span></div></div></div></div></figure><p>Context here is the number of tokens the model read on its last request. Each run also cost 25 to 29% less, as charged by the API.</p><p>Before the runs, we decided that the envelope would pass if correct answers fell by no more than 3 percentage points and the context got smaller. Haiku passed on both counts. Sonnet used less context and answered all 40 tasks correctly, but 40 runs are too few to rule out a drop of more than 3 points. With an earlier version of the envelope, Sonnet answered 103 of the 104 tasks correctly, against 104 without the envelope.</p><p>On the 40 find-the-problem tasks, Haiku did 10 points better with the envelope than without it, which is more than chance would explain (the 95% range is 3 to 19 points). Without the envelope, Haiku missed problems in the large snapshots and Figma files, where it only gets a preview and has to search the saved file.</p><p>How much the envelope saves depends on the size of the output. Without the envelope, the model holds a medium output in full, so replacing it saves more. A large output is already replaced by a preview, and the model searches the file for what it needs. These are Haiku's 104 tasks split by size.</p><figure class="chart"><figcaption class="ct">Tokens saved per run, by output size</figcaption><div class="crows"><div class="row"><div class="rl">Medium</div><div class="bars"><div class="bar"><span class="track bare"><span class="fill acc" style="width:100.0%" data-tip="Medium: 9,185"></span></span><span class="val">9,185</span></div></div></div><div class="row"><div class="rl">Large</div><div class="bars"><div class="bar"><span class="track bare"><span class="fill acc" style="width:34.1%" data-tip="Large: 3,131"></span></span><span class="val">3,131</span></div></div></div></div></figure><p>Medium runs cost 18% less but took about 3 seconds longer, because the model often opened the full output after reading the envelope. Large runs cost 31% less and were about 9 seconds faster.</p>
+  </section>
+  <section id="how-the-envelope-works" aria-labelledby="how-the-envelope-works-h">
+    <div class="sh"><h2 id="how-the-envelope-works-h">How the envelope works</h2></div>
+    <figure class="flow">
+<svg viewBox="0 0 340 418" role="img" aria-label="The hook saves the full tool output to a file and puts only the envelope, about a twentieth of the size, in the model's context. The model can still open the file with the commands in the envelope's get more section." style="font-family: var(--bh-font-sans)">
+  <defs>
+    <marker id="flow-ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+    </marker>
+  </defs>
+
+  <rect x="90" y="8" width="160" height="50" rx="6" fill="none" stroke="currentColor"/>
+  <text x="170" y="29" text-anchor="middle" font-size="13" font-weight="600" fill="currentColor">Tool output</text>
+  <text x="170" y="47" text-anchor="middle" font-size="11" fill="currentColor">100 invoices, ~2,800 tokens</text>
+
+  <line x1="170" y1="58" x2="170" y2="90" stroke="currentColor" marker-end="url(#flow-ah)"/>
+  <text x="178" y="78" font-size="11" fill="currentColor">after each tool call</text>
+
+  <rect x="120" y="92" width="100" height="32" rx="6" fill="none" stroke="currentColor"/>
+  <text x="170" y="113" text-anchor="middle" font-size="13" font-weight="600" fill="currentColor">Hook</text>
+
+  <line x1="150" y1="124" x2="72" y2="176" stroke="currentColor" marker-end="url(#flow-ah)"/>
+  <text x="100" y="146" text-anchor="end" font-size="11" fill="currentColor">saves all of it</text>
+  <line x1="190" y1="124" x2="238" y2="176" stroke="currentColor" marker-end="url(#flow-ah)"/>
+  <text x="226" y="146" font-size="11" fill="currentColor">writes</text>
+
+  <rect x="10" y="178" width="120" height="60" rx="6" fill="none" stroke="currentColor"/>
+  <text x="70" y="200" text-anchor="middle" font-size="13" font-weight="600" fill="currentColor">Saved file</text>
+  <text x="70" y="217" text-anchor="middle" font-size="11" fill="currentColor">the full output</text>
+  <text x="70" y="231" text-anchor="middle" font-size="11" fill="currentColor">~2,800 tokens</text>
+
+  <rect x="150" y="178" width="180" height="26" style="fill: var(--viz-acc); fill-opacity: 0.16"/>
+  <rect x="150" y="178" width="180" height="154" rx="2" fill="none" style="stroke: var(--viz-acc)" stroke-width="1.5"/>
+  <text x="240" y="195" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor">Envelope, ~140 tokens</text>
+  <line x1="150" y1="236" x2="330" y2="236" stroke="currentColor" stroke-opacity="0.3"/>
+  <line x1="150" y1="268" x2="330" y2="268" stroke="currentColor" stroke-opacity="0.3"/>
+  <line x1="150" y1="300" x2="330" y2="300" stroke="currentColor" stroke-opacity="0.3"/>
+  <rect x="151" y="205" width="4" height="30" style="fill: var(--sec-shape)"/>
+  <rect x="151" y="237" width="4" height="30" style="fill: var(--sec-anom)"/>
+  <rect x="151" y="269" width="4" height="30" style="fill: var(--sec-samp)"/>
+  <rect x="151" y="301" width="4" height="30" style="fill: var(--sec-more)"/>
+  <g font-size="11" fill="currentColor">
+    <text x="162" y="218" font-weight="600" style="font-family: var(--bh-font-mono)">shape</text>
+    <text x="162" y="231">exact counts</text>
+    <text x="162" y="250" font-weight="600" style="font-family: var(--bh-font-mono)">anomalies</text>
+    <text x="162" y="263">items that differ</text>
+    <text x="162" y="282" font-weight="600" style="font-family: var(--bh-font-mono)">samples</text>
+    <text x="162" y="295">items copied as they are</text>
+    <text x="162" y="314" font-weight="600" style="font-family: var(--bh-font-mono)">get more</text>
+    <text x="162" y="327">commands to read the file</text>
+  </g>
+
+  <line x1="240" y1="332" x2="240" y2="372" stroke="currentColor" marker-end="url(#flow-ah)"/>
+  <text x="248" y="356" font-size="11" fill="currentColor">in context</text>
+
+  <rect x="150" y="374" width="180" height="36" rx="6" fill="none" stroke="currentColor"/>
+  <text x="240" y="397" text-anchor="middle" font-size="13" font-weight="600" fill="currentColor">Model</text>
+
+  <path d="M150,392 H40 V240" fill="none" stroke="currentColor" stroke-dasharray="4 4" marker-end="url(#flow-ah)"/>
+  <text x="48" y="306" font-size="11" fill="currentColor">can open it</text>
+  <text x="48" y="320" font-size="11" fill="currentColor">with get more</text>
+</svg>
+<figcaption>The hook saves the full output to a file and puts only the envelope, about a twentieth of the size, in the model's context. The model can still open the file with the commands in the envelope's get more section.</figcaption>
+</figure>
+<p>When a tool's output is larger than 2,000 tokens, the hook saves the output to a file and gives the model an envelope in its place. The envelope has four sections, each labelled in the text:</p><ul class="points"><li><code>shape:</code> describes the output and gives exact counts, worked out over the whole output.</li><li><code>anomalies:</code> lists the items that differ from the rest, with the position of each in the output.</li><li><code>samples:</code> copies a few items exactly, chosen because they contain words from the tool call.</li><li><code>get more:</code> gives line numbers and ready-made commands for reading the rest of the saved file.</li></ul><p>A banner above the four sections says where the full output is saved. It also tells the model that every count is exact and that it should open the file only for what the envelope does not show.</p><p>Here is a real envelope. A tool returned a list of 100 invoices as JSON, and the tool call asked about invoice INV-1024. The hook's own code turned the list into this banner and envelope.</p><figure class="chart scale"><figcaption class="ct">Size in tokens</figcaption><div class="crows"><div class="row"><div class="rl">The list of invoices</div><div class="bars"><div class="bar"><span class="track bare"><span class="fill mut" style="width:100.0%" data-tip="The list of invoices: 2,772 tokens"></span></span><span class="val">2,772 tokens</span></div></div></div><div class="row"><div class="rl">The banner and envelope</div><div class="bars"><div class="bar"><span class="track bare"><span class="fill acc" style="width:5.2%" data-tip="The banner and envelope: 143 tokens"></span></span><span class="val">143 tokens</span></div></div></div></div></figure><pre class="wrap">[Folded: <span class="n">~2772</span> tokens -&gt; <span class="n">~143</span>. Full output: <span class="p">/tmp/tool-results/invoices.json</span>. This is the data's envelope: its shape (fields, values and counts), the rows that break it, samples, and how to get more, by jq path (jq). FILE in a command is <span class="p">/tmp/tool-results/invoices.json</span>. Every count and value in the envelope is exact, worked out over the whole output, not a sample: read the file only for what the envelope does not show.]</pre><div class="annot" role="group" aria-label="The envelope, a section at a time"><div class="ar shape"><pre><span class="k">shape:</span>
+  <span class="p">.invoices</span>: array[<span class="n">100</span>] of object
+    <span class="p">.id</span>        str, unique like INV-<span class="h">&lt;n&gt;</span>
+    <span class="p">.customer</span>  <span class="s">"Acme"</span> <span class="n">20</span>, <span class="s">"Birch"</span> <span class="n">20</span>, <span class="s">"Cobalt"</span> <span class="n">20</span>, <span class="s">"Dune"</span> <span class="n">20</span>, <span class="s">"Ember"</span> <span class="n">20</span>
+    <span class="p">.amount</span>    float, unique
+    <span class="p">.status</span>    <span class="s">"paid"</span> <span class="n">98</span>, <span class="s">"overdue"</span> <span class="n">2</span></pre><p class="an"><span class="ak"><i class="sw"></i>shape</span>The list holds 100 invoices with four fields each. Every customer has 20 invoices, and 98 invoices are paid while 2 are overdue.</p></div><div class="ar anom"><pre><span class="k">anomalies:</span> <span class="n">2</span> rows, all listed
+  <span class="p">.invoices[16]</span> INV-<span class="n">1017</span>: <span class="p">.status</span> <span class="s">"overdue"</span>
+  <span class="p">.invoices[71]</span> INV-<span class="n">1072</span>: <span class="p">.status</span> <span class="s">"overdue"</span></pre><p class="an"><span class="ak"><i class="sw"></i>anomalies</span>The two overdue invoices, with their positions in the list. "All listed" means there are no others.</p></div><div class="ar samp"><pre><span class="k">samples:</span>
+  <span class="p">.invoices[23]</span>: {<span class="s">"id"</span>:<span class="s">"INV-1024"</span>,<span class="s">"customer"</span>:<span class="s">"Dune"</span>,<span class="s">"amount"</span>:<span class="n">274.86</span>,<span class="s">"status"</span>:<span class="s">"paid"</span>}<span class="c">  (matches the query)</span></pre><p class="an"><span class="ak"><i class="sw"></i>samples</span>Invoice INV-1024, copied exactly as it appears, because the tool call named it.</p></div><div class="ar more"><pre><span class="k">get more:</span>
+<span class="x">  jq</span> <span class="s">'.invoices[] | select(.status != "paid") | .id'</span> <span class="x">FILE</span>
+<span class="x">  jq</span> <span class="s">'.invoices[16]'</span> <span class="x">FILE</span><span class="c">  (reads any path above)</span></pre><p class="an"><span class="ak"><i class="sw"></i>get more</span>A command that prints the id of every unpaid invoice, and one that reads any single invoice. <code>FILE</code> stands for the saved file.</p></div></div><p>When nothing in the output stands out, the <code>anomalies:</code> section says which checks it ran, and that passing them does not prove there is no problem. This is what it says for the same list with every invoice paid:</p><pre class="wrap"><span class="k">anomalies:</span> none found by its rules (a value few rows hold where one dominates, a number far outside the rest, a key few rows have or lack, a value of another type), which is not proof there are none</pre><h3 id="logs-page-snapshots-and-other-outputs">Logs, page snapshots and other outputs</h3><p>The hook builds envelopes with the same four sections for logs, page snapshots, XML, web pages, plain text and source code.</p><details class="more"><summary>Show the envelopes of a web server log and a page snapshot</summary><div class="mi"><p>A log is read line by line. The envelope groups lines that follow the same pattern, where a pattern is a line with every word that contains a digit or an id replaced by <code>&lt;*&gt;</code>. This is the envelope of a web server log of 300 lines.</p><div class="pairing"><pre><span class="k">shape:</span> <span class="n">300</span> lines, <span class="n">5</span> line templates <span class="c">(&lt;*&gt; is a token holding a digit, or a hex id)</span>
+      <span class="n">85</span>  <span class="h">&lt;*&gt;</span>:<span class="h">&lt;*&gt;</span>:<span class="h">&lt;*&gt;</span> INFO  GET /api/orders req=<span class="h">&lt;*&gt;</span> user=<span class="h">&lt;*&gt;</span> <span class="h">&lt;*&gt;</span> <span class="h">&lt;*&gt;</span>
+      <span class="n">75</span>  <span class="h">&lt;*&gt;</span>:<span class="h">&lt;*&gt;</span>:<span class="h">&lt;*&gt;</span> INFO  GET /health req=<span class="h">&lt;*&gt;</span> user=<span class="h">&lt;*&gt;</span> <span class="h">&lt;*&gt;</span> <span class="h">&lt;*&gt;</span>
+      <span class="n">69</span>  <span class="h">&lt;*&gt;</span>:<span class="h">&lt;*&gt;</span>:<span class="h">&lt;*&gt;</span> INFO  GET /api/items req=<span class="h">&lt;*&gt;</span> user=<span class="h">&lt;*&gt;</span> <span class="h">&lt;*&gt;</span> <span class="h">&lt;*&gt;</span>
+      <span class="n">68</span>  <span class="h">&lt;*&gt;</span>:<span class="h">&lt;*&gt;</span>:<span class="h">&lt;*&gt;</span> INFO  GET /api/users req=<span class="h">&lt;*&gt;</span> user=<span class="h">&lt;*&gt;</span> <span class="h">&lt;*&gt;</span> <span class="h">&lt;*&gt;</span>
+       <span class="n">3</span>  <span class="h">&lt;*&gt;</span>:<span class="h">&lt;*&gt;</span>:<span class="h">&lt;*&gt;</span> ERROR payment failed for order <span class="h">&lt;*&gt;</span> req=<span class="h">&lt;*&gt;</span> user=<span class="h">&lt;*&gt;</span>
+<span class="k">anomalies:</span> <span class="n">3</span> lines in <span class="n">1</span> group, all listed
+  <span class="n">3</span> lines like: <span class="h">&lt;*&gt;</span>:<span class="h">&lt;*&gt;</span>:<span class="h">&lt;*&gt;</span> ERROR payment failed for order <span class="h">&lt;*&gt;</span> req=<span class="h">&lt;*&gt;</span> user=<span class="h">&lt;*&gt;</span>
+    <span class="p">188:</span> 2026-11-03T00:03:07Z ERROR payment failed for order ORD-4e4b61 req=req-525f51ac user=u-a7cedc
+    <span class="p">196:</span> 2026-11-03T00:03:15Z ERROR payment failed for order ORD-1da976 req=req-25704aed user=u-1bd3e9
+    <span class="p">289:</span> 2026-11-03T00:04:48Z ERROR payment failed for order ORD-3044f5 req=req-5773740c user=u-e5070c
+<span class="k">get more:</span>
+<span class="x">  grep</span> -nF <span class="s">'ERROR payment failed for order'</span> <span class="x">FILE</span><span class="c">  (the 3 lines like it)</span>
+<span class="x">  sed</span> -n <span class="s">'A,Bp'</span> <span class="x">FILE</span><span class="c">  (any lines above, by number)</span></pre><div class="pn"><p>All 300 lines follow 5 patterns, and the number beside each pattern is how many lines follow it. Three lines record failed payments, so the envelope lists them by line number and gives a <code>grep</code> command that prints exactly those three.</p></div></div><p>For an output with an indented structure, such as an accessibility snapshot of a web page, the envelope shows the outline and counts groups of similar items. This is the envelope of a snapshot of a page that lists 150 invoices.</p><div class="pairing"><pre><span class="k">shape:</span> <span class="n">610</span> lines, <span class="n">15</span> line templates <span class="c">(&lt;*&gt; is a token holding a digit, a hex id or a quoted string)</span>
+  <span class="p">1:</span> - Page URL: https://billing.local/invoices
+  <span class="p">2:</span> - Page Title: Invoices
+  <span class="p">3:</span> - generic [ref=e53187]:
+  <span class="p">4:</span>   - banner [ref=e40337]:
+  <span class="p">6:</span>   - main [ref=e27900]:
+  <span class="p">7:</span>     - heading "Invoices" [level=1] [ref=e44330]
+  <span class="p">8:</span>     - list [ref=e47831]:
+            <span class="n">150</span> items, lines <span class="n">9</span>-<span class="n">608</span>
+            <span class="n">150</span> items like: - listitem [ref=<span class="h">&lt;*&gt;</span>]:
+  <span class="p">609:</span>   - contentinfo [ref=e13672]:
+  [+ <span class="n">2</span> more nodes, deeper or further on]
+<span class="k">anomalies:</span> <span class="n">3</span> of <span class="n">150</span> items in <span class="n">1</span> run, all listed
+  <span class="n">3</span> lines like: - button <span class="h">&lt;*&gt;</span> [ref=<span class="h">&lt;*&gt;</span>] [disabled]<span class="c">  (in 3 of 150 items)</span>
+    <span class="p">89:</span>       - listitem [ref=e28671]:
+    <span class="p">90:</span>         - text: Invoice INV-87af257
+    <span class="p">91:</span>         - text: $595.82 due 12 Nov
+    <span class="p">92:</span>         - button "Pay INV-87af257" [ref=e1179] [disabled]
+    <span class="p">177:</span>       - listitem [ref=e65742]:
+    <span class="p">178:</span>         - text: Invoice INV-668b725
+    <span class="p">179:</span>         - text: $121.67 due 27 Nov
+    <span class="p">180:</span>         - button "Pay INV-668b725" [ref=e33208] [disabled]
+    <span class="p">553:</span>       - listitem [ref=e59312]:
+    <span class="p">554:</span>         - text: Invoice INV-193349e
+    <span class="p">555:</span>         - text: $281.66 due 22 Nov
+    <span class="p">556:</span>         - button "Pay INV-193349e" [ref=e92037] [disabled]
+<span class="k">get more:</span>
+<span class="x">  grep</span> -nF <span class="s">'] [disabled]'</span> <span class="x">FILE</span><span class="c">  (the 3 lines like it)</span>
+<span class="x">  sed</span> -n <span class="s">'A,Bp'</span> <span class="x">FILE</span><span class="c">  (any lines above, by number)</span></pre><div class="pn"><p>The outline shows the top of the page, then says that lines 9 to 608 hold a list of 150 similar items. Three of the items have a disabled Pay button, so the envelope shows those three items in full.</p></div></div><p>For source code, the outline is the code's classes and functions.</p></div></details><h3 id="how-the-envelope-fits-its-budget">How the envelope fits its budget</h3><p>Each section can be written at a few levels of detail. The hook starts every section at its shortest, then adds detail in order of importance (shape, then anomalies, then get more, then samples) for as long as the envelope stays under 2,000 tokens. Most envelopes come out much smaller than that, and for our test outputs they were a few hundred tokens.</p><h3 id="how-we-check-the-envelope">How we check the envelope</h3><p>Before a model sees any envelope, a separate program checks it against the full output. We wrote this program apart from the code that builds envelopes, so that a mistake in one is unlikely to be repeated in the other. It counts every number again, compares every copied line with the original, and runs every command the envelope suggests to see that it prints what the envelope says. We tested 251 outputs, which include real logs, source files and recorded tool results as well as our test outputs, and the program found no mistake in any of their envelopes.</p><p>The program also tells us which questions can be answered from the envelope alone, without opening the saved file. These are the counts for the medium and large test outputs:</p><figure><div class="well"><table><thead><tr><th scope="col">Question</th><th scope="col" class="n">Answerable from the envelope alone</th></tr></thead><tbody><tr><td>How many items have some property?</td><td class="n">32 of 32</td></tr><tr><td>What is wrong in the output?</td><td class="n">32 of 32</td></tr><tr><td>What is wrong, when nothing is?</td><td class="n">8 of 8</td></tr><tr><td>Which items have some property?</td><td class="n">15 of 16</td></tr><tr><td>A question about one item the tool call does not name</td><td class="n">0 of 16</td></tr><tr><td>A question about one item the tool call names</td><td class="n">16 of 16</td></tr></tbody></table></div></figure><p>The envelope cannot answer a question about a particular item unless that item stands out or the tool call names it, because those are the only items it copies.</p><details class="more"><summary>Show how many questions about real outputs the envelope answers alone</summary><div class="mi"><p>Real outputs are less regular than our test outputs, so fewer questions about them can be answered from the envelope alone:</p><figure><div class="well"><table><thead><tr><th scope="col">Real output</th><th scope="col" class="n">Answerable from the envelope alone</th></tr></thead><tbody><tr><td>Hadoop (HDFS) server log</td><td class="n">10 of 20</td></tr><tr><td>Results of tool calls recorded in MCP-Atlas</td><td class="n">17 of 59</td></tr><tr><td>Python source files</td><td class="n">12 of 15</td></tr><tr><td>Rust source files</td><td class="n">6 of 6</td></tr><tr><td>A list of countries in XML (ISO 3166)</td><td class="n">0 of 3</td></tr><tr><td>Package release data from PyPI (JSON)</td><td class="n">2 of 3</td></tr></tbody></table></div></figure><p>For the list of countries, all 3 questions can be answered when the tool call names the country.</p></div></details>
+  </section>
+  <section id="heuristics" aria-labelledby="heuristics-h">
+    <div class="sh"><h2 id="heuristics-h">Heuristics</h2></div>
+    <p>The hook decides everything in an envelope with fixed rules, and no model is involved. We set the thresholds by hand and checked them on our test outputs, but we have not tuned them systematically.</p><div class="cards"><div class="card"><h3 id="every-output">Every output</h3><ul class="points"><li><strong>When to build an envelope.</strong> When the output is over 2,000 tokens, and only if the envelope is at most 90% of the output's size.</li><li><strong>Measurements.</strong> Numbers of six or more digits, such as sizes and timestamps, are never treated as categories or as outliers.</li><li><strong>Unusual numbers.</strong> A number more than three interquartile ranges outside the middle half.</li><li><strong>Error words.</strong> A fixed list that includes error, failed, fatal, exception, traceback, panic, crash, timeout, denied and invalid.</li><li><strong>Copied items.</strong> Items that contain a word from the tool call, skipping words that more than 5% of the lines, or 20% of JSON rows, contain.</li></ul></div><div class="card"><h3 id="logs-and-other-line-by-line-output">Logs and other line-by-line output</h3><ul class="points"><li><strong>Patterns.</strong> Two lines follow the same pattern when they match after every word that contains a digit, or an id of six or more hex characters, is replaced by <code>&lt;*&gt;</code>.</li><li><strong>Unusual lines.</strong> A pattern on 1% of the lines or fewer, or a pattern with an error word on 10% of the lines or fewer.</li><li><strong>Unusual values.</strong> In a <code>&lt;*&gt;</code> that holds six values or fewer, where one value is on 80% or more of the pattern's lines, a value on 2% of its lines or fewer.</li><li><strong>Zeros.</strong> A zero or a negative where every other value is 10 or more.</li><li><strong>Long lines.</strong> Cut at 300 characters, and the envelope says how many characters it cut.</li></ul></div><div class="card"><h3 id="json">JSON</h3><ul class="points"><li><strong>Unusual rows.</strong> When 75% or more of the rows share a value, the rows whose own value is on 10% of the rows or fewer.</li><li><strong>Unusual keys.</strong> Rows that have a key only 10% of rows have, or lack a key 90% have.</li><li><strong>Unusual types.</strong> A value of another type than the rest of its field.</li><li><strong>How many are listed.</strong> Up to 25 unusual rows per list, and fewer when the budget is tight. The envelope gives the total and says how many it lists.</li><li><strong>Long values.</strong> Cut at 60 characters.</li></ul></div><div class="card"><h3 id="page-snapshots-and-other-outlines">Page snapshots and other outlines</h3><ul class="points"><li><strong>Groups.</strong> A node with five or more children, 60% or more of whose first lines follow one pattern, is a group of similar items. Quoted text also counts as <code>&lt;*&gt;</code>.</li><li><strong>Unusual items.</strong> Items that hold a line or a value found in 20% of the items or fewer.</li><li><strong>Error lines.</strong> A line with an error word, when 10% of the items or fewer have one.</li><li><strong>Zeros.</strong> A zero or a negative where every other value is 10 or more.</li></ul></div></div><p>Because the rules are fixed, the envelope finds the kinds of problem they describe and can miss others. The checking program shows that what an envelope says is true, but it cannot show that the envelope found everything. We planted the problems in our test outputs ourselves, knowing the rules, so the test tasks are likely kinder to the envelope than real outputs are.</p><p>The $0.00 invoice described below was a problem that no rule covered until we added the rule for zeros, and on a real Hadoop server log, whose problems were labelled by the people who published it, only 10 of 20 questions could be answered from the envelope alone. This is why, when the envelope finds nothing unusual, it lists the checks it ran and says that they do not prove there is no problem.</p>
+  </section>
+  <section id="other-measurements" aria-labelledby="other-measurements-h">
+    <div class="sh"><h2 id="other-measurements-h">Other measurements</h2></div>
+    <h3 id="changing-one-section-at-a-time">Changing one section at a time</h3><p>We changed one section of the envelope at a time and counted how many questions could still be answered from the envelope alone. The <code>anomalies:</code> section made the biggest difference.</p><figure><div class="well"><table><thead><tr><th scope="col">Change to the envelope</th><th scope="col">Effect</th></tr></thead><tbody><tr><td>For JSON, list every item that differs from the rest, where simpler rules pick out only some</td><td>12 of 12 planted problems found, up from 9 or 10</td></tr><tr><td>Copy the items that contain words from the tool call</td><td>5 to 13 more questions about one item answered</td></tr><tr><td>Copy more example items</td><td>Almost no more questions answered, for 65 to 200 more tokens</td></tr><tr><td>Allow 500 tokens where the default is 2,000</td><td>Half as many counting questions about logs answered</td></tr></tbody></table></div></figure><h3 id="a-missed-answer-and-what-we-changed">A missed answer and what we changed</h3><p>In one task, an accessibility snapshot listed invoices, and one of them had an amount of $0.00. In an early run, the envelope's <code>anomalies:</code> section said "none", and Sonnet answered that nothing was wrong, even though it opened the file. We made two changes. The envelope now flags a number far from the rest, such as a zero among amounts between 20 and 900, and when it finds nothing, it lists the checks it ran. The task came in both sizes, so there were two such tasks.</p><figure><div class="well"><table><thead><tr><th scope="col">The invoice with an amount of $0.00</th><th scope="col" class="n">Before the changes</th><th scope="col" class="n">After</th></tr></thead><tbody><tr><td>Shown in the envelope</td><td class="n">0 of 2 tasks</td><td class="n">2 of 2 tasks</td></tr><tr><td>Found by Haiku</td><td class="n">2 of 2 runs</td><td class="n">4 of 4 runs</td></tr><tr><td>Found by Sonnet</td><td class="n">1 of 2 runs</td><td class="n">2 of 2 runs</td></tr></tbody></table></div></figure><p>Before the changes, Haiku found the invoice by searching the saved file. After the changes, neither model reported a problem in any of the 24 runs where the output had none.</p><h3 id="how-often-the-model-opens-the-full-output">How often the model opens the full output</h3><p>With the envelope, the model does not need the saved file to answer these questions, but it often opens it anyway. Without the envelope, it opens the file for each of the 52 large outputs, because it only has a preview. Adding a sentence to the banner that says every count is exact made Haiku open the file less often, and it lost no answers.</p><figure class="chart"><figcaption class="ct">Runs that opened the full output</figcaption><ul class="legend"><li><i class="sw acc"></i>With the envelope</li><li><i class="sw mut"></i>Without</li></ul><div class="crows"><div class="row"><div class="rl">Haiku, banner without the sentence</div><div class="bars"><div class="bar"><span class="track"><span class="fill acc" style="width:67.3%" data-tip="With the envelope: 70 of 104"></span></span><span class="val">70 of 104</span></div><div class="bar"><span class="track"><span class="fill mut" style="width:50.0%" data-tip="Without: 52 of 104"></span></span><span class="val">52 of 104</span></div></div></div><div class="row"><div class="rl">Haiku, banner with the sentence</div><div class="bars"><div class="bar"><span class="track"><span class="fill acc" style="width:49.0%" data-tip="With the envelope: 51 of 104"></span></span><span class="val">51 of 104</span></div><div class="bar"><span class="track"><span class="fill mut" style="width:50.0%" data-tip="Without: 52 of 104"></span></span><span class="val">52 of 104</span></div></div></div><div class="row"><div class="rl">Sonnet, banner without the sentence</div><div class="bars"><div class="bar"><span class="track"><span class="fill acc" style="width:51.0%" data-tip="With the envelope: 53 of 104"></span></span><span class="val">53 of 104</span></div><div class="bar"><span class="track"><span class="fill mut" style="width:50.0%" data-tip="Without: 52 of 104"></span></span><span class="val">52 of 104</span></div></div></div></div></figure><p>Opening the file less often hardly changed Haiku's context, because most of these reads are small searches that add about 1,000 tokens.</p><p>When the model opened the file, it mostly ran its own searches to check what the envelope had said. For example, after the envelope had counted the hidden cards in a Figma file, the model counted them again with <code>grep</code>. It used line numbers from the envelope in 12 to 27% of its reads, and it seldom ran the commands in <code>get more:</code>.</p><figure class="chart"><figcaption class="ct">What the model's reads of the saved file did</figcaption><ul class="legend"><li><i class="sw acc"></i>Ran a command from <code>get more:</code></li><li><i class="sw acc2"></i>Used line numbers from the envelope</li><li><i class="sw mut"></i>Ran its own search</li><li><i class="sw mut2"></i>Read the whole file</li></ul><div class="crows"><div class="row"><div class="rl">Sonnet, 88 reads</div><div class="segs" role="img" aria-label="Sonnet, 88 reads"><span class="sg acc2" style="flex-grow:27" data-tip="Used line numbers from the envelope: 27%" aria-label="Used line numbers from the envelope: 27%">27%</span><span class="sg mut" style="flex-grow:72" data-tip="Ran its own search: 72%" aria-label="Ran its own search: 72%">72%</span><span class="sg mut2" style="flex-grow:1" data-tip="Read the whole file: 1%" aria-label="Read the whole file: 1%"></span></div></div><div class="row"><div class="rl">Haiku, 113 reads</div><div class="segs" role="img" aria-label="Haiku, 113 reads"><span class="sg acc" style="flex-grow:4" data-tip="Ran a command from get more:: 4%" aria-label="Ran a command from get more:: 4%"></span><span class="sg acc2" style="flex-grow:12" data-tip="Used line numbers from the envelope: 12%" aria-label="Used line numbers from the envelope: 12%">12%</span><span class="sg mut" style="flex-grow:81" data-tip="Ran its own search: 81%" aria-label="Ran its own search: 81%">81%</span><span class="sg mut2" style="flex-grow:3" data-tip="Read the whole file: 3%" aria-label="Read the whole file: 3%"></span></div></div></div></figure><h3 id="other-versions-of-the-envelope">Other versions of the envelope</h3><p>We compared the final version's base with four other versions on Haiku, and none did clearly better.</p><details class="more"><summary>Show the five versions and how each did</summary><div class="mi"><p>All five versions are built by the same code. The base version is the final version before the two changes for the $0.00 invoice and the banner sentence. The others change it in one way each:</p><ul class="points"><li>The version with an example item also copies one ordinary item.</li><li>The shorter version has a shorter <code>shape:</code> section and copies no items.</li><li>The version with a command per group also gives a ready-made command for every group of similar items.</li></ul><figure><div class="well"><table><thead><tr><th scope="col">Version</th><th scope="col" class="n">Right, of 104</th><th scope="col" class="n">Tokens saved per run</th><th scope="col" class="n">Opened the file, of 104</th></tr></thead><tbody><tr><td>Base version</td><td class="n">104</td><td class="n">6,693</td><td class="n">75</td></tr><tr><td>With an example item</td><td class="n">104</td><td class="n">6,656</td><td class="n">75</td></tr><tr><td>Shorter</td><td class="n">103</td><td class="n">5,937</td><td class="n">87</td></tr><tr><td>With a command per group</td><td class="n">104</td><td class="n">5,973</td><td class="n">77</td></tr><tr><td>Without the envelope</td><td class="n">101</td><td class="n"></td><td class="n">52</td></tr></tbody></table></div></figure><p>In an earlier run, we also tried a fifth version, which copies the first and last items of the output where the base version copies the items the tool call names. In that run, it answered all 104 tasks correctly and saved 7,390 tokens per run, against 6,688 for the base version, but it opened the file in 87 runs against 72. The shorter version made Haiku open the file more often, so it saved less than the base version. The differences were small, so we kept the base version.</p></div></details>
+  </section>
+  <section id="what-is-not-settled" aria-labelledby="what-is-not-settled-h">
+    <div class="sh"><h2 id="what-is-not-settled-h">What is not settled</h2></div>
+    <ul class="points"><li>Sonnet ran the final version on only 40 tasks, which is too few to rule out a drop in correct answers of more than 3 points.</li><li>Without the envelope, Claude Code answers 96 to 99% of our test tasks correctly, so these tasks show a loss more easily than a gain.</li><li>We ran Haiku on 59 real tasks from MCP-Atlas, a benchmark of tasks that use MCP tools, by replaying the tool outputs recorded in it. In about half the runs, the model's tool call differed from the recorded one and the replay returned a smaller output, so the hook had nothing to replace. The table below counts only the runs where the hook did replace an output with the base version. In those runs, the context was 3,788 tokens smaller and the cost 3% lower.</li></ul><figure><div class="well"><table><thead><tr><th scope="col">Haiku on MCP-Atlas</th><th scope="col" class="n">With the envelope</th><th scope="col" class="n">Without</th></tr></thead><tbody><tr><td>Answers right</td><td class="n">39 of 59</td><td class="n">39 of 59</td></tr><tr><td>Opened the full output</td><td class="n">47 of 59</td><td class="n">12 of 59</td></tr></tbody></table></div></figure><ul class="points"><li>For JSON, the envelope does not yet flag a zero among numbers that are all 10 or more, as it does for logs and page snapshots.</li><li>We have not yet tested long sessions, where the model asks several questions about one output.</li></ul>
+  </section>
+  <section id="next" aria-labelledby="next-h">
+    <div class="sh"><h2 id="next-h">Next</h2></div>
+    <ol class="points"><li>Make the banner sentence that says every count is exact part of the default banner. Today it has to be turned on.</li><li>Run Sonnet on the MCP-Atlas tasks, and test long sessions.</li></ol>
+  </section>
+  <section id="how-we-tested" aria-labelledby="how-we-tested-h">
+    <div class="sh"><h2 id="how-we-tested-h">How we tested</h2></div>
+    <details class="more"><summary>Headless Claude Code with Haiku and Sonnet, about $43 of model runs in all</summary><div class="mi"><p>The model runs used headless Claude Code (<code>claude -p</code>) with Haiku and with Sonnet, and cost about $43 in all. Token counts and costs come from the API's own figures. The 95% ranges for correct answers use Newcombe's method for paired results, and those for tokens and cost use the bootstrap. The checking program runs without a model, so it costs nothing, and it ran on every version of the envelope before any model saw it. The example envelopes on this page were made by the hook's own code.</p></div></details>
+  </section>
+</main>
+</div>
+<div class="tip" role="tooltip" hidden></div>
+<script>
+(() => {
+  const tip = document.querySelector('.tip');
+  document.addEventListener('pointermove', (e) => {
+    const el = e.target.closest && e.target.closest('[data-tip]');
+    if (!el) { tip.hidden = true; return; }
+    tip.textContent = el.dataset.tip;
+    tip.hidden = false;
+    const r = tip.getBoundingClientRect();
+    const left = Math.max(8, Math.min(e.clientX + 12, innerWidth - r.width - 8));
+    let top = e.clientY - r.height - 12;
+    if (top < 8) top = e.clientY + 18;
+    tip.style.left = left + 'px';
+    tip.style.top = top + 'px';
+  });
+  document.addEventListener('pointerleave', () => { tip.hidden = true; });
+  addEventListener('scroll', () => { tip.hidden = true; }, { passive: true });
+  const links = new Map([...document.querySelectorAll('.side a')].map((a) => [a.hash.slice(1), a]));
+  const mark = (id) => links.forEach((a, key) => key === id ? a.setAttribute('aria-current', 'true') : a.removeAttribute('aria-current'));
+  const io = new IntersectionObserver((entries) => {
+    for (const e of entries) if (e.isIntersecting) mark(e.target.id);
+  }, { rootMargin: '-15% 0px -75% 0px' });
+  document.querySelectorAll('main > section[id]').forEach((s) => io.observe(s));
+})();
+</script>
