@@ -38,7 +38,8 @@ a recipe (sample or schema) and `--set FORMAT_envelope.PART=PRODUCER` swaps one 
   runs, native against the hook, scored from the answer, with tokens per request, the final
   context, cost, calls and time.
 
-Results: `results/FINDINGS.md`.
+Results: `results/FINDINGS.md`, which `./lab page` turns into one self-contained page,
+`pages/findings.html` (charts, the annotated envelope and folds come from markers in its comments).
 
 ## Kill criteria (set before measuring)
 
@@ -73,6 +74,7 @@ compressors/   route (the router); envelope (the protocol); envelope_json, schem
 claude_code/   hook (PostToolUse); fixture_mcp and replay_mcp (serve a task to Claude Code); fold_mcp
 evals/         truth, synthetic, real, atlas, tasks; envelope_check, schema_check; l1, sweep, l2, dials, sessions, stats
 harness/       fetch (real corpora); extract, stats (Claude Code transcripts)
+pages/         findings (FINDINGS.md as one HTML page), examples (its envelopes, made by the hook); assets/
 tests/         unit (pure functions) and functional (files and processes)
 dials/ sessions/ sweeps/   run specs
 results/       one file per run, never edited after; FINDINGS.md is what we found, kept current
