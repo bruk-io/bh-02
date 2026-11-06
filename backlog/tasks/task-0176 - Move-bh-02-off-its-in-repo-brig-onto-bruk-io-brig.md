@@ -5,7 +5,7 @@ status: To Do
 assignee:
   - '@bruk'
 created_date: '2026-10-31T03:54:00Z'
-updated_date: '2026-11-04T03:31:00Z'
+updated_date: '2026-11-06T15:47:00Z'
 labels:
   - brig
   - size-8
@@ -60,4 +60,6 @@ Architecture review, 2026-11-02 (three reviewers: brig's internals, the bh-02/br
 Owner, 2026-11-04 (relayed by the lead): land the swap without darwin confinement; decision-0011 amended the same day. Criterion 'runner:confined confines on darwin and on Linux' replaced: darwin refuses and names runner:unconfined until TASK-0176.05. Seatbelt (TASK-0176.05) stays under this intent and keeps it open.
 
 Owner, 2026-11-04: approval keeps counting fs_write best_effort as confined (runner:approval's _CONFINING). best_effort means the jail itself cannot undo a protected path, but a host process replacing one mid-session (git's config.lock rename over .git/config, say) leaves the jail's read-only mount on the old inode; the tripwire ends the jail when it sees that. The tripwire's gap over brig's rename pins is to be closed next (DRAFT-0022's first item).
+
+2026-11-06: the darwin Seatbelt jail (TASK-0176.05) is moved out of this intent into TASK-0196, standalone and on hold by the owner's decision to hold off on the Mac. Criterion #6 needs only that runner:confined refuse on darwin and name runner:unconfined until Seatbelt lands; where it says TASK-0176.05, read TASK-0196.
 <!-- SECTION:NOTES:END -->
