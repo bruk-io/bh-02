@@ -4,7 +4,7 @@ policies (`brig_spec.to_brig`, the one converter), launched and graded. This mod
 are the only ones that import brig, and they import only what `brig` exports.
 
 Linux only, for now. brig has a bubblewrap jail (`create_bwrap_jail`) and no darwin one yet, so
-on darwin `start` refuses, naming `runner:unconfined`; a seatbelt jail is TASK-0176.05's.
+on darwin `start` refuses, naming `runner:unconfined`; a seatbelt jail is TASK-0196's.
 
 The jail reads by allowlist, so `allowlisted` turns the policy into one: what is readable is the
 system tree (`/usr`, `/etc`, ...), the interpreter (`sys.base_prefix`, `sys.prefix`, and the
@@ -425,7 +425,7 @@ def _why_unjailable(platform: str, bwrap: str | None) -> str:
     if platform != "linux":
         return (
             f"runner:confined runs on Linux (bubblewrap) for now; this is {platform}, and brig "
-            "has no jail for it yet (a seatbelt jail for darwin is TASK-0176.05). "
+            "has no jail for it yet (a seatbelt jail for darwin is TASK-0196). "
             "Use `runner:unconfined` for the runner row (or `bh-02 --no-jail`), knowing it "
             "confines nothing"
         )

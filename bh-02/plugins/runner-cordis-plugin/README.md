@@ -249,7 +249,7 @@ root is not read-only there but absent: a write to it lands in the jail's own sc
 with it, and a masked directory is an empty one. **darwin**: brig has no jail type for it yet, so
 `runner:confined` refuses to start a program there, saying so and naming `runner:unconfined`; before any start its report is `unenforced` throughout (so
 `approval` never says confined) and its notice says the same (`tui:grades` shows it as a note)
-(TASK-0176.05 is the seatbelt jail); this is what keeps the swap from landing before it does.
+(TASK-0196 is the seatbelt jail, on hold until a Mac can prove it).
 
 **Placeholders.** bubblewrap holds a write-denied or masked path that doesn't exist with an empty
 directory, which brig makes on the host (`.envrc/`, `.vscode/`, `.idea/`, `.claude/`, and in a

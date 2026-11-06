@@ -1768,7 +1768,7 @@ def test_brig_s_report_is_the_runner_s_in_lower_case_and_the_planned_one_is_no_s
 
 
 async def test_a_platform_brig_has_no_jail_for_is_refused_by_name(tmp_path: Path) -> None:
-    """darwin has no jail type in brig yet (TASK-0176.05), so `runner:confined` refuses there and
+    """darwin has no jail type in brig yet (TASK-0196), so `runner:confined` refuses there and
     says what to use instead; so does any other platform."""
     for platform in ("darwin", "freebsd"):
         one = BrigJail(BrigConfig(), Host(), platform=platform)
