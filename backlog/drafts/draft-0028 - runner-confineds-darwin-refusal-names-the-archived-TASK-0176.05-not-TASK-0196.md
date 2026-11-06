@@ -6,6 +6,7 @@ title: >-
 status: Draft
 assignee: []
 created_date: '2026-11-06T15:51:00Z'
+updated_date: '2026-11-06T15:52:00Z'
 labels:
   - brig
 dependencies: []
@@ -22,3 +23,9 @@ The Seatbelt jail moved from TASK-0176.05 (archived) to TASK-0196 on 2026-11-06,
 <!-- AC:BEGIN -->
 - [ ] #1 The darwin refusal message, the jail module docstring, the runner README and the test docstring name TASK-0196
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Fixed directly in 224f96b (four text lines: jail.py's docstring and refusal message, the runner README, the darwin test's docstring), small enough not to need a task; scripts/check on the runner plugin exited 0 (266 passed). Archived as done.
+<!-- SECTION:NOTES:END -->
