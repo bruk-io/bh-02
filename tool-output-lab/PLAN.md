@@ -93,6 +93,22 @@ Later: a run nested in a run's items as an envelope of its own (a country's subd
 list of countries); JSON's exceptions to take the zero-among-positives rule logs and trees now have
 (`results/l1-3-*.md`).
 
+## v2: scenarios
+
+v2 replaces the test tasks with scenarios: seeded worlds whose tools answer any call, tasks a
+developer would set, and truths worked out from the world. SCENARIOS.md has the design, the kinds
+of problem, and the seal on the test set.
+
+| # | Stage | Needs a model | Status |
+|---|---|---|---|
+| V0 | The design, and the seal: sealed seeds from a key kept outside the repository, its SHA-256 committed, a ledger of builds and runs, each set run once (`scenarios/seal.py`, `./lab seal`) | no | done: no key made yet |
+| V1 | Which large outputs real sessions produce: tools, formats and sizes, from Claude Code transcripts (`harness/extract`) | no | |
+| V2 | The code-and-tests family: a generated package and history with a seeded regression, real `pytest` and `git` | no | |
+| V3 | A pilot without the hook on the open seeds; keep the templates Claude Code alone gets right 20 to 80% of the time | yes | |
+| V4 | The failure-mode set: problems no rule sees, with and without the exact-counts banner | yes | |
+| V5 | The incident-triage family, served with FastMCP; sessions of follow-up questions | yes | |
+| V6 | The sealed runs: Haiku, then Sonnet, every setting in one run per set | yes | |
+
 ## Decisions
 
 - Python 3.15 through `uv run --no-project`, standard library only for the envelope (ast-grep for
