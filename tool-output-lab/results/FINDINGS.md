@@ -1,78 +1,86 @@
-# Findings
+# Summarising large tool outputs for Claude Code
 
-When a tool returns a large output, Claude Code either puts all of it in the model's context or,
-when it is over Claude Code's size limit, saves it to a file and shows the model a preview. We
-tested a third way. A hook replaces the large output with a short summary of it, which we call the
-envelope, and saves the full output to a file that the model can still open. We wanted to know
-whether the model still answers correctly, and whether its context ends up smaller.
+When a tool returns a large output, such as a long log or a big JSON response, Claude Code either
+puts all of it into the model's context or, if it is larger than Claude Code's limit, saves it to a
+file and shows the model a short preview. We tested a third option. A hook replaces each large
+output with a short summary, which we call an envelope, and saves the full output to a file that
+the model can still open. We wanted to know whether the model still answers correctly with the
+envelope, and how much context it saves.
 
-## Result
+## Results
 
-On every set of tasks we tested, the model answered at least as well with the envelope as without
-it, and its context ended up smaller.
+The model answered at least as well with the envelope as without it in every test, and it used
+less context each time.
 
-The 104 test tasks ask questions about four kinds of output: lists of pods as JSON, request logs,
-accessibility snapshots and Figma files. The 40 "what is wrong" tasks are the ones among them that
-ask what is wrong in the output. They include two where one invoice in a list has an amount of
-$0.00, and eight where nothing is wrong and the right answer is "nothing".
+We tested on 104 tasks that we built. Each task is a tool output with a question about it, and we
+planted the answer in the output, so we know what the right answer is. The outputs are lists of
+Kubernetes pods in JSON, web server logs, accessibility snapshots of web pages, and Figma design
+files. Each comes in a medium size, which fits within Claude Code's limit, and a large size, which
+does not. Forty of the tasks ask the model to find a problem in the output, which is where a
+summary is most likely to hide something.
 
-We ran the final version of the envelope three times, each time against Claude Code without the
-envelope on the same tasks.
+Each task ran twice in Claude Code, once with the hook and once without it, and we compared the two
+runs task by task. We ran the final version of the envelope three times:
 
 | Answers right | With the envelope | Without |
 |---|---|---|
-| Haiku, 104 test tasks | 104 of 104 | 100 of 104 |
-| Haiku, 40 "what is wrong" tasks, each run twice | 80 of 80 | 72 of 80 |
-| Sonnet, 40 "what is wrong" tasks | 40 of 40 | 39 of 40 |
+| Haiku, all 104 tasks | 104 of 104 | 100 of 104 |
+| Haiku, 40 find-the-problem tasks, each run twice | 80 of 80 | 72 of 80 |
+| Sonnet, 40 find-the-problem tasks | 40 of 40 | 39 of 40 |
 
 | What the envelope saved per run | Context | Cost |
 |---|---|---|
-| Haiku, 104 test tasks | 6,158 tokens | 25% |
-| Haiku, 40 "what is wrong" tasks, each run twice | 7,267 tokens | 29% |
-| Sonnet, 40 "what is wrong" tasks | 8,164 tokens | 26% |
+| Haiku, all 104 tasks | 6,158 tokens | 25% |
+| Haiku, 40 find-the-problem tasks, each run twice | 7,267 tokens | 29% |
+| Sonnet, 40 find-the-problem tasks | 8,164 tokens | 26% |
 
-Context is the size of the model's input on its last request. Cost is what the API charged.
+Context here is the number of tokens the model read on its last request, and cost is what the API
+charged for the run.
 
-Before any run, we set two bars. Answers with the envelope may not fall more than 3 percentage
-points below answers without it, and the final context must be smaller. Haiku meets both bars.
-Sonnet's context is smaller, and Sonnet got all 40 answers right, but 40 runs are too few to rule
-out a fall of more than 3 points. On an earlier version of the envelope, over all 104 test tasks,
-Sonnet got 103 right against 104 without the envelope.
+Before the runs, we decided that the envelope would pass if correct answers fell by no more than 3
+percentage points and the context got smaller. Haiku passed on both counts. Sonnet used less
+context and answered all 40 tasks correctly, but 40 runs are too few to rule out a drop of more
+than 3 points. With an earlier version of the envelope, Sonnet answered 103 of the 104 tasks
+correctly, against 104 without the envelope.
 
-Haiku did better with the envelope than without it on the "what is wrong" tasks, by 10 points, and
-the gain is larger than chance would give (the 95% range is 3 to 19 points). Without the envelope,
-Haiku missed problems in large snapshots and Figma files, where it sees only a preview and has to
-search the file itself.
+On the 40 find-the-problem tasks, Haiku did 10 points better with the envelope than without it,
+which is more than chance would explain (the 95% range is 3 to 19 points). Without the envelope,
+Haiku missed problems in the large snapshots and Figma files, where it only gets a preview and has
+to search the saved file.
 
-The saving depends on the size of the output. A medium output (about 4,000 to 12,000 tokens) fits
-within Claude Code's limit, so without the envelope the model holds all of it. A large output
-(about 19,000 to 70,000 tokens) is over the limit, so without the envelope the model has to search
-the saved file. These are Haiku's 104 test tasks again, split by size:
+How much the envelope saves depends on the size of the output. Without the envelope, the model holds
+a medium output in full, so replacing it saves more. A large output is already replaced by a
+preview, and the model searches the file for what it needs. These are Haiku's 104 tasks split by
+size:
 
 | Output size | Tokens saved per run | Cost saved | Time per run |
 |---|---|---|---|
 | Medium | 9,185 | 18% | 3.0 s slower |
 | Large | 3,131 | 31% | 8.9 s faster |
 
-Medium runs are slower because the model often opens the full output as well as reading the
-envelope.
+Medium runs took longer because the model often opened the full output after reading the envelope.
 
-## What an envelope looks like
+## How the envelope works
 
-Here a tool returned a list of 100 invoices as JSON, about 2,800 tokens, and the tool call asked
-about invoice INV-1024. Two of the invoices are overdue. The hook replaced the list with an
-envelope of about 140 tokens. Everything shown below is the hook's real output for this list.
+The hook runs after every tool call. When the output is larger than 2,000 tokens, it saves the
+output to a file and gives the model an envelope in its place. The envelope has four sections, each
+labelled in the text:
 
-### The banner
+- `shape:` describes the output and gives exact counts, worked out over the whole output.
+- `anomalies:` lists the items that differ from the rest, with the position of each in the output.
+- `samples:` copies a few items exactly, chosen because they contain words from the tool call.
+- `get more:` gives line numbers and ready-made commands for reading the rest of the saved file.
 
-The envelope starts with a banner that tells the model what it is reading and where the full
-output is:
+A banner above the four sections says where the full output is saved. It also tells the model that
+every count is exact and that it should open the file only for what the envelope does not show.
+
+Here is a real envelope. A tool returned a list of 100 invoices as JSON, about 2,800 tokens long,
+and the tool call asked about invoice INV-1024. The hook's own code turned it into this banner and
+envelope, about 140 tokens in all:
 
 ```
 [Folded: ~2772 tokens -> ~143. Full output: /tmp/tool-results/invoices.json. This is the data's envelope: its shape (fields, values and counts), the rows that break it, samples, and how to get more, by jq path (jq). FILE in a command is /tmp/tool-results/invoices.json. Every count and value in the envelope is exact, worked out over the whole output, not a sample: read the file only for what the envelope does not show.]
 ```
-
-### Part 1: what the output is
 
 ```
 shape:
@@ -81,52 +89,36 @@ shape:
     .customer  "Acme" 20, "Birch" 20, "Cobalt" 20, "Dune" 20, "Ember" 20
     .amount    float, unique
     .status    "paid" 98, "overdue" 2
-```
-
-The list holds 100 invoices, and each invoice has four fields. Every customer has 20 invoices, and
-98 invoices are paid while 2 are overdue. The hook counted these over all 100 rows.
-
-### Part 2: the rows that do not fit
-
-```
 anomalies: 2 rows, all listed
   .invoices[16] INV-1017: .status "overdue"
   .invoices[71] INV-1072: .status "overdue"
-```
-
-Two invoices are overdue when the other 98 are paid, so the envelope lists both, with their place
-in the list, and says that these are all of them. When nothing stands out, this part lists the
-checks it ran instead. This is what it says for the same list with every invoice paid:
-
-```
-anomalies: none found by its rules (a value few rows hold where one dominates, a number far outside the rest, a key few rows have or lack, a value of another type), which is not proof there are none
-```
-
-### Part 3: rows copied from the output
-
-```
 samples:
   .invoices[23]: {"id":"INV-1024","customer":"Dune","amount":274.86,"status":"paid"}  (matches the query)
-```
-
-The tool call asked about INV-1024, so the envelope copies that row exactly as it is in the output.
-
-### Part 4: how to read the rest
-
-```
 get more:
   jq '.invoices[] | select(.status != "paid") | .id' FILE
   jq '.invoices[16]' FILE  (reads any path above)
 ```
 
-The first command prints the id of every invoice that is not paid. The second reads one row by its
-place in the list, and works for any place the envelope shows. FILE stands for the saved file.
+Read from the top, it says that the list holds 100 invoices with four fields each, that every
+customer has 20 invoices, and that 98 invoices are paid and 2 are overdue. The two overdue invoices
+are listed with their positions in the list, and "all listed" means there are no others. Invoice
+INV-1024 is copied exactly as it appears, because the tool call named it. The first command prints
+the id of every unpaid invoice, the second reads any single invoice, and `FILE` stands for the
+saved file.
 
-### The same parts for a log
+When nothing in the output stands out, the `anomalies:` section says which checks it ran, and that
+passing them does not prove there is no problem. This is what it says for the same list with every
+invoice paid:
 
-For a log, the envelope works line by line. It groups lines that follow the same pattern, which is
-the line with every word that holds a digit or a hex id replaced by `<*>`. This is the envelope of
-a request log of 300 lines:
+```
+anomalies: none found by its rules (a value few rows hold where one dominates, a number far outside the rest, a key few rows have or lack, a value of another type), which is not proof there are none
+```
+
+### Logs, page snapshots and other outputs
+
+A log is read line by line. The envelope groups lines that follow the same pattern, where a pattern
+is a line with every word that contains a digit or an id replaced by `<*>`. This is the envelope of
+a web server log of 300 lines:
 
 ```
 shape: 300 lines, 5 line templates (<*> is a token holding a digit, or a hex id)
@@ -145,167 +137,224 @@ get more:
   sed -n 'A,Bp' FILE  (any lines above, by number)
 ```
 
-The 300 lines follow 5 patterns, and the count beside each pattern is how many lines follow it.
-Three lines are payment errors, so the envelope lists them with their line numbers and gives a
-`grep` command that prints exactly those three lines.
+All 300 lines follow 5 patterns, and the number beside each pattern is how many lines follow it.
+Three lines record failed payments, so the envelope lists them by line number and gives a `grep`
+command that prints exactly those three.
 
-The hook also builds envelopes for accessibility snapshots, XML, web pages and source code. [The
-envelope](https://claude.ai/artifact/BZNhBgeCmSDnquEMcnvBkj) page shows one of each.
+For an output with an indented structure, such as an accessibility snapshot of a web page, the
+envelope shows the outline and counts groups of similar items. This is the envelope of a snapshot
+of a page that lists 150 invoices:
 
-## What we learned along the way
+```
+shape: 610 lines, 15 line templates (<*> is a token holding a digit, a hex id or a quoted string)
+  1: - Page URL: https://billing.local/invoices
+  2: - Page Title: Invoices
+  3: - generic [ref=e53187]:
+  4:   - banner [ref=e40337]:
+  6:   - main [ref=e27900]:
+  7:     - heading "Invoices" [level=1] [ref=e44330]
+  8:     - list [ref=e47831]:
+            150 items, lines 9-608
+            150 items like: - listitem [ref=<*>]:
+  609:   - contentinfo [ref=e13672]:
+  [+ 2 more nodes, deeper or further on]
+anomalies: 3 of 150 items in 1 run, all listed
+  3 lines like: - button <*> [ref=<*>] [disabled]  (in 3 of 150 items)
+    89:       - listitem [ref=e28671]:
+    90:         - text: Invoice INV-87af257
+    91:         - text: $595.82 due 12 Nov
+    92:         - button "Pay INV-87af257" [ref=e1179] [disabled]
+    177:       - listitem [ref=e65742]:
+    178:         - text: Invoice INV-668b725
+    179:         - text: $121.67 due 27 Nov
+    180:         - button "Pay INV-668b725" [ref=e33208] [disabled]
+    553:       - listitem [ref=e59312]:
+    554:         - text: Invoice INV-193349e
+    555:         - text: $281.66 due 22 Nov
+    556:         - button "Pay INV-193349e" [ref=e92037] [disabled]
+get more:
+  grep -nF '] [disabled]' FILE  (the 3 lines like it)
+  sed -n 'A,Bp' FILE  (any lines above, by number)
+```
 
-**Everything the envelope says is true.** We wrote a checker that shares no code with the code that
-builds the envelope. It counts every number again against the full output, compares every quoted
-line with the original, and runs every command the envelope suggests. Across 251 test outputs and
-every version of the envelope we tried, the checker found no false statement. It also counts how
-many tasks the envelope answers on its own, without the model opening the file. For the final
-version on the medium and large test outputs, these are the counts:
+The outline shows the top of the page, then says that lines 9 to 608 hold a list of 150 similar
+items. Three of the items have a disabled Pay button, so the envelope shows those three items in
+full.
 
-| Kind of question | Answered by the envelope alone |
+The hook builds envelopes in the same way for XML, web pages, plain text and source code. For source
+code, the outline is the code's classes and functions.
+
+### How the envelope fits its budget
+
+Each section can be written at a few levels of detail. The hook starts every section at its
+shortest, then adds detail in order of importance (shape, then anomalies, then get more, then
+samples) for as long as the envelope stays under 2,000 tokens. Most envelopes come out much smaller
+than that, and for our test outputs they were a few hundred tokens.
+
+### How we check the envelope
+
+Before a model sees any envelope, a separate program checks it against the full output. We wrote
+this program apart from the code that builds envelopes, so that a mistake in one is unlikely to be
+repeated in the other. It counts every number again, compares every copied line with the original,
+and runs every command the envelope suggests to see that it prints what the envelope says. We
+tested 251 outputs, which include real logs, source files and recorded tool results as well as our
+test outputs, and the program found no mistake in any of their envelopes.
+
+The program also tells us which questions can be answered from the envelope alone, without opening
+the saved file. These are the counts for the medium and large test outputs:
+
+| Question | Answerable from the envelope alone |
 |---|---|
-| How many rows or lines have something | 32 of 32 |
-| What is wrong in the output | 32 of 32 |
-| What is wrong, when nothing is | 8 of 8 |
-| List every row that has something | 15 of 16 |
-| Look up one row the tool call does not name | 0 of 16 |
-| Look up one row the tool call names | 16 of 16 |
+| How many items have some property? | 32 of 32 |
+| What is wrong in the output? | 32 of 32 |
+| What is wrong, when nothing is? | 8 of 8 |
+| Which items have some property? | 15 of 16 |
+| A question about one item the tool call does not name | 0 of 16 |
+| A question about one item the tool call names | 16 of 16 |
 
-On real outputs, fewer tasks can be answered from the envelope alone:
+The envelope cannot answer a question about a particular item unless that item stands out or the
+tool call names it, because those are the only items it copies. Real outputs are less regular than
+our test outputs, so fewer questions about them can be answered from the envelope alone:
 
-| Real output | Answered by the envelope alone |
+| Real output | Answerable from the envelope alone |
 |---|---|
-| HDFS server log | 10 of 20 |
-| MCP-Atlas tool results | 17 of 59 |
+| Hadoop (HDFS) server log | 10 of 20 |
+| Results of tool calls recorded in MCP-Atlas | 17 of 59 |
 | Python source files | 12 of 15 |
 | Rust source files | 6 of 6 |
-| ISO 3166 country list (XML) | 0 of 3 |
-| PyPI release data (JSON) | 2 of 3 |
+| A list of countries in XML (ISO 3166) | 0 of 3 |
+| Package release data from PyPI (JSON) | 2 of 3 |
 
-For the country list, all 3 can be answered when the tool call names the country.
+For the list of countries, all 3 questions can be answered when the tool call names the country.
 
-**The list of rows that do not fit matters most.** We changed one part of the envelope at a time and
-used the checker to count the tasks the envelope answers on its own.
+## Other measurements
 
-| Change to the envelope | What it changed |
+### Changing one section at a time
+
+We changed one section of the envelope at a time and counted how many questions could still be
+answered from the envelope alone. The `anomalies:` section made the biggest difference.
+
+| Change to the envelope | Effect |
 |---|---|
-| List every JSON row that breaks the pattern, instead of applying simpler rules | Finds 12 of 12 planted problems instead of 9 or 10 |
-| Copy the rows that contain words from the tool call | Answers 5 to 13 more lookups |
-| Add more example rows | Answers almost nothing more, and costs 65 to 200 tokens |
-| Allow 500 tokens instead of 2,000 | Answers half as many of the log counting tasks |
+| For JSON, list every item that differs from the rest, where simpler rules pick out only some | 12 of 12 planted problems found, up from 9 or 10 |
+| Copy the items that contain words from the tool call | 5 to 13 more questions about one item answered |
+| Copy more example items | Almost no more questions answered, for 65 to 200 more tokens |
+| Allow 500 tokens where the default is 2,000 | Half as many counting questions about logs answered |
 
-**One wrong answer led to two changes.** In an early run, Sonnet missed the invoice with an amount
-of $0.00. The envelope had said "anomalies: none", and Sonnet answered "none" even after opening the
-file. We changed the envelope in two ways. It now flags a number far from the rest, such as a zero
-among amounts of 20 to 900. When it finds nothing, it now lists the checks it ran and says there may
-be problems they do not catch.
+### A missed answer and what we changed
+
+In one task, an accessibility snapshot listed invoices, and one of them had an amount of $0.00. In
+an early run, the envelope's `anomalies:` section said "none", and Sonnet answered that nothing was
+wrong, even though it opened the file. We made two changes. The envelope now flags a number far
+from the rest, such as a zero among amounts between 20 and 900, and when it finds nothing, it lists
+the checks it ran. The task came in both sizes, so there were two such tasks.
 
 | The invoice with an amount of $0.00 | Before the changes | After |
 |---|---|---|
-| The envelope shows it | 0 of 2 tasks | 2 of 2 tasks |
-| Haiku found it | 2 of 2 runs | 4 of 4 runs |
-| Sonnet found it | 1 of 2 runs | 2 of 2 runs |
+| Shown in the envelope | 0 of 2 tasks | 2 of 2 tasks |
+| Found by Haiku | 2 of 2 runs | 4 of 4 runs |
+| Found by Sonnet | 1 of 2 runs | 2 of 2 runs |
 
-After the changes, neither model reported a problem in the 24 runs where nothing was wrong.
+Before the changes, Haiku found the invoice by searching the saved file. After the changes, neither
+model reported a problem in any of the 24 runs where the output had none.
 
-**The model often opens the full output anyway.** It opened the saved file in about half to two
-thirds of the runs, often when the answer was already in the envelope. A sentence in the banner
-that says every count is exact cut how often Haiku did this, and it lost no answers.
+### How often the model opens the full output
+
+With the envelope, the model does not need the saved file to answer these questions, but it often
+opens it anyway. Without the envelope, it opens the file for each of the 52 large outputs, because
+it only has a preview. Adding a sentence to the banner that says every count is exact made Haiku
+open the file less often, and it lost no answers.
 
 | Runs that opened the full output | With the envelope | Without |
 |---|---|---|
-| Haiku, without the sentence that counts are exact | 70 of 104 | 52 of 104 |
-| Haiku, with that sentence | 51 of 104 | 52 of 104 |
-| Sonnet, without that sentence | 53 of 104 | 52 of 104 |
+| Haiku, banner without the sentence | 70 of 104 | 52 of 104 |
+| Haiku, banner with the sentence | 51 of 104 | 52 of 104 |
+| Sonnet, banner without the sentence | 53 of 104 | 52 of 104 |
 
-Without the envelope, the model opens the file for every large output, because it sees only a
-preview, and 52 of the 104 tasks are large. Opening the file less did not make Haiku's context much
-smaller, because most of these reads are small searches that add about 1,000 tokens.
+Opening the file less often hardly changed Haiku's context, because most of these reads are small
+searches that add about 1,000 tokens.
 
-When the model opened the file, it mostly ran its own search to check what the envelope said. For
-example, after the envelope had counted the hidden cards in a Figma file, the model counted them
-again with `grep`. It almost never ran the commands the envelope suggested.
+When the model opened the file, it mostly ran its own searches to check what the envelope had said.
+For example, after the envelope had counted the hidden cards in a Figma file, the model counted
+them again with `grep`. It seldom used the commands in `get more:`.
 
-| What the model's call to the file did | Sonnet | Haiku |
+| What the model's read of the file did | Sonnet | Haiku |
 |---|---|---|
-| Ran a command the envelope suggested | 0% | 4% |
-| Used the envelope's line numbers in its own command | 25% | 12% |
+| Ran a command from `get more:` | 0% | 4% |
+| Used line numbers from the envelope in its own command | 25% | 12% |
 | Ran its own search | 69% | 81% |
 | Read the whole file | 1% | 3% |
 
-**How the envelope is built barely changes the result.** We tried five versions of the envelope,
-all made by the same code:
+### Other versions of the envelope
 
-- `schema` has the four parts shown above. The final version is `schema` with the two changes for
-  the $0.00 invoice and the sentence that counts are exact.
-- `full` is `schema` plus one ordinary row as an example.
-- `lean` has a shorter description, the rows that do not fit and one command, with no example rows.
-- `index` is `schema` plus a ready command for every group of rows.
-- `sample` shows the first and last rows of the output instead of the rows the tool call names.
+We compared four versions of the envelope on Haiku, all built by the same code. The base version is
+the final version before the two changes for the $0.00 invoice and the banner sentence. The others
+change it in one way each:
 
-The first four ran on Haiku in one run, on the 104 test tasks:
+- The version with an example item also copies one ordinary item.
+- The shorter version has a shorter `shape:` section and copies no items.
+- The version with a command per group also gives a ready-made command for every group of similar
+  items.
 
 | Version | Right, of 104 | Tokens saved per run | Opened the file, of 104 |
 |---|---|---|---|
-| `schema` | 104 | 6,693 | 75 |
-| `full` | 104 | 6,656 | 75 |
-| `lean` | 103 | 5,937 | 87 |
-| `index` | 104 | 5,973 | 77 |
+| Base version | 104 | 6,693 | 75 |
+| With an example item | 104 | 6,656 | 75 |
+| Shorter | 103 | 5,937 | 87 |
+| With a command per group | 104 | 5,973 | 77 |
 | Without the envelope | 101 | | 52 |
 
-In an earlier run, `sample` got 104 right against 103 without the envelope, saved 7,390 tokens per
-run, and opened the full output in 87 of 104 runs. None of the versions did clearly better than
-`schema`. `lean` made Haiku open the file more often, so it saved less.
+In an earlier run, we also tried a fifth version, which copies the first and last items of the
+output where the base version copies the items the tool call names. In that run, it answered all 104
+tasks correctly and saved 7,390 tokens per run, against 6,688 for the base version, but it opened
+the file in 87 runs against 72. The shorter version made Haiku open the file more often, so it saved
+less than the base version. The differences were small, so we kept the base version.
 
 ## What is not settled
 
-- Sonnet has had only 40 runs of the final version, which is too few to rule out a fall in answers
-  of more than 3 points.
-- Without the envelope, Claude Code gets 96 to 99% of the test tasks right, so these tasks show a
-  loss more easily than a gain.
-- We ran Haiku on 59 real tasks from the MCP-Atlas benchmark, which we replay from recorded tool
-  calls. In about half the runs, the replay returned a smaller output than the recorded one, so the
-  envelope had nothing to replace. The table below counts only the runs where the envelope was
-  used, with `schema` before the changes. In those runs the context was 3,788 tokens smaller and
-  the cost 3% lower.
+- Sonnet ran the final version on only 40 tasks, which is too few to rule out a drop in correct
+  answers of more than 3 points.
+- Without the envelope, Claude Code answers 96 to 99% of our test tasks correctly, so these tasks
+  show a loss more easily than a gain.
+- We ran Haiku on 59 real tasks from MCP-Atlas, a benchmark of tasks that use MCP tools, by
+  replaying the tool outputs recorded in it. In about half the runs, the model's tool call differed
+  from the recorded one and the replay returned a smaller output, so the hook had nothing to
+  replace. The table below counts only the runs where the hook did replace an output with the base
+  version. In those runs, the context was 3,788 tokens smaller and the cost 3% lower.
 
 | Haiku on MCP-Atlas | With the envelope | Without |
 |---|---|---|
 | Answers right | 39 of 59 | 39 of 59 |
 | Opened the full output | 47 of 59 | 12 of 59 |
 
-- For JSON, the envelope does not yet flag a zero among numbers that are all 10 or more. For logs
-  and outlines, it does.
-- We have not yet tested the envelope in long sessions, where the model answers several questions
-  about one output.
+- For JSON, the envelope does not yet flag a zero among numbers that are all 10 or more, as it does
+  for logs and page snapshots.
+- We have not yet tested long sessions, where the model asks several questions about one output.
 
 ## Next
 
-1. Make the sentence that says every count is exact part of the hook's default banner. Today it is
-   a setting (`banner=exact`).
-2. Run Sonnet on the MCP-Atlas tasks, and test long sessions with follow-up questions.
+1. Turn on the banner sentence that says every count is exact by default. Today it is a setting
+   (`banner=exact`).
+2. Run Sonnet on the MCP-Atlas tasks, and test long sessions.
 
-## How we measured
+## Where the numbers come from
 
-Each task runs in headless Claude Code twice, once as it is and once with the hook, and the two
-runs are compared task by task. The test tasks have answers we planted in the output. Each kind of
-output comes at a medium size, which fits within Claude Code's limit, and a large size, which is
-over it. Context and cost come from the API's own counts. The model runs cost about $43 in all.
+The model runs used headless Claude Code with Haiku and Sonnet, and cost about $43 in all. Token
+counts and costs come from the API. The reports are in `tool-output-lab/results/`:
 
-Before any model run, the checker described above checks every envelope, without a model.
-
-The numbers come from these reports in `results/`:
-
-- The final version on Haiku over the 104 test tasks: `dials-haiku-banner.md` (the `exact` setting).
-- The final version on the 40 "what is wrong" tasks: `dials-haiku-fixes.md` and
+- The final version on Haiku over all 104 tasks: `dials-haiku-banner.md` (the `exact` setting).
+- The final version on the 40 find-the-problem tasks: `dials-haiku-fixes.md` and
   `dials-sonnet-fixes.md`.
-- Sonnet on an earlier version: `dials-sonnet-synthetic.md`.
-- The other versions of the envelope: `dials-haiku-synthetic.md` and `dials-haiku-patterns.md`.
-- The MCP-Atlas tasks: `dials-haiku-atlas.md`.
-- The checker: `l1-3-schema.md` for the final version, and `sweep-*.md` for the changes one part
-  at a time.
-- How the model opens the full output: the transcripts of `dials-haiku-patterns.md` and
+- Sonnet with an earlier version over all 104 tasks: `dials-sonnet-synthetic.md`.
+- The other versions of the envelope: `dials-haiku-patterns.md` (the base version is `schema`, and
+  the others are `full`, `lean` and `index`) and `dials-haiku-synthetic.md` (`sample`).
+- MCP-Atlas: `dials-haiku-atlas.md`.
+- The checking program: `l1-3-schema.md` for the final version, and `sweep-*.md` for the changes to
+  one section at a time.
+- How the model reads the saved file: the transcripts of `dials-haiku-patterns.md` and
   `dials-sonnet-synthetic.md`.
 - The $0.00 invoice before the changes: `dials-haiku-synthetic.md` and `dials-sonnet-synthetic.md`.
 
-The example envelopes come from the hook's own code. The notes we wrote after each run, in order,
-are in git history up to commit `0ab11f7`.
+The example envelopes were made by the hook's own code. `PLAN.md` describes every option for each
+section of the envelope, and git history up to commit `0ab11f7` holds the notes we wrote after each
+run.
