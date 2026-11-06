@@ -10,6 +10,7 @@
 #   ./lab evals l2 [...]        layer 2: headless Claude Code on the eval tasks (costs money; --dry-run first)
 #   ./lab fetch hdfs            a real corpus into corpus/real/ (Python 3.13 with pyarrow; untracked)
 #   ./lab page [-o FILE]        the findings page: results/FINDINGS.md as pages/findings.html
+#   ./lab seal init|verify|status   the sealed test set's key, commitment and ledger (SCENARIOS.md)
 set -euo pipefail
 cd "$(dirname "$0")"
 export UV_SYSTEM_CERTS="${UV_SYSTEM_CERTS:-${UV_NATIVE_TLS:-}}"; unset UV_NATIVE_TLS
@@ -22,6 +23,7 @@ case "$cmd" in
   evals) layer="${1:-l1}"; shift || true; run python -m "evals.$layer" "$@" ;;
   fold) run python -m compressors.cli "$@" ;;
   page) run python -m pages.findings "$@" ;;
+  seal) run python -m scenarios.seal "$@" ;;
   fetch) uv run --quiet --no-project --python 3.13 --with pyarrow python -m harness.fetch "$@" ;;
-  *) echo "unknown command '$cmd': use check, fix, fold, evals, page, fetch, extract or stats" >&2; exit 2 ;;
+  *) echo "unknown command '$cmd': use check, fix, fold, evals, page, seal, fetch, extract or stats" >&2; exit 2 ;;
 esac

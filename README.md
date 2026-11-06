@@ -75,6 +75,7 @@ claude_code/   hook (PostToolUse); fixture_mcp and replay_mcp (serve a task to C
 evals/         truth, synthetic, real, atlas, tasks; envelope_check, schema_check; l1, sweep, l2, dials, sessions, stats
 harness/       fetch (real corpora); extract, stats (Claude Code transcripts)
 pages/         findings (FINDINGS.md as one HTML page), examples (its envelopes, made by the hook); assets/
+scenarios/     seal (the sealed test set's key, commitment and ledger); SCENARIOS.md has the v2 design
 tests/         unit (pure functions) and functional (files and processes)
 dials/ sessions/ sweeps/   run specs
 results/       one file per run, never edited after; FINDINGS.md is what we found, kept current
