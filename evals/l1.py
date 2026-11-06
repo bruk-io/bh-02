@@ -26,7 +26,7 @@ from pathlib import Path
 from compressors import markers
 from compressors.cli import fold_text
 from compressors.common import estimate_tokens, query_words, split_lines
-from compressors.config import DEFAULT, FoldConfig, load, with_sets
+from compressors.config import DEFAULT, FoldConfig, label, load, with_sets
 from compressors.envelope_json import VIEWS, envelope
 from compressors.json_items import parse_json_or_jsonl
 from compressors.route import lines_envelope
@@ -134,6 +134,8 @@ def check(task: Task, budget: int, query_on: bool, view: str = "sample", config:
         score.recall,
         estimate_tokens(out) > budget * 1.1,
         violations,
+        view,
+        label(config),
     )
 
 

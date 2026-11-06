@@ -1,6 +1,6 @@
 # Layer 1: the fold alone, budget 2000 tokens
 
-View: sample. Knobs: defaults.
+View: schema. Knobs: defaults.
 
 284 folds of 251 tasks. Sufficient = the task's scorer finds
 the answer in the fold text (an upper bound on what a model can answer without fetching more).
