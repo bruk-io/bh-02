@@ -3,7 +3,8 @@ registry reads the real files on this host, so this is a functional test)."""
 
 import pytest
 
-from evals.l1 import check
+from compressors.config import DEFAULT, with_sets
+from evals.l1 import check, report
 from evals.tasks import tasks
 
 _BY_ID = {t.task_id: t for t in tasks()}
@@ -55,3 +56,11 @@ def test_an_anomaly_the_fold_has_a_rule_for_is_in_view_and_none_is_ever_invented
 )
 def test_cases_the_layer_1_fixes_made_sufficient(task_id, query_on):
     assert check(_BY_ID[task_id], 2000, query_on).sufficient
+
+
+def test_a_report_names_the_recipe_and_knobs_its_folds_used():
+    """A report headed "View: sample" over schema folds misnames every number under it."""
+    config = with_sets(DEFAULT, ["banner=exact"])
+    row = check(_BY_ID["json-M-count-k7"], 2000, query_on=False, view="schema", config=config)
+    assert (row.view, row.config) == ("schema", "banner=exact")
+    assert "View: schema. Knobs: banner=exact." in report([row], 2000)
