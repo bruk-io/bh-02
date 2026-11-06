@@ -2,9 +2,9 @@
 
 When a tool returns a large output, such as a long log or a big JSON response, Claude Code either
 puts all of it into the model's context or, if it is larger than Claude Code's limit, saves it to a
-file and shows the model a short preview. We tested a third option. A hook replaces each large
-output with a short summary, which we call an envelope, and saves the full output to a file that
-the model can still open. We wanted to know whether the model still answers correctly with the
+file and shows the model a short preview. We tested a third option. A Claude Code hook, a
+script that runs after every tool call, replaces each large output with a short summary, which we
+call an envelope, and saves the full output to a file that the model can still open. We wanted to know whether the model still answers correctly with the
 envelope, and how much context it saves.
 
 ## Results
@@ -62,8 +62,10 @@ Medium runs took longer because the model often opened the full output after rea
 
 ## How the envelope works
 
-The hook runs after every tool call. When the output is larger than 2,000 tokens, it saves the
-output to a file and gives the model an envelope in its place. The envelope has four sections, each
+<!-- figure: envelope-flow -->
+
+When a tool's output is larger than 2,000 tokens, the hook saves the output to a file and gives the
+model an envelope in its place. The envelope has four sections, each
 labelled in the text:
 
 - `shape:` describes the output and gives exact counts, worked out over the whole output.
@@ -333,28 +335,15 @@ less than the base version. The differences were small, so we kept the base vers
 
 ## Next
 
-1. Turn on the banner sentence that says every count is exact by default. Today it is a setting
-   (`banner=exact`).
+1. Make the banner sentence that says every count is exact part of the default banner. Today it has
+   to be turned on.
 2. Run Sonnet on the MCP-Atlas tasks, and test long sessions.
 
-## Where the numbers come from
+## How we tested
 
-The model runs used headless Claude Code with Haiku and Sonnet, and cost about $43 in all. Token
-counts and costs come from the API. The reports are in `tool-output-lab/results/`:
-
-- The final version on Haiku over all 104 tasks: `dials-haiku-banner.md` (the `exact` setting).
-- The final version on the 40 find-the-problem tasks: `dials-haiku-fixes.md` and
-  `dials-sonnet-fixes.md`.
-- Sonnet with an earlier version over all 104 tasks: `dials-sonnet-synthetic.md`.
-- The other versions of the envelope: `dials-haiku-patterns.md` (the base version is `schema`, and
-  the others are `full`, `lean` and `index`) and `dials-haiku-synthetic.md` (`sample`).
-- MCP-Atlas: `dials-haiku-atlas.md`.
-- The checking program: `l1-3-schema.md` for the final version, and `sweep-*.md` for the changes to
-  one section at a time.
-- How the model reads the saved file: the transcripts of `dials-haiku-patterns.md` and
-  `dials-sonnet-synthetic.md`.
-- The $0.00 invoice before the changes: `dials-haiku-synthetic.md` and `dials-sonnet-synthetic.md`.
-
-The example envelopes were made by the hook's own code. `PLAN.md` describes every option for each
-section of the envelope, and git history up to commit `0ab11f7` holds the notes we wrote after each
-run.
+The model runs used headless Claude Code (`claude -p`) with Haiku and with Sonnet, and cost about
+$43 in all. Token counts and costs come from the API's own figures. The 95% ranges for correct
+answers use Newcombe's method for paired results, and those for tokens and cost use the bootstrap.
+The checking program runs without a model, so it costs nothing, and it ran on every version of the
+envelope before any model saw it. The example envelopes on this page were made by the hook's own
+code.
