@@ -45,7 +45,7 @@ bh-02 still jails the model's code with its own copy of brig (`libs/brig`, the o
 - [x] #3 Must not break: no jail can reach another jail's channel, another session's included, with a test that plants the attempt
 - [x] #4 What bh-02 alone knows (the self-modification list, the credential paths) lives in the runner plugin, not in brig
 - [x] #5 scripts/check and scripts/linux-jail-check pass
-- [ ] #6 Must not break: runner:confined confines on Linux, and on darwin refuses to start and names runner:unconfined until TASK-0176.05 lands Seatbelt; each of the status bar's four axes (fs_write, network, fs_read, env) is graded by brig, with no axis stronger than what a test shows
+- [x] #6 Must not break: runner:confined confines on Linux, and on darwin refuses to start and names runner:unconfined until TASK-0176.05 lands Seatbelt; each of the status bar's four axes (fs_write, network, fs_read, env) is graded by brig, with no axis stronger than what a test shows
 <!-- AC:END -->
 
 ## Implementation Notes
