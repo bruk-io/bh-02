@@ -280,6 +280,14 @@ def test_the_interpreter_bh_02_runs_on_is_denied_where_an_input_could_write_it()
     assert interpreter not in itself.fs.write_denies
 
 
+def _stood_in_for_an_interpreter(src: str, dst: Path) -> None:
+    """Copies `src` to `dst` as a fake interpreter file, executable: not `shutil.copy2`, whose
+    `copystat` reraises `chflags`'s `EPERM` on darwin when `src` carries a flag a copy may not
+    take (`/usr/bin/true`'s `restricted`, SIP's) - even into a fresh temp directory."""
+    shutil.copy(src, dst)
+    dst.chmod(0o755)
+
+
 def _a_python_in(project: Path) -> tuple[Path, Path, Path]:
     """A uv-managed Python under `project` and a venv beside it, as a project opened at the home
     directory holds them: the base's interpreter file (an executable, `true`'s) with its `python3`
@@ -289,7 +297,7 @@ def _a_python_in(project: Path) -> tuple[Path, Path, Path]:
     (base / "lib" / "python3.15").mkdir(parents=True)
     (base / "bin").mkdir()
     file = base / "bin" / "python3.15"
-    shutil.copy2(shutil.which("true") or "/bin/true", file)
+    _stood_in_for_an_interpreter(shutil.which("true") or "/bin/true", file)
     link = base / "bin" / "python3"
     link.symlink_to("python3.15")
     (venv / "bin").mkdir(parents=True)
@@ -384,7 +392,7 @@ def _a_uv_python_in(project: Path) -> tuple[Path, Path, tuple[Path, ...]]:
     (base / "lib" / "python3.15").mkdir(parents=True)
     (base / "bin").mkdir()
     file = base / "bin" / "python3.15"
-    shutil.copy2(shutil.which("true") or "/bin/true", file)
+    _stood_in_for_an_interpreter(shutil.which("true") or "/bin/true", file)
     (base / "bin" / "python3").symlink_to("python3.15")
     through = python / "cpython-3.15-linux"
     through.symlink_to(base)
@@ -437,7 +445,7 @@ def test_the_walk_to_the_interpreter_follows_relative_links_and_dots_and_ends_at
     base = project / "store" / "3.15.0"
     (base / "bin").mkdir(parents=True)
     (base / "lib").mkdir()
-    shutil.copy2(shutil.which("true") or "/bin/true", base / "bin" / "python3.15")
+    _stood_in_for_an_interpreter(shutil.which("true") or "/bin/true", base / "bin" / "python3.15")
     (base / "bin" / "python3").symlink_to("python3.15")
     (project / "alias").mkdir()
     (project / "alias" / "current").symlink_to("../store/3.15.0")
