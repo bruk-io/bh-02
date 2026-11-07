@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-17 14:00'
-updated_date: '2026-11-07 07:12'
+updated_date: '2026-11-07 07:13'
 labels:
   - memory
   - size-1
@@ -114,4 +114,6 @@ INFO    -  Documentation built in 1.28 seconds
 bh-01's tokens and bh-02's theme are in sync
    ok
 ```
+
+Review (reviewer agent): not closed. Both criteria are met and ticked: _saved/_deleted hold an exclusive flock on the directory_beneath descriptor for the whole read-change-write, and the two-subprocess race test is recorded failing pre-fix and passing after. Full check: format, lint, types, gates, docs ok; tests 2 failed of 3854, neither in this member (test_python_repl later_session_reads_as_the_person_s is the known darwin hole TASK-0197; test_tui_working real-clock test passed alone, a load flake). Blocking: close-task refuses a bug without a recorded repro. The pre-fix failure is described in prose only; the worker should record it with record-check TASK-0132 --repro -- uv run pytest 'bh-02/plugins/memory-cordis-plugin/tests/test_memory_directory.py::test_two_saves_started_at_once_from_two_processes_both_keep_their_line' -q against the pre-fix directory.py (git show 8bed0533~1:...), then restore and hand back for close. The reviewer cannot change files to do it.
 <!-- SECTION:NOTES:END -->
