@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-17 14:00'
-updated_date: '2026-11-07 07:13'
+updated_date: '2026-11-07 07:14'
 labels:
   - memory
   - size-1
@@ -31,7 +31,7 @@ Found reviewing TASK-0068 (2026-10-17). The memory tool's save and delete read M
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-1. Add a private _locked(directory) contextmanager in memory_cordis_plugin/directory.py that opens the memory directory via host_paths.directory_beneath(directory, []) and holds an exclusive fcntl.flock on its descriptor; the lock is released when directory_beneath closes the fd (context exit), so a crash holds nothing. 2. Thread the locked fd through _saved and _deleted as the root for _index/write_beneath/remove_beneath/write_beneath, so the whole read-modify-write of MEMORY.md (and the topic file) happens under one lock; _index simplified since directory existence is already proven by the open fd. _read is untouched (safe via rename). 3. Write a regression test in tests/test_memory_directory.py using two subprocess children (not multiprocessing, to avoid pickling across a hyphenated path) that both start a save of a different memory at roughly the same time against one directory; assert both lines land in MEMORY.md. Run it against the pre-fix code (lock removed) to see it fail, then against the fix to see it pass -- record both in notes. 4. Update directory.py's module docstring and the plugin README's auto-memory bullet to mention the lock. Risks: flock semantics on a read-only directory fd (verified working via a throwaway check), and error-message text changing because _index/write_beneath now receive an int fd instead of a Path (shown as /dev/fd/N) -- checked against existing tests that assert on error substrings. Proof: uv run pytest (via testlock) on memory-cordis-plugin tests plus the new regression test; scripts/check on the memory plugin.
+Fix round after review: record the pre-fix repro via record-check --repro instead of prose. 1) Save fixed directory.py aside, restore pre-fix version via 'git show 8bed0533~1:...directory.py' into the working tree only (test file stays committed/clean). 2) Run testlock record-check TASK-0132 --repro -- uv run pytest '...test_two_saves_started_at_once_from_two_processes_both_keep_their_line' -q; confirm it fails and is appended to notes. 3) git checkout the fixed directory.py back, confirm git status shows no code diff. 4) Append notes summarizing, leave ACs as already ticked (unchanged), do not touch anything else. Risk: record-check requires the test file itself be clean in git status, which it is since only directory.py is swapped.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -118,4 +118,52 @@ bh-01's tokens and bh-02's theme are in sync
 Review (reviewer agent): not closed. Both criteria are met and ticked: _saved/_deleted hold an exclusive flock on the directory_beneath descriptor for the whole read-change-write, and the two-subprocess race test is recorded failing pre-fix and passing after. Full check: format, lint, types, gates, docs ok; tests 2 failed of 3854, neither in this member (test_python_repl later_session_reads_as_the_person_s is the known darwin hole TASK-0197; test_tui_working real-clock test passed alone, a load flake). Blocking: close-task refuses a bug without a recorded repro. The pre-fix failure is described in prose only; the worker should record it with record-check TASK-0132 --repro -- uv run pytest 'bh-02/plugins/memory-cordis-plugin/tests/test_memory_directory.py::test_two_saves_started_at_once_from_two_processes_both_keep_their_line' -q against the pre-fix directory.py (git show 8bed0533~1:...), then restore and hand back for close. The reviewer cannot change files to do it.
 
 Owner stand-in (Opus), 2026-11-06: Approved as the reviewer proposes, no waiver. The close-task rule that a bug needs a recorded repro stays; prose in the notes doesn't count. Send TASK-0132 back to its worker to record the repro: put the pre-fix directory.py (git show 8bed0533~1:bh-02/plugins/memory-cordis-plugin/src/memory_cordis_plugin/directory.py) in the working tree only, run record-check TASK-0132 --repro -- uv run pytest 'bh-02/plugins/memory-cordis-plugin/tests/test_memory_directory.py::test_two_saves_started_at_once_from_two_processes_both_keep_their_line' -q, then restore the fixed file with git checkout, confirm git status shows no code change, and hand it back for review. That revert is local and temporary, the old code is never committed, and it's the smallest step that satisfies the gate. The two failures in the full check don't block this task. test_python_repl is TASK-0197. The test_tui_working real-clock failure is a load flake outside this member; if it shows up again, file it as its own bug rather than holding this task.
+
+Repro at 6a91269bce42, test files: bh-02/plugins/memory-cordis-plugin/tests/test_memory_directory.py; command: `uv run pytest bh-02/plugins/memory-cordis-plugin/tests/test_memory_directory.py::test_two_saves_started_at_once_from_two_processes_both_keep_their_line -q` exited 1
+
+```text
+F                                                                        [100%]
+=================================== FAILURES ===================================
+____ test_two_saves_started_at_once_from_two_processes_both_keep_their_line ____
+
+memory = PosixPath('/private/var/folders/rf/f34xmczn4659gm98hrsprydc0000gn/T/pytest-of-brukhabtu/pytest-999/test_two_saves_started_at_once0/state/memory')
+tmp_path = PosixPath('/private/var/folders/rf/f34xmczn4659gm98hrsprydc0000gn/T/pytest-of-brukhabtu/pytest-999/test_two_saves_started_at_once0')
+
+    def test_two_saves_started_at_once_from_two_processes_both_keep_their_line(
+        memory: Path, tmp_path: Path
+    ) -> None:
+        """Two processes (two sessions on the same project, or two worktrees) saving different
+        memories at the same moment: the lock on the directory serialises their read, change and
+        write of MEMORY.md, so neither save's line is lost to the other's rename. Seen failing
+        without the lock on `_saved` (`host_paths.directory_beneath`/`fcntl.flock` taken out):
+        MEMORY.md held only the line of whichever process's rename landed last."""
+        for round_ in range(5):
+            go = tmp_path / f"go-{round_}"
+            names = [f"race-a-{round_}", f"race-b-{round_}"]
+            processes: list[subprocess.Popen[str]] = []
+            try:
+                for name in names:
+                    processes.append(_racing_save(memory, name, go))
+                go.touch()
+                for started in processes:
+                    assert started.wait(timeout=10) == 0
+                    assert started.stdout is not None and started.stdout.readline().startswith("saved")
+            finally:
+                go.touch()  # unblock a child still polling, even when a sibling or an assert failed
+                for started in processes:
+                    if started.poll() is None:
+                        started.kill()
+            index = (memory / "MEMORY.md").read_text()
+            for name in names:
+>               assert f"({name}.md)" in index, f"round {round_}: {name!r}'s line is missing: {index!r}"
+E               AssertionError: round 0: 'race-a-0''s line is missing: '- [race-b-0](race-b-0.md): line for race-b-0\n'
+E               assert '(race-a-0.md)' in '- [race-b-0](race-b-0.md): line for race-b-0\n'
+
+bh-02/plugins/memory-cordis-plugin/tests/test_memory_directory.py:285: AssertionError
+=========================== short test summary info ============================
+FAILED bh-02/plugins/memory-cordis-plugin/tests/test_memory_directory.py::test_two_saves_started_at_once_from_two_processes_both_keep_their_line
+1 failed in 0.75s
+```
+
+Fix round after review (blocking finding: close-task needs a recorded repro, not prose). Restored the pre-fix directory.py (git show 8bed0533~1:bh-02/plugins/memory-cordis-plugin/src/memory_cordis_plugin/directory.py) into the working tree only (test file left untouched/clean), then ran testlock python3 record-check TASK-0132 --repro -- uv run pytest 'bh-02/plugins/memory-cordis-plugin/tests/test_memory_directory.py::test_two_saves_started_at_once_from_two_processes_both_keep_their_line' -q: the command failed (1 failed) as recorded above ('Repro at 6a91269bce42...exited 1'), and record-check itself exited 0, confirming the failure was recorded. Then ran 'git checkout -- bh-02/plugins/memory-cordis-plugin/src/memory_cordis_plugin/directory.py' and confirmed 'git status --porcelain' and 'git diff --stat HEAD -- <file>' were both empty, so the fixed code is unchanged and the old code was never committed. No code or test files were edited in this round; sending back for review/close.
 <!-- SECTION:NOTES:END -->
