@@ -6,7 +6,7 @@ title: >-
 status: In Progress
 assignee: []
 created_date: '2026-10-25 21:02'
-updated_date: '2026-10-25 21:28'
+updated_date: '2026-11-07 04:27'
 labels:
   - size-2
 dependencies: []
@@ -42,4 +42,6 @@ Approach: an explicit `sys.platform != "linux"` guard at the three Linux-only ca
 Evidence: `uv run mypy` -> Success on 208 files (host platform, darwin); `uv run mypy --platform linux` -> Success on 208 files; brig unit tests for dial, peer, pidfd, accept_hello pass; `scripts/arch-check --no-fix` ok for every gate. Pre-existing and unrelated: `libs/brig/tests/unit/test_process_namespaces_pure.py` fails to collect on darwin (`signal.SIGRTMIN`).
 
 Correction to the draft's premise, from the TASK-0169.01 review: `scripts/check` starts every step at once and reports in order, so a types failure does not stop tests, gates and docs; the earlier runs never reached them because stray test runs held the jail lock. AC #1 is therefore a question about a full run on a quiet machine; one is running now and its result goes here.
+
+Orchestrator, 2026-11-06 (macOS 27.0.1, HEAD ba798c43): scripts/check's types step passes on darwin (Success: no issues found in 208 source files), and format and lint pass. Its tests step never reported: with pytest -n auto (28 workers) the run hung for 28 minutes; filed as TASK-0202. Criterion #1 (the check reaches and reports tests, gates and docs) therefore waits on TASK-0202. The SIGRTMIN collection error noted above is in TASK-0198.
 <!-- SECTION:NOTES:END -->
