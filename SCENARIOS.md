@@ -64,6 +64,31 @@ their start in the envelope. A view that starts further in is left as it was, si
 numbers are not the file's. Lookups mostly still need a fetch: the thresholds are module constants,
 which the code envelope does not list.
 
+## The pilot on Haiku, without the hook
+
+`./lab scenarios-l2 --size M L --seeds 5 --conditions native --reps 3`
+(`results/scenarios-pilot-haiku.md`): 150 runs, $0.49. Claude Code alone got all 150 right, every
+task kind at both sizes, so none of the five templates is in the 20 to 80% band, and none can show
+a difference the hook makes.
+
+The reason is how the model works with a shell. It keeps outputs small itself: it runs the tests
+with `-q -rfE` or through `tail`, reads history with `git log --oneline | head -30`, finds a
+function with Grep and reads a file whole only to edit it. The median run carried 764 tokens of
+tool output; only 18 of 150 runs saw an output over 2,000 tokens, and 15 of those were file reads
+for an edit (Read, or `cat -n`, which the hook's whole-file rule does not take, since its line
+numbers are part of each line). The median final context, 36,500 tokens, is almost all Claude
+Code's own instructions and tools.
+
+So in this family the hook has little to act on. Large outputs come where the model cannot narrow
+the call: an MCP tool that returns everything it has, a file read whole to edit it, a question
+over a whole output. The next templates go there:
+
+- the incident-triage family, whose MCP tools return whole pod lists, logs and traces, as many real
+  MCP servers do;
+- code questions that need a whole output: counts and lists over a big module, or two files that
+  must agree (a constant and its docstring), which a grep cannot narrow;
+- problems no rule sees (a test shadowed by another of the same name, which pytest silently skips).
+
 ## The mix, from real sessions
 
 One real session so far (`results/v1-survey.md`, this research's own): 84 of its 2,364 tool results
