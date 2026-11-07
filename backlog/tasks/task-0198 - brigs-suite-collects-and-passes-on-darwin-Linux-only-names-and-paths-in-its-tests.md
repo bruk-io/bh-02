@@ -207,4 +207,6 @@ INFO    -  Documentation built in 1.50 seconds
 bh-01's tokens and bh-02's theme are in sync
    ok
 ```
+
+No repro: the fix (de2bab20) is already on main, so no test fails now to record. The before-state was reproduced by the worker instead: the base commit 238da659 hits AttributeError on signal.SIGRTMIN at collection on darwin; test_teardown_zombies failed with pid 1234 planted back; test_leak_poller_retry went red with _sample_outcome planted to return None (all in the notes above).
 <!-- SECTION:NOTES:END -->
