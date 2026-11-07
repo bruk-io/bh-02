@@ -167,7 +167,10 @@ async def test_a_command_running_when_the_person_leaves_is_cancelled_and_the_cha
     session = asyncio.create_task(converse(Echo(), typed, screen, commands))  # type: ignore[arg-type]
     await asyncio.wait_for(commands.started.wait(), 1)
     typed.interrupt()  # Ctrl-C stops a reply, not a command: it runs on
-    await asyncio.sleep(0.01)
+    # No event to wait for: a running command races only `input.closed()` (`_unless_closed`),
+    # never `input.interrupted()`, so nothing ever wakes to read the interrupt. One loop turn
+    # stands in for the event there isn't one for.
+    await asyncio.sleep(0)
     assert not session.done() and not commands.cleaned_up
     typed.close()
     await asyncio.wait_for(session, 1)
@@ -181,17 +184,21 @@ async def test_a_command_that_answers_runs_to_its_end_and_its_answer_is_shown() 
     class Slow(Noted):
         def __init__(self) -> None:
             super().__init__()
-            self.go = asyncio.Event()
+            self.go, self.started = asyncio.Event(), asyncio.Event()
 
         async def run(self, line: str) -> str | list[Mapping[str, Any]]:
+            self.started.set()
             await self.go.wait()
             return await super().run(line)
 
     commands, screen, typed, echo = Slow(), Screen(), Typed("!make"), Echo()
     session = asyncio.create_task(converse(echo, typed, screen, commands))  # type: ignore[arg-type]
-    await asyncio.sleep(0.01)
+    await asyncio.wait_for(commands.started.wait(), 1)  # the command is running
     typed.interrupt()
-    await asyncio.sleep(0.01)
+    # No event to wait for: as above, a running command races only `input.closed()`, never
+    # `input.interrupted()`, so nothing ever wakes to read the interrupt. One loop turn stands
+    # in for the event there isn't one for.
+    await asyncio.sleep(0)
     commands.go.set()
     typed.type("well?")
     typed.type(None)
