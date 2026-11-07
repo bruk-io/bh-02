@@ -106,7 +106,7 @@ of problem, and the seal on the test set.
 | V2 | The code-and-tests family: a generated package and history with a seeded regression, real `pytest` and `git` | no | done: five tasks; layer 1 on five open seeds at M and L, no fold false (`results/scenarios-l1-code-M.md`, `-L.md`); it found that a whole file read with `cat` folded as a log, and the hook now folds it as code |
 | V3 | A pilot without the hook on the open seeds; keep the templates Claude Code alone gets right 20 to 80% of the time | yes | done: the harness (`./lab scenarios-l2`); Haiku got 150 of 150 right for $0.49 and kept its outputs small itself (764 tokens of tool output at the median, 18 runs over 2,000), so no template qualifies (`results/scenarios-pilot-haiku.md`) |
 | V4 | The failure-mode set: problems no rule sees, with and without the exact-counts banner | yes | |
-| V5 | The incident-triage family, served with FastMCP; sessions of follow-up questions | yes | in part: the family, its MCP server and layer 1 (no fold false at M or L); the hook now folds the text a FastMCP result wraps; the native pilot on Haiku is running; sessions of follow-up questions not yet |
+| V5 | The incident-triage family, served with FastMCP; sessions of follow-up questions | yes | in part: the family, its MCP server and layer 1 (no fold false at M or L); the hook now folds the text a FastMCP result wraps; the native pilot on Haiku got 149 of 150 right for $1.01, with an output over 2,000 tokens in 84 runs (`results/scenarios-pilot-incident-haiku.md`); sessions of follow-up questions not yet |
 | V6 | The sealed runs: Haiku, then Sonnet, every setting in one run per set | yes | |
 
 ## Decisions

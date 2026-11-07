@@ -117,6 +117,30 @@ Code shows the model that form: the whole log escaped into one JSON string, with
 hook, and the hook folded it as JSON, one string field, 36 tokens. The hook now folds the text such
 a wrapper holds, and the incident server sends plain text, as many MCP servers do.
 
+## The incident pilot on Haiku, without the hook
+
+`./lab scenarios-l2 --family incident --size M L --seeds 5 --conditions native --reps 3`
+(`results/scenarios-pilot-incident-haiku.md`): 150 runs, $1.01. Claude Code alone got 149 right;
+the one miss read the rolled-out service's own metrics, which are clean, never read its caller's
+logs, and answered that nothing had broken. So accuracy is at the ceiling again: these tasks can
+show the hook losing answers, but hardly gaining any.
+
+Unlike the code family, the large outputs are there. The model narrows what it can (it asks for
+a time window in most log calls), but a tool that returns everything still returns a lot: 84 of 150
+runs saw an output over 2,000 tokens (18 of 150 in the code family), and the median run carried
+6,200 tokens of tool output at M. At L, Claude Code saved the large outputs to files and the model
+searched them with Bash (77 runs opened a saved file), so its final context was smaller at L than at
+M (43,000 tokens against 48,400).
+
+So this family is where the hook has something to do, and a run with and without it, paired, can
+measure what it saves and whether it loses answers. Harder variants would bring accuracy below the
+ceiling: two problems at once, a question over a whole log (which pod served the most 504s), or a
+join of two outputs (pods that restarted against the minutes their service went quiet).
+
+One thing for the harness: sessions work in a folder under /tmp, and some ran `ls -la /tmp`, which
+lists the other runs' folders. Nothing there holds an answer, but each run should get a folder of
+its own that it cannot see past.
+
 ## The mix, from real sessions
 
 One real session so far (`results/v1-survey.md`, this research's own): 84 of its 2,364 tool results
