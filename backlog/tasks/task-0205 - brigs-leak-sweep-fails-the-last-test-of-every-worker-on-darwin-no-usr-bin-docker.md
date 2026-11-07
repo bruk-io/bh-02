@@ -6,6 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-11-07 04:50'
+updated_date: '2026-11-07 05:58'
 labels:
   - brig
   - tests
@@ -25,3 +26,9 @@ In every scripts/check on macOS 27.0.1 (TASK-0202, 2026-11-06; 8 times a run) th
 <!-- AC:BEGIN -->
 - [ ] #1 The sweep finds docker where it is (or skips the container arm with a reason when there is none) and a scripts/check on darwin reports no run_id teardown ERROR
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Owner stand-in (Opus), 2026-11-06: Ruled on TASK-0200 that the red full check on darwin (7 failed, 25 errors outside subagents) does not hold up closing tasks whose criteria are limited to other areas; the run_id teardown ERRORs this task names are part of what stays here. Until this and its neighbours (TASK-0204, 0206, 0198, 0199, 0170) are fixed, every closing review on darwin must map each failure in the full check to its owning task.
+<!-- SECTION:NOTES:END -->
