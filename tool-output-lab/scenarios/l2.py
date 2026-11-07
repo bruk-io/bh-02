@@ -13,6 +13,7 @@ is run once, through `scenarios.seal.begin_run`.
 import argparse
 import json
 import os
+import re
 import subprocess
 import tempfile
 from collections import defaultdict
@@ -65,8 +66,9 @@ def calls_in(lines: Iterable[str]) -> list[dict[str, Any]]:
             continue
         if not isinstance(event, dict):  # a line that is JSON but not an event
             continue
-        message = event.get("message") or {}
-        for block in message.get("content") or []:
+        message = event.get("message")
+        content = message.get("content") if isinstance(message, dict) else None
+        for block in content if isinstance(content, list) else []:
             if not isinstance(block, dict):
                 continue
             if block.get("type") == "tool_use" and block.get("name") != "ToolSearch":
@@ -85,6 +87,24 @@ def calls_in(lines: Iterable[str]) -> list[dict[str, Any]]:
             elif block.get("type") == "tool_result" and (call := calls.get(str(block.get("tool_use_id")))):
                 call["tokens"] = estimate_tokens(_result_text(block))
     return list(calls.values())
+
+
+def unprefixed(answer: str, prefix: str) -> str:
+    """The answer with `prefix` taken off every name that starts with it, so "shop.orders.total" is
+    scored as the "orders.total" it names."""
+    return re.sub(rf"(?<![\w.]){re.escape(prefix)}(?=\w)", "", answer) if prefix else answer
+
+
+def rescored(row: dict[str, Any]) -> dict[str, Any]:
+    """A row scored again from its answer with today's scorer. An edit (scored from the file) and a
+    commit (whose truth needs the built hashes) keep their score."""
+    if row["kind"] in ("edit", "commit") or row["error"]:
+        return row
+    w = code.world(row["seed"], row["size"])
+    shas = tuple("0" * 40 for _ in w.history)  # these kinds' truths do not use the hashes
+    t = next(x for x in code.tasks(w, code.Built(Path("."), shas)) if x.task_id.endswith(f"-{row['kind']}"))
+    score = score_answer(t.truth, unprefixed(row["answer"], t.prefix))
+    return {**row, "correct": score.correct, "recall": score.recall, "precision": score.precision}
 
 
 def _failed(error: str) -> Session:
@@ -130,7 +150,7 @@ def run_one(
         correct, recall, precision, parsed = problem is None, None, None, True
         extra["edit_problem"] = problem
     else:
-        score = score_answer(t.truth, session.answer)
+        score = score_answer(t.truth, unprefixed(session.answer, t.prefix))
         correct, recall, precision, parsed = score.correct, score.recall, score.precision, score.parsed
     folds = [
         e for e in hook_entries(log, session.session_id) if e.get("branch", "passthrough") != "passthrough"
@@ -240,6 +260,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--dry-run", action="store_true", help="list the runs and an estimated cost; run nothing"
     )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="keep results/NAME.jsonl's rows (scored again) and run only the jobs they do not cover",
+    )
     ns = parser.parse_args(argv)
     jobs = [
         (size, seed, kind, condition, rep)
@@ -253,12 +278,29 @@ def main(argv: list[str] | None = None) -> int:
     if ns.dry_run:
         print(f"{len(jobs)} runs, about ${len(jobs) * per_run:.2f} on {ns.model} (a rough estimate)")
         return 0
+    results = _LAB / "results"
+    kept: list[dict[str, Any]] = []
+    if ns.resume and (old := results / f"{ns.name}.jsonl").exists():
+        kept = [rescored(json.loads(line)) for line in old.read_text(encoding="utf-8").splitlines() if line]
+        done = {(r["size"], r["seed"], r["kind"], r["condition"], r["rep"]) for r in kept}
+        jobs = [j for j in jobs if j not in done]
+        print(f"resuming: {len(kept)} rows kept and scored again, {len(jobs)} runs to go")
     runs: list[Run] = [
         partial(_row, size, seed, kind, cond, ns.model, rep) for size, seed, kind, cond, rep in jobs
     ]
-    rows = run_all(runs, len(jobs), ns.name, ns.workers, ns.max_cost)
+    rest = f"{ns.name}-rest" if kept else ns.name
+    rows = kept + run_all(runs, len(jobs), rest, ns.workers, ns.max_cost)
+    if kept:  # one file of rows, and one hook log, for the whole run
+        (results / f"{ns.name}.jsonl").write_text(
+            "".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8"
+        )
+        (results / f"{rest}.jsonl").unlink()
+        if (log := results / f"{rest}-hook.jsonl").exists():
+            with (results / f"{ns.name}-hook.jsonl").open("a", encoding="utf-8") as f:
+                f.write(log.read_text(encoding="utf-8"))
+            log.unlink()
     text = report(rows, ns.model)
-    (_LAB / "results" / f"{ns.name}.md").write_text(text, encoding="utf-8")
+    (results / f"{ns.name}.md").write_text(text, encoding="utf-8")
     print(text, end="")
     return 0
 

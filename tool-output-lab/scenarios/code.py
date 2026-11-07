@@ -438,6 +438,7 @@ class Task:
     probes: tuple[str, ...]
     query: str = ""
     path: str = ""  # for an edit, the file it is made in
+    prefix: str = ""  # a prefix an answer may put before each name ("shop." before orders.order_total_20)
 
 
 def _is_doc(node: ast.stmt) -> bool:
@@ -523,6 +524,7 @@ def tasks(w: World, built: Built) -> tuple[Task, ...]:
             Items(callers(w, reg.rule), frozenset(f"{c.module}.{c.name}" for c in w.composites)),
             (f"grep -rn {reg.rule.name} shop", f"grep -rn {reg.rule.name} ."),
             query=reg.rule.name,
+            prefix="shop.",
         ),
         Task(
             f"{prefix}-lookup",
