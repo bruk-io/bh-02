@@ -271,8 +271,13 @@ def test_a_sub_agent_is_a_name_in_the_agents_directory_that_bh_02_makes_and_no_o
     session = tmp_path / SESSION
     put(session / "transcript.jsonl", *ONE)
     put(session / "agents" / "general-1" / "transcript.jsonl", message("fine", "2026-10-18T03:00:05.000Z"))
-    for name in (
-        "General-1",
+    bad = (
+        # "Helper-1", not "General-1": on a filesystem that folds case (macOS's default), a
+        # directory named General-1 is the same entry as general-1, so planting it would silently
+        # overwrite the real agent's transcript instead of testing the uppercase-first-letter
+        # rejection; the rejection itself is covered on the literal string "General-1", with no
+        # filesystem involved, in test_watching.py
+        "Helper-1",
         "general",
         "x y-1",
         "-general-1",
@@ -280,12 +285,16 @@ def test_a_sub_agent_is_a_name_in_the_agents_directory_that_bh_02_makes_and_no_o
         "general-1 ",
         "a" * 40 + "-1",
         "general-0001234567",
-    ):
+    )
+    for name in bad:
         put(
             session / "agents" / name / "transcript.jsonl",
             message(f"SECRET {name}", "2026-10-18T03:00:06.000Z"),
         )
     (session / "agents" / "stray-file").write_text("not a directory")
+    # each planted name is really its own entry: a filesystem that folded two of them together
+    # would silently drop one of the "SECRET" transcripts instead of exercising the rejection
+    assert len(os.listdir(session / "agents")) == len(bad) + 2  # the bad ones, general-1, stray-file
     out = "\n".join(lines_of(tmp_path))
     assert "fine" in out and "SECRET" not in out
 
