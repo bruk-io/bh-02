@@ -4,6 +4,7 @@ title: scripts/check's tests hang on a many-core Mac
 status: To Do
 assignee: []
 created_date: '2026-11-07 04:27'
+updated_date: '2026-11-07 04:30'
 labels:
   - scripts
   - tests
@@ -26,3 +27,9 @@ On a 28-core Mac (macOS 27.0.1, 2026-11-06) scripts/check's test step (pytest -n
 - [ ] #2 scripts/check completes on a 28-core Mac every time (three runs in a row), whatever the core count, and the worker count it uses is said where TEST_WORKERS is set
 - [ ] #3 Tests that fail only under load are fixed or filed, not retried away
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Owner stand-in (Opus), 2026-11-06: Approved as the run's first task (Opus worker): nothing else can prove 'scripts/check passes' on this Mac until it is fixed. Fix the cause; a lower worker count is fine only if AC #1 explains the hang and AC #3's load-only failures are fixed or filed, not retried away.
+<!-- SECTION:NOTES:END -->
