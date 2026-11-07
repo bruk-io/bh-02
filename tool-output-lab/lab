@@ -12,6 +12,7 @@
 #   ./lab page [-o FILE]        the findings page: results/FINDINGS.md as pages/findings.html
 #   ./lab seal init|verify|status   the sealed test set's key, commitment and ledger (SCENARIOS.md)
 #   ./lab scenarios [--size M]  layer 1 on the v2 scenarios: open seeds built, their real outputs folded and checked
+#   ./lab scenarios-l2 [...]    layer 2 on the v2 scenarios: Claude Code in a fresh world per run (paid; --dry-run first)
 set -euo pipefail
 cd "$(dirname "$0")"
 export UV_SYSTEM_CERTS="${UV_SYSTEM_CERTS:-${UV_NATIVE_TLS:-}}"; unset UV_NATIVE_TLS
@@ -26,6 +27,7 @@ case "$cmd" in
   page) run python -m pages.findings "$@" ;;
   seal) run python -m scenarios.seal "$@" ;;
   scenarios) run python -m scenarios.l1 "$@" ;;
+  scenarios-l2) run python -m scenarios.l2 "$@" ;;
   fetch) uv run --quiet --no-project --python 3.13 --with pyarrow python -m harness.fetch "$@" ;;
-  *) echo "unknown command '$cmd': use check, fix, fold, evals, page, seal, scenarios, fetch, extract or stats" >&2; exit 2 ;;
+  *) echo "unknown command '$cmd': use check, fix, fold, evals, page, seal, scenarios, scenarios-l2, fetch, extract or stats" >&2; exit 2 ;;
 esac
