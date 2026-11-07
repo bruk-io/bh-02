@@ -6,6 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-11-07 04:27'
+updated_date: '2026-11-07 04:30'
 labels:
   - security
   - runner
@@ -28,3 +29,9 @@ Found 2026-11-06 on macOS 27.0.1 (Python 3.15.0rc2), with and without Claude Cod
 - [ ] #2 On darwin a jailed input cannot write any path the test lists; the test passes on macOS and still fails if the deny is removed (seen failing)
 - [ ] #3 scripts/check passes on Linux (scripts/linux-jail-check too) and the test passes on macOS
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Owner stand-in (Opus), 2026-11-06: Approved in this run (Opus worker, security). Condition: close only with the written path named and the cause shown; if the test's darwin expectation is what is wrong, say why with evidence and fix the test - no skip, no xfail, no widening of what counts as DENIED. The reviewer checks AC #2's seen-failing step.
+<!-- SECTION:NOTES:END -->
