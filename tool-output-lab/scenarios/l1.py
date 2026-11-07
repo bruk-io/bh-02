@@ -23,7 +23,7 @@ from compressors.config import FoldConfig
 from evals import l1
 from evals.tasks import BUDGET
 from evals.tasks import Task as EvalTask
-from scenarios import code
+from scenarios import code, incident
 from scenarios.seal import open_seeds
 
 _LAB = Path(__file__).resolve().parent.parent
@@ -54,7 +54,38 @@ def probe_tasks(w: code.World, built: code.Built) -> list[EvalTask]:
     return out
 
 
-def run(size: str, seeds: tuple[int, ...]) -> list[l1.Row]:
+def incident_probe_tasks(w: incident.World) -> list[EvalTask]:
+    """Each incident task's tool calls as layer-1 tasks: the tool's output, the task's truth. The
+    query is the call's arguments, as the hook takes it from an MCP call."""
+    out = []
+    for t in incident.tasks(w):
+        for tool, args in t.probes:
+            text = incident.call(w, tool, dict(args))
+            call = f"{tool}({', '.join(f'{k}={v}' for k, v in args)})"
+            query = " ".join(v for _, v in args)
+            out.append(
+                EvalTask(
+                    f"{t.task_id} | {call}",
+                    "incident",
+                    t.kind,
+                    w.size,
+                    "",
+                    t.prompt,
+                    t.truth,
+                    query,
+                    partial(str, text),
+                )
+            )
+    return out
+
+
+def run(size: str, seeds: tuple[int, ...], family: str = "code") -> list[l1.Row]:
+    if family == "incident":
+        return [
+            l1.check(t, BUDGET, query_on=True, view="schema", config=_CONFIG)
+            for seed in seeds
+            for t in incident_probe_tasks(incident.world(seed, size))
+        ]
     rows = []
     root = Path(tempfile.mkdtemp(prefix="scenarios-"))
     try:
@@ -70,15 +101,16 @@ def run(size: str, seeds: tuple[int, ...]) -> list[l1.Row]:
     return rows
 
 
-def report(rows: list[l1.Row], size: str, seeds: int) -> str:
+def report(rows: list[l1.Row], size: str, seeds: int, family: str = "code") -> str:
     """The folds' violations first, then each task kind's probes: output and envelope sizes, and
     how often the envelope alone answers."""
     bad = [r for r in rows if r.violations]
     out = [
-        f"# Layer 1 on the code-and-tests scenarios, size {size}, open seeds 0 to {seeds - 1}",
+        f"# Layer 1 on the {family} scenarios, size {size}, open seeds 0 to {seeds - 1}",
         "",
-        "Each task's probe commands run in its built world; their real outputs are folded as the hook",
-        "folds a Bash result (the command is the query), under the final recipe, and checked.",
+        "Each task's probes (commands, or tool calls) run in its world; their real outputs are folded as",
+        "the hook folds them (the command, or the call's arguments, is the query), under the final recipe,",
+        "and checked.",
         "",
         f"## Invariants: {len(bad)} folds of {len(rows)} with violations",
         "",
@@ -94,6 +126,7 @@ def report(rows: list[l1.Row], size: str, seeds: int) -> str:
         task_id, cmd = r.task_id.split(" | ", 1)
         general = re.sub(r"shop/\w+\.py", "shop/<module>.py", cmd)
         general = re.sub(r"\b\w+_for_\w+\b", "<function>", general)
+        general = re.sub(r"service=\w+", "service=<service>", general)
         groups.setdefault((task_id.rsplit("-", 1)[1], general), []).append(r)
     for (kind, cmd), rs in groups.items():
         ins = sorted(r.raw_tokens for r in rs)
@@ -119,16 +152,17 @@ def main(argv: list[str] | None = None) -> int:
         prog="./lab scenarios", description=__doc__.split("\n\n")[0] if __doc__ else None
     )
     parser.add_argument("--size", choices=("M", "L"), default="M")
+    parser.add_argument("--family", choices=("code", "incident"), default="code")
     parser.add_argument("--seeds", type=int, default=5, help="how many open seeds, from 0")
     parser.add_argument("--name", default="", help="the results file's name (default scenarios-l1-code-SIZE)")
     ns = parser.parse_args(argv)
-    rows = run(ns.size, open_seeds(ns.seeds))
-    name = ns.name or f"scenarios-l1-code-{ns.size}"
+    rows = run(ns.size, open_seeds(ns.seeds), ns.family)
+    name = ns.name or f"scenarios-l1-{ns.family}-{ns.size}"
     results = _LAB / "results"
     with (results / f"{name}.jsonl").open("w", encoding="utf-8") as f:
         for r in rows:
             f.write(json.dumps(asdict(r)) + "\n")
-    text = report(rows, ns.size, ns.seeds)
+    text = report(rows, ns.size, ns.seeds, ns.family)
     (results / f"{name}.md").write_text(text, encoding="utf-8")
     print(text, end="")
     return 1 if any(r.violations for r in rows) else 0

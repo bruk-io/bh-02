@@ -27,23 +27,35 @@ from compressors.common import estimate_tokens
 from compressors.config import FoldConfig
 from evals.l2 import Run, Session, hook_entries, hook_settings, parse_stream, run_all
 from evals.truth import ANSWER_INSTRUCTION, Edited, answer_line, score_answer
-from scenarios import code
+from scenarios import code, incident
 from scenarios.seal import open_seeds
 
 _LAB = Path(__file__).resolve().parent.parent
 CONDITIONS = ("native", "fold")
-KINDS = ("failing", "commit", "callers", "lookup", "edit")
+FAMILIES = {
+    "code": ("failing", "commit", "callers", "lookup", "edit"),
+    "incident": ("cause", "count", "stale", "gap", "healthy"),
+}
+_SERVER = "uv run -q --no-project --python 3.15 --with fastmcp python -m scenarios.incident_mcp"
 _FINAL = FoldConfig(banner="exact")  # the final version: schema, the exact-counts banner
 _COST_PER_RUN = {"haiku": 0.02, "sonnet": 0.25}  # rough: a scenario takes more turns than a v1 task
 _TIMEOUT = 900
 
 
-def prompt_for(t: code.Task) -> str:
+type Task = code.Task | incident.Task
+
+
+def prompt_for(t: Task) -> str:
     return f"{t.prompt}\n\n{ANSWER_INSTRUCTION['edit' if t.kind == 'edit' else t.kind]}"
 
 
-def tools_for(t: code.Task) -> str:
-    return "Bash,Read,Grep,Glob" + (",Edit" if t.kind == "edit" else "")
+def tools_for(t: Task) -> str:
+    """The tools a session may use: the shell and file tools, Edit for an edit, and an incident's
+    MCP tools."""
+    mcp = (
+        "".join(f"mcp__incident__{name}," for name in incident.TOOLS) if isinstance(t, incident.Task) else ""
+    )
+    return mcp + "Bash,Read,Grep,Glob" + (",Edit" if t.kind == "edit" else "")
 
 
 def _result_text(block: dict[str, Any]) -> str:
@@ -98,7 +110,17 @@ def unprefixed(answer: str, prefix: str) -> str:
 def rescored(row: dict[str, Any]) -> dict[str, Any]:
     """A row scored again from its answer with today's scorer. An edit (scored from the file) and a
     commit (whose truth needs the built hashes) keep their score."""
-    if row["kind"] in ("edit", "commit") or row["error"]:
+    if row["error"]:
+        return row
+    if row.get("family") == "incident":
+        it = next(
+            x
+            for x in incident.tasks(incident.world(row["seed"], row["size"]))
+            if x.task_id.endswith(f"-{row['kind']}")
+        )
+        s = score_answer(it.truth, unprefixed(row["answer"], it.prefix))
+        return {**row, "correct": s.correct, "recall": s.recall, "precision": s.precision}
+    if row["kind"] in ("edit", "commit"):
         return row
     w = code.world(row["seed"], row["size"])
     shas = tuple("0" * 40 for _ in w.history)  # these kinds' truths do not use the hashes
@@ -111,26 +133,48 @@ def _failed(error: str) -> Session:
     return Session("", 0, False, False, 0, False, 0.0, _TIMEOUT * 1000, 0, 0, 0, 0, 0, 0, 0, 0, 0, error)
 
 
+def _incident_setup(d: Path, size: str, seed: int, kind: str) -> tuple[Task, Path, list[str]]:
+    """An incident session: an empty folder to work in, and the MCP server over the seed's world."""
+    t = next(x for x in incident.tasks(incident.world(seed, size)) if x.task_id.endswith(f"-{kind}"))
+    work = d / "work"
+    work.mkdir()
+    server = {
+        "command": "sh",
+        "args": ["-c", f"cd {_LAB} && exec {_SERVER}"],
+        "env": {"SCENARIO_SEED": str(seed), "SCENARIO_SIZE": size},
+    }
+    (d / "mcp.json").write_text(json.dumps({"mcpServers": {"incident": server}}), encoding="utf-8")
+    return t, work, ["--mcp-config", str(d / "mcp.json")]
+
+
 def run_one(
-    size: str, seed: int, kind: str, condition: str, model: str, rep: int, log: Path
+    family: str, size: str, seed: int, kind: str, condition: str, model: str, rep: int, log: Path
 ) -> dict[str, Any]:
     """One session on one task of a freshly built world, scored."""
     with tempfile.TemporaryDirectory(prefix="scenario-") as d:
-        w = code.world(seed, size)
-        built = code.build(w, Path(d) / "repo")
-        t = next(x for x in code.tasks(w, built) if x.task_id.endswith(f"-{kind}"))
-        original = (built.root / t.path).read_text(encoding="utf-8") if t.path else ""
+        t: Task
+        if family == "incident":
+            t, cwd, flags = _incident_setup(Path(d), size, seed, kind)
+        else:
+            w = code.world(seed, size)
+            built = code.build(w, Path(d) / "repo")
+            t, cwd, flags = (
+                next(x for x in code.tasks(w, built) if x.task_id.endswith(f"-{kind}")),
+                built.root,
+                [],
+            )
+        original = (cwd / t.path).read_text(encoding="utf-8") if t.path else ""
         settings = Path(d) / "settings.json"
-        hook = hook_settings("all", log, "Bash", "schema", _FINAL) if condition == "fold" else {}
+        hook = hook_settings("all", log, "mcp__.*|Bash", "schema", _FINAL) if condition == "fold" else {}
         settings.write_text(json.dumps(hook), encoding="utf-8")
         command = ["claude", "-p", prompt_for(t), "--model", model, "--max-turns", "30"]
-        command += ["--output-format", "stream-json", "--verbose", "--strict-mcp-config"]
+        command += ["--output-format", "stream-json", "--verbose", "--strict-mcp-config", *flags]
         command += ["--setting-sources", "project,local", "--settings", str(settings)]
         command += ["--allowedTools", tools_for(t)]
         try:
             proc = subprocess.run(
                 command,
-                cwd=built.root,
+                cwd=cwd,
                 env=dict(os.environ),
                 capture_output=True,
                 text=True,
@@ -143,7 +187,7 @@ def run_one(
                 session = replace(session, error=f"{session.error}; {proc.stderr[-300:]}")
         except subprocess.TimeoutExpired:
             session, calls = _failed(f"timed out after {_TIMEOUT}s"), []
-        edited = (built.root / t.path).read_text(encoding="utf-8") if t.path else ""
+        edited = (cwd / t.path).read_text(encoding="utf-8") if t.path else ""
     extra: dict[str, Any] = {}
     if isinstance(t.truth, Edited):
         problem = t.truth.check(original, edited)
@@ -157,7 +201,7 @@ def run_one(
     ]
     return {
         "task_id": t.task_id,
-        "family": "code",
+        "family": family,
         "kind": kind,
         "size": size,
         "seed": seed,
@@ -179,9 +223,9 @@ def run_one(
 
 
 def _row(
-    size: str, seed: int, kind: str, condition: str, model: str, rep: int, log: Path
+    family: str, size: str, seed: int, kind: str, condition: str, model: str, rep: int, log: Path
 ) -> list[dict[str, Any]]:
-    return [run_one(size, seed, kind, condition, model, rep, log)]
+    return [run_one(family, size, seed, kind, condition, model, rep, log)]
 
 
 def _median(xs: list[float]) -> float:
@@ -189,12 +233,12 @@ def _median(xs: list[float]) -> float:
     return xs[len(xs) // 2] if xs else 0.0
 
 
-def report(rows: list[dict[str, Any]], model: str) -> str:
+def report(rows: list[dict[str, Any]], model: str, family: str = "code") -> str:
     """Per task kind and size: how often each condition answered right, and what a run cost; then
     the commands whose output was large, which is where the hook can act."""
     scored = [r for r in rows if not r["error"]]
     out = [
-        f"# Scenarios, layer 2: code and tests on {model}",
+        f"# Scenarios, layer 2: the {family} family on {model}",
         "",
         f"{len(rows)} runs, {len(rows) - len(scored)} failed to produce an answer (not scored).",
         f"Spent ${sum(r['cost_usd'] for r in rows):.2f}.",
@@ -206,7 +250,7 @@ def report(rows: list[dict[str, Any]], model: str) -> str:
     groups: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
     for r in scored:
         groups[(r["kind"], r["size"], r["condition"])].append(r)
-    for kind in KINDS:
+    for kind in FAMILIES[family]:
         for (k, size, condition), rs in sorted(groups.items()):
             if k != kind:
                 continue
@@ -249,7 +293,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--model", default="claude-haiku-5-5")
     parser.add_argument("--size", nargs="+", choices=("M", "L"), default=["M"])
     parser.add_argument("--seeds", type=int, default=5, help="how many open seeds, from 0")
-    parser.add_argument("--kinds", nargs="+", choices=KINDS, default=list(KINDS))
+    parser.add_argument("--family", choices=tuple(FAMILIES), default="code")
+    parser.add_argument("--kinds", nargs="+", choices=sorted({k for ks in FAMILIES.values() for k in ks}))
     parser.add_argument("--conditions", nargs="+", choices=CONDITIONS, default=["native"])
     parser.add_argument("--reps", type=int, default=1)
     parser.add_argument("--workers", type=int, default=4)
@@ -266,12 +311,18 @@ def main(argv: list[str] | None = None) -> int:
         help="keep results/NAME.jsonl's rows (scored again) and run only the jobs they do not cover",
     )
     ns = parser.parse_args(argv)
+    kinds = ns.kinds or list(FAMILIES[ns.family])
+    if unknown := set(kinds) - set(FAMILIES[ns.family]):
+        parser.error(
+            f"the {ns.family} family has no task {', '.join(sorted(unknown))}:"
+            f" its tasks are {', '.join(FAMILIES[ns.family])}"
+        )
     jobs = [
         (size, seed, kind, condition, rep)
         for rep in range(ns.reps)
         for size in ns.size
         for seed in open_seeds(ns.seeds)
-        for kind in ns.kinds
+        for kind in kinds
         for condition in ns.conditions
     ]
     per_run = next((v for k, v in _COST_PER_RUN.items() if k in ns.model), _COST_PER_RUN["sonnet"])
@@ -286,7 +337,8 @@ def main(argv: list[str] | None = None) -> int:
         jobs = [j for j in jobs if j not in done]
         print(f"resuming: {len(kept)} rows kept and scored again, {len(jobs)} runs to go")
     runs: list[Run] = [
-        partial(_row, size, seed, kind, cond, ns.model, rep) for size, seed, kind, cond, rep in jobs
+        partial(_row, ns.family, size, seed, kind, cond, ns.model, rep)
+        for size, seed, kind, cond, rep in jobs
     ]
     rest = f"{ns.name}-rest" if kept else ns.name
     rows = kept + run_all(runs, len(jobs), rest, ns.workers, ns.max_cost)
@@ -299,7 +351,7 @@ def main(argv: list[str] | None = None) -> int:
             with (results / f"{ns.name}-hook.jsonl").open("a", encoding="utf-8") as f:
                 f.write(log.read_text(encoding="utf-8"))
             log.unlink()
-    text = report(rows, ns.model)
+    text = report(rows, ns.model, ns.family)
     (results / f"{ns.name}.md").write_text(text, encoding="utf-8")
     print(text, end="")
     return 0
