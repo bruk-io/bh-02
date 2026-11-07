@@ -9,7 +9,8 @@ created_date: '2026-10-25 21:02'
 updated_date: '2026-11-07 04:27'
 labels:
   - size-2
-dependencies: []
+dependencies:
+  - TASK-0202
 type: bug
 ---
 
