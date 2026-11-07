@@ -1049,6 +1049,36 @@ seatbelt's `file-read*` family already covers link creation from a denied
 source; no further guard is needed in brig or in an embedder's own readers.
 (Ruled 2026-11-07, decision-206.)
 
+**Every directory between a write root and a carve-out is pinned on seatbelt
+too (2026-11-07, TASK-0197).** decision-168 pinned them on bwrap and held
+that seatbelt needed no pin, since it denies the carve-out's path whatever
+directory ends up there. Measured on macOS 27.0.1, that is not enough: SBPL
+judges a `rename` by its source and destination paths only, never by what
+the moved directory holds, so a workload renamed the directory above a
+carve-out (`<root>/xdg`, above `<root>/xdg/bh-02`) to a name of its own,
+rewrote the denied file there, and renamed the directory back, leaving its
+file at the very path `write_denies` named (bh-02's
+`test_a_session_run_from_home_can_t_choose_what_a_later_session_reads_as_the_person_s`,
+an embedder's). Ruled: `render_sbpl` emits, after the carve-outs, one
+`(deny file-write-unlink (literal "RESOLVED"))` per directory `pins` names,
+resolved through `resolved` like every other `Spec` path (`run`'s
+`build_compile_ctx` already resolves the pins). `file-write-unlink` is the
+operation a rename's source and a rename over an existing directory are
+checked as (measured: a pin with it refuses both), and it is the narrowest
+one that does: creating, writing and removing entries inside a pin, `chmod`
+and `utimes` on it are still allowed (measured: both refusals and that
+control in one jail, `tests/integration/test_seatbelt_pins.py`), where
+`file-write*` on the literal would refuse `utimes` too (measured by hand). Unlike bwrap's pin it needs no existence
+answer and the render stays pure: a rule on a path that is absent refuses
+nothing until a directory is made there, and then refuses moving it away.
+Two gaps stay open, both measured and named for the embedder: a directory
+renamed onto an ABSENT pin's path (a rename's destination is checked as
+`file-write-create`, which a pin cannot deny without refusing `mkdir` there
+too), so the embedder that cares holds the topmost absent one, as on bwrap;
+and a write root renamed whole into another write root, which no pin
+between root and carve-out covers; TASK-0209 tracks both. Implementing task: TASK-0197.
+(Ruled 2026-11-07, decision-207.)
+
 **`rlimits`' hard limit sits one second above its soft limit (2026-09-08,
 decision-161).** The roster row above says "`SIGXCPU` is real", and until this
 ruling that was a claim about darwin only. The trampoline set
@@ -1251,8 +1281,11 @@ be the copy decision-152 deleted the event stream for).
   parent, on the host (above), and the embedder that cares holds the topmost
   absent one instead. `pins` names them lexically and `run`'s
   `build_compile_ctx` observes whether each exists; a pin with no answer is
-  `UnknownPathExistence`, never a guess. darwin's seatbelt needs no pin: it
-  denies the path, whatever directory ends up there.
+  `UnknownPathExistence`, never a guess. *Amended 2026-11-07, decision-207:*
+  darwin's seatbelt pins them too, with a rule rather than a mount (§6, after
+  decision-206); it had been held to need none because it denies the path
+  whatever directory ends up there, and a rename carries the files out from
+  under that path and back.
 - **The channel directory is mounted BEFORE the write roots (2026-09-08,
   decision-163), and until it was, a `write_denies` carve-out inside a jail
   directory was compiled and then silently unmade.** The endpoint's directory

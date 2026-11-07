@@ -57,6 +57,7 @@ _GOLDEN_SPEC = Spec(
 _GOLDEN_RESOLVED = {
     "/tmp/bg1/workspace": "/private/tmp/bg1/workspace",
     "/tmp/bg1/workspace/.git/hooks": "/private/tmp/bg1/workspace/.git/hooks",
+    "/tmp/bg1/workspace/.git": "/private/tmp/bg1/workspace/.git",
     "/Users/dev/.ssh": "/Users/dev/.ssh",
 }
 
@@ -73,6 +74,7 @@ _EXPECTED_GOLDEN_PROFILE = """\
 (allow file-write* (subpath "/private/tmp/bg1/workspace"))
 (allow file-write* (subpath "/private/tmp/bg1/chan"))
 (deny file-write* (subpath "/private/tmp/bg1/workspace/.git/hooks"))
+(deny file-write-unlink (literal "/private/tmp/bg1/workspace/.git"))
 (allow network-bind)
 (deny network* (with no-log))
 """
@@ -106,6 +108,7 @@ _ORDER_RESOLVED = {
     "/private/tmp/order/b": "/private/tmp/order/b",
     "/private/tmp/order/a/.git/hooks": "/private/tmp/order/a/.git/hooks",
     "/private/tmp/order/b/.envrc": "/private/tmp/order/b/.envrc",
+    "/private/tmp/order/a/.git": "/private/tmp/order/a/.git",
 }
 
 
@@ -305,6 +308,7 @@ def _sealed_resolved(root: str) -> dict[str, str]:
     return {
         root: root,
         "/private/tmp/.git/hooks": "/private/tmp/.git/hooks",
+        "/private/tmp/.git": "/private/tmp/.git",
     }
 
 
@@ -322,13 +326,18 @@ def test_a_write_root_at_or_above_the_jail_directory_is_denied_it_but_its_scratc
     )
     lines = profile.splitlines()
     start = lines.index('(deny file-write* (subpath "/"))')
-    assert lines[start : start + 7] == [
+    # The pin (decision-207), where the root is below `/` and above `.git`.
+    pinned = (
+        ['(deny file-write-unlink (literal "/private/tmp/.git"))'] if root == "/private/tmp" else []
+    )
+    assert lines[start : start + 7 + len(pinned)] == [
         '(deny file-write* (subpath "/"))',
         f'(allow file-write* (subpath "{root}"))',
         f'(deny file-write* (subpath "{_SEALED_JAIL_DIR}"))',
         f'(allow file-write* (subpath "{_SEALED_JAIL_DIR}/tmp"))',
         f'(allow file-write* (subpath "{_SEALED_JAIL_DIR}/chan"))',
         '(deny file-write* (subpath "/private/tmp/.git/hooks"))',
+        *pinned,
         "(allow network-bind)",
     ]
 
@@ -342,3 +351,76 @@ def test_no_seal_when_no_write_root_reaches_the_jail_directory() -> None:
         profile = render_sbpl(spec, resolved={root: root}, jail_dir=_GOLDEN_JAIL_DIR)
         assert f'(subpath "{_GOLDEN_JAIL_DIR}")' not in profile
         assert f'(subpath "{_GOLDEN_JAIL_DIR}/tmp")' not in profile
+
+
+# --------------------------------------------------------------------------
+# decision-207: the pins. Every directory strictly between a write root and a
+# carve-out is denied `file-write-unlink` on its literal path, after the
+# carve-outs, so it can't be renamed away (taking the carve-out's files with
+# it) or renamed over.
+# --------------------------------------------------------------------------
+
+_PIN_SPEC = Spec(
+    fs=FsPolicy(
+        write_allows=("/tmp/home",),
+        write_denies=("/tmp/home/xdg/bh-02", "/tmp/home/.config/bh-02/deep", "/tmp/home/.envrc"),
+    ),
+)
+_PIN_RESOLVED = {
+    "/tmp/home": "/private/tmp/home",
+    "/tmp/home/xdg/bh-02": "/private/tmp/home/xdg/bh-02",
+    "/tmp/home/.config/bh-02/deep": "/private/tmp/home/.config/bh-02/deep",
+    "/tmp/home/.envrc": "/private/tmp/home/.envrc",
+    "/tmp/home/xdg": "/private/tmp/home/xdg",
+    "/tmp/home/.config": "/private/tmp/home/.config",
+    "/tmp/home/.config/bh-02": "/private/tmp/home/.config/bh-02",
+}
+
+
+@pytest.mark.unit
+def test_each_directory_between_a_write_root_and_a_carve_out_is_pinned_after_the_carve_outs() -> (
+    None
+):
+    """One `(deny file-write-unlink (literal RESOLVED))` per directory strictly
+    between the root and a carve-out, shallowest first, resolved, right after
+    the last carve-out; none for the root itself, for a carve-out directly in
+    it (`.envrc`), or for a carve-out, whose subpath deny holds it already."""
+    lines = render_sbpl(_PIN_SPEC, resolved=_PIN_RESOLVED, jail_dir=_GOLDEN_JAIL_DIR).splitlines()
+    pinned = [line for line in lines if line.startswith("(deny file-write-unlink")]
+    assert pinned == [
+        '(deny file-write-unlink (literal "/private/tmp/home/.config"))',
+        '(deny file-write-unlink (literal "/private/tmp/home/xdg"))',
+        '(deny file-write-unlink (literal "/private/tmp/home/.config/bh-02"))',
+    ]
+    carve_outs = [
+        i for i, line in enumerate(lines) if line.startswith('(deny file-write* (subpath "/private')
+    ]
+    assert len(carve_outs) == 3
+    assert lines.index(pinned[0]) == max(carve_outs) + 1
+
+
+@pytest.mark.unit
+def test_a_pin_needs_a_resolved_form_like_every_spec_path() -> None:
+    """A pin missing from `resolved` is refused by name, never rendered from
+    its lexical (`/tmp`) form; the control is the same spec with it present."""
+    missing = {path: real for path, real in _PIN_RESOLVED.items() if path != "/tmp/home/xdg"}
+    with pytest.raises(UnresolvedPath, match="'/tmp/home/xdg'"):
+        render_sbpl(_PIN_SPEC, resolved=missing, jail_dir=_GOLDEN_JAIL_DIR)
+    assert "/private/tmp/home/xdg" in render_sbpl(
+        _PIN_SPEC, resolved=_PIN_RESOLVED, jail_dir=_GOLDEN_JAIL_DIR
+    )
+
+
+@pytest.mark.unit
+def test_no_pin_without_a_carve_out_below_a_root() -> None:
+    """The control: a write root with no carve-out beneath it renders no pin."""
+    spec = Spec(
+        fs=FsPolicy(write_allows=("/private/tmp/w",), write_denies=("/private/tmp/elsewhere/x",))
+    )
+    resolved = {
+        "/private/tmp/w": "/private/tmp/w",
+        "/private/tmp/elsewhere/x": "/private/tmp/elsewhere/x",
+    }
+    assert "file-write-unlink" not in render_sbpl(
+        spec, resolved=resolved, jail_dir=_GOLDEN_JAIL_DIR
+    )

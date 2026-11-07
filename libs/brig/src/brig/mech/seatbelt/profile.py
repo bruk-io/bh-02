@@ -28,7 +28,7 @@ falling back to the lexical form, which is the exact `/tmp` vs
 `/private/tmp` bug this whole arrangement exists to prevent (law 2's
 refusal-not-downgrade posture). The keys this render requires: every
 `spec.fs.write_allows`, every `spec.fs.write_denies`, every
-and `spec.fs.read_denies`.
+`spec.fs.read_denies`, and every pin (`brig.mech.bwrap.pins`, decision-207).
 
 **The `jail_dir` guard is LEXICAL, not a proof of resolution.** A pure
 render cannot `lstat` to prove a path is actually resolved. So
@@ -58,6 +58,7 @@ has a feature the parent does not:**
                                             (allow file-write* (subpath "JAIL_DIR/tmp"))
       [when any channel is declared]        (allow file-write* (subpath "JAIL_DIR/chan"))
       [per write_denies entry, spec order]  (deny file-write* (subpath "RESOLVED"))
+      [per pin, shallowest first]           (deny file-write-unlink (literal "RESOLVED"))
     (allow network-bind)                    [ONLY when at least one LISTEN channel]
     (deny network* (with no-log))
 
@@ -133,6 +134,17 @@ condition used to be spelled as a filter on `Channel.kind`, because a
 is the only kind there is since decision-153, so the filter is gone and
 the condition is simply "does this spec declare a channel".
 
+**The pins (decision-207).** Every directory strictly between a write root
+and a carve-out (`brig.mech.bwrap.pins`, decision-168's set) gets
+`(deny file-write-unlink (literal "RESOLVED"))` after the carve-outs. SBPL
+judges a rename by its two paths only, so without it the workload renamed the
+directory above a carve-out away, rewrote the denied file under the new name,
+and renamed it back. `file-write-unlink` is what a rename's source and a
+rename over an existing directory are checked as; creating, writing and
+removing entries inside a pin, `chmod` and `utimes` on it stay allowed
+(measured). A rule on an absent pin refuses nothing until one is made there,
+so the render needs no existence answer and stays pure.
+
 **`ReadModelUnsupported`.** SPEC.md §6's roster row spells seatbelt's
 `fs_read` axis "(denylist)": the two read models are declared, not layered
 (SPEC.md §5), and compiling `ReadModel.ALLOW_LIST` through a denylist-only
@@ -168,6 +180,7 @@ from typing import Final
 
 from brig.core import ReadModel, Spec
 from brig.core.runtime import channel_dir
+from brig.mech.bwrap import pins
 
 #: darwin's known symlinked roots (SPEC.md §6). A `jail_dir` whose leading
 #: path component is one of these is almost certainly the UNRESOLVED
@@ -233,6 +246,12 @@ def _sbpl_subpath(path: str) -> str:
     return f'(subpath "{_sbpl_str(rendered)}")'
 
 
+def _sbpl_literal(path: str) -> str:
+    """Render an SBPL `(literal "...")` clause: the path itself, nothing
+    beneath it."""
+    return f'(literal "{_sbpl_str(path)}")'
+
+
 def _resolve(path: str, resolved: Mapping[str, str]) -> str:
     """Look up `path`'s realpath'd form in `resolved`; refuse
     (`UnresolvedPath`, naming `path`) rather than fall back to the lexical
@@ -274,7 +293,8 @@ def render_sbpl(
               `spec.fs.read_model is ReadModel.DENY_LIST` (seatbelt is a
               denylist-only mechanism).
         resolved: Maps each `Spec` path this render needs -- every
-              `write_allows`/`write_denies`/`read_denies` entry -- to its
+              `write_allows`/`write_denies`/`read_denies` entry and every
+              pin (decision-207) -- to its
               realpath'd form, exactly
               as the `Spec` carries the key. Built by a `run`-layer
               helper; this render performs no resolution of its own.
@@ -360,6 +380,13 @@ def render_sbpl(
     # be a clean, single-line-range edit).
     for path in spec.fs.write_denies:
         lines.append(f"(deny file-write* {_sbpl_subpath(_resolve(path, resolved))})")
+
+    # The pins (decision-207): the directories between a write root and a
+    # carve-out can't be renamed away or renamed over, or the carve-out's files
+    # would leave its path, be rewritten, and come back. After the allows, so
+    # the deny wins.
+    for path in pins(spec.fs.write_allows, spec.fs.write_denies):
+        lines.append(f"(deny file-write-unlink {_sbpl_literal(_resolve(path, resolved))})")
 
     # Brig's own call, not the parent's (plan ambiguity A2, this module's
     # docstring): network-bind is emitted ONLY when the spec declares at

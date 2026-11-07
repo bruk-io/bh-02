@@ -205,8 +205,18 @@ _EXPECTED_IMPORTS_BY_FILE: Final[dict[str, frozenset[str]]] = {
     # `Final` constant, the same stdlib-typing-only shape the other rows carry.
     # `brig.core.runtime` (2026-10-12, decision-184): `channel_dir`, the pure
     # name of the runtime's channel directory the profile grants.
+    # `brig.mech.bwrap` (2026-11-07, decision-207): `pins`, the pure, lexical
+    # set of directories between a write root and a carve-out, which seatbelt
+    # now pins too (`oci.py` imports it from there as well).
     "seatbelt/profile.py": frozenset(
-        {"__future__", "collections.abc", "typing", "brig.core", "brig.core.runtime"}
+        {
+            "__future__",
+            "collections.abc",
+            "typing",
+            "brig.core",
+            "brig.core.runtime",
+            "brig.mech.bwrap",
+        }
     ),
     # `bwrap.py` (2026-09-08, decision-159): the linux mechanism. NOT a
     # carve-out either -- `Bwrap.compile` is a pure `spec -> argv` render,
