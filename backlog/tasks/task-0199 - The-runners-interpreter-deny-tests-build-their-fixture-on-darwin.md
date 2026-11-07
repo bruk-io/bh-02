@@ -1,7 +1,7 @@
 ---
 id: TASK-0199
 title: The runner's interpreter-deny tests build their fixture on darwin
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-11-07 04:27'
@@ -127,4 +127,6 @@ No repro: record-check --repro cannot be recorded for this bug, because the bug 
 - Committing the copy2 (broken) version first to satisfy that gate does not help: record-check would then record that commit against the broken file, and close-task's later check (`edited_repro_tests`/`check_repro`, board.py) compares the task's HEAD test file against the recorded commit with `git diff --quiet`; since the fix (copy+chmod in `_stood_in_for_an_interpreter`) changes that same file afterward, close-task refuses with "the repro test ... changed since ...: a fix doesn't edit the test that reproduced the bug."
 There is no ordering of commit/record/fix that satisfies both gates when the fix and the repro are the same file, which is this bug's shape (a darwin-only fixture-building bug in the test itself, not in jail.py or any production code).
 The before/after evidence the repro would have recorded is already in these notes from the earlier session: with shutil.copy2 restored at the three call sites, `testlock uv run pytest` on the three tests -> 3 failed, each with `PermissionError: [Errno 1] Operation not permitted` inside shutil.py's `copystat` -> `chflags` on the fake interpreter file; with the fix (`_stood_in_for_an_interpreter`: shutil.copy + chmod(0o755)) restored, the same three tests -> 3 passed in 0.26s.
+
+Review (reviewer, second round): CLOSED. The fix round added a 'No repro:' note. It explains why record-check cannot record a repro when the fix and the repro are the same test file, and it cites the copy2-restored evidence (3 failed, EPERM in copystat) against the fix (3 passed). Only notes changed since the last review, so the earlier full-check result still stands: red only from darwin failures outside the runner plugin, tracked by TASK-0198, TASK-0205, TASK-0170 and TASK-0079.15. AC#1 and AC#2 are met as recorded. No new findings and no drafts.
 <!-- SECTION:NOTES:END -->
