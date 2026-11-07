@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-07 04:27'
-updated_date: '2026-11-07 06:45'
+updated_date: '2026-11-07 06:53'
 labels:
   - app
   - tests
@@ -82,4 +82,70 @@ dispatch of the same task. I brought that task file in via `git checkout 6f8f045
 rather than re-deriving the plan, and worked independently from there, verifying every claim in
 it myself (reproduced the failure, confirmed the regex, confirmed test_watching.py's coverage,
 ran my own planted-violation proof) before relying on it.
+
+Check `scripts/check` exited 1
+
+(279 earlier lines omitted)
+```text
+        `leader_pid` holding `leader_stamp` (decision-185). Refuses a path that is
+        not a socket before connecting, and closes the connection and refuses when
+        the peer is not one of the group's. `lstat` is the path check's seam.
+    
+        Raises:
+            EndpointRefused: the path is a link or not a socket, or the peer is
+                not a process of `group` (or its leader's identity can't vouch for
+                it, or brig reads no peer here, or the kernel could not report the
+                peer of a connection that succeeded: decision-186).
+            OSError: nothing listens there yet (`FileNotFoundError`,
+                `ConnectionRefusedError`): only the `lstat` and the `connect`
+                raise one.
+        """
+        reason = _path_refusal(lstat(endpoint).st_mode)
+        if reason is not None:
+            raise EndpointRefused(endpoint, reason)
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            sock.connect(endpoint)
+        except BaseException:
+            sock.close()
+            raise
+        try:
+            try:
+                peer = _read_peer(sock)
+            except OSError as error:
+                # Something answered; who, the kernel would not say. Not "not
+                # yet": a caller polling readiness would wait it out (decision-186).
+>               raise EndpointRefused(
+                    endpoint, f"the kernel could not report who listens there ({error})"
+                ) from error
+E               brig.run.dial.EndpointRefused: refused to dial '/private/tmp/bg-4066gcix/chan/219e48b6480255bf.sock': the kernel could not report who listens there ([Errno 57] Socket is not connected). A process of the jail can write the channel directory, so the host dials only the started process's own listener
+
+libs/brig/src/brig/run/dial.py:219: EndpointRefused
+=========================== short test summary info ============================
+FAILED bh-02/app/tests/test_python_repl.py::test_a_session_run_from_home_can_t_choose_what_a_later_session_reads_as_the_person_s@jail-lock
+FAILED libs/brig/tests/integration/test_channel_planted_link.py::test_a_listener_that_left_after_listening_is_refused
+FAILED libs/brig/tests/integration/test_channel_planted_link.py::test_a_link_planted_with_the_empty_stack_is_refused_by_readiness_and_connect
+3 failed, 3850 passed, 231 skipped in 70.83s (0:01:10)
+   FAILED: tests
+== gates
+== (root)
+   ok
+== libs/brig
+   ok
+== libs/cordis
+   ok
+== libs/cordis-helpers
+   ok
+== libs/host-paths
+   ok
+   ok
+== docs
+INFO    -  Cleaning site directory
+INFO    -  Building documentation to directory: /Users/brukhabtu/src/github.com/bruk-io/bh-02/site
+INFO    -  Documentation built in 1.27 seconds
+   ok
+== tokens
+bh-01's tokens and bh-02's theme are in sync
+   ok
+```
 <!-- SECTION:NOTES:END -->
