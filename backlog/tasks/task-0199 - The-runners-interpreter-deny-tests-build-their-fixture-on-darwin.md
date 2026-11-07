@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-07 04:27'
-updated_date: '2026-11-07 06:00'
+updated_date: '2026-11-07 06:14'
 labels:
   - runner
   - darwin
@@ -53,4 +53,70 @@ This session (base c0a7d480, worktree wf_a31c136d-eaf-10) picked this task up fr
   - Confirmed `git diff bh-02/plugins/runner-cordis-plugin/src/runner_cordis_plugin/jail.py` empty after reverting each plant, before moving to the next and before committing.
 - AC #2 (not covered by the prior attempt): testlock scripts/check bh-02/plugins/runner-cordis-plugin -> format/lint/types/gates/docs all ok, tests "80 passed, 33 skipped in 6.01s". testlock scripts/linux-jail-check -> "327 passed, 2 skipped in 71.98s", covering the runner plugin and brig's bwrap/e2e suites in the Ubuntu/bubblewrap container. Both green: AC #2 checked.
 Only test_runner_confined.py changed; jail.py is unchanged from main (verified via git diff, empty).
+
+Check `scripts/check` exited 1
+
+(3805 earlier lines omitted)
+```text
+>       assert outcome is teardown.KillOutcome.FAILED, detail
+E       AssertionError: pid 1234 now names a different process (start time does not match the one recorded at launch); nothing was signalled
+E       assert <KillOutcome.ALREADY_GONE: 'ALREADY_GONE'> is <KillOutcome.FAILED: 'FAILED'>
+E        +  where <KillOutcome.FAILED: 'FAILED'> = <enum 'KillOutcome'>.FAILED
+E        +    where <enum 'KillOutcome'> = teardown.KillOutcome
+
+libs/brig/tests/unit/test_teardown_zombies.py:115: AssertionError
+=========================== short test summary info ============================
+FAILED bh-02/app/tests/test_python_repl.py::test_a_session_run_from_home_can_t_choose_what_a_later_session_reads_as_the_person_s@jail-lock
+FAILED bh-02/app/tests/test_trajectory_view.py::test_a_sub_agent_is_a_name_in_the_agents_directory_that_bh_02_makes_and_no_other
+FAILED libs/brig/tests/integration/test_channel_planted_link.py::test_a_listener_that_left_after_listening_is_refused
+FAILED libs/brig/tests/integration/test_exit_status_is_recorded_not_invented.py::test_a_pid_is_watched_until_its_status_is_recorded_so_no_one_sees_neither
+FAILED libs/brig/tests/unit/test_teardown_zombies.py::test_teardown_fails_an_item_whose_table_it_cannot_read
+ERROR libs/brig/tests/unit/test_process_namespaces_pure.py - AttributeError: ...
+ERROR libs/brig/tests/unit/test_process_namespaces_pure.py - AttributeError: ...
+ERROR libs/brig/tests/unit/test_process_namespaces_pure.py - AttributeError: ...
+ERROR libs/brig/tests/unit/test_process_namespaces_pure.py - AttributeError: ...
+ERROR libs/brig/tests/unit/test_process_namespaces_pure.py - AttributeError: ...
+ERROR libs/brig/tests/unit/test_process_namespaces_pure.py - AttributeError: ...
+ERROR libs/brig/tests/unit/test_process_namespaces_pure.py - AttributeError: ...
+ERROR libs/brig/tests/unit/test_process_namespaces_pure.py - AttributeError: ...
+ERROR libs/brig/tests/integration/test_supervisor_link.py::test_replies_find_their_callers_by_id_whatever_order_they_come_in
+ERROR libs/brig/tests/integration/test_supervisor_link.py::test_descriptors_cross_both_ways
+ERROR libs/brig/tests/integration/test_supervisor_link.py::test_a_closed_socket_wakes_every_caller_waiting_on_it
+ERROR libs/brig/tests/integration/test_supervisor_link.py::test_a_reply_nobody_waits_for_and_a_message_it_cannot_read_are_dropped_with_their_fds
+ERROR libs/brig/tests/integration/test_supervisor_link.py::test_close_is_idempotent_and_sends_end_of_file
+ERROR libs/brig/tests/integration/test_supervisor_link.py::test_a_link_nobody_holds_closes_its_end
+ERROR libs/brig/tests/integration/test_supervisor_link.py::test_an_error_reply_is_a_refusal_with_the_reason_and_its_descriptors_are_closed
+ERROR libs/brig/tests/integration/test_supervisor_link.py::test_the_hello_is_waited_for_and_a_socket_that_closes_first_is_gone
+ERROR libs/brig/tests/integration/test_supervisor_link.py::test_a_missed_deadline_calls_unresponsive_once_ends_the_link_and_ignores_the_late_reply
+ERROR examples/warden/plugins/warden-systray-cordis-plugin/tests/test_tray.py::test_no_names_is_a_placeholder_label
+ERROR examples/warden/plugins/warden-cordis-plugin/tests/test_warden_registry.py::test_two_processes_cannot_share_a_name
+ERROR examples/warden/plugins/warden-systray-cordis-plugin/tests/test_tray.py::test_names_come_back_sorted
+ERROR examples/warden/plugins/warden-cordis-plugin/tests/test_warden_wiring.py::test_the_registry_row_binds_one_processes_value_and_runs_nothing
+ERROR libs/host-paths/tests/test_host_paths_appender.py::test_a_link_at_the_name_is_refused_not_followed[True]
+ERROR libs/host-paths/tests/test_host_paths_appender.py::test_an_appender_with_nothing_queued_flushes_and_closes_at_once
+ERROR examples/warden/plugins/warden-cordis-plugin/tests/test_process.py::test_spawns_the_command_and_terminates_it_on_exit
+ERROR libs/cordis/tests/test_invariants.py::test_invariants_hold_when_operations_interleave[115]
+5 failed, 3805 passed, 221 skipped, 25 errors in 71.20s (0:01:11)
+   FAILED: tests
+== gates
+== (root)
+   ok
+== libs/brig
+   ok
+== libs/cordis
+   ok
+== libs/cordis-helpers
+   ok
+== libs/host-paths
+   ok
+   ok
+== docs
+INFO    -  Cleaning site directory
+INFO    -  Building documentation to directory: /Users/brukhabtu/src/github.com/bruk-io/bh-02/site
+INFO    -  Documentation built in 1.26 seconds
+   ok
+== tokens
+bh-01's tokens and bh-02's theme are in sync
+   ok
+```
 <!-- SECTION:NOTES:END -->
