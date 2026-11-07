@@ -111,4 +111,6 @@ INFO    -  Documentation built in 1.26 seconds
 bh-01's tokens and bh-02's theme are in sync
    ok
 ```
+
+No repro: the failure was mypy's output on darwin (four attr-defined/no-any-return errors in libs/brig), recorded on TASK-0169.01 and TASK-0169.02 before the fix; it is a type-check result, not a test, and the full check's types step on main is the evidence it no longer occurs.
 <!-- SECTION:NOTES:END -->
