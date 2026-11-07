@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-07 04:27'
-updated_date: '2026-11-07 06:15'
+updated_date: '2026-11-07 06:21'
 labels:
   - runner
   - darwin
@@ -121,4 +121,10 @@ bh-01's tokens and bh-02's theme are in sync
 ```
 
 Review (reviewer, not the worker): NOT CLOSED. close-task refused because a bug closes only with its repro recorded, and none is. To close: the worker runs record-check TASK-0199 --repro against the three tests with copy2 restored (a repro that fails before the fix), or appends a note starting 'No repro:' that says why. Otherwise the review passes. The diff is test-only and jail.py is unchanged. AC#1 is met by the notes' revert/plant evidence. The interpreter-file deny is guarded by the pure spec_for test, which is accepted. AC#2 is met: the runner plugin gave 80 passed/33 skipped when the reviewer re-ran it on macOS, and linux-jail-check gave 327 passed. The full check is red with 5 failed and 25 errors, none in the runner plugin. They are darwin failures in brig, warden, host-paths, cordis and the app, already tracked by TASK-0198, TASK-0205, TASK-0170 and TASK-0079.15, and are unrelated. No drafts filed.
+
+No repro: record-check --repro cannot be recorded for this bug, because the bug lives in the test fixture itself, so the repro file and the fixed file are the same file (test_runner_confined.py), and record-check's two gates each refuse that:
+- To make the three tests fail, shutil.copy2 must be restored at the three call sites. record-check then runs `git status --porcelain -- <files>` on the named test file before recording; with copy2 restored (uncommitted), it is dirty, and record-check refuses with "commit the repro test first, so the note can name its commit".
+- Committing the copy2 (broken) version first to satisfy that gate does not help: record-check would then record that commit against the broken file, and close-task's later check (`edited_repro_tests`/`check_repro`, board.py) compares the task's HEAD test file against the recorded commit with `git diff --quiet`; since the fix (copy+chmod in `_stood_in_for_an_interpreter`) changes that same file afterward, close-task refuses with "the repro test ... changed since ...: a fix doesn't edit the test that reproduced the bug."
+There is no ordering of commit/record/fix that satisfies both gates when the fix and the repro are the same file, which is this bug's shape (a darwin-only fixture-building bug in the test itself, not in jail.py or any production code).
+The before/after evidence the repro would have recorded is already in these notes from the earlier session: with shutil.copy2 restored at the three call sites, `testlock uv run pytest` on the three tests -> 3 failed, each with `PermissionError: [Errno 1] Operation not permitted` inside shutil.py's `copystat` -> `chflags` on the fake interpreter file; with the fix (`_stood_in_for_an_interpreter`: shutil.copy + chmod(0o755)) restored, the same three tests -> 3 passed in 0.26s.
 <!-- SECTION:NOTES:END -->
