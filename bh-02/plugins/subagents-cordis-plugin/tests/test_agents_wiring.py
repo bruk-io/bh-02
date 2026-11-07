@@ -282,13 +282,23 @@ def _programs(where: Path) -> list[int]:
 
 
 def _running(pid: int) -> bool:
-    """Whether the program is still running: a zombie nobody reaped has ended (this container's
-    init reaps none), and a pid the kernel has no entry for is gone."""
+    """Whether the program is still running, and a pid the kernel has no entry for is gone. On
+    Linux (this container's init reaps no zombie) a zombie counts as ended too, read from
+    `/proc`. Darwin has no `/proc`, so there `os.kill(pid, 0)` stands in: it cannot tell a zombie
+    from a running process, but the unconfined runner always `await`s the child (`stop`,
+    `stopped`), which reaps it, so this test never sees one (`test_shell_command.py`'s `_alive`
+    is the precedent for the same split)."""
+    if Path("/proc/self").exists():  # Linux; darwin has no /proc
+        try:
+            stat_line = Path(f"/proc/{pid}/stat").read_text()
+        except OSError:
+            return False
+        return stat_line.rsplit(")", 1)[1].split()[0] != "Z"
     try:
-        stat_line = Path(f"/proc/{pid}/stat").read_text()
-    except OSError:
+        os.kill(pid, 0)
+    except ProcessLookupError:
         return False
-    return stat_line.rsplit(")", 1)[1].split()[0] != "Z"
+    return True
 
 
 async def _all_gone(pids: Sequence[int]) -> bool:
