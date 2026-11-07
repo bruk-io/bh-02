@@ -6,6 +6,7 @@ title: >-
 status: Draft
 assignee: []
 created_date: '2026-11-07 05:35'
+updated_date: '2026-11-07 05:44'
 labels: []
 dependencies: []
 type: bug
@@ -21,3 +22,9 @@ The full scripts/check at f6ce185a (recorded on TASK-0169.04) shows ERROR libs/c
 <!-- AC:BEGIN -->
 - [ ] #1 The cause of the cordis test_invariants setup error under the full run is explained, or it is shown to share the host-paths/warden setup-error cause and merged there
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Owner stand-in (Opus), 2026-11-06: Fold into DRAFT-0020 (same rotating full-run setup-ERROR symptom; this draft already says to merge if so) and archive this draft, rather than accepting a second task. If accept-work finds a distinct cause, promote this one too.
+<!-- SECTION:NOTES:END -->
