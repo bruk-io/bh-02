@@ -115,4 +115,6 @@ INFO    -  Documentation built in 1.33 seconds
 bh-01's tokens and bh-02's theme are in sync
    ok
 ```
+
+Review (reviewer agent), 2026-11-06: not closed, one blocker. The ACs hold: AC1 cause explained and fixed (boot inside run()'s try, rt.shutdown in finally) with a regression test; AC2 reviewer's full check through testlock completed in 75.65 s, every step reported (16 failed/3794 passed/25 errors, all other steps ok), TEST_WORKERS = min(8, cpu) with its reason; AC3 load-only failures filed as TASK-0203..0206, the rest map to filed tasks. Blocker: close-task refuses a bug without a recorded repro. The worker saw test_booting.py::test_a_run_cancelled_while_its_rows_start_leaves_no_row_running fail with the fix reverted, but that run is not recorded. Record it (revert bootstrap.py's change, record-check TASK-0202 --repro -- uv run pytest bh-02/app/tests/test_booting.py::test_a_run_cancelled_while_its_rows_start_leaves_no_row_running -q, restore), then send back for close. No other findings; no drafts filed.
 <!-- SECTION:NOTES:END -->
