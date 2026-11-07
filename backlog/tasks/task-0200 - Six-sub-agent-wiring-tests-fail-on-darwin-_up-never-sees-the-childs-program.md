@@ -195,4 +195,6 @@ INFO    -  Documentation built in 1.27 seconds
 bh-01's tokens and bh-02's theme are in sync
    ok
 ```
+
+Review (reviewer, 2026-11-07, round 2): NOT closed, on one fact: close-task refuses a bug with no recorded repro. AC1, AC2 and the narrowed AC3 (stand-in ruling, committed with finish-moved in 17d28523) are met on the evidence in these notes. The worker's notes describe the failing test before the fix (test_agent_stop_ends_the_child_and_its_python_program failing at line 310), but it was never recorded through record-check --repro. To close: record it against the pre-fix code (record-check TASK-0200 --repro -- uv run pytest bh-02/plugins/subagents-cordis-plugin/tests/test_agents_wiring.py::test_agent_stop_ends_the_child_and_its_python_program -q, run on a checkout of 4dd3b2d1^), or add a note starting 'No repro:' saying why not. Full check (record-check --tier full) exits 1: 7 failed / 25 errors, none in the subagents plugin, same count as the run recorded before this round (which changed only this file); brig, warden, host-paths, runner-confined and app tests on this darwin host, in the area of TASK-0204/0205. No files rewritten. No drafts filed.
 <!-- SECTION:NOTES:END -->
