@@ -89,6 +89,34 @@ over a whole output. The next templates go there:
   must agree (a constant and its docstring), which a grep cannot narrow;
 - problems no rule sees (a test shadowed by another of the same name, which pytest silently skips).
 
+## The incident-triage family, as built
+
+`scenarios/incident.py` builds a world from a seed and a size (M: 8 services, L: 12): services
+with dependencies, pods named by their pod template's hash, a few days of deploys, and two hours of
+request logs (13:00 to 15:00). A little before 14:00 one service is rolled out, and from then on a
+share of one caller's requests to it time out (504); the rollout leaves one or two pods on the old
+version. Decoys: an unrelated deploy near the same time, and a noisy service whose cache misses and
+closed connections (499) are harmless. One service logs nothing for one minute. `scenarios/
+incident_mcp.py` serves five tools with FastMCP (`list_services`, `list_pods`, `list_deploys`,
+`get_logs`, `get_metrics`), each returning everything it has; a service's logs are 9,000 to 14,500
+tokens at M and 40,000 to 50,000 at L, every pod 5,000 and 23,000.
+
+| Task | What it asks | Truth | What layer 1 found |
+|---|---|---|---|
+| cause | the deploy behind the caller's errors: service and version | the rollout's version | the logs' envelope shows the timeouts and whom they name; the version is in `list_deploys`, small enough to reach the model whole |
+| count | the caller's 5xx responses from 14:00 to 15:00 | counted from the logs | the envelope counts the 504 lines by pattern, so the answer is a sum of its counts |
+| stale | the rolled-out service's pods still on an older version | from the pods | not in the envelope: every service has its own version, so no value dominates and two pods do not stand out |
+| gap | the minute a service logged nothing | the missing minute | not in the envelope: no rule sees an absence |
+| healthy | whether the noisy service is wrong | none | the envelope flags the 499 lines as anomalies, and shows them spread evenly over both hours |
+
+Layer 1 on five open seeds at M and L (`results/scenarios-l1-incident-M.md`, `-L.md`): no fold
+stated anything false.
+
+The smoke run found that FastMCP sends a tool's text result also as `{"result": "..."}`, and Claude
+Code shows the model that form: the whole log escaped into one JSON string, with or without the
+hook, and the hook folded it as JSON, one string field, 36 tokens. The hook now folds the text such
+a wrapper holds, and the incident server sends plain text, as many MCP servers do.
+
 ## The mix, from real sessions
 
 One real session so far (`results/v1-survey.md`, this research's own): 84 of its 2,364 tool results
