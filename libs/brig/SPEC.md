@@ -3745,6 +3745,9 @@ and `Process.wait_ready` reported ready. Ruled, superseding that residual:
 Implementing task: TASK-0079.33. (Ruled 2026-10-12, decision-185.)
 *Amended by decision-186 (below, 2026-10-13): `Jail.wait_ready(channel)` is
 gone, and a peer the kernel can't report is a refusal, not "not yet".*
+*Amended by decision-208 (below, 2026-11-07): darwin's `LOCAL_PEERPID` is
+now measured, and it names the connection's peer, not always the process
+that called `listen`.*
 
 **The Spec names channels, not host paths (2026-10-13, decision-186).**
 decision-0001's migration step 3b, its third part. decision-184 gave each jail
@@ -3819,6 +3822,44 @@ container or a remote sandbox shares no host path with it). Ruled:
   where the host lets them, decision-196).
 
 Implementing task: TASK-0079.32. (Ruled 2026-10-13, decision-186.)
+
+**darwin's peer is the connection's, measured (2026-11-07, decision-208).**
+decision-185 described `LOCAL_PEERPID` from the platform's headers, as the
+pid of the process that called `listen`, and left it unverified. Measured on
+macOS 27.0.1 (a listener that forks and exits, its child holding the
+socket): while nothing has accepted the connection, `LOCAL_PEERPID` is the
+pid that called `listen`; once a process accepts it, it is that process's
+pid; once the accepting end has closed, the read fails with `ENOTCONN`. Two
+intermittent failures of `test_channel_planted_link.py` on darwin (4 runs of
+20) were this, not a race in the dial: its forking workload's child accepted
+and closed every connection, so the host's read of the peer raced it three
+ways ("has left" before the accept; the live child, in the group, after it;
+`ENOTCONN` after the close), and its serving workload closed each connection
+as soon as it had answered. Ruled, no code change to the dial:
+
+- **A process that accepted the connection vouches for it on darwin.** It
+  is alive and holds the socket, and the dial requires its group to be the
+  started process's under a leader still holding its identity, as for any
+  peer, so what is refused (another group, a host socket, an unreadable peer)
+  is unchanged. What is not the same as Linux: a daemon that forks after
+  `listen` is refused as "has left" on darwin only until its child accepts a
+  connection; after that its child is the peer and the dial succeeds. The
+  test of that refusal holds the socket in the child without accepting, so
+  both platforms report the listener that left.
+- **A server that closes a connection before the host reads its peer is
+  refused on darwin** (decision-186: a peer the kernel can't report is a
+  refusal, never "not yet"). Linux keeps `SO_PEERCRED` after the close
+  (measured in `scripts/linux-jail-check`'s container: the server's pid,
+  read after it had closed). A workload that answers and closes at once can therefore fail
+  `Process.wait_ready` on darwin; brig's tests hold each connection until the
+  host closes it, and the darwin residual is named here (TASK-0210).
+- **The pid-reuse residual stands on darwin** as decision-185 named it: there
+  is no pidfd, so an exited listener's number taken by a process of the group
+  would vouch, and one taken by any other process reads as "not the started
+  process's group" rather than "has left" (a refusal either way).
+
+Implementing task: TASK-0206 (tests and this record; no code change).
+(Ruled 2026-11-07, decision-208.)
 
 **Mailbox is deleted (2026-09-08, decision-153).** It was the second kind
 here: an asynchronous, durable, ordered, many-writer-safe framed file with

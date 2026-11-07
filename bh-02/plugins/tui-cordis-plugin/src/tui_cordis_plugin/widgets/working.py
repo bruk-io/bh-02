@@ -65,5 +65,7 @@ class Working(Static):
         self.display = False
 
     def _tick(self) -> None:
-        self.update(render.working_line(self._clock() - self._began))
+        # To the nearest second: Textual wakes a timer half a millisecond early, so the first
+        # tick reads 0.9995 s, which whole seconds would say as `0s` (TASK-0206).
+        self.update(render.working_line(round(self._clock() - self._began)))
         self.display = True

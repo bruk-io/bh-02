@@ -46,6 +46,9 @@ _SYSTEM_ROOTS = ("/bin", "/usr", "/lib", "/lib64", "/etc")
 _PLANT = "import os, sys, time; os.symlink(sys.argv[2], sys.argv[1]); time.sleep(60)"
 
 #: Listens on argv[1] and answers every connection with argv[2], until ended.
+#: Each connection is held until the host closes it: darwin's `LOCAL_PEERPID`
+#: is unreadable (`ENOTCONN`) once the serving end has closed, so a server that
+#: closed first would be refused by the dial it answered (decision-208).
 _SERVE = """import socket, sys
 s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 s.bind(sys.argv[1])
@@ -54,14 +57,19 @@ while True:
     c, _ = s.accept()
     try:
         c.sendall(sys.argv[2].encode())
+        while c.recv(64):
+            pass
     except OSError:
         pass
     c.close()"""
 
-#: Listens on argv[1], then forks: the child keeps the socket and accepts, the
-#: listener itself exits (a daemon that forks after `listen`). Once the
-#: listener is reaped (`kill(pid, 0)` finds no process, not even a zombie),
-#: the child writes the file argv[2], so the test asks only after it has left.
+#: Listens on argv[1], then forks: the child keeps the socket, the listener
+#: itself exits (a daemon that forks after `listen`). Once the listener is
+#: reaped (`kill(pid, 0)` finds no process, not even a zombie), the child
+#: writes the file argv[2], so the test asks only after it has left. The child
+#: never accepts: the host's connect completes in the backlog, and on darwin a
+#: process that accepts (or closes what it accepted) becomes the peer the
+#: kernel reports (or none at all), not the listener (decision-208).
 _FORK_AFTER_LISTEN = """import os, socket, sys, time
 s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 s.bind(sys.argv[1])
@@ -76,9 +84,7 @@ while True:
         break
     time.sleep(0.01)
 open(sys.argv[2], "w").close()
-while True:
-    c, _ = s.accept()
-    c.close()"""
+time.sleep(60)"""
 
 
 @pytest.fixture
@@ -255,9 +261,11 @@ def test_a_co_tenant_listening_at_a_sibling_reservation_is_refused(
 
 @pytest.mark.integration
 def test_a_listener_that_left_after_listening_is_refused(run_id: str, jail_dir: str) -> None:
-    """The kernel names the process that called `listen`; one that has since
-    exited is no vouching peer, even when the socket's holder is in the
-    group (the safe direction for a daemon that forks after `listen`)."""
+    """The kernel names the process that called `listen` while nothing has
+    accepted (Linux always, darwin until a process accepts: decision-208); one
+    that has since exited is no vouching peer, even when the socket's holder
+    is in the group (the safe direction for a daemon that forks after
+    `listen`)."""
     jail = _create(jail_dir, confined=False)
     reservation = jail.channel("ctl")
     left = os.path.join(jail_dir, "own", "left")

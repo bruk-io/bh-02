@@ -50,6 +50,12 @@ def _line(app: BhApp) -> str | None:
     return next((row.strip() for row in _screen(app).splitlines() if "Working" in row), None)
 
 
+def _seconds(app: BhApp) -> int:
+    """The whole seconds the working line shows, -1 while it shows none."""
+    shown = re.fullmatch(r"Working · (\d+)s", _line(app) or "")
+    return int(shown[1]) if shown else -1
+
+
 async def _until(pilot: Pilot[None], done: Callable[[], bool], *, within: float = 3.0) -> None:
     """Let the app run until `done()`, polling in short pauses."""
     for _ in range(round(within / 0.02)):
@@ -105,6 +111,17 @@ async def test_while_a_reply_runs_the_screen_says_so_and_for_how_long() -> None:
         await _until(pilot, lambda: _line(app) == "Working · 7s")  # redrawn by the timer
         clock.now += 58
         await _until(pilot, lambda: _line(app) == "Working · 1m 05s")  # then minutes
+
+
+async def test_a_tick_a_hair_early_says_the_second_it_is_nearest() -> None:
+    """Textual wakes a timer half a millisecond early, so the real first tick reads 0.9995 s
+    after the reply began: it says `1s`, never `0s` a second in (TASK-0206)."""
+    clock = _Clock()
+    app = _app(clock)
+    async with app.run_test(size=_SIZE) as pilot:
+        await _started(app, pilot)
+        clock.now += 0.9995
+        await _until(pilot, lambda: _line(app) == "Working · 1s")
 
 
 async def test_the_line_sits_between_the_chat_view_and_the_composer_and_is_one_row() -> None:
@@ -309,14 +326,16 @@ async def test_the_list_of_commands_opens_under_it_and_the_palette_and_a_questio
 
 async def test_at_the_real_clock_and_interval_it_appears_after_a_second_and_counts() -> None:
     """The defaults, undriven: about once a second, so nothing for the first moments, then
-    the seconds."""
+    the seconds, counting up. Textual's interval skips the ticks it is late for, so a loaded
+    machine can show 1s then 3s: the count is waited past the first, not through each second."""
     app = BhApp()
     async with app.run_test(size=_SIZE) as pilot:
         app.post_message(ReplyStarted())
         await pilot.pause(0.4)
         assert _line(app) is None
         await _until(pilot, lambda: _line(app) is not None, within=3.0)
-        assert re.fullmatch(r"Working · [12]s", _line(app) or "")
-        await _until(pilot, lambda: _line(app) == "Working · 2s", within=3.0)
+        first = re.fullmatch(r"Working · ([12])s", _line(app) or "")
+        assert first is not None, _line(app)
+        await _until(pilot, lambda: _seconds(app) > int(first[1]), within=3.0)
         app.post_message(ReplyEnded())
         await _until(pilot, lambda: _line(app) is None)
