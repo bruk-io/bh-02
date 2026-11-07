@@ -119,4 +119,6 @@ INFO    -  Documentation built in 1.28 seconds
 bh-01's tokens and bh-02's theme are in sync
    ok
 ```
+
+No repro: both tests already passed before the fix under the 5ms and 50ms loop-clock skew (the worker's planted check), as the task text itself says; this replaces a fixed-wait shape for consistency with TASK-0162, so no failing test exists to record.
 <!-- SECTION:NOTES:END -->
