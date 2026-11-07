@@ -3,7 +3,7 @@ id: TASK-0168
 title: >-
   Make chat's remaining fixed sleeps wait for their condition (a command
   leaving, a command answering)
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-19 00:06'
@@ -121,4 +121,6 @@ bh-01's tokens and bh-02's theme are in sync
 ```
 
 No repro: both tests already passed before the fix under the 5ms and 50ms loop-clock skew (the worker's planted check), as the task text itself says; this replaces a fixed-wait shape for consistency with TASK-0162, so no failing test exists to record.
+
+Review (reviewer, not the worker): closed. Diff touches only chat-cordis-plugin/tests/test_chat.py: one sleep became a wait on a real Slow.started event; the two Ctrl-C-during-command absences got sleep(0) plus a comment naming why no event exists. AC1 met by the diff; AC2 by the worker's skew runs (5ms/50ms) and -n 8 loadgroup run. Full check exited 1 on two tests outside this change, both already tracked: test_python_repl run-from-home test (TASK-0197, fails alone) and brig listener-left test (draft-0021/0023, TASK-0206; passes on rerun). No new findings filed.
 <!-- SECTION:NOTES:END -->
