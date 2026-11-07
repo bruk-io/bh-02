@@ -4,6 +4,7 @@ title: Full-suite-only setup ERRORs in host-paths appender and warden tests on d
 status: Draft
 assignee: []
 created_date: '2026-11-07 05:00'
+updated_date: '2026-11-07 05:44'
 labels: []
 dependencies: []
 type: bug
@@ -20,3 +21,9 @@ scripts/check on a 28-core Mac (2026-11-07, recorded on TASK-0169.06) reports 25
 - [ ] #1 The cause of the setup errors under the full run is explained
 - [ ] #2 scripts/check on the 28-core Mac shows no ERROR in host-paths or warden tests, or each is filed under the task that owns its cause
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Owner stand-in (Opus), 2026-11-06: Accept this as the owner of every full-run-only setup ERROR under the parallel check on darwin (host-paths appender, warden, and cordis test_invariants[73] from DRAFT-0022, which is folded in here and archived). Promote through accept-work. TASK-0169.06 #2 depends on this being an accepted task, not on it being fixed.
+<!-- SECTION:NOTES:END -->
