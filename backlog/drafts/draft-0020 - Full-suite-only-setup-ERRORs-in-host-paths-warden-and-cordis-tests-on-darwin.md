@@ -1,6 +1,6 @@
 ---
 id: DRAFT-0020
-title: Full-suite-only setup ERRORs in host-paths appender and warden tests on darwin
+title: 'Full-suite-only setup ERRORs in host-paths, warden and cordis tests on darwin'
 status: Draft
 assignee: []
 created_date: '2026-11-07 05:00'
