@@ -6,6 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-11-07 05:39'
+updated_date: '2026-11-07 05:53'
 labels:
   - subagents
   - linux
@@ -26,3 +27,9 @@ On Linux under scripts/linux-jail-check (Docker, Ubuntu 24.04, bubblewrap 0.9.0,
 - [ ] #1 The cause of the loop row's inactive status under runner:confined in this container is named
 - [ ] #2 The test passes under scripts/linux-jail-check, or is shown to need an environment this container cannot give (and says so by skipping, named)
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Owner stand-in (Opus), 2026-11-07: TASK-0200's AC3 was narrowed to leave this test's Linux failure to this task; TASK-0200 no longer waits on it. This task now owns the only known failure in the subagents plugin's tests on Linux.
+<!-- SECTION:NOTES:END -->
