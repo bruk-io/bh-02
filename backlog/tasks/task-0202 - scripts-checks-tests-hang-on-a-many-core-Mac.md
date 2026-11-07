@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-07 04:27'
-updated_date: '2026-11-07 04:57'
+updated_date: '2026-11-07 04:58'
 labels:
   - scripts
   - tests
@@ -159,4 +159,70 @@ FAILED bh-02/app/tests/test_booting.py::test_a_run_cancelled_while_its_rows_star
 ```
 
 Fix round 2026-11-06: repro recorded above. With bootstrap.py reverted to its pre-fix form (git show 749a2d1d~1), record-check --repro under testlock ran the test: 1 failed (35 tasks left on the loop), recorded. Fix restored (git checkout), same test through testlock: 1 passed in 1.25s. Back to review for close.
+
+Check `scripts/check` exited 1
+
+(4379 earlier lines omitted)
+```text
+FAILED bh-02/plugins/runner-cordis-plugin/tests/test_runner_confined.py::test_a_jail_denies_the_directory_of_each_link_from_the_interpreter_bh_02_runs_on_to_its_file@jail-lock
+FAILED bh-02/plugins/runner-cordis-plugin/tests/test_runner_confined.py::test_the_walk_to_the_interpreter_follows_relative_links_and_dots_and_ends_at_a_loop@jail-lock
+FAILED bh-02/plugins/subagents-cordis-plugin/tests/test_agents_wiring.py::test_retiring_a_child_while_it_replies_ends_the_call_with_no_report@jail-lock
+FAILED bh-02/plugins/subagents-cordis-plugin/tests/test_agents_wiring.py::test_unloading_the_agents_row_retires_every_child_it_holds@jail-lock
+FAILED bh-02/plugins/subagents-cordis-plugin/tests/test_agents_wiring.py::test_ctrl_c_stops_the_parent_s_reply_and_the_child_it_waits_on_from_the_tool@jail-lock
+FAILED bh-02/plugins/subagents-cordis-plugin/tests/test_agents_wiring.py::test_ctrl_c_stops_the_child_a_python_input_waits_on@jail-lock
+FAILED bh-02/app/tests/test_trajectory_view.py::test_a_sub_agent_is_a_name_in_the_agents_directory_that_bh_02_makes_and_no_other
+FAILED bh-02/app/tests/test_xdist_groups.py::test_every_test_file_that_starts_a_jail_is_in_a_group
+FAILED bh-02/app/tests/test_real_launch.py::test_a_keyed_model_s_key_never_reaches_an_input_s_environment
+FAILED bh-02/plugins/subagents-cordis-plugin/tests/test_agents_wiring.py::test_agent_stop_ends_the_child_and_its_python_program@jail-lock
+FAILED bh-02/plugins/subagents-cordis-plugin/tests/test_agents_wiring.py::test_release_stops_the_children_s_programs_and_their_conversations_go_on@jail-lock
+FAILED libs/brig/tests/integration/test_exit_status_is_recorded_not_invented.py::test_a_pid_is_watched_until_its_status_is_recorded_so_no_one_sees_neither
+FAILED libs/brig/tests/unit/test_teardown_zombies.py::test_teardown_fails_an_item_whose_table_it_cannot_read
+ERROR libs/brig/tests/unit/test_process_namespaces_pure.py - AttributeError: ...
+ERROR libs/brig/tests/unit/test_process_namespaces_pure.py - AttributeError: ...
+ERROR libs/brig/tests/unit/test_process_namespaces_pure.py - AttributeError: ...
+ERROR libs/brig/tests/unit/test_process_namespaces_pure.py - AttributeError: ...
+ERROR libs/brig/tests/unit/test_process_namespaces_pure.py - AttributeError: ...
+ERROR libs/brig/tests/unit/test_process_namespaces_pure.py - AttributeError: ...
+ERROR libs/brig/tests/unit/test_process_namespaces_pure.py - AttributeError: ...
+ERROR libs/brig/tests/unit/test_process_namespaces_pure.py - AttributeError: ...
+ERROR libs/brig/tests/integration/test_supervisor_link.py::test_an_error_reply_is_a_refusal_with_the_reason_and_its_descriptors_are_closed
+ERROR libs/brig/tests/integration/test_supervisor_link.py::test_a_closed_socket_wakes_every_caller_waiting_on_it
+ERROR libs/brig/tests/integration/test_supervisor_link.py::test_the_hello_is_waited_for_and_a_socket_that_closes_first_is_gone
+ERROR libs/brig/tests/integration/test_supervisor_link.py::test_descriptors_cross_both_ways
+ERROR libs/brig/tests/integration/test_supervisor_link.py::test_a_reply_nobody_waits_for_and_a_message_it_cannot_read_are_dropped_with_their_fds
+ERROR libs/brig/tests/integration/test_supervisor_link.py::test_a_link_nobody_holds_closes_its_end
+ERROR libs/brig/tests/integration/test_supervisor_link.py::test_close_is_idempotent_and_sends_end_of_file
+ERROR libs/brig/tests/integration/test_supervisor_link.py::test_a_missed_deadline_calls_unresponsive_once_ends_the_link_and_ignores_the_late_reply
+ERROR libs/brig/tests/integration/test_supervisor_link.py::test_replies_find_their_callers_by_id_whatever_order_they_come_in
+ERROR examples/warden/plugins/warden-systray-cordis-plugin/tests/test_tray.py::test_no_names_is_a_placeholder_label
+ERROR examples/warden/plugins/warden-cordis-plugin/tests/test_warden_registry.py::test_two_processes_cannot_share_a_name
+ERROR examples/warden/plugins/warden-systray-cordis-plugin/tests/test_systray_wiring.py::test_the_row_binds_a_zero_argument_factory_and_runs_nothing
+ERROR examples/warden/plugins/warden-cordis-plugin/tests/test_warden_wiring.py::test_a_supervised_row_enters_the_process_then_registers_it_under_its_name
+ERROR libs/host-paths/tests/test_host_paths_appender.py::test_the_file_is_made_readable_by_its_owner_alone
+ERROR examples/warden/app/tests/test_warden_bootstrap.py::test_a_command_that_cannot_spawn_fails_the_composition
+ERROR examples/warden/plugins/warden-cordis-plugin/tests/test_warden_registry.py::test_each_registration_is_its_own_entry_and_its_remover_takes_only_that
+ERROR libs/host-paths/tests/test_host_paths.py::test_the_config_home_is_the_variable_else_the_home_s_dot_config[environ3-expected3]
+15 failed, 3795 passed, 221 skipped, 25 errors in 73.92s (0:01:13)
+   FAILED: tests
+== gates
+== (root)
+   ok
+== libs/brig
+   ok
+== libs/cordis
+   ok
+== libs/cordis-helpers
+   ok
+== libs/host-paths
+   ok
+   ok
+== docs
+INFO    -  Cleaning site directory
+INFO    -  Building documentation to directory: /Users/brukhabtu/src/github.com/bruk-io/bh-02/site
+INFO    -  Documentation built in 1.31 seconds
+   ok
+== tokens
+bh-01's tokens and bh-02's theme are in sync
+   ok
+```
 <!-- SECTION:NOTES:END -->
