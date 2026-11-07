@@ -77,6 +77,19 @@ def needs_docker() -> None:
         pytest.skip(f"a container jail needs a Docker daemon: {reason}")
 
 
+def docker_reachable() -> bool:
+    """`needs_docker`'s own check as a question rather than a skip, for a caller that is not
+    itself a test and so cannot skip -- the session's container leak sweep (`tests/conftest.py`),
+    which must decide whether to ask `docker` at all before it ever does. Where `_why_not` found
+    a reason (no daemon, no `DEFAULT_DOCKER` binary, no cached image), nothing this session did
+    could have made a container to leak, so the sweep has nothing to look for; asking anyway
+    crashed the whole run's teardown on a machine where `DEFAULT_DOCKER` names no file (TASK-0198:
+    `/usr/bin/docker` on a darwin host whose Docker Desktop installs the CLI at
+    `/usr/local/bin/docker`), with the exception attributed to whichever test happened to be
+    running last -- never the test that actually needed tracing."""
+    return _why_not() is None
+
+
 def needs_python_image() -> None:
     """Skip, visibly and by name, where the image with an interpreter is not cached."""
     needs_docker()

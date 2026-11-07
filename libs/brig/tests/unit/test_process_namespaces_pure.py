@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import ast
 import signal
-from typing import Any
+from typing import Any, Final
 
 import pytest
 
@@ -32,6 +32,14 @@ pytestmark = pytest.mark.unit
 
 _CHAN = "/run/brig/jail0/chan"
 _TOKEN = "0123456789abcdef"
+
+#: A realtime signal (SIGRTMIN..SIGRTMAX) is a Linux concept; darwin's `signal` module has no
+#: such attribute at all, so referencing `signal.SIGRTMIN` while BUILDING a parametrize list
+#: (eager, at collection time) raises `AttributeError` and takes the whole module down with it
+#: -- the failure this guards, read with `signal.SIGRTMIN` itself still in the row below. `None`
+#: here, not a fallback signal number, is what lets the row's own `skipif` tell a real run from a
+#: platform that never had one to try.
+_SIGRTMIN: Final = getattr(signal, "SIGRTMIN", None)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -153,7 +161,20 @@ def test_the_supervisor_and_the_host_send_an_init_the_same_sigterm(
         (signal.SIGINT, 0, 0, signal.SIGKILL),
         (signal.SIGUSR1, 0, 0, signal.SIGKILL),
         (signal.SIGHUP, 0, 0, signal.SIGKILL),
-        (signal.SIGRTMIN, 0, 0, signal.SIGKILL),  # a realtime signal terminates by default too
+        pytest.param(
+            # a realtime signal terminates by default too, but only Linux has one: `_SIGRTMIN`
+            # is `None` on darwin, and a row this test never runs still needs an `int` to satisfy
+            # the parameter's type, so the fallback is any ordinary signal already in this table.
+            _SIGRTMIN if _SIGRTMIN is not None else signal.SIGHUP,
+            0,
+            0,
+            signal.SIGKILL,
+            marks=pytest.mark.skipif(
+                _SIGRTMIN is None,
+                reason="signal.SIGRTMIN is Linux-only; this platform's signal module has no such attribute",
+            ),
+            id="SIGRTMIN",
+        ),
         (signal.SIGINT, 1 << (signal.SIGINT - 1), 0, signal.SIGINT),  # handled: the handler runs
         (signal.SIGTERM, 0, _TERM, signal.SIGTERM),  # ignored: ignored, as for any process
         (signal.SIGKILL, 0, 0, signal.SIGKILL),

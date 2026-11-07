@@ -103,15 +103,27 @@ def test_blank_lines_are_skipped() -> None:
 def test_teardown_fails_an_item_whose_table_it_cannot_read(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """`leader_pid` must name no real process, so `_guarded_ladder` falls through
+    `_identity.recycled`'s check to the group-membership read this test actually pins -- a
+    hardcoded small pid (`1234`, this test's original premise) does not promise that on a
+    long-uptime host: on one darwin development machine it was, at the moment of this writing,
+    a live, days-old `PeopleWidget_macOSExtension` process, which made `recycled()` read a real,
+    mismatching start-time stamp and report `ALREADY_GONE` before ever reaching the unreadable
+    table -- not a darwin bug in teardown (`recycled` did exactly decision-155's job), and not a
+    Linux-only premise either: an unlucky pid collision on a long-lived Linux host would read the
+    same way. `os.getpid() + 1_000_000` is the same no-real-process idiom
+    `test_exit_status_is_recorded_not_invented.py` already uses, deterministic on any host this
+    workspace targets because neither platform's pid space extends that far past a live pid."""
+    leader_pid = os.getpid() + 1_000_000
     pgid = os.getpgrp() + 1000
     # Control: the same call over a readable, empty table ends ALREADY_GONE, so
     # the FAILED below is the unreadable table's doing.
     monkeypatch.setattr(teardown, "read_process_table", lambda: "")
-    outcome, detail = teardown._guarded_ladder(pgid, 1234, "x", 0.1)
+    outcome, detail = teardown._guarded_ladder(pgid, leader_pid, "x", 0.1)
     assert outcome is teardown.KillOutcome.ALREADY_GONE, detail
 
     monkeypatch.setattr(teardown, "read_process_table", lambda: "100 100\n")
-    outcome, detail = teardown._guarded_ladder(pgid, 1234, "x", 0.1)
+    outcome, detail = teardown._guarded_ladder(pgid, leader_pid, "x", 0.1)
     assert outcome is teardown.KillOutcome.FAILED, detail
     assert "UnreadableProcessTable" in detail, detail
 

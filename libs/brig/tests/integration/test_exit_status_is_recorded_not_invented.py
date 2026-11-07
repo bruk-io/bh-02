@@ -305,7 +305,9 @@ def test_a_pid_is_watched_until_its_status_is_recorded_so_no_one_sees_neither(
         real(*args, **kwargs)  # type: ignore[arg-type]
 
     monkeypatch.setattr(_waiters, "record_status", slowly)
-    proc = subprocess.Popen(["/bin/true"])
+    # `/usr/bin/true`, not `/bin/true`: darwin has no `/bin/true` (`/usr/bin/true` is the one
+    # path both platforms agree on, the same one the rest of this suite's host-level spawns use).
+    proc = subprocess.Popen(["/usr/bin/true"])
     key = proc.pid + 1_000_000  # a key no real process has; the status is kept under it
     _waiters.watch(proc, jail_id="window", pid=key)
     gap = False

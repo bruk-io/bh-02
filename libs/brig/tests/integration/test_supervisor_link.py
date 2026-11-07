@@ -23,7 +23,40 @@ import pytest
 from brig.run import SupervisorGone, SupervisorUnresponsive
 from brig.run._supervisor_link import SupervisorLink, SupervisorRefused
 
-pytestmark = pytest.mark.integration
+
+def _why_no_seqpacket() -> str | None:
+    """Why an `AF_UNIX`/`SOCK_SEQPACKET` socketpair cannot be made here, or `None`.
+
+    `SupervisorLink`'s wire (decision-191) IS this socket type (`brig/run/host.py`,
+    `brig/run/_supervisor_program.py`); it is a Linux mechanism, same as the pid namespace
+    the supervisor it talks to is PID 1 of. darwin's kernel refuses it outright
+    (`socket.socketpair` raises `OSError: [Errno 43] Protocol not supported`), so this whole
+    module -- every test here is the host side of that same wire -- cannot run off Linux, not
+    just one test in it. The POSIX floor in `tests/conftest.py` does not catch this: it skips by
+    `os.name`, which is `"posix"` on darwin too, so a mechanism darwin's own POSIX layer lacks
+    needs the capability PROBED, not inferred from the platform name.
+    """
+    try:
+        first, second = socket.socketpair(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+    except OSError as error:
+        return f"AF_UNIX SOCK_SEQPACKET is not available here ({error})"
+    first.close()
+    second.close()
+    return None
+
+
+_SEQPACKET_GAP = _why_no_seqpacket()
+
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        _SEQPACKET_GAP is not None,
+        reason=(
+            "SupervisorLink's wire is a SOCK_SEQPACKET socketpair (decision-191), a Linux "
+            f"mechanism: {_SEQPACKET_GAP}"
+        ),
+    ),
+]
 
 
 class Peer:

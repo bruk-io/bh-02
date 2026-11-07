@@ -6,6 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-11-07 04:27'
+updated_date: '2026-11-07 06:15'
 labels:
   - brig
   - darwin
@@ -24,8 +25,48 @@ From TASK-0079.34's re-run on macOS 27.0.1 (2026-11-06). uv run pytest libs/brig
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 uv run pytest libs/brig -q on macOS collects every file and passes; a Linux-only test skips off Linux saying why, never by silencing a whole module
-- [ ] #2 test_teardown_zombies' darwin result is explained: either teardown is wrong on darwin and fixed, or the test's premise is Linux-only and it says so
-- [ ] #3 The leak poller's /bin/ps failures are traced: a real ps failure is reported, a transient one does not fail an unrelated test
-- [ ] #4 brig's tiers pass on Linux (as root and as tester) and scripts/linux-jail-check passes
+- [x] #1 uv run pytest libs/brig -q on macOS collects every file and passes; a Linux-only test skips off Linux saying why, never by silencing a whole module
+- [x] #2 test_teardown_zombies' darwin result is explained: either teardown is wrong on darwin and fixed, or the test's premise is Linux-only and it says so
+- [x] #3 The leak poller's /bin/ps failures are traced: a real ps failure is reported, a transient one does not fail an unrelated test
+- [x] #4 brig's tiers pass on Linux (as root and as tester) and scripts/linux-jail-check passes
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1) Reviewed prior attempt's diff (already applied to worktree): SIGRTMIN getattr+skipif guard, /usr/bin/true, supervisor_link SOCK_SEQPACKET probe+skipif, teardown_zombies pid-collision fix, leak poller retry (_sample_outcome) + docker_reachable gate, new unit test for _sample_outcome. 2) Verified by planting: reverted teardown_zombies to pid=1234, confirmed real local collision (pid 1234 is a live darwin process) makes the original test fail, reverted via scratch-copy+sha256 (not git). 3) Run uv sync --all-packages, then uv run pytest libs/brig -q (darwin, via testlock) to confirm full collection+pass. 4) scripts/check libs/brig (darwin) for format/lint/types/this member's tests/gates/docs. 5) scripts/linux-jail-check (via testlock) to confirm brig's tiers still pass on Linux. 6) Check off ACs with evidence, append notes, squash into one commit.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Verified the prior attempt's diff (already present in the worktree, identical to the provided patch) and finished it:
+
+AC1 (collects every file, passes on darwin; Linux-only skips named, not silenced): `testlock uv run pytest libs/brig -q -n 8` -> 1304 passed, 180 skipped in 33.46s. `-rs` listing shows every skip has a visible reason naming the Linux mechanism (bwrap absent, PR_SET_CHILD_SUBREAPER is Linux, docker CLI absent, SOCK_SEQPACKET errno 43, signal.SIGRTMIN absent) -- no module is silenced, each uses pytest.mark.skipif/pytest.skip with a reason.
+  - test_process_namespaces_pure.py: confirmed `hasattr(signal, "SIGRTMIN")` is False on this darwin/Python 3.15 host, and the base commit (238da659) built its parametrize row with bare `signal.SIGRTMIN` at collection time -- the exact collection-stopping AttributeError the task describes. Fix: `_SIGRTMIN = getattr(signal, "SIGRTMIN", None)` plus a `pytest.param(..., marks=skipif(_SIGRTMIN is None))`.
+  - test_exit_status_is_recorded_not_invented.py: `/bin/true` -> `/usr/bin/true` (darwin has no `/bin/true`).
+  - test_supervisor_link.py: probes `socket.socketpair(AF_UNIX, SOCK_SEQPACKET)` and skips the whole module with the real OSError in the reason (confirmed: `[Errno 43] Protocol not supported` on this host) -- SupervisorLink's wire IS that socket type, so every test in the module needs it, not just one.
+  - oci_jail.py/conftest.py: added `docker_reachable()` (same check `needs_docker` uses) gating the session-teardown container-leak sweep, so a darwin host with no docker CLI (confirmed: `/usr/bin/docker is not there`) doesn't crash teardown with a FileNotFoundError attributed to an unrelated test.
+
+AC2 (test_teardown_zombies' darwin result explained): planted the original premise back (`leader_pid = 1234`) in a scratch copy (sha256 e1d01bc9...checked before/after, reverted via copy not git) and reran just that test: it FAILED --
+  `AssertionError: pid 1234 now names a different process (start time does not match the one recorded at launch); nothing was signalled`
+  -- because pid 1234 is, right now on this machine, a live process (`ps -p 1234` -> PeopleWidget_macOSExtension). Confirms the docstring's explanation exactly: not a darwin bug in teardown (`recycled()` did decision-155's job correctly), but a pid-collision-prone test premise that could flake on any long-uptime host, Linux included. Fix: `leader_pid = os.getpid() + 1_000_000` (same no-real-process idiom as test_exit_status_...). Reran after reverting the plant: 41 passed.
+
+AC3 (leak poller /bin/ps failures traced, transient doesn't fail an unrelated test): `_sample_outcome` (pure) classifies a sampling interval's attempts -- None if any attempt succeeded (a retry cleared it), the last attempt's repr if all failed (real, persistent failure, still fails the run). `_poll_once` now retries once immediately before counting a failure. Covered directly by tests/unit/test_leak_poller_retry.py (5 cases: success, transient-cleared, persistent-reported-by-last-error, no-attempts, lone-failure-still-reported) -- all pass in the full run above.
+
+AC4 (brig's tiers pass on Linux, scripts/linux-jail-check passes): `testlock scripts/linux-jail-check` -> 327 passed, 2 skipped in 71.44s, run as the unprivileged `bh` user inside the container per the script's own documented design (it deliberately never runs the suite as root: "root ignores permission bits, so a denial the tests expect would pass for the wrong reason"). Not separately re-run as root; the delegation's machine instructions named only this one command.
+
+Also ran, once each: `testlock scripts/check libs/brig` -> format/lint/types/tests/gates(root, brig, cordis, cordis-helpers, host-paths)/docs all `ok` (tests: 1304 passed, 180 skipped).
+
+Not independently re-verified: scripts/check for the whole workspace (left to the reviewer per standing instructions) and the "as root" half of AC4's parenthetical (the script's own design runs as tester only).
+
+Follow-up on advisor review (addressed three gaps):
+
+1) None of the 5 changed files were in scripts/linux-jail-check's DEFAULT list, so the first Linux run proved the bwrap tiers only, not this diff. Reran targeted: `testlock scripts/linux-jail-check -- libs/brig -q -n 4 -rs` -> 1392 passed, 92 skipped (every skip has a named reason: darwin-only mechanisms, no docker CLI, euid!=0 for the root-only test -- none silent). Then `testlock scripts/linux-jail-check -- <the 5 changed files> -v -rs` -> 103 passed, 0 skipped: test_supervisor_link.py's 4 tests ran for real (not skipped -- confirms `_why_no_seqpacket()` returns None on a real Linux kernel), and the `[SIGRTMIN]` parametrize id ran for real too (not skipped -- confirms the getattr guard only skips where the platform truly lacks it).
+
+2) AC4's "(as root and as tester)": scripts/linux-jail-check's own docstring says it deliberately never runs as root ("root ignores permission bits ... bh-02 is not run as root"), so I built a one-off root-persona run against the already-built image (`docker run -u root` with the same security-opts, workspace tar, and `uv sync`/pytest invocation the script uses) and ran `test_bwrap_root_confined.py` + `test_compile_ctx_euid.py` plus the 5 changed files: 105 passed (then a -v rerun of just the two euid-sensitive tests confirmed `test_a_jail_started_as_root_holds_no_capabilities_...` PASSED, not skipped -- under `scripts/linux-jail-check` alone it skips with "euid is 1001: ... run the suite as root to exercise it"). Both personas now have direct evidence.
+
+3) AC3's _sample_outcome: planted it to always `return None` in a scratch copy (sha256 before/after matched: c7f4a8f2...), reran tests/unit/test_leak_poller_retry.py -- the 2 persistent-failure cases went red exactly as expected (`assert None == "FileNotFoundError(...)"`, `assert None == "OSError('EFAULT')"`), 3 transient/success cases stayed green. Reverted via the scratch copy (sha256 matched original), reran: 5 passed. Also read `_ps_rows` itself: `_PS_ARGV = ["/bin/ps", "-Ao", "pid=,ppid=,pgid=,stat=,command="]` is the same flag set BSD ps (darwin) and procps (Linux) both accept, and its own docstring already documents the EFAULT race this call is prone to under concurrent spawning (an environment captured mid-write, 58/298 in one stress run, 0/296 with the `LC_ALL=C` fixed-env fix already in place) -- the darwin failures the task names are this same race, not a flag incompatibility (if it were a flag bug every sample would fail, and the full-suite run showed zero poll_errors across the whole session).
+
+Ticking AC4 now on both personas' evidence.
+<!-- SECTION:NOTES:END -->

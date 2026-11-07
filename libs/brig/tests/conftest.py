@@ -738,6 +738,27 @@ def _sweep_for_leaks(run_id: str, seen_pgids: set[int], harness_pid: int) -> Non
     )
 
 
+def _sample_outcome(attempts: Sequence[Exception | None]) -> str | None:
+    """Pure (TASK-0198): whether one sampling interval's `/bin/ps` reads, in order, counts as a
+    poll failure.
+
+    `attempts` is the ordered outcome of each read this interval tried -- `None` for one that
+    returned rows, the raised exception for one that did not -- and `_poll_once` tries a second
+    read only when the first failed. `None` here, whenever ANY attempt in `attempts` succeeded:
+    a single failed read immediately retried and clearing is exactly the transient class
+    `_ps_rows`'s own docstring measures (an `EFAULT` from a live environment write racing the
+    read, 58 of 298 spawns in one stress run, 0 of 296 with the fix that same docstring
+    describes) -- real for that one read, gone a few milliseconds later, and not a coverage gap
+    worth failing a session over. The last attempt's `repr()` when every attempt in `attempts`
+    failed: a read no retry clears is reported, and still fails the run (`run_id`'s teardown) --
+    neither attempt succeeding is not distinguishable here from `/bin/ps` being unreadable on
+    this machine outright, and that is exactly the persistent class this poller exists to catch.
+    """
+    if any(attempt is None for attempt in attempts):
+        return None
+    return repr(attempts[-1]) if attempts else None
+
+
 def _poll_once(
     token: str,
     harness_pgid: int,
@@ -757,9 +778,11 @@ def _poll_once(
     load-bearing, not cosmetic -- see the `run_id` fixture's docstring for
     what it trades away.
 
-    On failure, appends to `poll_errors` and returns instead of raising.
-    An unhandled exception here would silently end polling for the rest of
-    the session -- with a plain `warnings.warn` faring no better: a
+    **A failed read is retried once, immediately, before this counts it** (TASK-0198):
+    `_sample_outcome` makes the "a retry cleared it" vs "still broken" distinction a pure one,
+    over the two attempts' outcomes. Only a sample where both attempts failed appends to
+    `poll_errors` and returns instead of raising. An unhandled exception here would silently end
+    polling for the rest of the session -- with a plain `warnings.warn` faring no better: a
     warning raised from a daemon thread is not reliably surfaced by
     pytest's item-scoped, main-thread warning capture, and under
     `filterwarnings = ["error", ...]` it would raise *inside this thread*
@@ -768,10 +791,19 @@ def _poll_once(
     after `poller.join()`, which cannot be swallowed either way, and the
     `run_id` fixture fails the run loudly if it is ever non-empty.
     """
-    try:
-        rows = _ps_rows()
-    except (OSError, subprocess.SubprocessError) as exc:
-        poll_errors.append(repr(exc))
+    attempts: list[Exception | None] = []
+    rows: list[tuple[int, int, int, str, str]] = []
+    for _attempt in range(2):
+        try:
+            rows = _ps_rows()
+        except (OSError, subprocess.SubprocessError) as exc:
+            attempts.append(exc)
+            continue
+        attempts.append(None)
+        break
+    outcome = _sample_outcome(attempts)
+    if outcome is not None:
+        poll_errors.append(outcome)
         return
     for _pid, _ppid, pgid, _stat, command in rows:
         if token in command and pgid != harness_pgid:
@@ -965,16 +997,22 @@ def run_id() -> Iterator[str]:
             failure_sections.append(f"SECONDARY (/bin/ps) sweep also failed:\n{exc}")
 
         # Containers (M10, decision-202): a jail the container tier made that outlived its test.
-        # Only if that tier's helpers were imported at all, so a unit-only run asks no daemon.
+        # Only if that tier's helpers were imported at all, so a unit-only run asks no daemon --
+        # and only where `docker_reachable()` agrees with the very check that would have let a
+        # container test run at all (`needs_docker`'s own `_why_not`): a machine where the tier
+        # could make nothing has nothing for this sweep to find, and asking `docker` anyway, on
+        # one where `DEFAULT_DOCKER` names no file, crashed the whole session's teardown with a
+        # `FileNotFoundError` attributed to whichever test happened to run last (TASK-0198).
         if "tests.oci_jail" in sys.modules:
-            from tests.oci_jail import leaked_containers
+            from tests.oci_jail import docker_reachable, leaked_containers
 
-            containers = leaked_containers(token)
-            if containers:
-                failure_sections.append(
-                    "CONTAINER sweep -- container jails labelled with this run's token that "
-                    "outlived their tests (removed now):\n" + "\n".join(containers)
-                )
+            if docker_reachable():
+                containers = leaked_containers(token)
+                if containers:
+                    failure_sections.append(
+                        "CONTAINER sweep -- container jails labelled with this run's token that "
+                        "outlived their tests (removed now):\n" + "\n".join(containers)
+                    )
 
         if failure_sections:
             pytest.fail(
