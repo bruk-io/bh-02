@@ -1,7 +1,7 @@
 ---
 id: TASK-0202
 title: scripts/check's tests hang on a many-core Mac
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-11-07 04:27'
@@ -225,4 +225,6 @@ INFO    -  Documentation built in 1.31 seconds
 bh-01's tokens and bh-02's theme are in sync
    ok
 ```
+
+Review (reviewer agent), 2026-11-06, closed. The blocker from the last round (no recorded repro) is resolved: record-check --repro at 5c9be416 shows test_a_run_cancelled_while_its_rows_start_leaves_no_row_running failing (35 tasks left) with the fix reverted. Reviewer's full check through testlock completed in 73.92 s with every step reported: 15 failed/3795 passed/25 errors, all of them failures already filed (TASK-0197..0206, TASK-0169.04/.05), and no files changed by the check. AC1-3 met as ticked. No findings; no drafts filed.
 <!-- SECTION:NOTES:END -->
