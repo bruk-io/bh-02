@@ -1,7 +1,7 @@
 ---
 id: TASK-0206
 title: Two tests fail now and then in a full scripts/check on darwin
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-11-07 04:50'
@@ -242,4 +242,6 @@ bh-01's tokens and bh-02's theme are in sync
 ```
 
 No repro: both failures are load- and timing-dependent races that a single command cannot reproduce on demand; the worker's evidence stands in for one (20-run baseline on darwin, 4 of 20 red before the fix; plants of the has-left clause and of a stopped count seen red, recorded above).
+
+Reviewer, 2026-11-07: closed. AC1 met on the worker's evidence (causes measured, plants seen red, diff read: test premises fixed, dial unchanged, widget rounds with a test that pins it). AC2 met: three full scripts/check runs in a row through the test lock, each exit 0, 3863 passed 231 skipped. No blocking findings, no drafts filed; the darwin close-first residual is already TASK-0210.
 <!-- SECTION:NOTES:END -->
