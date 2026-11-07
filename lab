@@ -16,7 +16,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 export UV_SYSTEM_CERTS="${UV_SYSTEM_CERTS:-${UV_NATIVE_TLS:-}}"; unset UV_NATIVE_TLS
-run() { uv run --quiet --no-project --python 3.15 --with pytest --with ruff --with "mypy>=2.3" --with ast-grep-py "$@"; }
+run() { uv run --quiet --no-project --python 3.15 --with pytest --with ruff --with "mypy>=2.3" --with ast-grep-py --with fastmcp "$@"; }
 cmd="${1:-check}"; shift || true
 case "$cmd" in
   check) run ruff format --check . && run ruff check --no-fix . && run mypy && run pytest "$@" ;;
