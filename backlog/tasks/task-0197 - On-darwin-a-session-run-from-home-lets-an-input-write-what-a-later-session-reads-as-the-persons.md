@@ -111,4 +111,6 @@ INFO    -  Documentation built in 1.25 seconds
 bh-01's tokens and bh-02's theme are in sync
    ok
 ```
+
+No repro: the repro tests (bh-02/app/tests/test_python_repl.py::test_a_session_run_from_home_can_t_choose_what_a_later_session_reads_as_the_person_s and libs/brig/tests/integration/test_seatbelt_pins.py) fail only without the fix, which is already committed; the worker's notes record them failing with the pin line removed (WROTE at index 5) and the reviewer cannot revert code to re-record it. Both pass in the reviewer's full check.
 <!-- SECTION:NOTES:END -->
