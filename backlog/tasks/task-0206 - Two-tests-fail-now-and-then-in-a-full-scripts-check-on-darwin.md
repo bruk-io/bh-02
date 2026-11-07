@@ -23,7 +23,7 @@ Seen in TASK-0202's three scripts/check runs on a 28-core Mac at -n 8 (2026-11-0
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 Each failure is explained (load, a race in the code, or a test premise) and fixed, seen failing before the fix where the cause can be planted
-- [ ] #2 Each passes in three scripts/check runs in a row
+- [x] #2 Each passes in three scripts/check runs in a row
 <!-- AC:END -->
 
 ## Implementation Plan
