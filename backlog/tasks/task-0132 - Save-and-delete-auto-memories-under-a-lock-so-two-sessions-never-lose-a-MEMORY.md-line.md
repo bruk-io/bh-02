@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-17 14:00'
-updated_date: '2026-11-07 07:10'
+updated_date: '2026-11-07 07:12'
 labels:
   - memory
   - size-1
@@ -48,4 +48,70 @@ Checked out the pre-fix directory.py (git show HEAD:...) and re-ran: FAILED, e.g
 Commands run: uv sync --all-packages (ok); testlock uv run pytest bh-02/plugins/memory-cordis-plugin -q -> 150 passed; uv run mypy -> Success: no issues found in 208 source files; uv run ruff check . -> All checks passed; uv run ruff format --check . -> 851 files already formatted; testlock scripts/check bh-02/plugins/memory-cordis-plugin -> format/lint/types/tests/gates/docs all ok (150 passed). scripts/check (whole repo) was not run -- left for the reviewer per standing rules. scripts/arch-check was not run separately since nothing outside this one member changed; the member's own gate ran clean as part of scripts/check.
 
 Follow-up fix found by review: _deleted's second write_beneath (the index rewrite after remove_beneath) had lost its own except OSError branch when the lock was added, so a failure there (e.g. ENOSPC) fell through to the outer handler and wrongly reported 'bh-02 did not delete the memory' even though the topic file was already removed. Restored the original two-phase handling (distinct 'deleted, but MEMORY.md could not be updated' message) inside the lock, matching _saved's shape; moved the _unknown(name) early return back inside the with block too. Verified by monkeypatching write_beneath to raise only for MEMORY.md after a real delete: before the fix it said 'bh-02 did not delete the memory', after the fix it correctly says 'the memory was deleted, but MEMORY.md could not be updated, so its line is still there: ...'. Also hardened the new race test (test_two_saves_started_at_once_from_two_processes_both_keep_their_line) with a try/finally that always touches the go file and kills any still-running child, so a failed assertion never leaves a busy-polling process behind. Re-ran after these changes: testlock uv run pytest bh-02/plugins/memory-cordis-plugin -q -> 150 passed; uv run mypy -> no issues (208 files); uv run ruff check/format -> clean; testlock scripts/check bh-02/plugins/memory-cordis-plugin -> format/lint/types/tests/gates/docs all ok.
+
+Check `scripts/check` exited 1
+
+(128 earlier lines omitted)
+```text
+E         Use -v to get more diff
+
+bh-02/app/tests/test_python_repl.py:980: AssertionError
+___ test_at_the_real_clock_and_interval_it_appears_after_a_second_and_counts ___
+[gw6] darwin -- Python 3.15.0 /Users/brukhabtu/Documents/src/github.com/bruk-io/bh-02/.venv/bin/python
+
+    async def test_at_the_real_clock_and_interval_it_appears_after_a_second_and_counts() -> None:
+        """The defaults, undriven: about once a second, so nothing for the first moments, then
+        the seconds."""
+        app = BhApp()
+        async with app.run_test(size=_SIZE) as pilot:
+            app.post_message(ReplyStarted())
+            await pilot.pause(0.4)
+            assert _line(app) is None
+            await _until(pilot, lambda: _line(app) is not None, within=3.0)
+            assert re.fullmatch(r"Working · [12]s", _line(app) or "")
+>           await _until(pilot, lambda: _line(app) == "Working · 2s", within=3.0)
+
+bh-02/plugins/tui-cordis-plugin/tests/test_tui_working.py:320: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+pilot = <Pilot app=BhApp(title='bh-02', classes={'-dark-mode', '-theme-bh-01-dark'}, pseudo_classes={'focus', 'dark'})>
+done = <function test_at_the_real_clock_and_interval_it_appears_after_a_second_and_counts.<locals>.<lambda> at 0x111971f30>
+within = 3.0
+
+    async def _until(pilot: Pilot[None], done: Callable[[], bool], *, within: float = 3.0) -> None:
+        """Let the app run until `done()`, polling in short pauses."""
+        for _ in range(round(within / 0.02)):
+            if done():
+                return
+            await pilot.pause(0.02)
+>       raise AssertionError("what the test waited for never happened")
+E       AssertionError: what the test waited for never happened
+
+bh-02/plugins/tui-cordis-plugin/tests/test_tui_working.py:59: AssertionError
+=========================== short test summary info ============================
+FAILED bh-02/app/tests/test_python_repl.py::test_a_session_run_from_home_can_t_choose_what_a_later_session_reads_as_the_person_s@jail-lock
+FAILED bh-02/plugins/tui-cordis-plugin/tests/test_tui_working.py::test_at_the_real_clock_and_interval_it_appears_after_a_second_and_counts
+2 failed, 3852 passed, 231 skipped in 71.00s (0:01:10)
+   FAILED: tests
+== gates
+== (root)
+   ok
+== libs/brig
+   ok
+== libs/cordis
+   ok
+== libs/cordis-helpers
+   ok
+== libs/host-paths
+   ok
+   ok
+== docs
+INFO    -  Cleaning site directory
+INFO    -  Building documentation to directory: /Users/brukhabtu/src/github.com/bruk-io/bh-02/site
+INFO    -  Documentation built in 1.28 seconds
+   ok
+== tokens
+bh-01's tokens and bh-02's theme are in sync
+   ok
+```
 <!-- SECTION:NOTES:END -->
