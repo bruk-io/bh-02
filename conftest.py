@@ -40,6 +40,7 @@ GROUPS = (
             "them, safe alone and so only as slow as the others."
         ),
         modules=(
+            "bh-02/app/tests/test_host_values.py",
             "bh-02/app/tests/test_python_repl.py",
             "bh-02/plugins/runner-cordis-plugin/tests/test_runner_confined.py",
             "bh-02/plugins/runner-cordis-plugin/tests/test_runner_tmux.py",
