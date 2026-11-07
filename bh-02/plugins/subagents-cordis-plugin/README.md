@@ -232,7 +232,8 @@ runs.
   made is said in a note (the only one), and the child runs without one; a log that never failed
   says nothing (`test_a_log_removed_under_a_running_child_is_said_once_when_it_ends_before_its_usage`).
 - **`bh-02 watch SESSION AGENT`** (the app's, `bh_02.watching`) renders one log read-only, follows it
-  until `agent_end` (`--once` stops after what is there), and refuses names bh-02 did not make before
+  until `agent_end`, or until the session is no longer running (the pid in its `running.lock` is
+  gone), saying so (`--once` stops after what is there), and refuses names bh-02 did not make before
   it builds a path: it reads through `host_paths.read_beneath` (no link, a descriptor opened
   read-only). Terminal control characters and bidirectional overrides in what the model wrote are dropped.
 - **The status field.** `subagents:status` shows `agents: N running` while any child runs and takes the
