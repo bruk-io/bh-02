@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-19 00:06'
-updated_date: '2026-11-07 07:02'
+updated_date: '2026-11-07 07:04'
 labels:
   - chat
   - size-1
@@ -53,4 +53,70 @@ AC2: built a local, uncommitted pytest plugin recreating TASK-0162's repro (scra
 Not verified: the full repo-wide scripts/check (left for the reviewer, per standing rules).
 
 Noted but out of scope (not filed as a task, no action needed): because nothing consumes interrupted() while a command runs, Typed._interrupt stays set into whatever reply follows in these two tests; it doesn't affect any assertion here (Echo's reply doesn't suspend) and may be an artifact of the Typed test fake rather than the real input row — flagging only, not chasing it under this task.
+
+Check `scripts/check` exited 1
+
+(122 earlier lines omitted)
+```text
+>       assert [s.rsplit("\n", 1)[-1] for s in said] == ["DENIED"] * len(inputs), said
+E       AssertionError: ['(/private/var/folders/rf/f34xmczn4659gm98hrsprydc0000gn/T/pytest-of-brukhabtu/pytest-978/popen-gw0/test_a_session_ru...me/xdg/bh-02/startup.py ran first: no public functions)
+E         DENIED', 'DENIED', 'DENIED', 'DENIED', 'DENIED', 'WROTE', ...]
+E       assert ['DENIED', 'D... 'WROTE', ...] == ['DENIED', 'D...'DENIED', ...]
+E         
+E         At index 5 diff: 'WROTE' != 'DENIED'
+E         Use -v to get more diff
+
+bh-02/app/tests/test_python_repl.py:980: AssertionError
+_____________ test_a_listener_that_left_after_listening_is_refused _____________
+[gw2] darwin -- Python 3.15.0 /Users/brukhabtu/Documents/src/github.com/bruk-io/bh-02/.venv/bin/python
+
+run_id = '2a8d334ea14840c7a91c02f3034f2e41'
+jail_dir = '/private/tmp/bg-uz0kq6b2'
+
+    @pytest.mark.integration
+    def test_a_listener_that_left_after_listening_is_refused(run_id: str, jail_dir: str) -> None:
+        """The kernel names the process that called `listen`; one that has since
+        exited is no vouching peer, even when the socket's holder is in the
+        group (the safe direction for a daemon that forks after `listen`)."""
+        jail = _create(jail_dir, confined=False)
+        reservation = jail.channel("ctl")
+        left = os.path.join(jail_dir, "own", "left")
+        body = f"python3 -c '{_FORK_AFTER_LISTEN}' {reservation.bound_path} {left}; sleep 60"
+        process = jail.start(workload_argv(run_id, body), channel=reservation)
+        try:
+            deadline = time.monotonic() + _READY_S
+            while not os.path.exists(left):
+                assert time.monotonic() < deadline, "the listener never left"
+                time.sleep(0.02)
+>           with pytest.raises(EndpointRefused, match="has left"):
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           Failed: DID NOT RAISE EndpointRefused
+
+libs/brig/tests/integration/test_channel_planted_link.py:271: Failed
+=========================== short test summary info ============================
+FAILED bh-02/app/tests/test_python_repl.py::test_a_session_run_from_home_can_t_choose_what_a_later_session_reads_as_the_person_s@jail-lock
+FAILED libs/brig/tests/integration/test_channel_planted_link.py::test_a_listener_that_left_after_listening_is_refused
+2 failed, 3851 passed, 231 skipped in 70.81s (0:01:10)
+   FAILED: tests
+== gates
+== (root)
+   ok
+== libs/brig
+   ok
+== libs/cordis
+   ok
+== libs/cordis-helpers
+   ok
+== libs/host-paths
+   ok
+   ok
+== docs
+INFO    -  Cleaning site directory
+INFO    -  Building documentation to directory: /Users/brukhabtu/src/github.com/bruk-io/bh-02/site
+INFO    -  Documentation built in 1.28 seconds
+   ok
+== tokens
+bh-01's tokens and bh-02's theme are in sync
+   ok
+```
 <!-- SECTION:NOTES:END -->
