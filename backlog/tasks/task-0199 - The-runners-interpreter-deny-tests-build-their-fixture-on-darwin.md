@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-07 04:27'
-updated_date: '2026-11-07 06:14'
+updated_date: '2026-11-07 06:15'
 labels:
   - runner
   - darwin
@@ -119,4 +119,6 @@ INFO    -  Documentation built in 1.26 seconds
 bh-01's tokens and bh-02's theme are in sync
    ok
 ```
+
+Review (reviewer, not the worker): NOT CLOSED. close-task refused because a bug closes only with its repro recorded, and none is. To close: the worker runs record-check TASK-0199 --repro against the three tests with copy2 restored (a repro that fails before the fix), or appends a note starting 'No repro:' that says why. Otherwise the review passes. The diff is test-only and jail.py is unchanged. AC#1 is met by the notes' revert/plant evidence. The interpreter-file deny is guarded by the pure spec_for test, which is accepted. AC#2 is met: the runner plugin gave 80 passed/33 skipped when the reviewer re-ran it on macOS, and linux-jail-check gave 327 passed. The full check is red with 5 failed and 25 errors, none in the runner plugin. They are darwin failures in brig, warden, host-paths, cordis and the app, already tracked by TASK-0198, TASK-0205, TASK-0170 and TASK-0079.15, and are unrelated. No drafts filed.
 <!-- SECTION:NOTES:END -->
