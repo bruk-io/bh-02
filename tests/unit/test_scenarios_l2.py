@@ -4,7 +4,7 @@ import json
 
 from evals.truth import Exact
 from scenarios import code
-from scenarios.l2 import calls_in, prompt_for, report, tools_for
+from scenarios.l2 import calls_in, prompt_for, report, tools_for, unprefixed
 
 
 def _task(kind: str) -> code.Task:
@@ -102,3 +102,19 @@ def test_a_report_counts_right_answers_by_task_size_and_condition_and_leaves_fai
     assert "| failing | M | native | 1 of 2 (50%) |" in text
     assert "1 failed to produce an answer" in text
     assert "`Bash: ./run-tests -v` | 1 | 7,000 |" in text
+
+
+def test_an_event_whose_message_is_text_is_passed_over():
+    lines = _stream(
+        {"type": "system", "message": "compacting"}, {"type": "assistant", "message": {"content": "hi"}}
+    )
+    assert calls_in(lines) == []
+
+
+def test_a_name_given_with_the_package_before_it_is_the_name_it_names():
+    assert (
+        unprefixed("ANSWER: shop.orders.total_1, carts.total_2", "shop.")
+        == "ANSWER: orders.total_1, carts.total_2"
+    )
+    assert unprefixed("ANSWER: workshop.orders.x", "shop.") == "ANSWER: workshop.orders.x"
+    assert unprefixed("ANSWER: shop.orders.x", "") == "ANSWER: shop.orders.x"
