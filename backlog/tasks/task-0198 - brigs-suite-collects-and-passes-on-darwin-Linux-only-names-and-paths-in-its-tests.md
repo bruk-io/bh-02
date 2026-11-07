@@ -3,7 +3,7 @@ id: TASK-0198
 title: >-
   brig's suite collects and passes on darwin: Linux-only names and paths in its
   tests
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-07 04:27'
 updated_date: '2026-11-07 19:26'
@@ -209,4 +209,6 @@ bh-01's tokens and bh-02's theme are in sync
 ```
 
 No repro: the fix (de2bab20) is already on main, so no test fails now to record. The before-state was reproduced by the worker instead: the base commit 238da659 hits AttributeError on signal.SIGRTMIN at collection on darwin; test_teardown_zombies failed with pid 1234 planted back; test_leak_poller_retry went red with _sample_outcome planted to return None (all in the notes above).
+
+Review (reviewer, 2026-11-07): CLOSED. Change is de2bab20 (brig test-only), reviewed last round and found correct. Full check rerun (recorded above): exit 1, 2 failed / 3853 passed; format, lint, types, gates, docs, tokens ok. Neither failure comes from this change: test_python_repl home-session -> TASK-0197 (To Do); test_tui_working real-clock timing -> TASK-0206 (To Do, named in its description). The darwin listener-left flake from the last review did not recur and, per the owner stand-in's SPLIT ruling, belongs to TASK-0206. The test_trajectory_view failure is fixed by TASK-0201 (Done). All four ACs met on the worker's recorded evidence. No new findings; no drafts filed.
 <!-- SECTION:NOTES:END -->
