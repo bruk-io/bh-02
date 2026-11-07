@@ -6,7 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-11-07 04:27'
-updated_date: '2026-11-07 06:51'
+updated_date: '2026-11-07 19:26'
 labels:
   - brig
   - darwin
@@ -141,4 +141,70 @@ Review (reviewer, 2026-11-07): NOT CLOSED. Full check (recorded above) failed te
 Owner stand-in (Opus), 2026-11-07: SPLIT, do not block. test_channel_planted_link::test_a_listener_that_left_after_listening_is_refused is not a failure this task named or caused. TASK-0198's commit (de2bab20) touches neither that test nor brig/run/dial.py. The flake was seen before this task existed (TASK-0079.34's review, DRAFT-0021) and is already its own bug, TASK-0206, whose ACs ask for more than this one does: explain it, plant it, three green checks in a row. Holding this task open for it would duplicate TASK-0206 and stall finished, reviewed work. Read AC1 as: every file collects and every failure this task named passes on macOS. The one exception is the darwin peer-check race tracked in TASK-0206; it is not skipped, retried or silenced, so no check is weakened. The AC text is unchanged and the task gets no finish-moved label. The reviewer may close on the rest of the evidence and should cite TASK-0206 in the close note. The other two failures stay with TASK-0197 and TASK-0201, as the review said.
 
 Owner stand-in (Opus), 2026-11-06: (A) the 2026-11-07 SPLIT ruling stands. The later delegation brief asking for this flaky test to be fixed here was generated without that ruling or TASK-0206; the board is the source, so the brief is stale. No new commit under this task: de2bab20 is its change, and the worker found the 'prior attempt' patch identical to it. Not (B): a darwin peer-check change in brig/run/dial.py needs a SPEC.md decision first and would duplicate TASK-0206's ACs. Not (C): loosening the test's match here would hide the safe mode while the unsafe 'DID NOT RAISE' mode stays open, and pinning the right refusal reason belongs in TASK-0206's fix. Reviewer: close on the recorded evidence, citing TASK-0206 (and TASK-0197, TASK-0201 for the other two failures).
+
+Check `scripts/check` exited 1
+
+(128 earlier lines omitted)
+```text
+E         Use -v to get more diff
+
+bh-02/app/tests/test_python_repl.py:980: AssertionError
+___ test_at_the_real_clock_and_interval_it_appears_after_a_second_and_counts ___
+[gw3] darwin -- Python 3.15.0 /Users/brukhabtu/Documents/src/github.com/bruk-io/bh-02/.venv/bin/python
+
+    async def test_at_the_real_clock_and_interval_it_appears_after_a_second_and_counts() -> None:
+        """The defaults, undriven: about once a second, so nothing for the first moments, then
+        the seconds."""
+        app = BhApp()
+        async with app.run_test(size=_SIZE) as pilot:
+            app.post_message(ReplyStarted())
+            await pilot.pause(0.4)
+            assert _line(app) is None
+            await _until(pilot, lambda: _line(app) is not None, within=3.0)
+            assert re.fullmatch(r"Working · [12]s", _line(app) or "")
+>           await _until(pilot, lambda: _line(app) == "Working · 2s", within=3.0)
+
+bh-02/plugins/tui-cordis-plugin/tests/test_tui_working.py:320: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+pilot = <Pilot app=BhApp(title='bh-02', classes={'-theme-bh-01-dark', '-dark-mode'}, pseudo_classes={'dark', 'focus'})>
+done = <function test_at_the_real_clock_and_interval_it_appears_after_a_second_and_counts.<locals>.<lambda> at 0x114861220>
+within = 3.0
+
+    async def _until(pilot: Pilot[None], done: Callable[[], bool], *, within: float = 3.0) -> None:
+        """Let the app run until `done()`, polling in short pauses."""
+        for _ in range(round(within / 0.02)):
+            if done():
+                return
+            await pilot.pause(0.02)
+>       raise AssertionError("what the test waited for never happened")
+E       AssertionError: what the test waited for never happened
+
+bh-02/plugins/tui-cordis-plugin/tests/test_tui_working.py:59: AssertionError
+=========================== short test summary info ============================
+FAILED bh-02/app/tests/test_python_repl.py::test_a_session_run_from_home_can_t_choose_what_a_later_session_reads_as_the_person_s@jail-lock
+FAILED bh-02/plugins/tui-cordis-plugin/tests/test_tui_working.py::test_at_the_real_clock_and_interval_it_appears_after_a_second_and_counts
+2 failed, 3853 passed, 231 skipped in 72.91s (0:01:12)
+   FAILED: tests
+== gates
+== (root)
+   ok
+== libs/brig
+   ok
+== libs/cordis
+   ok
+== libs/cordis-helpers
+   ok
+== libs/host-paths
+   ok
+   ok
+== docs
+INFO    -  Cleaning site directory
+INFO    -  Building documentation to directory: /Users/brukhabtu/src/github.com/bruk-io/bh-02/site
+INFO    -  Documentation built in 1.50 seconds
+   ok
+== tokens
+bh-01's tokens and bh-02's theme are in sync
+   ok
+```
 <!-- SECTION:NOTES:END -->
