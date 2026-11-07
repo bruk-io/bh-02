@@ -8,9 +8,13 @@ bh-02 can, and `approval`'s rule puts each input (and each extension to load) to
 import asyncio
 import contextlib
 import os
+import shutil
 import signal
-from collections.abc import Mapping, Sequence
+import tempfile
+from collections.abc import Mapping
 from pathlib import Path
+
+from runner_cordis_plugin.runner import ArgvFor
 
 __all__ = ["Unjailed", "UNENFORCED"]
 
@@ -50,10 +54,14 @@ def _program_env(environ: Mapping[str, str]) -> dict[str, str]:
 
 
 class _Process:
-    """The worker in a session of its own, so a terminal's Ctrl-C never reaches it directly."""
+    """The worker in a session of its own, so a terminal's Ctrl-C never reaches it directly.
+    `endpoint` is the socket it was started with, picked by `Unjailed.start` (reserve-then-start,
+    the unconfined mechanism's own way of it), in `directory`, removed once the worker stops."""
 
-    def __init__(self, process: asyncio.subprocess.Process) -> None:
+    def __init__(self, process: asyncio.subprocess.Process, endpoint: str, directory: str) -> None:
         self._process = process
+        self._endpoint = endpoint
+        self._directory = directory
 
     def interrupt(self) -> bool:
         if self._process.returncode is not None:
@@ -83,6 +91,12 @@ class _Process:
         to them first; nothing runs unasked here, a startup file included)."""
         return ()
 
+    async def connect(self, *, limit: int) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
+        """A plain connect to the worker's socket: nothing confines this mechanism, so nothing
+        checks what answers beyond the kernel's own refusal of an absent or unbound path (every
+        axis `unenforced`, `channel_exclusivity` and `control` included)."""
+        return await asyncio.open_unix_connection(self._endpoint, limit=limit)
+
     async def stopped(self) -> None:
         """Return once the process has ended, however it ended."""
         await self._process.wait()
@@ -98,6 +112,7 @@ class _Process:
                 with contextlib.suppress(*_GONE):
                     os.killpg(self._process.pid, signal.SIGKILL)
                 await self._process.wait()
+        shutil.rmtree(self._directory, ignore_errors=True)
 
 
 class Unjailed:
@@ -110,19 +125,28 @@ class Unjailed:
         """Nothing: no jail holds anything on the host."""
         return ""
 
-    async def start(self, argv: Sequence[str], *, cwd: str, endpoint: str) -> _Process:
+    async def start(self, argv_for: ArgvFor, *, cwd: str) -> _Process:
+        """Reserve-then-start, this mechanism's own way of it: a socket path of its own, in a
+        short directory of its own (a Unix socket path must fit in about 100 bytes), that
+        `argv_for` gets, as a brig jail's reserved path is."""
+        directory = tempfile.mkdtemp(prefix="bh-k-", dir="/tmp")
+        endpoint = str(Path(directory) / "k.sock")
         log = Path(endpoint).with_name("stderr.log")
-        with log.open("wb") as stderr:
-            process = await asyncio.create_subprocess_exec(
-                *argv,
-                cwd=cwd,
-                env=_program_env(os.environ),
-                stdin=asyncio.subprocess.DEVNULL,
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=stderr,
-                start_new_session=True,
-            )
-        started = _Process(process)
+        try:
+            with log.open("wb") as stderr:
+                process = await asyncio.create_subprocess_exec(
+                    *argv_for(endpoint),
+                    cwd=cwd,
+                    env=_program_env(os.environ),
+                    stdin=asyncio.subprocess.DEVNULL,
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=stderr,
+                    start_new_session=True,
+                )
+        except BaseException:
+            shutil.rmtree(directory, ignore_errors=True)
+            raise
+        started = _Process(process, endpoint, directory)
         try:
             await _until_listening(endpoint, process)
         except BaseException:

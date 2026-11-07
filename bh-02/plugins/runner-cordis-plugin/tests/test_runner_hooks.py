@@ -1,7 +1,7 @@
 """The `runner` value over any mechanism: each owner stops its own program on `/release`, a start
 ends a release, and each start is told to whoever watches; and the rows that bind it."""
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from cordis.loader import resolve
@@ -37,7 +37,7 @@ class _Mechanism:
     def report(self) -> Mapping[str, str]:
         return UNENFORCED
 
-    async def start(self, argv: Sequence[str], *, cwd: str, endpoint: str) -> _Start:
+    async def start(self, argv_for: Callable[[str], Sequence[str]], *, cwd: str) -> _Start:
         self.starts.append(_Start(len(self.starts) + 1))
         return self.starts[-1]
 
@@ -74,18 +74,18 @@ async def test_a_start_ends_a_release_and_is_told_to_each_watcher() -> None:
     stop_watching = runner.on_start(lambda started: seen.append(started.n))  # type: ignore[attr-defined]
     await runner.release()
     assert runner.released()
-    await runner.start(["x"], cwd="/w", endpoint="/s")
+    await runner.start(lambda path: ["x", path], cwd="/w")
     assert not runner.released() and seen == [1]
     assert runner.report()["fs_read"] == "grade 1" and runner.notice() == "notice 1"
     stop_watching()
-    await runner.start(["y"], cwd="/w", endpoint="/s")
+    await runner.start(lambda path: ["y", path], cwd="/w")
     assert seen == [1] and runner.report()["fs_read"] == "grade 2"  # the last start's
 
 
 async def test_the_runner_stops_no_program_itself() -> None:
     mechanism = _Mechanism([])
     runner = Runner(mechanism)
-    await runner.start(["x"], cwd="/w", endpoint="/s")
+    await runner.start(lambda path: ["x", path], cwd="/w")
     await runner.release()
     assert not mechanism.starts[0].stopped  # its owner registered no stop: it is the owner's
 

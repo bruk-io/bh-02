@@ -101,6 +101,7 @@ from brig.core import (
 )
 from brig.mech.bwrap import DEFAULT_BWRAP_PATH, DEFAULT_INTERPRETER, InterpreterNotMounted, pins
 from brig.run import (
+    EndpointRefused,
     HostRuntime,
     IoPolicy,
     Jail,
@@ -113,6 +114,7 @@ from brig.run import (
 )
 from brig.stack import CompiledJail, Stack, scratch_darwin, strict_linux
 from host_paths import state_home
+from runner_cordis_plugin.runner import ArgvFor
 from runner_cordis_plugin.tripwire import Tripwire
 
 __all__ = [
@@ -217,7 +219,6 @@ class BrigConfig:
 def spec_for(
     *,
     root: str,
-    endpoint: str,
     scratch: str,
     home: str,
     config: BrigConfig,
@@ -272,7 +273,7 @@ def spec_for(
     # library and the venv's prefix, but in a venv layout the base's own binary is on neither (with
     # no venv the whole prefix is, and this adds nothing). Files only: a deny on a link is the mount
     # on what it leads to, so the file is what holds. Strictly under a root, as `host`.
-    allows = (*writable, str(Path(endpoint).parent))
+    allows = tuple(writable)
     interpreter = [i for i in interpreters if i not in allows and any(i.startswith(r + "/") for r in allows)]
     # And the links on the way to it, which a mount on the file does not hold (the entry of a link
     # can be renamed, and an input plant its own interpreter at the name): their directories.
@@ -290,10 +291,6 @@ def spec_for(
     ]
     return Spec(
         fs=FsPolicy(
-            # The program's socket directory too: brig's Spec names a channel, not its path
-            # (brig's decision-186), so the directory the owner chose for its socket is granted
-            # here, as brig granted it per channel until then. TASK-0079.31 moves the owners to a
-            # socket brig reserves, and this goes.
             write_allows=allows,
             write_denies=tuple(dict.fromkeys(denies)),
             read_denies=(
@@ -306,6 +303,10 @@ def spec_for(
             allow_names=tuple(BASELINE_ENV if config.env is None else config.env),
             set=(("TMPDIR", scratch),),
         ),
+        # The program's socket: brig's Spec names a channel, not its path (decision-186), and
+        # each mechanism grants the channel directory on its own, nothing here; `BrigJail`
+        # reserves it (`jail.channel("program")`) and puts its bound path in the program's argv
+        # (decision-185, TASK-0079.31).
         channels=(Channel(name="program", kind=ChannelKind.LISTEN),),
     )
 
@@ -830,6 +831,23 @@ class _Jailed:
         project and what `write` adds."""
         return self._facts.writes
 
+    async def connect(self, *, limit: int) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
+        """A stream to this start's program, through brig's verified dial (`Process.connect`,
+        decision-185): the host's one check of what answers at the reserved socket, never a raw
+        connect to the path (a process of the jail could plant a link there). `limit` is the
+        stream's own, as `asyncio.open_connection` takes it.
+
+        Raises:
+            ConnectionError: what answered is not this process's own listener (brig's
+                `EndpointRefused`, wrapped so no owner need import brig to catch it).
+            OSError: nothing listens there yet.
+        """
+        try:
+            sock = await asyncio.to_thread(self._process.connect)
+        except EndpointRefused as refused:
+            raise ConnectionError(str(refused)) from refused
+        return await asyncio.open_connection(sock=sock, limit=limit)
+
     def _write(self) -> None:
         """The record as it stands: the placeholders, and which process group holds the jail they
         are mounted in: a Linux jail's instance (`Jail.instance_group`: PID 1 of its namespaces,
@@ -926,48 +944,38 @@ def _mark_of(path: str) -> str | None:
         return None
 
 
-async def _until_listening(endpoint: str, timeout: float) -> None:
-    """Wait until something accepts on `endpoint` (connect, then leave without a word), as
-    brig's `Jail.wait_ready` did until its decision-186 took it away with the path a channel
-    named. The owner dials the same path as found; TASK-0079.31 moves both to brig's verified
-    dial (`Process.connect`).
-
-    Raises:
-        TimeoutError: nothing accepted within `timeout` seconds.
-    """
-    async with asyncio.timeout(timeout):
-        while True:
-            with contextlib.suppress(OSError):
-                _, writer = await asyncio.open_unix_connection(endpoint)
-                writer.close()
-                return
-            await asyncio.sleep(0.02)
-
-
 def _launch(
-    compiled: CompiledJail, *, argv: Sequence[str], cwd: str, jail_id: str, jail_dir: str, tether: int
+    compiled: CompiledJail, *, argv_for: ArgvFor, cwd: str, jail_id: str, jail_dir: str, tether: int
 ) -> tuple[Jail, Process]:
-    """A jail of its own for `argv`: brig's `Jail.create` through the host runtime, tethered
-    to `tether` (the read end; the jail holds a duplicate), then its first and only `start`.
-    A refused start changes nothing in brig (the jail is its creator's), so this ends the jail
-    itself before saying why: what `create` started (a `JAIL_LIFETIME` helper) never outlives a
-    start nobody was handed. The start's error is the one that crosses, whatever the ending
-    found: each item it could not end, or its own failure, is a note on it (`_unended`).
+    """A jail of its own for `argv_for`: brig's `Jail.create` through the host runtime, tethered
+    to `tether` (the read end; the jail holds a duplicate), then reserve-then-start (decision-184,
+    decision-185, TASK-0079.31): `jail.channel("program")` reserves a socket in the jail's own
+    channel directory, `argv_for(reservation.bound_path)` is the program's, and `channel=` the
+    reservation binds it there, never a path `argv_for` chose on its own. A refused start (the
+    reservation included) changes nothing in brig (the jail is its creator's), so this ends the
+    jail itself before saying why: what `create` started (a `JAIL_LIFETIME` helper) never
+    outlives a start nobody was handed. The start's error is the one that crosses, whatever the
+    ending found: each item it could not end, or its own failure, is a note on it (`_unended`).
 
     Raises:
         LaunchRefused: the jail needs a capability the host runtime lacks.
         JailDirInUse: `jail_dir` holds an earlier jail's records that still run.
         HelperFailed: a helper the jail starts at its creation failed.
+        UnknownChannel: the compiled `Spec` declares no "program" channel (a bug here).
+        ReservationRefused: a reservation `jail.channel` just made was refused (unreachable
+            outside brig's own bugs: nothing else could race it, one reservation per start).
         ExecWrapNotAPrefix: the compiled wrap is not a pure argv prefix (the jail is destroyed).
         TetherClosed: `tether` has already ended (the jail is destroyed).
-        WorkloadSpawnFailed: `argv` could not be spawned in the jail (the jail is destroyed).
+        WorkloadSpawnFailed: the argv could not be spawned in the jail (the jail is destroyed).
         OSError: the jail directory or a record could not be written.
     """
     jail = Jail.create(
         compiled, runtime=HostRuntime(), cwd=cwd, jail_id=jail_id, jail_dir=jail_dir, tether=tether
     )
     try:
-        return jail, jail.start(argv, cwd=cwd, io=IoPolicy())
+        reservation = jail.channel("program")
+        argv = list(argv_for(reservation.bound_path))
+        return jail, jail.start(argv, cwd=cwd, io=IoPolicy(), channel=reservation)
     except BaseException as error:
         try:
             report = jail.destroy()
@@ -1026,7 +1034,6 @@ class BrigJail:
         self._interpreters = host_interpreters() if interpreters is None else tuple(interpreters)
         # The grades are known before anything starts: compile once against a throwaway directory.
         # A platform brig has no preset for grades nothing; `start` says what to use instead.
-        # The probe's endpoint is in a subdirectory: bwrap refuses one directly in the jail directory.
         # What each start is (its own grades among it) is kept with that start (`_Facts`).
         self._report: Mapping[str, str] = {}
         # every program this jail started that may still run, and the starts under way: what
@@ -1035,7 +1042,7 @@ class BrigJail:
         self._starting: set[asyncio.Future[None]] = set()
         if platform in _STACKS:
             with tempfile.TemporaryDirectory(prefix="bh-j-", dir="/tmp") as probe:
-                self._report = self.compile(probe, str(Path(probe, "chan", "k.sock")), ".", ())[1]
+                self._report = self.compile(probe, ".", ())[1]
 
     def report(self) -> Mapping[str, str]:
         """The grades, known before anything starts (what `approval` reads); no start changes
@@ -1052,13 +1059,13 @@ class BrigJail:
         await asyncio.to_thread(self._swept, records_dir(os.environ, str(Path.home())))
         return released_for(running=bool(self._live))
 
-    async def start(self, argv: Sequence[str], *, cwd: str, endpoint: str) -> _Jailed:
-        """Start `argv` in `cwd`, in a jail of its own compiled from the policy, listening on
-        `endpoint`."""
+    async def start(self, argv_for: ArgvFor, *, cwd: str) -> _Jailed:
+        """Start `argv_for(path)` in `cwd`, in a jail of its own compiled from the policy, `path`
+        the socket it reserves for the program (reserve-then-start, `_launch`)."""
         starting: asyncio.Future[None] = asyncio.get_running_loop().create_future()
         self._starting.add(starting)
         try:
-            started = await self._launched(argv, cwd=cwd, endpoint=endpoint)
+            started = await self._launched(argv_for, cwd=cwd)
             self._live = [*(each for each in self._live if not each.stopped), started]
             return started
         finally:
@@ -1066,7 +1073,7 @@ class BrigJail:
             if not starting.done():  # a `release` cancelled as it waited cancels it
                 starting.set_result(None)
 
-    async def _launched(self, argv: Sequence[str], *, cwd: str, endpoint: str) -> _Jailed:
+    async def _launched(self, argv_for: ArgvFor, *, cwd: str) -> _Jailed:
         stack_for(self._platform)  # refuses on a platform brig has no preset for
         if self._platform == "linux" and not Path(DEFAULT_BWRAP_PATH).exists():
             raise RuntimeError(
@@ -1088,9 +1095,13 @@ class BrigJail:
         watched, tether = os.pipe()
         try:
             author = git_author(*self._git_identity(cwd)) if self._platform == "linux" else ()
-            jail, report = self.compile(jail_dir, endpoint, cwd, argv, author)
+            # A preview of the argv, the reserved path not chosen yet (`""`, which `readable_roots`
+            # and `_linked_dirs` skip: neither names an absolute path): what the compile grants on
+            # Linux is the program's own directories, never one a channel will bind on its own.
+            preview = tuple(argv_for(""))
+            jail, report = self.compile(jail_dir, cwd, preview, author)
             absent = self._absent_secrets(jail.spec)
-            facts = self._facts(jail.spec, report, absent, jail_dir, endpoint)
+            facts = self._facts(jail.spec, report, absent, jail_dir)
             absent_holds = self._absent_denies if self._platform == "linux" else self._absent_pins
             made = made_by_the_jail(absent_holds(jail.spec))
             if made:
@@ -1113,7 +1124,7 @@ class BrigJail:
                 asyncio.to_thread(
                     _launch,
                     jail,
-                    argv=argv,
+                    argv_for=argv_for,
                     cwd=cwd,
                     jail_id=Path(jail_dir).name,
                     jail_dir=jail_dir,
@@ -1147,7 +1158,10 @@ class BrigJail:
             )
         started = _Jailed(running, process, facts, jail_dir, placed, lock, record, tether, wire)
         try:
-            await _until_listening(endpoint, _READY_TIMEOUT_S)
+            # Readiness through the same verified dial as `connect` (decision-185): a planted
+            # link, or an answer from outside the process's own group, refuses at once rather
+            # than waiting out the timeout (decision-186).
+            await asyncio.to_thread(process.wait_ready, _READY_TIMEOUT_S)
         except BaseException as error:
             log = Path(process.stderr_path)
             detail = log.read_text(errors="replace")[-2000:] if log.is_file() else ""
@@ -1158,12 +1172,15 @@ class BrigJail:
     def compile(
         self,
         jail_dir: str,
-        endpoint: str,
         cwd: str,
         argv: Sequence[str],
         author: Sequence[tuple[str, str]] = (),
     ) -> tuple[CompiledJail, Mapping[str, str]]:
-        """The jail for `argv` in `cwd`, compiled, and its grades. `author` (Linux: `git_author`)
+        """The jail for `argv` in `cwd`, compiled, and its grades. `argv` is the program's command
+        with an empty path where its socket goes (`argv_for("")`: the socket is reserved only
+        once the jail exists, `_launch`): the directories `readable_roots` grants on Linux are its
+        own, never a path a channel will bind, which the mechanism grants on its own
+        (decision-186). `author` (Linux: `git_author`)
         is set in the worker's environment besides the policy's own.
 
         Raises:
@@ -1176,7 +1193,6 @@ class BrigJail:
         names = (host_executable, str(Path(base_prefix, "bin", "python3")))  # how the host reaches its Python
         spec = spec_for(
             root=cwd,
-            endpoint=endpoint,
             scratch=scratch,
             home=str(Path.home()),
             config=self._config,
@@ -1214,23 +1230,20 @@ class BrigJail:
         holds = held(spec, self._absent_secrets(spec)) if self._platform == "linux" else ()
         return jail, graded(report, holds)
 
-    def _facts(
-        self, spec: Spec, report: Mapping[str, str], absent: Collection[str], jail_dir: str, endpoint: str
-    ) -> _Facts:
-        """What a start compiled to `spec` (in `jail_dir`, listening on `endpoint`; `absent`, the
-        read denies that are not there) is, for whoever started it: its grades, its notice, the
-        trees it reads (Linux) and the roots it may write but its scratch."""
-        socket_dir = str(Path(endpoint).parent)
-        writes = tuple(
-            w for w in spec.fs.write_allows if not Path(w).is_relative_to(jail_dir) and w != socket_dir
-        )
+    def _facts(self, spec: Spec, report: Mapping[str, str], absent: Collection[str], jail_dir: str) -> _Facts:
+        """What a start compiled to `spec` (in `jail_dir`; `absent`, the read denies that are not
+        there) is, for whoever started it: its grades, its notice, the trees it reads (Linux) and
+        the roots it may write but its scratch. The program's reserved socket lives in `jail_dir`
+        (brig's own channel directory, decision-186), so excluding `jail_dir` excludes it too;
+        `spec.fs.write_allows` never names it (the mechanism grants it on its own)."""
+        writes = tuple(w for w in spec.fs.write_allows if not Path(w).is_relative_to(jail_dir))
         if self._platform != "linux":
             return _Facts(report, self._note, writes=writes)
         trees = (*spec.fs.read_allows, *spec.fs.write_allows)
         return _Facts(
             report,
             "\n".join(filter(None, (self._note, notice_for(self._platform, held(spec, absent))))),
-            told_reads(trees, (jail_dir, socket_dir)),
+            told_reads(trees, (jail_dir,)),
             writes,
         )
 

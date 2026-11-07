@@ -8,8 +8,10 @@ a test drives either path with a fake rule over this. Never bind it in a running
 import asyncio
 import contextlib
 import os
+import shutil
 import signal
-from collections.abc import Mapping, Sequence
+import tempfile
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 __all__ = ["PlainJail"]
@@ -21,8 +23,11 @@ _UNENFORCED: Mapping[str, str] = {"fs_write": "unenforced", "network": "unenforc
 
 
 class _Started:
-    def __init__(self, process: asyncio.subprocess.Process) -> None:
+    def __init__(self, process: asyncio.subprocess.Process, endpoint: str, directory: str) -> None:
         self.process = process
+        self._endpoint = endpoint
+        self._directory = directory
+        self.connects = 0  # how often its owner dialled it: through `connect`, the only way
 
     def report(self) -> Mapping[str, str]:
         return _UNENFORCED
@@ -30,11 +35,18 @@ class _Started:
     def notice(self) -> str:
         return ""
 
+    async def connect(self, *, limit: int) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
+        """A plain connect to the worker's socket: this fake confines nothing, so nothing checks
+        what answers."""
+        self.connects += 1
+        return await asyncio.open_unix_connection(self._endpoint, limit=limit)
+
     async def stop(self) -> None:
         if self.process.returncode is None:
             with contextlib.suppress(ProcessLookupError):
                 os.killpg(self.process.pid, signal.SIGKILL)
         await self.process.wait()
+        shutil.rmtree(self._directory, ignore_errors=True)
 
 
 class PlainJail:
@@ -50,12 +62,20 @@ class PlainJail:
     async def release(self) -> str:
         return ""
 
-    async def start(self, argv: Sequence[str], *, cwd: str, endpoint: str) -> _Started:
+    async def start(self, argv_for: Callable[[str], Sequence[str]], *, cwd: str) -> _Started:
+        """Reserve-then-start, this fake's own way of it: a socket path of its own, that
+        `argv_for` gets, as a brig jail's reserved path is."""
+        directory = tempfile.mkdtemp(prefix="bh-x-", dir="/tmp")
+        endpoint = str(Path(directory) / "x.sock")
         with Path(endpoint).with_name("stderr.log").open("wb") as stderr:
             process = await asyncio.create_subprocess_exec(
-                *argv, cwd=cwd, stdin=asyncio.subprocess.DEVNULL, stderr=stderr, start_new_session=True
+                *argv_for(endpoint),
+                cwd=cwd,
+                stdin=asyncio.subprocess.DEVNULL,
+                stderr=stderr,
+                start_new_session=True,
             )
-        started = _Started(process)
+        started = _Started(process, endpoint, directory)
         self.started.append(started)
         async with asyncio.timeout(_READY_S):
             while True:  # until it accepts: connect, then leave without a word (a probe)

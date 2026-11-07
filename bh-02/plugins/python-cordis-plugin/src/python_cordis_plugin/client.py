@@ -66,10 +66,8 @@ import asyncio
 import contextlib
 import json
 import os
-import shutil
-import tempfile
 import unicodedata
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from sys import executable
@@ -106,13 +104,15 @@ _STRIPPED = frozenset({"Cc", "Cf"})
 
 @runtime_checkable
 class Jailed(Protocol):
-    """A program a jail started: it can be interrupted and stopped, and says why, when the jail
-    ended it itself (`ended`: a Linux `runner:confined` whose hold on a path the host undid; "" when
-    it did not), and what its start is (`report`, `notice`, `reads`, `writes`: this program's
-    jail's, whatever else the jail starts)."""
+    """A program a jail started: it can be interrupted, dialled (`connect`, through the
+    mechanism's own verified dial; never a path of this row's own) and stopped, and says why, when
+    the jail ended it itself (`ended`: a Linux `runner:confined` whose hold on a path the host
+    undid; "" when it did not), and what its start is (`report`, `notice`, `reads`, `writes`: this
+    program's jail's, whatever else the jail starts)."""
 
     def interrupt(self) -> bool: ...
     def ended(self) -> str: ...
+    async def connect(self, *, limit: int) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]: ...
     async def stop(self) -> None: ...
     def report(self) -> Mapping[str, str]: ...
     def notice(self) -> str: ...
@@ -131,10 +131,11 @@ class Access(Protocol):
 
 @runtime_checkable
 class Runner(Protocol):
-    """What the Python process needs of the `runner` value (CONTRACTS.md: runner): its start,
-    and the runner's own grades before any."""
+    """What the Python process needs of the `runner` value (CONTRACTS.md: runner): its start
+    (reserve-then-start: `argv_for(path)` is the worker's argv, `path` the socket the runner
+    reserves for it, never one this row chose), and the runner's own grades before any."""
 
-    async def start(self, argv: Sequence[str], *, cwd: str, endpoint: str) -> Jailed: ...
+    async def start(self, argv_for: Callable[[str], Sequence[str]], *, cwd: str) -> Jailed: ...
     def report(self) -> Mapping[str, str]: ...
 
 
@@ -501,7 +502,10 @@ def _placed(names: Sequence[str], root: Path, home: Path, environ: Mapping[str, 
 
 
 def worker_argv(endpoint: str) -> list[str]:
-    """The worker, run by path under this interpreter, isolated (-I: no PYTHON* env, no cwd on path)."""
+    """The worker, run by path under this interpreter, isolated (-I: no PYTHON* env, no cwd on
+    path), listening on `endpoint`: the socket the runner reserves for it (reserve-then-start),
+    never a path of this row's own choosing (`PythonProcess._start` passes this function itself
+    as the runner's `argv_for`)."""
     return [executable, "-I", str(_WORKER), endpoint]
 
 
@@ -534,7 +538,6 @@ class PythonProcess:
         self._config = config
         self._access = access  # asked before an input opens a project file, for what it asks about
         self._lock = asyncio.Lock()
-        self._dir: str | None = None
         self._process: Jailed | None = None
         # the last worker this python row started, kept once it has stopped: what its jail is (`reads`,
         # `notice`, `report`, `writes`) is this row's, never another program's of the same jail,
@@ -932,14 +935,9 @@ class PythonProcess:
         return message
 
     async def _start(self) -> None:
-        # A Unix socket path must fit in about 100 bytes, so it lives in a short directory of its own.
-        self._dir = tempfile.mkdtemp(prefix="bh-k-", dir="/tmp")
-        endpoint = str(Path(self._dir) / "k.sock")
         root = str(Path(self._config.root).resolve())
-        self._process = self._worker = await self._runner.start(
-            worker_argv(endpoint), cwd=root, endpoint=endpoint
-        )
-        self._reader, self._writer = await asyncio.open_unix_connection(endpoint, limit=_LINE_LIMIT)
+        self._process = self._worker = await self._runner.start(worker_argv, cwd=root)
+        self._reader, self._writer = await self._process.connect(limit=_LINE_LIMIT)
         self._send({"op": "hello"})
         self._fresh, self._pending = True, ""  # a new worker runs its startup files afresh
 
@@ -952,6 +950,3 @@ class PythonProcess:
         if self._process is not None:
             await self._process.stop()
             self._process = None
-        if self._dir is not None:
-            shutil.rmtree(self._dir, ignore_errors=True)
-            self._dir = None

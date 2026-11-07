@@ -16,31 +16,39 @@ brig jail (`jail.BrigJail`, `runner:confined`) or none (`unconfined.Unjailed`,
   field, and an owner waiting for a release to end.
 """
 
+from asyncio import StreamReader, StreamWriter
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Protocol, runtime_checkable
 
 from cordis_helpers import Hooks
 
-__all__ = ["Mechanism", "Runner", "Started"]
+__all__ = ["ArgvFor", "Mechanism", "Runner", "Started"]
 
 
 @runtime_checkable
 class Started(Protocol):
     """A program a runner started: what its own start is (its grades, and what the person should
-    know of it), and how to stop it."""
+    know of it), how to dial it and how to stop it."""
 
     def report(self) -> Mapping[str, str]: ...
     def notice(self) -> str: ...
+    async def connect(self, *, limit: int) -> tuple[StreamReader, StreamWriter]: ...
     async def stop(self) -> None: ...
+
+
+type ArgvFor = Callable[[str], Sequence[str]]
 
 
 @runtime_checkable
 class Mechanism(Protocol):
-    """What starts a program: a brig jail, or nothing at all. `release` lets go of what it holds
-    on the host once no program of its runs, and says what that freed."""
+    """What starts a program: a brig jail, or nothing at all. Reserve-then-start: the mechanism
+    picks where the program listens (a brig jail's channel directory; `unconfined`'s own scratch
+    directory), never a path the owner chose, and calls `argv_for` with it for the argv to start
+    (a pure function: it may be called more than once, with the same path each time). `release`
+    lets go of what it holds on the host once no program of its runs, and says what that freed."""
 
     def report(self) -> Mapping[str, str]: ...
-    async def start(self, argv: Sequence[str], *, cwd: str, endpoint: str) -> Started: ...
+    async def start(self, argv_for: ArgvFor, *, cwd: str) -> Started: ...
     async def release(self) -> str: ...
 
 
@@ -70,11 +78,12 @@ class Runner:
         """Whether `/release` has stopped what runs and nothing has started since."""
         return self._released
 
-    async def start(self, argv: Sequence[str], *, cwd: str, endpoint: str) -> Started:
-        """Start `argv` in `cwd`, listening on `endpoint`; tell each watcher (`on_start`). A start
-        ends a release, before anything waits."""
+    async def start(self, argv_for: ArgvFor, *, cwd: str) -> Started:
+        """Start `argv_for(path)` in `cwd`, `path` the mechanism's own, never the caller's
+        (`Mechanism.start`); tell each watcher (`on_start`). A start ends a release, before
+        anything waits."""
         self._released = False
-        started = await self._mechanism.start(argv, cwd=cwd, endpoint=endpoint)
+        started = await self._mechanism.start(argv_for, cwd=cwd)
         self._last = started
         for watch in tuple(self._starts):
             watch(started)

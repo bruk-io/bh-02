@@ -14,12 +14,20 @@ over it; and `/release`. The only package in the workspace that imports brig (th
 
 `runner.py`'s `Runner` is the `runner` value both rows bind, over a mechanism (`BrigJail` in
 `jail.py`, `Unjailed` in `unconfined.py`): what is the same whichever starts the program.
-- `start(argv, *, cwd, endpoint) -> started`: the mechanism starts it, listening on `endpoint`,
-  and each watcher (`on_start(watch) -> remover`) is told of it after, so the status bar's jail
-  field (`tui:grades`) follows a Python process started again in place. What one start is stays
-  with it (`started.report()`, `notice()`, `reads()`, `writes()`): the Python process and the
-  extensions process each start from a command of their own. `report()` and `notice()` are the
-  last start's (before any, the mechanism's grades and "").
+- `start(argv_for, *, cwd) -> started`: reserve-then-start (decision-184, decision-185,
+  TASK-0079.31). The mechanism reserves where the program will listen (a brig jail's own channel
+  directory; `Unjailed`'s own scratch directory), never a path the owner chose, and starts
+  `argv_for(path)`, `path` that socket (a pure function of it: the mechanism may call it more
+  than once, with the same path, to see what else is in it before it reserves anything), then
+  waits for it to accept a connection itself. An owner dials it with `await started.connect(*,
+  limit) -> (reader, writer)`, through the mechanism's own verified dial (brig's `Process.connect`,
+  decision-185: the host's one check that what answers is the started process's own, never a link
+  a process of the jail could plant at its socket's path) -- never a raw path, which `started` has
+  none of to give. Each watcher (`on_start(watch) -> remover`) is told of a start after, so the
+  status bar's jail field (`tui:grades`) follows a Python process started again in place. What one
+  start is stays with it (`started.report()`, `notice()`, `reads()`, `writes()`): the Python
+  process and the extensions process each start from a command of their own. `report()` and
+  `notice()` are the last start's (before any, the mechanism's grades and "").
 - **Each owner stops its own program.** A row that starts something registers its stop
   (`on_release(stop) -> remover`, `stop: async () -> str`): the python row its Python process,
   the extensions row the extensions process. `release()` asks each in turn, then has the mechanism let go of
@@ -169,11 +177,14 @@ policy seam, not this).
   where each session's `claude/` holds its Claude Code child's config and messaging peer token.
   A third, of a run with another `XDG_STATE_HOME`, is not known to this one and is not hidden;
 - **network**: none; the program's own LISTEN socket is the one way in or out. brig's Spec
-  names the channel (`program`, whichever program it is), not its path (brig's decision-186), so
-  the directory the owner chose for the socket is a write root of the policy's own, as brig
-  granted it per channel until then,
-  and the runner waits for it to accept a connection itself (TASK-0079.31 moves the owners to a
-  socket brig reserves and dials with its check). The runner
+  names the channel (`program`, whichever program it is), not its path (brig's decision-186):
+  `BrigJail` reserves it (`jail.channel("program")`) in the jail's own channel directory, which
+  brig's mechanism grants on its own, not the policy's `write_allows`, and puts the reservation's
+  `bound_path` in the program's argv (reserve-then-start, TASK-0079.31). The runner waits for it
+  to accept a connection through brig's own verified dial (`Process.wait_ready`, decision-185:
+  the host's one check that what answers is the started process's own, never a link a process of
+  the jail planted at its socket's path), and an owner dials it the same way (`started.connect()`),
+  never the raw path. The runner
   starts two programs, each with a jail of its own compiled from this one policy: the Python
   process (`python:tool`), and the extensions process (`extensions:process`), where the
   model's own plugins run;
@@ -330,10 +341,10 @@ that started a server and ended: `test_the_sweep_leaves_a_jail_a_server_holds_af
 decisions 194 to 196 a program the runner starts is PID 1 of user, pid, mount, network and IPC
 namespaces of its own, with a `/proc` for them: it sees no other program and the supervisor not at
 all, can't signal one, and `$TMPDIR` is a directory of its own, not the one every program of the jail
-shares. Ending a program ends its pid namespace, a `setsid()` child included. What this does not
-reach yet is bh-02's own sockets: each owner's socket directory is a write grant of the Spec like any
-other and stays shared by the jail's programs, so one can reach another owner's socket there until
-TASK-0079.31 moves the owners to brig's channel directory (where each program sees only its own).
+shares. Ending a program ends its pid namespace, a `setsid()` child included. bh-02's own sockets
+reach this too (TASK-0079.31): each program starts in a jail of its own, compiled from this one
+policy, so its reserved socket lives in its own jail's channel directory, under its own `jail_dir`,
+never one another program's jail could reach.
 Run as uid 0, or on a host that blocks nested user namespaces, the programs share the jail's
 namespaces as they did, `Process.namespaces` is `False` and `Process.control` says why; nothing in
 the runner changes with it. A program that is PID 1 of its namespace is not ended by a signal it
