@@ -6,7 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-11-07 04:27'
-updated_date: '2026-11-07 06:15'
+updated_date: '2026-11-07 06:44'
 labels:
   - brig
   - darwin
@@ -69,4 +69,70 @@ Follow-up on advisor review (addressed three gaps):
 3) AC3's _sample_outcome: planted it to always `return None` in a scratch copy (sha256 before/after matched: c7f4a8f2...), reran tests/unit/test_leak_poller_retry.py -- the 2 persistent-failure cases went red exactly as expected (`assert None == "FileNotFoundError(...)"`, `assert None == "OSError('EFAULT')"`), 3 transient/success cases stayed green. Reverted via the scratch copy (sha256 matched original), reran: 5 passed. Also read `_ps_rows` itself: `_PS_ARGV = ["/bin/ps", "-Ao", "pid=,ppid=,pgid=,stat=,command="]` is the same flag set BSD ps (darwin) and procps (Linux) both accept, and its own docstring already documents the EFAULT race this call is prone to under concurrent spawning (an environment captured mid-write, 58/298 in one stress run, 0/296 with the `LC_ALL=C` fixed-env fix already in place) -- the darwin failures the task names are this same race, not a flag incompatibility (if it were a flag bug every sample would fail, and the full-suite run showed zero poll_errors across the whole session).
 
 Ticking AC4 now on both personas' evidence.
+
+Check `scripts/check` exited 1
+
+(154 earlier lines omitted)
+```text
+        (session / "agents" / "stray-file").write_text("not a directory")
+        out = "\n".join(lines_of(tmp_path))
+>       assert "fine" in out and "SECRET" not in out
+E       AssertionError: assert ('fine' in 'rows.jsonl not found: row reloads are not shown\nconversation 1  transcript.jsonl  2026-10-17 20:00:00.000\n  reply 1...)\n  conversation 1  transcript.jsonl  2026-10-17 20:00:06.000\n    reply 1  2026-10-17 20:00:06.000  SECRET General-1')
+
+bh-02/app/tests/test_trajectory_view.py:290: AssertionError
+_____________ test_a_listener_that_left_after_listening_is_refused _____________
+[gw1] darwin -- Python 3.15.0 /Users/brukhabtu/Documents/src/github.com/bruk-io/bh-02/.venv/bin/python
+
+run_id = '6fe68b30217f4966815f5ae8986bea7a'
+jail_dir = '/private/tmp/bg-h_cf1671'
+
+    @pytest.mark.integration
+    def test_a_listener_that_left_after_listening_is_refused(run_id: str, jail_dir: str) -> None:
+        """The kernel names the process that called `listen`; one that has since
+        exited is no vouching peer, even when the socket's holder is in the
+        group (the safe direction for a daemon that forks after `listen`)."""
+        jail = _create(jail_dir, confined=False)
+        reservation = jail.channel("ctl")
+        left = os.path.join(jail_dir, "own", "left")
+        body = f"python3 -c '{_FORK_AFTER_LISTEN}' {reservation.bound_path} {left}; sleep 60"
+        process = jail.start(workload_argv(run_id, body), channel=reservation)
+        try:
+            deadline = time.monotonic() + _READY_S
+            while not os.path.exists(left):
+                assert time.monotonic() < deadline, "the listener never left"
+                time.sleep(0.02)
+>           with pytest.raises(EndpointRefused, match="has left"):
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           AssertionError: Regex pattern did not match.
+E             Expected regex: 'has left'
+E             Actual message: "refused to dial '/private/tmp/bg-h_cf1671/chan/30e1feff56c5c00b.sock': the kernel could not report who listens there ([Errno 57] Socket is not connected). A process of the jail can write the channel directory, so the host dials only the started process's own listener"
+
+libs/brig/tests/integration/test_channel_planted_link.py:271: AssertionError
+=========================== short test summary info ============================
+FAILED bh-02/app/tests/test_python_repl.py::test_a_session_run_from_home_can_t_choose_what_a_later_session_reads_as_the_person_s@jail-lock
+FAILED bh-02/app/tests/test_trajectory_view.py::test_a_sub_agent_is_a_name_in_the_agents_directory_that_bh_02_makes_and_no_other
+FAILED libs/brig/tests/integration/test_channel_planted_link.py::test_a_listener_that_left_after_listening_is_refused
+3 failed, 3850 passed, 231 skipped in 70.28s (0:01:10)
+   FAILED: tests
+== gates
+== (root)
+   ok
+== libs/brig
+   ok
+== libs/cordis
+   ok
+== libs/cordis-helpers
+   ok
+== libs/host-paths
+   ok
+   ok
+== docs
+INFO    -  Cleaning site directory
+INFO    -  Building documentation to directory: /Users/brukhabtu/src/github.com/bruk-io/bh-02/site
+INFO    -  Documentation built in 1.33 seconds
+   ok
+== tokens
+bh-01's tokens and bh-02's theme are in sync
+   ok
+```
 <!-- SECTION:NOTES:END -->
