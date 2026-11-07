@@ -1,7 +1,7 @@
 ---
 id: TASK-0167
 title: 'Subagents README: bh-02 watch also ends when the session is no longer running'
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-18 23:55'
@@ -104,4 +104,6 @@ INFO    -  Documentation built in 1.28 seconds
 bh-01's tokens and bh-02's theme are in sync
    ok
 ```
+
+Review: closed. AC1 met: README watch bullet (commit 7a4085d5) names both ends, agent_end and the session no longer running (pid in running.lock gone), saying so, matching docs/bh-02/reference/command-line.md. Full check: all gates, docs, tokens ok; tests 2 failed / 3851 passed (test_python_repl home-session jail test, brig test_channel_planted_link left-listener test), both outside this doc-only change's area; the worker's 6 test_agents_wiring failures did not recur in the full run. No findings filed.
 <!-- SECTION:NOTES:END -->
