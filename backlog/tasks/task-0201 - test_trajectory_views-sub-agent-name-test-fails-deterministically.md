@@ -1,7 +1,7 @@
 ---
 id: TASK-0201
 title: test_trajectory_view's sub-agent name test fails deterministically
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-11-07 04:27'
@@ -150,4 +150,6 @@ bh-01's tokens and bh-02's theme are in sync
 ```
 
 No repro: the bug was in the test itself (its planted General-1 folded onto general-1 on APFS), so the failing form is the pre-fix test at 681789cd^, which the worker ran and saw fail in 0.60s; the fixed test cannot fail on it, and the worker's planted refused_agent(name.lower()) violation shows the fixed test still catches the rejection it guards.
+
+Review (reviewer, not the worker): CLOSED. AC #1 met: cause (APFS case-folding made the planted General-1 overwrite general-1's transcript) is in the notes; fix renames the planted name to Helper-1 and adds an os.listdir count guard; the test still asserts 'fine' present and no SECRET; passed on macOS and in the Linux container per notes, and in the reviewer's full check. Full check: format/lint/types/gates/docs/tokens ok; tests 3850 passed, 3 failed, all unrelated: test_python_repl home-session test (tracked by TASK-0197) and two brig test_channel_planted_link tests on darwin (filed as DRAFT-0023). No findings against the change itself.
 <!-- SECTION:NOTES:END -->
