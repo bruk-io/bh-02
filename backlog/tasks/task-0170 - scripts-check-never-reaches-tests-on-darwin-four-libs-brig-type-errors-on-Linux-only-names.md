@@ -3,7 +3,7 @@ id: TASK-0170
 title: >-
   scripts/check never reaches tests on darwin: four libs/brig type errors on
   Linux-only names
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-10-25 21:02'
 updated_date: '2026-11-07 06:55'
@@ -113,4 +113,6 @@ bh-01's tokens and bh-02's theme are in sync
 ```
 
 No repro: the failure was mypy's output on darwin (four attr-defined/no-any-return errors in libs/brig), recorded on TASK-0169.01 and TASK-0169.02 before the fix; it is a type-check result, not a test, and the full check's types step on main is the evidence it no longer occurs.
+
+Reviewer verdict: closed. Full check (darwin, test lock) ran and reported every step: format, lint, types passed (no Linux-only name errors in libs/brig), every gate ok, docs ok, tokens ok; tests 3 failed / 3850 passed / 231 skipped. AC #1 (reaches and reports tests, gates, docs) met; the 3 failures are outside this task and already tracked: test_python_repl home-session write -> TASK-0197; test_channel_planted_link -> DRAFT-0021/DRAFT-0023 (passed rerun alone); test_tui_working real-clock -> TASK-0206 (also failed rerun alone here, so maybe more than load). AC #2: 3ee5f3e's sys.platform guards keep the Linux path type-checked; approach noted. No new findings, nothing filed; the check changed no files.
 <!-- SECTION:NOTES:END -->
