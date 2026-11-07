@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-07 04:27'
-updated_date: '2026-11-07 19:43'
+updated_date: '2026-11-07 19:45'
 labels:
   - security
   - runner
@@ -45,4 +45,70 @@ Owner stand-in (Opus), 2026-11-06: Approved in this run (Opus worker, security).
 Diagnosis (AC 1): two inputs were written, not one; pytest shows only the first diff. Index 5 renamed <tmp>/home/xdg (the parent of the trusted <tmp>/home/xdg/bh-02) to home/moved, and index 6 renamed <tmp>/home/.config (the parent of the trusted, absent ~/.config/bh-02) to home/moved-too; a temporary diagnostic test, since removed, printed WROTE for both. Cause: brig's Seatbelt profile. SBPL judges a rename by its source and destination paths only, so the deny on xdg/bh-02 never sees its parent leave with it. Probed with sandbox-exec under brig's profile shape (deny default, system.sb): renaming the parent away, rewriting the denied file under the new name and renaming it back all succeeded, and the changed file was then at the denied path. SPEC.md decision-168 had held that seatbelt needs no pin. The test's darwin expectation is right. Fix in brig (SPEC first): SPEC.md decision-207, with decision-168's sentence amended. render_sbpl emits one (deny file-write-unlink (literal RESOLVED)) per directory brig.mech.bwrap.pins names, after the carve-outs. Probed: file-write-unlink refuses a rename-away and a rename over an existing pin, while mkdir, file create, chmod and utimes inside or on the pin stay allowed; file-write* on the literal would also refuse utimes. AC 2: the home-session test passes; with the pin line planted out of profile.py (scratch copy, sha256 eebc23a4... restored and matched) it failed again at index 5, WROTE != DENIED, seen. New unit tests in test_seatbelt_profile.py (pin emission, refusal of an unresolved pin, control with no pin); with the pin line removed, the new test, the golden and the sealed /private/tmp case failed, seen. Runs: scripts/check libs/brig exit 0 (1308 passed); scripts/check bh-02/app --no-gates --no-docs exit 0 (359 passed); runner and python plugin tests 253 passed; brig seatbelt/darwin tests 84 passed; scripts/linux-jail-check exit 0 (327 passed, 2 skipped). AC 3 is left for the reviewer: the full scripts/check was not run. Filed TASK-0209 for two gaps that are measured and named in decision-207: a tree renamed onto an absent pin, and a write root renamed into another root.
 
 Added libs/brig/tests/integration/test_seatbelt_pins.py: a real seatbelt jail in which a rename of the pin away and a rename over an existing empty pin are refused with seatbelt's denial signature, the carve-out's file stays unchanged, and, in the same jail as the control, mkdir, write and remove inside the pin plus chmod and utime on it succeed. decision-207 cites it. With the pin line planted out of profile.py it failed (rename_away and rename_over both OK), seen; restored, sha256 eebc23a4... matched. Re-run of scripts/check libs/brig: exit 1, only from libs/brig/tests/integration/test_channel_planted_link.py, which compiles an empty Stack on darwin, so no seatbelt is involved. Run alone it failed 1 time in 5. This is the known flake TASK-0206, not this change; the first scripts/check libs/brig run passed with it.
+
+Check `scripts/check` exited 0
+
+(32 earlier lines omitted)
+```text
+........................................................................ [ 35%]
+........................................................................ [ 36%]
+........................................................................ [ 38%]
+........................................................................ [ 40%]
+........................................................................ [ 42%]
+........................................................................ [ 44%]
+........................................................................ [ 45%]
+........................................................................ [ 47%]
+............................................s.......s......sssssssssssss [ 49%]
+sssssssssssssss.sssssss.ssssssssssssssssssssssssss...sssssssssssssssssss [ 51%]
+ssss.s.......s.......................................................... [ 52%]
+....s................................................................... [ 54%]
+...............s..ssssssssssssssssssssssssssss.sssssssssssssssssssssssss [ 56%]
+ssssssssssss...s..s..s..s................................sssssssssssssss [ 58%]
+sssss................................................................... [ 59%]
+........................................................................ [ 61%]
+........................................................................ [ 63%]
+........................................................................ [ 65%]
+........................................................................ [ 66%]
+........................................................................ [ 68%]
+........................................................................ [ 70%]
+........................................................................ [ 72%]
+.............................................s.......................... [ 73%]
+........................................................................ [ 75%]
+........................................................................ [ 77%]
+........................................................................ [ 79%]
+........................................................................ [ 80%]
+........................................................................ [ 82%]
+........................................................................ [ 84%]
+........................................................................ [ 86%]
+........................................................................ [ 88%]
+........................................................................ [ 89%]
+........................................................................ [ 91%]
+........................................................................ [ 93%]
+........................................................................ [ 95%]
+........................................................................ [ 96%]
+........................................................................ [ 98%]
+..........................................................               [100%]
+3859 passed, 231 skipped in 72.56s (0:01:12)
+   ok
+== gates
+== (root)
+   ok
+== libs/brig
+   ok
+== libs/cordis
+   ok
+== libs/cordis-helpers
+   ok
+== libs/host-paths
+   ok
+   ok
+== docs
+INFO    -  Cleaning site directory
+INFO    -  Building documentation to directory: /Users/brukhabtu/src/github.com/bruk-io/bh-02/site
+INFO    -  Documentation built in 1.25 seconds
+   ok
+== tokens
+bh-01's tokens and bh-02's theme are in sync
+   ok
+```
 <!-- SECTION:NOTES:END -->
