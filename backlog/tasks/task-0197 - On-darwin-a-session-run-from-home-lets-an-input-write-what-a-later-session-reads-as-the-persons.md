@@ -28,7 +28,7 @@ Found 2026-11-06 on macOS 27.0.1 (Python 3.15.0rc2), with and without Claude Cod
 <!-- AC:BEGIN -->
 - [x] #1 The path that is written is named and the cause found (Seatbelt profile, spec_for's denies, or the test's expectations on darwin), with the evidence in the notes
 - [x] #2 On darwin a jailed input cannot write any path the test lists; the test passes on macOS and still fails if the deny is removed (seen failing)
-- [ ] #3 scripts/check passes on Linux (scripts/linux-jail-check too) and the test passes on macOS
+- [x] #3 scripts/check passes on Linux (scripts/linux-jail-check too) and the test passes on macOS
 <!-- AC:END -->
 
 ## Implementation Plan
