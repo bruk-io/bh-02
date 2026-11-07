@@ -122,4 +122,6 @@ INFO    -  Documentation built in 1.26 seconds
 bh-01's tokens and bh-02's theme are in sync
    ok
 ```
+
+Review (reviewer, 2026-11-07): NOT closed. Full check (record-check --tier full) passed on darwin, no files rewritten. AC1 and AC2 met on the evidence (cause named; six tests pass on darwin, and on Linux via linux-jail-check). The fix matches the plan and the precedent in test_shell_command.py. AC3 is not met: on Linux test_a_child_s_python_runs_in_a_jail_of_its_own_under_the_confined_runner fails (TASK-0207). This task stays open until TASK-0207 is fixed, or until the owner narrows AC3 and labels it finish-moved.
 <!-- SECTION:NOTES:END -->
