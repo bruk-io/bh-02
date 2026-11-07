@@ -3,7 +3,7 @@ id: TASK-0197
 title: >-
   On darwin a session run from home lets an input write what a later session
   reads as the person's
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-11-07 04:27'
@@ -113,4 +113,6 @@ bh-01's tokens and bh-02's theme are in sync
 ```
 
 No repro: the repro tests (bh-02/app/tests/test_python_repl.py::test_a_session_run_from_home_can_t_choose_what_a_later_session_reads_as_the_person_s and libs/brig/tests/integration/test_seatbelt_pins.py) fail only without the fix, which is already committed; the worker's notes record them failing with the pin line removed (WROTE at index 5) and the reviewer cannot revert code to re-record it. Both pass in the reviewer's full check.
+
+Reviewer verdict: closed. Full scripts/check on macOS passed through the test lock (3859 passed, 231 skipped; gates, docs, tokens ok; no files reformatted), including the home-session test. linux-jail-check passed per the worker (327 passed, 2 skipped). AC #1 diagnosis and AC #2 seen-failing are evidenced in the notes. Remaining darwin gaps are filed as TASK-0209. No new findings.
 <!-- SECTION:NOTES:END -->
