@@ -1,7 +1,7 @@
 ---
 id: TASK-0048
 title: Check on macOS whether a jailed input can hard-link a file it may not read
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-07 03:05'
@@ -113,4 +113,6 @@ INFO    -  Documentation built in 1.34 seconds
 bh-01's tokens and bh-02's theme are in sync
    ok
 ```
+
+Reviewed and closed. AC#1 met: test_seatbelt_hardlink_read_deny.py drives the real seatbelt path; hard-linking a read_denies source inside write_allows is refused, with the control in the same test, and the planted violation shows the test can fail; it passed when I re-ran it. AC#2 is conditional ('If it does'): the test shows the link does not succeed, so the condition is false and the criterion holds without a change; ticked on that evidence. Full check: format, lint, types, gates, docs and tokens ok; tests 2 failed of 3855, both outside this change (test + SPEC.md only). test_python_repl's home-session test is the known TASK-0197 bug and fails every time. test_channel_planted_link's listener-left test passed when re-run (a flake under load, covered by TASK-0206). No new drafts. The commit is 6febc8e9 on main, not the 614af78f the report named (it was rebased).
 <!-- SECTION:NOTES:END -->
