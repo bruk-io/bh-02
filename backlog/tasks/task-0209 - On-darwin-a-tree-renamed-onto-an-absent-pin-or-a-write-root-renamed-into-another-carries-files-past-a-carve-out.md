@@ -3,7 +3,7 @@ id: TASK-0209
 title: >-
   On darwin a tree renamed onto an absent pin, or a write root renamed into
   another, carries files past a carve-out
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-11-07 19:34'
@@ -118,4 +118,6 @@ bh-01's tokens and bh-02's theme are in sync
 ```
 
 No repro: the fix is already committed (550cec5d), so the repro tests pass on this tree; the failing-before evidence is the worker's plant run above (fixes removed by scratch copy + sha256: test_seatbelt_pins.py::test_a_write_root_above_a_carve_out_can_t_be_renamed_into_another_root and test_runner_confined.py::test_a_darwin_jail_holds_an_absent_directory_above_a_write_deny_against_a_rename_onto_it both failed). Reviewer reran both: 2 passed.
+
+Review (reviewer agent): closed. Full check (record-check --tier full, through testlock) green: 3862 passed, gates, docs, tokens ok; tree clean afterwards. AC1: three new tests with plant evidence in notes. AC2: root pin in render_sbpl and absent-pin creation in BrigJail._absent_pins close both shapes; SPEC.md decision-208 rules it, decision-207 amended. AC3: linux-jail-check exit 0 (327 passed) per worker; Linux code path unchanged in the diff. Findings: none blocking. Documented trade-offs: a jailed input can no longer rename/remove the project root on darwin (Linux parity); an empty ~/.config or .git exists on the host while a darwin jail runs and is swept after. No drafts filed.
 <!-- SECTION:NOTES:END -->
