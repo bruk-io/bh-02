@@ -5,12 +5,13 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-07 04:27'
-updated_date: '2026-11-07 05:53'
+updated_date: '2026-11-07 05:54'
 labels:
   - subagents
   - darwin
   - tests
   - size-2
+  - finish-moved
 dependencies: []
 priority: medium
 type: bug
@@ -26,13 +27,13 @@ On macOS 27.0.1 (2026-11-06, with and without Claude Code's sandbox, run alone):
 <!-- AC:BEGIN -->
 - [x] #1 The cause is named in the notes (the product's handling of a child's program on darwin, or the test's liveness check)
 - [x] #2 The six tests pass on macOS and Linux; if the product was wrong, a test shows the fix
-- [ ] #3 The subagents plugin's tests pass on macOS and Linux
+- [x] #3 The subagents plugin's tests pass on macOS and Linux, except test_a_child_s_python_runs_in_a_jail_of_its_own_under_the_confined_runner on Linux, which TASK-0207 owns
 <!-- AC:END -->
 
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-1) Confirm the cause: run test_agent_stop_ends_the_child_and_its_python_program on darwin, read the failure at line 310 (_up's assert all(_running(pid)...)). Inspect _running: it reads /proc/{pid}/stat, which doesn't exist on darwin, so OSError -> always returns False, so _up's liveness assert always fails once pids appear. This is the test's liveness check, not the product (the child pid files do appear, proving the python program is up). 2) Precedent: bh-02/plugins/commands-cordis-plugin/tests/test_shell_command.py's _alive() already branches: Linux reads /proc for zombie-exclusion, darwin uses os.kill(pid,0). Port that same branch into test_agents_wiring.py's _running, used by _up and _all_gone. 3) Plant: run the six named tests on darwin before the fix (expect failure at line 310), then after the fix (expect pass). 4) Run the full subagents plugin test file and scripts/check for subagents-cordis-plugin (docs/gates). 5) Note in the task that Linux is not independently verified here (no linux test run in this env) but the Linux branch is unchanged (still /proc-based) so no regression risk there; call out if I can run under linux-jail-check/docker python directly to sanity check the branch runs there too if time permits.
+Fix round after review: AC3 is the one blocking finding. Confirmed HEAD (ebfb5c48) already carries the _running fix (4dd3b2d1, same as the orphaned worktree commit 53365d3c the delegation named; no cherry-pick needed, diff between them showed only unrelated draft files). The owner stand-in already ruled in TASK-0200's notes: narrow AC3 to exclude TASK-0207's confined-runner Linux failure, add finish-moved, commit. Apply exactly that: replace AC3's text with the stand-in's wording, keep AC1/AC2 checked, check AC3 (its narrowed wording is already satisfied by evidence in the notes: 137 passed/1 failed on Linux, 137 passed/1 skipped on darwin, same single unrelated test), add the finish-moved label, append a short note pointing at the already-recorded ruling, then squash into one commit.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -126,4 +127,6 @@ bh-01's tokens and bh-02's theme are in sync
 Review (reviewer, 2026-11-07): NOT closed. Full check (record-check --tier full) passed on darwin, no files rewritten. AC1 and AC2 met on the evidence (cause named; six tests pass on darwin, and on Linux via linux-jail-check). The fix matches the plan and the precedent in test_shell_command.py. AC3 is not met: on Linux test_a_child_s_python_runs_in_a_jail_of_its_own_under_the_confined_runner fails (TASK-0207). This task stays open until TASK-0207 is fixed, or until the owner narrows AC3 and labels it finish-moved.
 
 Owner stand-in (Opus), 2026-11-07: Narrow AC3; do not wait for TASK-0207. The task's scope was the six darwin liveness failures, and AC1/AC2 are met on both platforms. The one Linux failure (test_a_child_s_python_runs_in_a_jail_of_its_own_under_the_confined_runner) stops in _booted before the changed _running check, is skipped on darwin, and is already tracked as TASK-0207, so holding this task open would only stall a finished fix. Narrowing changes no check: the test still runs and still fails on Linux until TASK-0207 fixes it. New AC3 wording: 'The subagents plugin's tests pass on macOS and Linux, except test_a_child_s_python_runs_in_a_jail_of_its_own_under_the_confined_runner on Linux, which TASK-0207 owns'. Whoever applies it edits AC3, adds the finish-moved label, and commits both with this note before the task goes back to review.
+
+Fix round after review (AC3 was the one blocking finding). Confirmed HEAD (ebfb5c48, this checkout's main) already carries the _running fix: 4dd3b2d1 is the same change as the orphaned worktree commit 53365d3c the delegation named as the 'earlier attempt' (diff between the two commits showed only unrelated draft files, not the fix itself), so no cherry-pick was needed or done. Applying the ruling already recorded above ('Owner stand-in (Opus), 2026-11-07: Narrow AC3...'): AC3's text is replaced with its exact wording, checked (satisfied by the evidence already in these notes: 137 passed/1 failed on Linux and 137 passed/1 skipped on darwin, same single pre-existing, unrelated confined-runner test, TASK-0207); the finish-moved label is added. AC1/AC2 left untouched (already checked, not re-verified this round, per the fix-round brief). No product or test code changed this round; no pytest/scripts/check run (nothing to re-prove).
 <!-- SECTION:NOTES:END -->
