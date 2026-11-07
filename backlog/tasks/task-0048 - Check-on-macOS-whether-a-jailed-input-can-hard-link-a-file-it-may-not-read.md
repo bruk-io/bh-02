@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-07 03:05'
-updated_date: '2026-11-07 07:11'
+updated_date: '2026-11-07 07:18'
 labels:
   - jail
   - security
@@ -47,4 +47,70 @@ Evidence for AC#1:
 
 Not verified / out of scope:
 - `scripts/check libs/brig`: format, lint, mypy, all four gates (root, libs/brig, libs/cordis, libs/cordis-helpers, libs/host-paths) and docs all report `ok`. The `tests` stage itself fails, but on pre-existing, unrelated failures already present before this change and outside TASK-0048's scope: a collection-time AttributeError in tests/unit/test_process_namespaces_pure.py (`signal.SIGRTMIN` does not exist on darwin), plus several integration/unit tests (test_supervisor_link.py's AF_UNIX/SOCK_SEQPACKET socketpair, test_subset.py, test_teardown_zombies.py, test_exit_status_is_recorded_not_invented.py) that fail or error under this machine's heavy concurrent load (other sessions' scripts/check runs holding the lock throughout). None touch seatbelt, hard links, or SPEC.md Sec.6; the new test is not among the failures in any run. Left unticked for the reviewer per the standing rule.
+
+Check `scripts/check` exited 1
+
+(122 earlier lines omitted)
+```text
+>       assert [s.rsplit("\n", 1)[-1] for s in said] == ["DENIED"] * len(inputs), said
+E       AssertionError: ['(/private/var/folders/rf/f34xmczn4659gm98hrsprydc0000gn/T/pytest-of-brukhabtu/pytest-1000/popen-gw0/test_a_session_r...me/xdg/bh-02/startup.py ran first: no public functions)
+E         DENIED', 'DENIED', 'DENIED', 'DENIED', 'DENIED', 'WROTE', ...]
+E       assert ['DENIED', 'D... 'WROTE', ...] == ['DENIED', 'D...'DENIED', ...]
+E         
+E         At index 5 diff: 'WROTE' != 'DENIED'
+E         Use -v to get more diff
+
+bh-02/app/tests/test_python_repl.py:980: AssertionError
+_____________ test_a_listener_that_left_after_listening_is_refused _____________
+[gw7] darwin -- Python 3.15.0 /Users/brukhabtu/Documents/src/github.com/bruk-io/bh-02/.venv/bin/python
+
+run_id = '9616b916d710418d95cef9e6c3852ea2'
+jail_dir = '/private/tmp/bg-lovldho5'
+
+    @pytest.mark.integration
+    def test_a_listener_that_left_after_listening_is_refused(run_id: str, jail_dir: str) -> None:
+        """The kernel names the process that called `listen`; one that has since
+        exited is no vouching peer, even when the socket's holder is in the
+        group (the safe direction for a daemon that forks after `listen`)."""
+        jail = _create(jail_dir, confined=False)
+        reservation = jail.channel("ctl")
+        left = os.path.join(jail_dir, "own", "left")
+        body = f"python3 -c '{_FORK_AFTER_LISTEN}' {reservation.bound_path} {left}; sleep 60"
+        process = jail.start(workload_argv(run_id, body), channel=reservation)
+        try:
+            deadline = time.monotonic() + _READY_S
+            while not os.path.exists(left):
+                assert time.monotonic() < deadline, "the listener never left"
+                time.sleep(0.02)
+>           with pytest.raises(EndpointRefused, match="has left"):
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           Failed: DID NOT RAISE EndpointRefused
+
+libs/brig/tests/integration/test_channel_planted_link.py:271: Failed
+=========================== short test summary info ============================
+FAILED bh-02/app/tests/test_python_repl.py::test_a_session_run_from_home_can_t_choose_what_a_later_session_reads_as_the_person_s@jail-lock
+FAILED libs/brig/tests/integration/test_channel_planted_link.py::test_a_listener_that_left_after_listening_is_refused
+2 failed, 3853 passed, 231 skipped in 73.07s (0:01:13)
+   FAILED: tests
+== gates
+== (root)
+   ok
+== libs/brig
+   ok
+== libs/cordis
+   ok
+== libs/cordis-helpers
+   ok
+== libs/host-paths
+   ok
+   ok
+== docs
+INFO    -  Cleaning site directory
+INFO    -  Building documentation to directory: /Users/brukhabtu/src/github.com/bruk-io/bh-02/site
+INFO    -  Documentation built in 1.34 seconds
+   ok
+== tokens
+bh-01's tokens and bh-02's theme are in sync
+   ok
+```
 <!-- SECTION:NOTES:END -->
