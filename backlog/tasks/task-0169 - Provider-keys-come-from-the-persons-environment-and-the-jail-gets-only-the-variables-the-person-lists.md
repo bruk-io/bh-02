@@ -50,14 +50,14 @@ The `local.env` rule exists so a key never reaches code the model writes. The ja
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A `key = { env = "NAME" }` on an openai endpoint sends the value of NAME from the process environment as that request's Authorization header, and a missing variable is refused with a message naming the variable and where it was looked for.
-- [ ] #2 A `key` with `cmd` or `op`, and an optional `ttl_ms` (default 300000), behaves as `key_command` and `key_ttl_ms` did: run through the shell as the person, kept for the TTL, dropped at once when the server refuses it, and errors name the command, never what it printed.
-- [ ] #3 A bare-string `key`, a `key` with no source or more than one, a `ttl_ms` beside `env`, an unknown field, and any `key` in a layer's `extra` are each refused with a message that says what to write instead; `key_command` and `key_ttl_ms` are no longer read and no test pins them.
-- [ ] #4 A `claude-code` endpoint with a `base_url` accepts `key = { cmd = ... }` or `{ op = ... }` and hands the command to the Claude Code CLI; `{ env = ... }` there is refused with a message saying why; bh-02 never holds that key.
-- [ ] #5 `local.env` is no longer read for any key or for `CLAUDE_CODE_OAUTH_TOKEN`, and the `hide = ["local.env"]` default, the credential-list entries and the `/release` and mid-session flows built on it are removed or reworded, with the docs saying which old files stop working.
-- [ ] #6 The runner's environment allow-list is read from a standing file under `~/.config/bh-02/` without `--patch`, and the model's code cannot write that file; a test shows a variable not on the list (a provider key exported in the shell) is absent from the jailed worker's environment.
-- [ ] #7 Under `--no-jail`, provider keys in the process environment are not scrubbed, and the jail docs state that this exposes them to the model's code.
-- [ ] #8 README.md, docs/bh-02/using/models.md, the jail docs, get-started, GLOSSARY.md and the models plugin README describe the new `key` object, the environment source and the allow-list's home, and scripts/check passes.
+- [x] #1 A `key = { env = "NAME" }` on an openai endpoint sends the value of NAME from the process environment as that request's Authorization header, and a missing variable is refused with a message naming the variable and where it was looked for.
+- [x] #2 A `key` with `cmd` or `op`, and an optional `ttl_ms` (default 300000), behaves as `key_command` and `key_ttl_ms` did: run through the shell as the person, kept for the TTL, dropped at once when the server refuses it, and errors name the command, never what it printed.
+- [x] #3 A bare-string `key`, a `key` with no source or more than one, a `ttl_ms` beside `env`, an unknown field, and any `key` in a layer's `extra` are each refused with a message that says what to write instead; `key_command` and `key_ttl_ms` are no longer read and no test pins them.
+- [x] #4 A `claude-code` endpoint with a `base_url` accepts `key = { cmd = ... }` or `{ op = ... }` and hands the command to the Claude Code CLI; `{ env = ... }` there is refused with a message saying why; bh-02 never holds that key.
+- [x] #5 `local.env` is no longer read for any key or for `CLAUDE_CODE_OAUTH_TOKEN`, and the `hide = ["local.env"]` default, the credential-list entries and the `/release` and mid-session flows built on it are removed or reworded, with the docs saying which old files stop working.
+- [x] #6 The runner's environment allow-list is read from a standing file under `~/.config/bh-02/` without `--patch`, and the model's code cannot write that file; a test shows a variable not on the list (a provider key exported in the shell) is absent from the jailed worker's environment.
+- [x] #7 Under `--no-jail`, provider keys in the process environment are not scrubbed, and the jail docs state that this exposes them to the model's code.
+- [x] #8 README.md, docs/bh-02/using/models.md, the jail docs, get-started, GLOSSARY.md and the models plugin README describe the new `key` object, the environment source and the allow-list's home, and scripts/check passes.
 <!-- AC:END -->
 
 ## Implementation Notes
