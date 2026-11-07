@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-07 04:27'
-updated_date: '2026-11-07 04:54'
+updated_date: '2026-11-07 04:56'
 labels:
   - scripts
   - tests
@@ -49,4 +49,70 @@ AC #2. scripts/check: TEST_WORKERS = str(min(8, os.cpu_count() or 1)), the comme
 AC #3, failures under load or not filed before: the three 2 s boot deadlines in test_booting.py (fail at 28 workers, pass at 8: the cap hides them) -> TASK-0204; brig's run_id teardown running a missing /usr/bin/docker, an ERROR on whichever test ends each worker (8 a run, the 'flaky' warden/host-paths/brig ERRORs) -> TASK-0205; test_tui_working real-clock and test_channel_planted_link listener test, each failing in one run of three -> TASK-0206. The rest are filed: TASK-0197 (session from home), TASK-0198 (supervisor_link SEQPACKET, SIGRTMIN, exit_status, teardown_zombies), TASK-0199 (interpreter-deny chflags), TASK-0200 (six sub-agent wiring), TASK-0201 (trajectory name), TASK-0169.04 (keyed model key), TASK-0169.05 (xdist groups). Not verified: a run at 28 workers (this run's rules cap pytest at -n 8).
 
 Correction to the AC #1 note: the captured pytest-v.log is not the 28-minute run the description reports. It is a later -n auto run that reached ~99% and was stopped at session finish (OSError: cannot send (already closed?)): gw24 went silent at 2% right after its timed-out booting test, and exactly one collected test never started (the log does not show which worker it was queued on, so it is not attributed to gw24 here). The description's run stranded 377 tests behind its silent worker. Same mechanism, two runs; how much work is stranded depends on how much the silent worker had queued when its test missed the deadline.
+
+Check `scripts/check` exited 1
+
+(4406 earlier lines omitted)
+```text
+FAILED bh-02/plugins/runner-cordis-plugin/tests/test_runner_confined.py::test_the_walk_to_the_interpreter_follows_relative_links_and_dots_and_ends_at_a_loop@jail-lock
+FAILED bh-02/app/tests/test_real_launch.py::test_a_keyed_model_s_key_never_reaches_an_input_s_environment
+FAILED bh-02/plugins/subagents-cordis-plugin/tests/test_agents_wiring.py::test_retiring_a_child_while_it_replies_ends_the_call_with_no_report@jail-lock
+FAILED bh-02/plugins/subagents-cordis-plugin/tests/test_agents_wiring.py::test_unloading_the_agents_row_retires_every_child_it_holds@jail-lock
+FAILED bh-02/plugins/subagents-cordis-plugin/tests/test_agents_wiring.py::test_ctrl_c_stops_the_parent_s_reply_and_the_child_it_waits_on_from_the_tool@jail-lock
+FAILED bh-02/plugins/subagents-cordis-plugin/tests/test_agents_wiring.py::test_ctrl_c_stops_the_child_a_python_input_waits_on@jail-lock
+FAILED bh-02/app/tests/test_trajectory_view.py::test_a_sub_agent_is_a_name_in_the_agents_directory_that_bh_02_makes_and_no_other
+FAILED bh-02/app/tests/test_xdist_groups.py::test_every_test_file_that_starts_a_jail_is_in_a_group
+FAILED bh-02/plugins/subagents-cordis-plugin/tests/test_agents_wiring.py::test_agent_stop_ends_the_child_and_its_python_program@jail-lock
+FAILED bh-02/plugins/subagents-cordis-plugin/tests/test_agents_wiring.py::test_release_stops_the_children_s_programs_and_their_conversations_go_on@jail-lock
+FAILED libs/brig/tests/integration/test_channel_planted_link.py::test_a_listener_that_left_after_listening_is_refused
+FAILED libs/brig/tests/integration/test_exit_status_is_recorded_not_invented.py::test_a_pid_is_watched_until_its_status_is_recorded_so_no_one_sees_neither
+FAILED libs/brig/tests/unit/test_teardown_zombies.py::test_teardown_fails_an_item_whose_table_it_cannot_read
+ERROR libs/brig/tests/unit/test_process_namespaces_pure.py - AttributeError: ...
+ERROR libs/brig/tests/unit/test_process_namespaces_pure.py - AttributeError: ...
+ERROR libs/brig/tests/unit/test_process_namespaces_pure.py - AttributeError: ...
+ERROR libs/brig/tests/unit/test_process_namespaces_pure.py - AttributeError: ...
+ERROR libs/brig/tests/unit/test_process_namespaces_pure.py - AttributeError: ...
+ERROR libs/brig/tests/unit/test_process_namespaces_pure.py - AttributeError: ...
+ERROR libs/brig/tests/unit/test_process_namespaces_pure.py - AttributeError: ...
+ERROR libs/brig/tests/unit/test_process_namespaces_pure.py - AttributeError: ...
+ERROR libs/brig/tests/integration/test_supervisor_link.py::test_descriptors_cross_both_ways
+ERROR libs/brig/tests/integration/test_supervisor_link.py::test_a_missed_deadline_calls_unresponsive_once_ends_the_link_and_ignores_the_late_reply
+ERROR libs/brig/tests/integration/test_supervisor_link.py::test_a_closed_socket_wakes_every_caller_waiting_on_it
+ERROR libs/brig/tests/integration/test_supervisor_link.py::test_the_hello_is_waited_for_and_a_socket_that_closes_first_is_gone
+ERROR libs/brig/tests/integration/test_supervisor_link.py::test_a_reply_nobody_waits_for_and_a_message_it_cannot_read_are_dropped_with_their_fds
+ERROR libs/brig/tests/integration/test_supervisor_link.py::test_a_link_nobody_holds_closes_its_end
+ERROR libs/brig/tests/integration/test_supervisor_link.py::test_close_is_idempotent_and_sends_end_of_file
+ERROR libs/brig/tests/integration/test_supervisor_link.py::test_replies_find_their_callers_by_id_whatever_order_they_come_in
+ERROR libs/brig/tests/integration/test_supervisor_link.py::test_an_error_reply_is_a_refusal_with_the_reason_and_its_descriptors_are_closed
+ERROR examples/warden/plugins/warden-systray-cordis-plugin/tests/test_tray.py::test_no_names_is_a_placeholder_label
+ERROR examples/warden/app/tests/test_warden_bootstrap.py::test_shutting_down_terminates_every_registered_process
+ERROR examples/warden/app/tests/test_warden_bootstrap.py::test_a_command_that_cannot_spawn_fails_the_composition
+ERROR examples/warden/plugins/warden-cordis-plugin/tests/test_process.py::test_spawns_the_command_and_terminates_it_on_exit
+ERROR libs/brig/tests/unit/test_strategies.py::test_specs_strategy_can_emit_a_non_default_value_for_every_field[fs.read_allows]
+ERROR libs/host-paths/tests/test_host_paths_appender.py::test_a_cancelled_flush_leaves_the_writes_to_finish
+ERROR examples/warden/plugins/warden-systray-cordis-plugin/tests/test_systray_wiring.py::test_the_row_binds_a_zero_argument_factory_and_runs_nothing
+ERROR libs/host-paths/tests/test_host_paths_appender.py::test_close_waits_for_the_last_write_then_closes_the_file_and_takes_no_more
+16 failed, 3794 passed, 221 skipped, 25 errors in 75.65s (0:01:15)
+   FAILED: tests
+== gates
+== (root)
+   ok
+== libs/brig
+   ok
+== libs/cordis
+   ok
+== libs/cordis-helpers
+   ok
+== libs/host-paths
+   ok
+   ok
+== docs
+INFO    -  Cleaning site directory
+INFO    -  Building documentation to directory: /Users/brukhabtu/src/github.com/bruk-io/bh-02/site
+INFO    -  Documentation built in 1.33 seconds
+   ok
+== tokens
+bh-01's tokens and bh-02's theme are in sync
+   ok
+```
 <!-- SECTION:NOTES:END -->
