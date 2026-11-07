@@ -6,7 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-11-07 04:27'
-updated_date: '2026-11-07 06:44'
+updated_date: '2026-11-07 06:45'
 labels:
   - brig
   - darwin
@@ -135,4 +135,6 @@ INFO    -  Documentation built in 1.33 seconds
 bh-01's tokens and bh-02's theme are in sync
    ok
 ```
+
+Review (reviewer, 2026-11-07): NOT CLOSED. Full check (recorded above) failed tests: 3 failed / 3850 passed. Two are outside this task and already tracked (test_python_repl home-session -> TASK-0197; test_trajectory_view sub-agent name -> TASK-0201). The third is in this task's scope: libs/brig/tests/integration/test_channel_planted_link.py::test_a_listener_that_left_after_listening_is_refused fails intermittently on darwin -- 2 of 3 standalone runs of that file failed with 'Failed: DID NOT RAISE EndpointRefused' (wait_ready returned instead of refusing a listener that has left). A full 'uv run pytest libs/brig -q -n 8' rerun passed, so the worker's single green run did not catch it. AC1 says brig's suite passes on macOS; a test that fails most standalone runs does not meet it. Blocking: trace why darwin reports the forked-after-listen listener as still vouching (likely LOCAL_PEERPID / pid-liveness check racing the 'left' marker, or darwin semantics differing from SO_PEERCRED) and either fix the check or make the test's premise darwin-correct, with evidence of repeated passes (e.g. 20 runs). Rest of the diff reviewed: SIGRTMIN guard, /usr/bin/true, SEQPACKET probe-skip with reason, pid collision fix, _sample_outcome retry and docker_reachable gate look correct; gates, lint, types, docs all ok.
 <!-- SECTION:NOTES:END -->
