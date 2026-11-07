@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-07 04:50'
-updated_date: '2026-11-07 22:16'
+updated_date: '2026-11-07 22:27'
 labels:
   - tests
   - darwin
@@ -42,4 +42,70 @@ Owner stand-in (Opus), 2026-11-06: TASK-0198 will not fix this test; it is this 
 Folded in from two drafts (archived), 2026-11-07. (1) 'brig's planted-link refusal test fails on darwin under the full parallel check': TASK-0079.34's review ran scripts/check (full tier, xdist) on macOS 27.0.1 on 2026-11-07 and test_a_listener_that_left_after_listening_is_refused FAILED (no traceback kept in the -q summary); the orchestrator's serial run of 2026-11-06 passed it. It is in the verified dial TASK-0079.31 will rely on, so a load-dependent failure may be a real race in the dial's leader/peer check. (2) 'brig's planted-link channel tests fail on darwin: kernel can't report the listener': in TASK-0201's full check (2026-11-07, macOS 27) both test_a_listener_that_left_after_listening_is_refused and test_a_link_planted_with_the_empty_stack_is_refused_by_readiness_and_connect failed with EndpointRefused '... the kernel could not report who listens there ([Errno 57] Socket is not connected)' from brig/run/dial.py:219. That is mode (b) above, and it shows mode (b) also hits the second test, test_a_link_planted_with_the_empty_stack_is_refused_by_readiness_and_connect, which this task did not name before. The fix should leave both tests passing on macOS and Linux, still asserting the refusal each was written to, and still failing if that refusal is removed.
 
 Worker claude, 2026-11-07. Causes, with evidence. BRIG, both modes: darwin LOCAL_PEERPID is the connection's peer, not the listen caller. Probe on macOS 27.0.1, a listener that forks and exits with its child holding the socket: child not accepting gives the listen pid, exited; child accepted with the connection open gives the child's pid, alive and in the group; child accepted and closed gives OSError 57 ENOTCONN. The forking workload's child accepted and closed every connection, so the host's peer read raced it three ways: has left (pass), the live child in the group (mode a, DID NOT RAISE), ENOTCONN (mode b). The serving workload closed each connection right after sending, so a genuine control's dial could read ENOTCONN (mode b in the empty-stack test, and seen once in the control of test_a_peer_the_kernel_cannot_report). Not a dial race; the dial's checks are unchanged. Baseline before the fix: 20 runs of test_channel_planted_link.py on darwin, 4 failed (3 DID NOT RAISE, 1 Errno 57). Fix: the forking child holds the socket and never accepts; the serving workload holds each connection until the host closes it. SPEC.md decision-208 records the measured darwin semantics and residuals, no dial code change; TASK-0210 filed for the darwin close-first residual and the identical serving workload in test_channel_reservation_starts.py. Plant: has-left clause removed from _peer_refusal on a scratch-backed copy, sha256 restored 22209aa7: the fixed test red 3 of 3. TUI, two causes. 1: Textual's interval skips ticks it is late for, so a loaded loop shows 1s then 3s and the exact 2s frame is never seen; the test now waits for a count larger than the first. Planted a 2.2 s loop block after the first appearance: the old test failed with the recorded symptom, the new one passed. 2: found in the 20-run proof, Working 0s at the first real tick, because Textual sleeps 0.5 ms short and the widget floored 0.9995 s. The widget now rounds; new test test_a_tick_a_hair_early_says_the_second_it_is_nearest is red against the old widget and green after. Plant that stops the count at 1.5 s: the real-clock test red; restored, sha256 0a6b35db. Proof: darwin 20 of 20 test_channel_planted_link.py; darwin 20 of 20 test_tui_working.py plus test_tui_command_working.py; Linux via scripts/linux-jail-check --shell with bubblewrap, 20 of 20 of test_channel_planted_link.py plus test_tui_working.py, 33 passed each, bwrap test included. scripts/check libs/brig exit 0, 1309 passed 180 skipped, gates and docs ok; scripts/check bh-02/plugins/tui-cordis-plugin --no-gates --no-docs exit 0, 345 passed. AC2, three full scripts/check runs, left unticked for the reviewer.
+
+Check `scripts/check` exited 0
+
+(32 earlier lines omitted)
+```text
+........................................................................ [ 35%]
+........................................................................ [ 36%]
+........................................................................ [ 38%]
+........................................................................ [ 40%]
+........................................................................ [ 42%]
+........................................................................ [ 43%]
+........................................................................ [ 45%]
+........................................................................ [ 47%]
+.....................................................s..s.......s.ssssss [ 49%]
+ssssssssssssssssssssssssss..sssssssssssssssssssssssss..ssssssssssssssss. [ 51%]
+ssssssssss........s.s.............s..................................... [ 52%]
+........................................................................ [ 54%]
+..................s.sss.ssssssssssssssssssssssssssssssssssssssssssssssss [ 56%]
+sssssssssssssssss...s..........................................sssssssss [ 58%]
+sssssssss.s..........s.................................................. [ 59%]
+........................................................................ [ 61%]
+........................................................................ [ 63%]
+........................................................................ [ 65%]
+........................................................................ [ 66%]
+........................................................................ [ 68%]
+........................................................................ [ 70%]
+........................................................................ [ 72%]
+.................................................s...................... [ 73%]
+........................................................................ [ 75%]
+........................................................................ [ 77%]
+........................................................................ [ 79%]
+........................................................................ [ 80%]
+........................................................................ [ 82%]
+........................................................................ [ 84%]
+........................................................................ [ 86%]
+........................................................................ [ 87%]
+........................................................................ [ 89%]
+........................................................................ [ 91%]
+........................................................................ [ 93%]
+........................................................................ [ 94%]
+........................................................................ [ 96%]
+........................................................................ [ 98%]
+..............................................................           [100%]
+3863 passed, 231 skipped in 70.93s (0:01:10)
+   ok
+== gates
+== (root)
+   ok
+== libs/brig
+   ok
+== libs/cordis
+   ok
+== libs/cordis-helpers
+   ok
+== libs/host-paths
+   ok
+   ok
+== docs
+INFO    -  Cleaning site directory
+INFO    -  Building documentation to directory: /Users/brukhabtu/src/github.com/bruk-io/bh-02/site
+INFO    -  Documentation built in 1.29 seconds
+   ok
+== tokens
+bh-01's tokens and bh-02's theme are in sync
+   ok
+```
 <!-- SECTION:NOTES:END -->
