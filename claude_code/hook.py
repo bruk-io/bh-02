@@ -279,6 +279,21 @@ def viewed_file(command: str) -> str | None:
     return m["path"] if m else None
 
 
+def unwrapped(raw: str) -> str:
+    """The text inside a result that only wraps it, `{"result": "..."}`, as FastMCP gives the result
+    of a tool that returns text and Claude Code shows it; any other result as it is. Folded whole,
+    the wrapper is one string field, and the envelope says nothing about the text in it."""
+    if not raw.lstrip().startswith("{") or '"result"' not in raw[:40]:
+        return raw
+    try:
+        value = json.loads(raw)
+    except ValueError:
+        return raw
+    if isinstance(value, dict) and set(value) == {"result"} and isinstance(value["result"], str):
+        return value["result"]
+    return raw
+
+
 def digest(text: str) -> str:
     """A short digest of a result's text, for the log: enough to tell one output from another."""
     return hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest()[:16]
@@ -365,6 +380,8 @@ def handle(
                 return None
         case Inline(raw=raw):
             pass
+    if (inner := unwrapped(raw)) != raw:  # fold the text the wrapper holds, and save that text
+        action, raw = Inline(inner), inner
     outcome = decide(event, action, raw, budget, session, view, config)
     _log(outcome.log)
     for target, text in outcome.saves:
