@@ -11,6 +11,7 @@ updated_date: '2026-10-14 10:40'
 labels:
   - models
   - size-3
+  - finish-moved
 dependencies: []
 priority: medium
 type: feature
@@ -94,4 +95,6 @@ PLANTED VIOLATIONS, each seen failing with its guard removed, then restored (cmp
 ACCEPTANCE: #1 test_model_lists_what_each_endpoint_serves_named_endpoint_slash_id, test_the_real_get_lists_what_a_server_serves, test_an_unreachable_endpoint_is_one_line_within_the_deadline_never_an_error, test_a_server_that_does_not_answer_in_time_is_said_at_the_deadline (6 s deadline, 3 s connect), test_asking_a_slow_server_does_not_block_the_event_loop. #2 test_a_model_of_an_endpoint_means_a_model_with_no_network_call (--model/layer default/the file's default/check/current/listed/endpoints/`/model NAME`, zero Get calls), the wire test of the model row, the app pairing test. #3 the ids, key and trusted-file tests above (A-D). #4 test_include_narrows_what_is_listed_from_what_was_kept and E. #5 docs, README, CONTRACTS, GLOSSARY, scripts/check exit 0. #6 test_the_choices_and_the_status_bar_never_ask_a_server_and_offer_what_model_found and F.
 
 Close review (Opus low, independent): CLOSE, no blocking findings; AC #1 judged against the orchestrator's narrowed finish line. The reviewer planted nine faults in a scratch copy (cleaning dropped, key in the URL, project models file read, current() and _choices scheduling a refresh, the model row GETting /models, redirects followed, a failed refresh counted fresh, the 1 MiB limit removed) and each was caught. Runs: models 249 passed, app 200 passed; arch-check, mypy, scripts/check (2688 passed) exit 0. Should-fix and nits filed as TASK-0095 (not blocking). Not verified by anyone: /model against a real server (the stub and MockTransport stand in).
+
+Finish moved (recorded 2026-11-06): criterion #6 was added per decision-0003 ("Complete slash commands in the composer from the commands the palette already reads"), which required /model's per-keystroke choices() to never trigger discovery I/O on the TUI's event loop and instead read a cache filled off the loop.
 <!-- SECTION:NOTES:END -->

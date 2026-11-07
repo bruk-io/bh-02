@@ -11,6 +11,7 @@ labels:
   - context
   - brig
   - security
+  - finish-moved
 dependencies: []
 references:
   - 'https://github.com/bruk-io/bh-02/pull/8'
@@ -27,9 +28,14 @@ When bh-02 runs in its own source checkout (an editable install, working on bh-0
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 When bh-02's own shipped context file, or the package directories it can import from, lie under a root the jail lets inputs write, the jail write-denies them as it does layer files
-- [ ] #2 Or the context plugin treats the shipped file as the project's when its way passes through the project, without losing the person's own guidance sections
 - [x] #3 A test shows a jailed input can't make bh-02 import a module it wrote
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Finish moved (recorded 2026-11-06): criterion #2 ("Or the context plugin treats the shipped file as the project's...") was an alternative to #1, not a separate requirement. #1 was the route taken (a4d0ffd), as the final summary says, so #2 is removed rather than left unticked on a Done task.
+<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 

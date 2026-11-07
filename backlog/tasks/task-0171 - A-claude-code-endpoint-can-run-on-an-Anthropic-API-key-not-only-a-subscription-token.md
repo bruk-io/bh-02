@@ -7,7 +7,8 @@ status: In Progress
 assignee: []
 created_date: '2026-10-25 17:52'
 updated_date: '2026-10-26 02:06'
-labels: []
+labels:
+  - size-3
 dependencies:
   - TASK-0169
 priority: medium

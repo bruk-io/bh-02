@@ -1,10 +1,11 @@
 ---
 id: TASK-0086
 title: 'Sub-agents, after the first run: what TASK-0080''s run deferred'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-13 00:53'
-labels: []
+labels:
+  - size-8
 dependencies: []
 priority: low
 type: intent

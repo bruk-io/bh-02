@@ -12,6 +12,7 @@ labels:
   - runner
   - tests
   - size-1
+  - finish-moved
 dependencies: []
 priority: low
 type: bug
@@ -55,4 +56,6 @@ Holder: pid 3806 killed; it is a zombie (PID 1 does not reap), with no open fds;
 Not run: the tester-user run (not used: root runs); scripts/linux-jail-check (not required by the criteria, not run); libs/brig and libs/cordis were not touched, so their suites run only through scripts/check.
 
 Closed on review (Opus, low) of 132b03a: CLOSE, all four criteria met, nothing blocking, nothing to fix. Reviewer held the real lock: test_runner_confined.py 51 passed, 1 skipped; planted a non-shared lock in a scratch copy and the new shared-lock test failed at credential.is_dir(); scripts/check exit 0 (2528 passed, 31 skipped); runner 66 passed. The stand-ins for another session stay on the real lock correctly: each is dead before the test's jail starts, so those tests prove the record and group rule (crashed-session cleanup), not lock sharing. Nits left: README.md:191 is 116 columns (predates this task); two tests left on the real lock leave harmless placeholders under tmp_path when a holder is live; the new test's child sleeps 120 s if readline hangs (its finally kills it).
+
+Finish moved (recorded 2026-11-06): the task's own notes record the orchestrator (2026-10-14) added criteria #3 and #4 before work began, folding in TASK-0085's close review should-fix items (a test of the shared-lock rule end to end, and wording/docstring fixes naming the real lock path) while the task stayed size-1.
 <!-- SECTION:NOTES:END -->

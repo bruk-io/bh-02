@@ -9,6 +9,7 @@ updated_date: '2026-10-09 04:22'
 labels:
   - agent
   - tools
+  - finish-moved
 dependencies: []
 references:
   - 'https://github.com/bruk-io/bh-02/pull/10'
@@ -56,6 +57,8 @@ Refined by the review against cordis of 2026-10-09 (the separation, duplicates a
 
 <!-- SECTION:NOTES:BEGIN -->
 Decisions made while building it: (1) a registration is register(spec, run, *, runs="jail", show=None); a run answers {"content": str, "touched"?: [...]}, and the loop turns a raise or another shape into an error the model reads. (2) A tool that runs on the host (runs="host") is put to the person whatever the jail grades: nothing the model asks for runs unconfined unasked. No host tool exists yet. (3) The list is kept by the loop instance, for its life (a /model switch makes a new loop, which reads it again); keeping it in the transcript is TASK-0057. (4) requires defaults to [] (CodeAct is a default, not a requirement); the shipped layer sets ["python"]. A layer that overrides the loop row's config replaces it, as any override does. (5) The loop checks a call's input against the spec (required keys, simple JSON types) before approval, so a malformed call is never put to the person, as before. (6) The transcript view already renders any call generically (name, short args, a `code` argument as a block), so `show` changes only the approval modal. (7) update-layer no longer drops a row with the id `tools`: only a row using the pre-CodeAct `tools:` plugin is dropped; a `tools` row naming no plugin is now a change to agent:tools. (8) The kernel row now depends on `tools` and `system`, both brokers that never reload; editing the system row's config would now restart the kernel. Validation: ruff, mypy, scripts/arch-check, mkdocs --strict all pass. Full suite under tini: 1924 passed; the 2 failures (test_real_launch terminal-going-away, test_shell_command program-left-holding-output) fail identically on main in this VM. brig's network integration tests were excluded (environmental here).
+
+Finish moved (recorded 2026-11-06): commit 17bc863b ("refine the tools broker and the kernel split") rewrote these criteria before implementation began, moving the python tool's instructions into a `system` section of their own instead of the tool description, adding opened-files to a call's result, fixing the offered order by name, reading the tool list once per conversation after `requires` registration, and having a registration state where it runs and how it is shown.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

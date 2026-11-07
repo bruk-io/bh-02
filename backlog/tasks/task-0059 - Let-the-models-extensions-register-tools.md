@@ -8,6 +8,7 @@ updated_date: '2026-10-09 21:30'
 labels:
   - extensions
   - tools
+  - finish-moved
 dependencies:
   - TASK-0056
   - TASK-0057
@@ -44,4 +45,6 @@ Refined by the review against cordis of 2026-10-09 (the separation, duplicates a
 - The host registers the tool with `runs = "jail"` and `show = offered.shown_tool_call` (its name, its extension, its arguments as JSON), so the loop's `Asked` puts each call to the `approval` rule as it does an input, and unconfined the person sees the call that way. `Extensions._call` forwards the call and its answer; a worker gone answers `error: ...`.
 - Redefining or deleting the file is the existing unload/load path: the remover unregisters the tool, the loop's `toolset` tells the change on the next message (TASK-0057), and a later call to a removed tool gets the loop's removed-tool answer. With both shipped providers' `fixed` list, a tool added mid-conversation is offered from the next conversation; the system section and the change note say so.
 - Tests: `test_extensions_offered.py` (the spec rules, the shown call), and in `test_extensions_host.py` the real worker with `agent_cordis_plugin.ToolBroker`: register, call, error, redefine, delete; refusals (`python`, a layer row's name while it restarts, a non-object schema); unconfined, the call is not unasked.
+
+Finish moved (recorded 2026-11-06): commit 17bc863b ("refine the tools broker and the kernel split") rewrote the approval criterion before implementation began, having the host register each extension tool as running in the extensions process's runner and state how a call is shown, with `approval` deciding by TASK-0058's separated rule; the task also gained a dependency on TASK-0058.
 <!-- SECTION:NOTES:END -->

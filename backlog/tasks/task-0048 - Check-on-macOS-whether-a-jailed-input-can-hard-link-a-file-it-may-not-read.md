@@ -7,6 +7,7 @@ created_date: '2026-10-07 03:05'
 labels:
   - jail
   - security
+  - size-2
 dependencies: []
 priority: medium
 type: spike

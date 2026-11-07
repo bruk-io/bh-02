@@ -7,6 +7,8 @@ created_date: '2026-10-10 18:42'
 updated_date: '2026-10-12 22:22'
 labels:
   - runner
+  - finish-moved
+  - size-5
 milestone: m-5
 dependencies:
   - TASK-0079.32
@@ -39,4 +41,6 @@ type: feature
 2026-10-11: rewired onto decision-0001's split. It no longer depends on TASK-0073 (superseded): it needs a channel per start (TASK-0079.05) and per-process isolation (TASK-0079.07), so the Python process and the extensions process can't reach each other in one jail.
 
 Owner's trim, 2026-10-12: moved out of TASK-0079's finish line to the deferred brig intent TASK-0084. Sub-agents run with a jail each from the same policy until this lands (decision-0002).
+
+Finish moved (recorded 2026-11-06): commit b6b09860 ("Accept the brig and sub-agent intents and decision-0001, and split them") added criteria #7 and #8 when this task was rewired onto decision-0001's runtime/confinement split, requiring the mount tripwire to end the jail independent of the runtime and read allows to be decided at create rather than per start.
 <!-- SECTION:NOTES:END -->

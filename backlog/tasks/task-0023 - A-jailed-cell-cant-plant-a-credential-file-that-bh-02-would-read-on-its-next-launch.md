@@ -7,7 +7,8 @@ status: Done
 assignee: []
 created_date: '2026-09-30 01:36'
 updated_date: '2026-09-30 03:35'
-labels: []
+labels:
+  - finish-moved
 dependencies: []
 priority: high
 ---
@@ -32,4 +33,6 @@ Found in task-0019/0022, widened on 2026-09-29. The model row reads the first lo
 
 <!-- SECTION:NOTES:BEGIN -->
 Commit 881494b (+ f5b2eb4). One credential search: bh_02.cli.credential_search() (above bh_02's install and sys.prefix, nearest first) is the new layers.credentials. models:model and models:catalog depend on layers and search only that list (claude-code start, the openai per-request key read, /model's key check), so the models plugin no longer anchors on its own package and the four plugins/... paths aren't searched at all. unreadable(credentials, beside, states) builds secrets containing every credential path by construction. test_credential_search computes both from the real anchors (red first: it found the four paths). Linux: an absent searched path under a writable root keeps its write deny, so it's held by a read-only placeholder and a cell can't create it. A deny nested in another is left to the outer one, because bwrap can't mount on it. test_a_jailed_cell_cannot_plant_a_credential_where_the_model_row_looks (real jail; red on Linux). The lookup accepts regular files only; tests cover a placeholder at a nearer path for the claude-code reread and the openai key read (not red first: is_file already held; shown to catch a regression by switching to exists). Measured and not closable: a host rename over a masked file, or removing a placeholder, detaches the mount inside the jail. So on Linux fs_read is graded best_effort whenever a secret under a writable root is held, the jail's notice() names those paths, tui:status shows it when a kernel comes up, and the README and CONTRACTS say so. test_a_linux_jail_s_hold_on_a_secret_ends_when_the_host_replaces_or_removes_it pins the gap. On Linux the person can't create the root local.env mid-session (the notice says to stop bh-02 first). Verified after merging into leftovers: scripts/check 1809 passed / 19 skipped, all green; scripts/linux-jail-check 83 passed; pytest -m e2e 16 passed (both live Claude Code tests incl.); a real bh-02 launch in a pty with the default jail answered after a cold start, /model sonnet, /model haiku and /clear (2.0-2.8 s).
+
+Finish moved (recorded 2026-11-06): the task's own description notes it was "widened on 2026-09-29"; commit d39c27b8 broadened the criteria from Linux-only (the original 13b84c2 version, titled "On Linux a jailed cell can't plant...") to cover darwin and Linux alike, before any implementation started. The widening also added the regular-file-only lookup and the Linux rename/placeholder residual criteria that the later implementation (881494b/f5b2eb4) delivered.
 <!-- SECTION:NOTES:END -->

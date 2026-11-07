@@ -10,6 +10,7 @@ created_date: '2026-10-14 00:01'
 updated_date: '2026-10-14 03:42'
 labels:
   - tui
+  - size-8
 dependencies: []
 priority: medium
 type: intent

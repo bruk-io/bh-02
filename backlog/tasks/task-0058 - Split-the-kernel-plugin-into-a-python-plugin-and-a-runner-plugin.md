@@ -9,6 +9,7 @@ labels:
   - kernel
   - brig
   - memory
+  - finish-moved
 dependencies:
   - TASK-0056
 priority: medium
@@ -47,4 +48,6 @@ Refined by the review against cordis of 2026-10-09 (the separation, duplicates a
 - `update-layer`: ids `kernel`->`python`, `jail`->`runner`, `jail_status`->`grades`; uses `kernel:*`, `brig:jail`, `memory:memory`, `tui:jail_status`; a `clear` naming `kernel` names `python`. Tested in `test_outdated_layers.py`.
 - Gates: `brig-one-adapter` names `runner_cordis_plugin`, `worker-stdlib-only` `python_cordis_plugin.worker`, the budget and allow lists the new modules.
 - Found on the way, committed separately (e474301): CPython 3.15's `Process.wait()` waits for the pipes to close, so a `!COMMAND` leaving a background program holding its output waited for it; `shell_command` now watches the return code.
+
+Finish moved (recorded 2026-11-06): commit 17bc863b ("refine the tools broker and the kernel split") rewrote these criteria before implementation began, making `runner:approval` the rule alone (asking moved to the askers), giving each owner its own start with `runner:release` only notifying them, making the runner report grades per start as a status-bar row of its own, and deleting the frame's keep-and-grace code.
 <!-- SECTION:NOTES:END -->

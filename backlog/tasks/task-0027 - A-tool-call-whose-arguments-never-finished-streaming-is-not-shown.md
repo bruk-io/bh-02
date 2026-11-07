@@ -5,7 +5,8 @@ status: Done
 assignee: []
 created_date: '2026-09-30 01:36'
 updated_date: '2026-09-30 02:03'
-labels: []
+labels:
+  - finish-moved
 dependencies: []
 priority: low
 ---
@@ -27,4 +28,6 @@ Found in task-0021. When Claude Code drops a connection mid-stream it closes the
 
 <!-- SECTION:NOTES:BEGIN -->
 Commits f3fa23c, 9a38d80 (merged into leftovers). Step (claude_code/stream.py, still pure) emits a call whose arguments decode at its block close, as before. A call that doesn't decode (or has no arguments yet, since '' decodes to {}) is held, along with everything after it so stream order is kept, and released only when message_delta brings a stop reason. The loop then sees it with its error before stop, exactly as today. On a retry close (message_stop with no stop reason) the provider drops the Step and the held call with it. A held call was never shown, so a retry whose only streamed content was that call carries on to the retried stream. After shown text the step still fails with the restarted error, now without the broken call before it. Tests, red first: test_a_call_cut_off_by_a_stream_claude_code_retries_is_never_shown (cut before any arguments and halfway through them), test_a_call_cut_off_by_a_retried_stream_after_text_is_not_shown_before_the_error, two Step-level tests in test_claude_code_stream.py. test_a_finished_step_whose_call_did_not_decode_shows_it_with_its_error pins today's behaviour (it passed before the fix, on purpose). agent-cordis-plugin is untouched and its undecodable-call tests pass. scripts/check after the merge: 1794 passed, 14 skipped, all green. Covered by the fake only: a dropped connection can't be forced against the real CLI.
+
+Finish moved (recorded 2026-11-06): commit c529a493, four minutes after creation (62ceff6) and before any implementation, refined the generic "arguments don't parse" wording into the precise mechanism this task's own description names: Claude Code retries a dropped stream via message_stop with no stop reason, and only that case must stay hidden, while a call that genuinely fails to decode in a finished step (a stop reason arrived) must still show as before.
 <!-- SECTION:NOTES:END -->

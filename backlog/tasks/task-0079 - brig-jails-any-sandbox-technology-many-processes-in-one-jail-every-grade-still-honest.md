@@ -3,12 +3,14 @@ id: TASK-0079
 title: >-
   brig jails: any sandbox technology, many processes in one jail, every grade
   still honest
-status: To Do
+status: In Progress
 assignee:
   - '@bruk'
 created_date: '2026-10-11 15:31'
 updated_date: '2026-10-12 22:22'
-labels: []
+labels:
+  - finish-moved
+  - size-8
 dependencies: []
 type: intent
 ---
@@ -41,4 +43,6 @@ Scope narrowed by the owner (2026-10-12, option B of four): this intent closes o
 Order changed by the owner (2026-10-12): the sub-agents milestone (M6) runs now; TASK-0079.31, .32 and TASK-0074 follow the owner's Mac run of the darwin dial (TASK-0079.34), because .31 makes bh-02 on macOS depend on it.
 
 Owner's trim, 2026-10-12: TASK-0074 (one jail per session) leaves this intent's finish line for TASK-0084. This intent closes on the runtime seam, Jail and Process, the channel directory with reserve-then-start, TASK-0079.32 (the Spec names channels), TASK-0079.33 (done) and TASK-0079.31 (after the owner's Mac run, TASK-0079.34).
+
+Finish moved (recorded 2026-11-06): the owner narrowed the scope on 2026-10-12 (option B of four), deferring container/Docker runtimes and per-process isolation to a new intent, TASK-0084; criteria #4 and #5 were reworded to match (a fake runtime proves the protocol, Docker is TASK-0084's; per-process isolation inside one bwrap jail is TASK-0084's), as recorded directly above.
 <!-- SECTION:NOTES:END -->

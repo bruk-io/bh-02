@@ -1,12 +1,13 @@
 ---
 id: TASK-0084
 title: 'brig keeps processes in one jail apart, and takes a container as a jail'
-status: To Do
+status: In Progress
 assignee:
   - '@bruk'
 created_date: '2026-10-12 14:45'
 updated_date: '2026-10-12 22:22'
-labels: []
+labels:
+  - size-8
 dependencies: []
 type: intent
 ---

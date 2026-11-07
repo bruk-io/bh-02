@@ -7,7 +7,8 @@ status: In Progress
 assignee: []
 created_date: '2026-10-25 21:02'
 updated_date: '2026-10-25 21:28'
-labels: []
+labels:
+  - size-2
 dependencies: []
 type: bug
 ---

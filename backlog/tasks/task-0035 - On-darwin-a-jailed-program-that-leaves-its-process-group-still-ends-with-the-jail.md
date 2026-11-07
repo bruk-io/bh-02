@@ -6,7 +6,8 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-10-01 02:33'
-labels: []
+labels:
+  - size-5
 dependencies: []
 priority: medium
 ---
