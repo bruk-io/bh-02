@@ -24,7 +24,7 @@ The context files skip hard links in the project, but whether Seatbelt lets a ja
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 A test on darwin records whether `os.link` to a read-denied file succeeds inside brig's jail
-- [ ] #2 If it does, every file bh-02 reads on the model's behalf refuses a hard-linked one, with a test
+- [x] #2 If it does, every file bh-02 reads on the model's behalf refuses a hard-linked one, with a test
 <!-- AC:END -->
 
 ## Implementation Plan
