@@ -148,4 +148,6 @@ INFO    -  Documentation built in 1.27 seconds
 bh-01's tokens and bh-02's theme are in sync
    ok
 ```
+
+No repro: the bug was in the test itself (its planted General-1 folded onto general-1 on APFS), so the failing form is the pre-fix test at 681789cd^, which the worker ran and saw fail in 0.60s; the fixed test cannot fail on it, and the worker's planted refused_agent(name.lower()) violation shows the fixed test still catches the rejection it guards.
 <!-- SECTION:NOTES:END -->
