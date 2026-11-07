@@ -4,6 +4,7 @@ title: bh-02-worker agent still names local.env as the Claude credential
 status: Draft
 assignee: []
 created_date: '2026-11-07 03:41'
+updated_date: '2026-11-07 04:30'
 labels:
   - agents
   - docs
@@ -24,3 +25,9 @@ Found by the reviews of TASK-0169.04 and TASK-0171, not filed then. .claude/agen
 - [ ] #1 bh-02-worker.md states the credential rule as CLAUDE.md now does: the token and API key come from an endpoint's key, reach only the Claude Code CLI child's explicit environment, and are never printed, logged, copied or committed
 - [ ] #2 No mention of local.env remains under .claude/
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Owner stand-in (Opus), 2026-11-06: Leave as a draft for Bruk. It edits .claude/agents/bh-02-worker.md, his own agent configuration, which a stand-in should not approve changing; and the stale line is stricter than the current rule (never set ANTHROPIC_API_KEY at all), so leaving it costs nothing safety-wise in this run, which excludes TASK-0171/0172, the only work that touches that key. Bruk to promote and do it on return.
+<!-- SECTION:NOTES:END -->
