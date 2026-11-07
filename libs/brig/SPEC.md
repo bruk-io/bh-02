@@ -1035,6 +1035,20 @@ the same way: `axes` is the mechanism's own declaration, in code and shipped as
 data, and this table is its description. (Ruled 2026-08-24, decision-118, from
 `doc-017` §3's ambiguity A5. Implementing task: **task-059**.)
 
+**A hard link to a `read_denies` source is denied, probed rather than
+assumed (2026-11-07, TASK-0048).** `fs_read`'s denylist is a path-based SBPL
+rule (`(deny file-read* (subpath "RESOLVED"))`), so whether `os.link`
+could give a `read_denies` source a second, undenied path — reading it
+through the new name instead of the old one — was open. Measured against
+the real kernel (`tests/integration/test_seatbelt_hardlink_read_deny.py`)
+with the source **inside `write_allows`** (the exact shape the write-side
+`.envrc`/`.git/hooks` carve-outs above already use): the link itself fails
+with the mechanism's own denial signature, and the control — the identical
+shape with the source not `read_denies` — both links and reads back. So
+seatbelt's `file-read*` family already covers link creation from a denied
+source; no further guard is needed in brig or in an embedder's own readers.
+(Ruled 2026-11-07, decision-206.)
+
 **`rlimits`' hard limit sits one second above its soft limit (2026-09-08,
 decision-161).** The roster row above says "`SIGXCPU` is real", and until this
 ruling that was a claim about darwin only. The trampoline set

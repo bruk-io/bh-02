@@ -1,9 +1,11 @@
 ---
 id: TASK-0048
 title: Check on macOS whether a jailed input can hard-link a file it may not read
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@claude'
 created_date: '2026-10-07 03:05'
+updated_date: '2026-11-07 07:11'
 labels:
   - jail
   - security
@@ -21,6 +23,28 @@ The context files skip hard links in the project, but whether Seatbelt lets a ja
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A test on darwin records whether `os.link` to a read-denied file succeeds inside brig's jail
+- [x] #1 A test on darwin records whether `os.link` to a read-denied file succeeds inside brig's jail
 - [ ] #2 If it does, every file bh-02 reads on the model's behalf refuses a hard-linked one, with a test
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1) Probe empirically on this Mac (outside the test suite) whether os.link to a read-denied source succeeds under a hand-written Seatbelt profile, covering the full matrix: source outside/inside write_allows, in/not in read_denies -- confirmed the deciding factor is read permission on the source, not write permission on it, and that linking a read_denies source INSIDE write_allows (SPEC.md's own .envrc/.git-hooks carve-out shape) is denied. 2) Write the real integration test through brig's production path (Spec/FsPolicy/Stack([seatbelt])/build_compile_ctx/tests.conftest.launch), modelled on test_seatbelt_smoke.py: a jailed process attempts os.link from a read_denies source (inside write_allows) to an undenied destination, asserted denied against seatbelt's own denial_signatures[0], with the required control (the same shape but source not in read_denies, succeeds and the link content reads back) in the same test. 3) Since AC#1 resolves to 'does not succeed', AC#2's condition does not arise -- leave it unticked and say so, record the fact as a dated SPEC.md Sec.6 paragraph (empirical dialect knowledge, like the unscoped network-bind fact), decision-206. 4) Run the new test file through testlock; run scripts/check libs/brig through testlock. Risk: hand-written SBPL findings could differ from brig's actual emitted profile order; mitigated by re-running the decisive case through the real compiled Stack before concluding.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Finding: os.link to a read-denied file does NOT succeed inside brig's Seatbelt jail -- AC#2's condition does not arise, left unticked.
+
+Evidence for AC#1:
+- New test libs/brig/tests/integration/test_seatbelt_hardlink_read_deny.py, run through the real production path (Spec/FsPolicy/Stack([seatbelt])/build_compile_ctx/tests.conftest.launch), mirrors test_seatbelt_smoke.py's observe-from-inside pattern. It covers the one cell that matters: a read_denies source INSIDE write_allows (the same shape SPEC.md Sec.6 already describes for .envrc/.git/hooks carve-outs) hard-linked to an undenied name in the same tree -- denied, matching seatbelt's own denial_signatures[0], and the destination name never appears on the host. The control (identical shape, source NOT in read_denies) both links and reads its content back, in the same test, per WORKFLOW.md's "a control belongs in the same test as the claim."
+- `testlock uv run pytest libs/brig/tests/integration/test_seatbelt_hardlink_read_deny.py -q` -> 1 passed.
+- Planted the violation: dropped `read_denies=(secret,)` from the spec (scratch-copy edit, restored after, sha256 verified identical to the pre-plant file) -- the test went red exactly as expected: `AssertionError: os.link of a read_denies source succeeded ... stdout='LINK_OK\nREAD_VIA_LINK:TOP_SECRET=1\n\n'`. Restored and re-ran: 1 passed again.
+- An earlier scratch probe (outside the suite, hand-written SBPL, not shipped) first tried source outside write_allows, which is denied regardless of read_denies membership -- that only shows hard-linking needs *some* permission on the source, not which one. The matrix that actually answers the question is the source INSIDE write_allows, which is what the shipped test exercises.
+- Recorded as a dated SPEC.md Sec.6 paragraph, decision-206 (next free after decision-205), alongside seatbelt's other probed dialect facts (the unscoped network-bind fact, etc.), naming TASK-0048 and the test file. "No code change" -- brig already refuses this; nothing in brig or an embedder needs a new guard.
+
+Not verified / out of scope:
+- `scripts/check libs/brig`: format, lint, mypy, all four gates (root, libs/brig, libs/cordis, libs/cordis-helpers, libs/host-paths) and docs all report `ok`. The `tests` stage itself fails, but on pre-existing, unrelated failures already present before this change and outside TASK-0048's scope: a collection-time AttributeError in tests/unit/test_process_namespaces_pure.py (`signal.SIGRTMIN` does not exist on darwin), plus several integration/unit tests (test_supervisor_link.py's AF_UNIX/SOCK_SEQPACKET socketpair, test_subset.py, test_teardown_zombies.py, test_exit_status_is_recorded_not_invented.py) that fail or error under this machine's heavy concurrent load (other sessions' scripts/check runs holding the lock throughout). None touch seatbelt, hard links, or SPEC.md Sec.6; the new test is not among the failures in any run. Left unticked for the reviewer per the standing rule.
+<!-- SECTION:NOTES:END -->
