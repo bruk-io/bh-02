@@ -160,6 +160,28 @@ async def test_an_unrelated_providers_background_work_does_not_keep_an_interacti
     await asyncio.wait_for(run([*layers(), patch]), 2)
 
 
+async def test_a_run_cancelled_while_its_rows_start_leaves_no_row_running(
+    composition: Callable[..., Path],
+) -> None:
+    """A run cancelled mid-boot (Ctrl-C, or a test's deadline) shuts its rows down before the
+    cancellation goes on. Left on the loop, they were cancelled all at once when the loop closed,
+    and a row whose task was cancelled before it began left its parent waiting on it forever: the
+    hang that stalled a scripts/check worker (TASK-0202)."""
+    patch = composition('[[plugin]]\nid = "loop"\nuse = "fragile:echo_model"\n', one_reply=True)
+    running: asyncio.Task[None] | None = None
+
+    def cancel_once_a_row_starts(line: str) -> None:
+        if running is not None and not running.cancelling() and line.startswith("reload "):
+            running.cancel()
+
+    running = asyncio.create_task(
+        run([*layers(), patch], [Row("chat", config={"prompt": "hi"})], trace=cancel_once_a_row_starts)
+    )
+    (outcome,) = await asyncio.wait_for(asyncio.gather(running, return_exceptions=True), 10)
+    assert isinstance(outcome, asyncio.CancelledError)
+    assert [task for task in asyncio.all_tasks() if task is not asyncio.current_task()] == []
+
+
 async def test_caninputing_a_run_while_a_row_starts_cleans_up_promptly() -> None:
     """Ctrl-C during a slow startup must unwind, not wait for the slow piece to finish."""
     started = asyncio.Event()

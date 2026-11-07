@@ -19,6 +19,7 @@ of them. Each step's output is captured and printed whole, in the order below, o
 finished: a step that ends early waits for the ones before it to be printed.
 """
 
+import os
 import subprocess
 import sys
 from collections.abc import Iterator
@@ -32,8 +33,12 @@ import click
 ROOT = Path(__file__).resolve().parent.parent
 BH_01 = ROOT.parent / "bh-01"  # where scripts/sync-tokens reads bh-01's token CSS from
 # pytest-xdist's `-n`: how many worker processes run the tests, and `--dist loadgroup` keeps the tests of
-# one group (the root conftest.py names them: what they share on the host) on one of them.
-TEST_WORKERS = "auto"
+# one group (the root conftest.py names them: what they share on the host) on one of them. Eight at
+# most, whatever the core count (TASK-0202): every worker boots compositions, Python processes and
+# jails at once, so on a 28-core Mac `-n auto` (28) pushed boots past the tests' deadlines and one
+# worker hung, while 8 run the whole suite in about 84 s. The suite's long pole is the jail-lock
+# group, serial on one worker, so more workers buy little.
+TEST_WORKERS = str(min(8, os.cpu_count() or 1))
 
 
 @dataclass(frozen=True)

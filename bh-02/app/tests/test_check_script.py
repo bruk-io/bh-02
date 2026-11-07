@@ -66,6 +66,11 @@ def test_the_plan_is_the_steps_in_their_order_for_the_workspace(check: ModuleTyp
     assert isinstance(by_name["tokens"], check.Skipped)
 
 
+def test_the_tests_run_on_eight_workers_at_most_whatever_the_core_count(check: ModuleType) -> None:
+    """`-n auto` on a 28-core Mac pushed boots past the tests' deadlines and hung a worker (TASK-0202)."""
+    assert 1 <= int(check.TEST_WORKERS) <= 8
+
+
 def test_the_plan_for_a_member_scopes_ruff_pytest_and_mypy_and_can_leave_out_gates_and_docs(
     check: ModuleType,
 ) -> None:

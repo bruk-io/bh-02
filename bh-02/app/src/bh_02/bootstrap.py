@@ -516,13 +516,16 @@ async def run(
     if trace is not None:
         rt.listeners.append(lambda event: trace(str(event)))
     async with _row_log(rt, row_log, report):
-        booted: Booted = await boot(paths, last, rt, report=report)
+        # The runtime is shut down however the run ends, a cancellation mid-boot included: rows
+        # left on the loop are cancelled at once when it closes, and a row cancelled before its
+        # task began leaves its parent waiting on it for ever (TASK-0202).
         try:
+            booted: Booted = await boot(paths, last, rt, report=report)
             _raise_if_stalled(booted, "could not start", NotStarted)
             await _await_chat(booted)
             _raise_if_stalled(booted, "stopped early")
         finally:
-            await booted.runtime.shutdown()
+            await rt.shutdown()
 
 
 async def _await_chat(booted: Booted) -> None:
