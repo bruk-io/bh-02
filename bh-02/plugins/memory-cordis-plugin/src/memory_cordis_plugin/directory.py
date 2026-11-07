@@ -10,14 +10,32 @@ the reason and left as it is, and nothing outside the directory is read, written
 A save checks MEMORY.md before it writes anything, writes the topic file, then the index, each
 whole or not at all (`write_beneath`), so the index never lacks a line for a memory that was
 saved or keeps one for a memory that was deleted, except where a person wrote the line.
+
+A save and a delete also hold an exclusive `flock` on the memory directory (opened through no
+link, `host_paths.directory_beneath`) for their whole read, change and write of MEMORY.md, so two
+sessions on one project (or two worktrees) saving or deleting at once never read the same old
+index and have the last rename win: the other's line would be lost until saved again. The lock
+is advisory (every writer that matters is bh-02's own tool, never a write the model makes through
+Python) and goes with the descriptor, closed as `directory_beneath` leaves it, so a crashed
+session holds nothing.
 """
 
 import asyncio
-from collections.abc import Mapping
+import contextlib
+import fcntl
+from collections.abc import Iterator, Mapping
 from pathlib import Path, PurePath
 from typing import Any, assert_never
 
-from host_paths import Link, Linked, NotOneFile, read_beneath, remove_beneath, write_beneath
+from host_paths import (
+    Link,
+    Linked,
+    NotOneFile,
+    directory_beneath,
+    read_beneath,
+    remove_beneath,
+    write_beneath,
+)
 from memory_cordis_plugin.auto import INDEX
 from memory_cordis_plugin.keeping import (
     Action,
@@ -64,21 +82,25 @@ def keep(directory: Path, asked: Action) -> str:
 
 
 def _saved(directory: Path, save: Save) -> str:
-    """`save` written: the index checked first, so a refusal writes nothing; then the topic file,
-    then the index with the memory's line."""
+    """`save` written under a lock on `directory`: the index checked first, so a refusal writes
+    nothing; then the topic file, then the index with the memory's line."""
     file = topic_file(save.name)
     try:
-        index = _index(directory)
-        replaced = write_beneath(directory, [file], topic_text(save).encode())
+        with _locked(directory) as at:
+            try:
+                index = _index(at)
+                replaced = write_beneath(at, [file], topic_text(save).encode())
+            except OSError as error:
+                return _failed(error, f"save the memory {save.name!r}")
+            try:
+                write_beneath(at, [INDEX], with_line(index, save.name, index_line(save)).encode(**_BYTES))
+            except OSError as error:
+                return (
+                    f"error: the memory {save.name!r} was written to {file}, but {INDEX} could not be "
+                    f"updated, so it has no line there yet: {error}"
+                )
     except OSError as error:
         return _failed(error, f"save the memory {save.name!r}")
-    try:
-        write_beneath(directory, [INDEX], with_line(index, save.name, index_line(save)).encode(**_BYTES))
-    except OSError as error:
-        return (
-            f"error: the memory {save.name!r} was written to {file}, but {INDEX} could not be updated, so "
-            f"it has no line there yet: {error}"
-        )
     return (
         f"{'updated' if replaced else 'saved'} the memory {save.name!r} ({save.kind}) in {file}, "
         f"and its line in {INDEX}"
@@ -100,51 +122,58 @@ def _read(directory: Path, name: str) -> str:
 
 
 def _deleted(directory: Path, name: str) -> str:
-    """The memory `name` deleted: its topic file and its line in the index. A line whose file is
-    already gone is taken out too."""
+    """The memory `name` deleted under a lock on `directory`: its topic file and its line in the
+    index. A line whose file is already gone is taken out too."""
     file = topic_file(name)
     try:
-        index = _index(directory)
-        try:
-            remove_beneath(directory, [file])
-            had_file = True
-        except FileNotFoundError:
-            if not directory.is_dir():
-                raise
-            had_file = False
+        with _locked(directory) as at:
+            index = _index(at)
+            try:
+                remove_beneath(at, [file])
+                had_file = True
+            except FileNotFoundError:
+                had_file = False
+            lines = with_line(index, name, None)
+            if not had_file and lines == index:
+                return _unknown(name)
+            if lines != index:
+                try:
+                    write_beneath(at, [INDEX], lines.encode(**_BYTES))
+                except OSError as error:
+                    return (
+                        f"error: the memory {name!r} was deleted, but {INDEX} could not be updated, so "
+                        f"its line is still there: {error}"
+                    )
     except OSError as error:
         return _failed(error, f"delete the memory {name!r}")
-    lines = with_line(index, name, None)
-    if not had_file and lines == index:
-        return _unknown(name)
-    if lines != index:
-        try:
-            write_beneath(directory, [INDEX], lines.encode(**_BYTES))
-        except OSError as error:
-            return (
-                f"error: the memory {name!r} was deleted, but {INDEX} could not be updated, so its line "
-                f"is still there: {error}"
-            )
     return f"deleted the memory {name!r}" + (
         f" and its line in {INDEX}" if had_file else f": it had no file, so only its line in {INDEX} went"
     )
 
 
-def _index(directory: Path) -> str:
-    """MEMORY.md as it reads now ('' when there is none yet), read through no link. Raises OSError
-    for an index that is not to be read or rewritten: a link, a second name for another file, a
-    file that is not a regular one, one too large, or no directory."""
+@contextlib.contextmanager
+def _locked(directory: Path) -> Iterator[int]:
+    """`directory`, opened through no link (`host_paths.directory_beneath`) and held under an
+    exclusive `flock` for a save or delete's whole read, change and write of MEMORY.md: its
+    descriptor, to read and write beneath instead of `directory` itself, so the lock covers every
+    step. The lock goes with the descriptor, released when it is closed on leaving, so a crashed
+    session holds nothing. Raises what `directory_beneath` raises when `directory` is not there,
+    or is a link on the way."""
+    with directory_beneath(directory, []) as at:
+        fcntl.flock(at, fcntl.LOCK_EX)
+        yield at
+
+
+def _index(directory: int) -> str:
+    """MEMORY.md as it reads now ('' when there is none yet), read through no link beneath the
+    locked directory `directory`. Raises OSError for an index that is not to be read or
+    rewritten: a link, a second name for another file, or a file that is too large."""
     try:
         found = read_beneath(directory, [INDEX], cap=LIMIT)
     except FileNotFoundError:
-        if directory.is_dir():
-            return ""
-        raise
+        return ""
     if isinstance(found, Link):
-        raise Linked(
-            f"{directory / INDEX} is a link (to {found.target}), which is not followed beneath {directory}",
-            PurePath(INDEX),
-        )
+        raise Linked(f"{INDEX} is a link (to {found.target}), which is not followed", PurePath(INDEX))
     return found.decode(**_BYTES)
 
 

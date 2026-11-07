@@ -143,6 +143,12 @@ the model of it (`keeping.py` and `directory.py`):
   refused, never followed, replaced or removed, and nothing outside the directory is touched.
   Each file is written whole under a name of its own and moved into place, so a reader never
   sees half of one. The work runs in a thread, off the event loop.
+- A save and a delete hold an exclusive `flock` on the directory (opened through no link) for
+  their whole read, change and write of `MEMORY.md`, so two sessions on one project (or two
+  worktrees) saving or deleting at once never both read the old index and have the last rename
+  win, losing the other's line. The lock is advisory, which is enough since every writer that
+  matters is this tool, and it goes with the directory's descriptor, so a crashed session holds
+  nothing.
 - It is also a function in a python input, `tools.memory(...)`, like any registered tool. A file
   written through Python is the model's own and is not checked.
 

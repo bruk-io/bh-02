@@ -3,6 +3,8 @@ the tool's own lines and a person's left alone, and nothing outside the director
 the model has left it (a link to a file outside among the cases)."""
 
 import os
+import subprocess
+import sys
 import threading
 from pathlib import Path
 from typing import Any
@@ -225,3 +227,59 @@ async def test_the_tool_works_in_a_thread_of_its_own_so_a_save_never_blocks_the_
     monkeypatch.setattr("memory_cordis_plugin.directory.keep", spy)
     await call(memory, _DIRECTORY_SAVE)
     assert where and where != [threading.get_ident()]
+
+
+# A save, run in a process of its own: prints "ready" once imported, then waits for `go` to
+# appear (a busy poll, so both processes notice it within microseconds of each other) before
+# saving, so two processes started well apart still reach the lock at nearly the same moment.
+_RACE_SAVE = """
+import os, sys
+from pathlib import Path
+from memory_cordis_plugin import keep
+from memory_cordis_plugin.keeping import Save
+directory, name, go = sys.argv[1], sys.argv[2], sys.argv[3]
+print("ready", flush=True)
+while not os.path.exists(go):
+    pass
+print(keep(Path(directory), Save(name, "project", f"line for {name}", "body text")))
+"""
+
+
+def _racing_save(memory: Path, name: str, go: Path) -> subprocess.Popen[str]:
+    """A process started now, saving the memory `name` in `memory` the moment `go` exists."""
+    started = subprocess.Popen(
+        [sys.executable, "-c", _RACE_SAVE, str(memory), name, str(go)],
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    assert started.stdout is not None and started.stdout.readline().strip() == "ready"
+    return started
+
+
+def test_two_saves_started_at_once_from_two_processes_both_keep_their_line(
+    memory: Path, tmp_path: Path
+) -> None:
+    """Two processes (two sessions on the same project, or two worktrees) saving different
+    memories at the same moment: the lock on the directory serialises their read, change and
+    write of MEMORY.md, so neither save's line is lost to the other's rename. Seen failing
+    without the lock on `_saved` (`host_paths.directory_beneath`/`fcntl.flock` taken out):
+    MEMORY.md held only the line of whichever process's rename landed last."""
+    for round_ in range(5):
+        go = tmp_path / f"go-{round_}"
+        names = [f"race-a-{round_}", f"race-b-{round_}"]
+        processes: list[subprocess.Popen[str]] = []
+        try:
+            for name in names:
+                processes.append(_racing_save(memory, name, go))
+            go.touch()
+            for started in processes:
+                assert started.wait(timeout=10) == 0
+                assert started.stdout is not None and started.stdout.readline().startswith("saved")
+        finally:
+            go.touch()  # unblock a child still polling, even when a sibling or an assert failed
+            for started in processes:
+                if started.poll() is None:
+                    started.kill()
+        index = (memory / "MEMORY.md").read_text()
+        for name in names:
+            assert f"({name}.md)" in index, f"round {round_}: {name!r}'s line is missing: {index!r}"
