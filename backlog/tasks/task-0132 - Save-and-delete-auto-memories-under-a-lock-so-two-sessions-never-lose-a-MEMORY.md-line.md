@@ -3,11 +3,11 @@ id: TASK-0132
 title: >-
   Save and delete auto memories under a lock, so two sessions never lose a
   MEMORY.md line
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-17 14:00'
-updated_date: '2026-11-07 07:14'
+updated_date: '2026-11-07 07:16'
 labels:
   - memory
   - size-1
@@ -166,4 +166,6 @@ FAILED bh-02/plugins/memory-cordis-plugin/tests/test_memory_directory.py::test_t
 ```
 
 Fix round after review (blocking finding: close-task needs a recorded repro, not prose). Restored the pre-fix directory.py (git show 8bed0533~1:bh-02/plugins/memory-cordis-plugin/src/memory_cordis_plugin/directory.py) into the working tree only (test file left untouched/clean), then ran testlock python3 record-check TASK-0132 --repro -- uv run pytest 'bh-02/plugins/memory-cordis-plugin/tests/test_memory_directory.py::test_two_saves_started_at_once_from_two_processes_both_keep_their_line' -q: the command failed (1 failed) as recorded above ('Repro at 6a91269bce42...exited 1'), and record-check itself exited 0, confirming the failure was recorded. Then ran 'git checkout -- bh-02/plugins/memory-cordis-plugin/src/memory_cordis_plugin/directory.py' and confirmed 'git status --porcelain' and 'git diff --stat HEAD -- <file>' were both empty, so the fixed code is unchanged and the old code was never committed. No code or test files were edited in this round; sending back for review/close.
+
+Review (reviewer agent): closed. Both criteria met and ticked: _saved/_deleted hold an exclusive flock on the directory descriptor across read-change-write, and the two-process race test is recorded failing against the pre-fix directory.py (repro at 6a91269bce42, record-check exit 1) and passing after. No source changed since the full check recorded last round (only the task file), so that check stands: format, lint, types, gates, docs ok; the two test failures are outside this member (TASK-0197 darwin hole; test_tui_working real-clock load flake, which per the owner stand-in gets its own bug only if it recurs). The blocking finding (repro only in prose) is resolved. No drafts filed.
 <!-- SECTION:NOTES:END -->
