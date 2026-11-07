@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-07 04:27'
-updated_date: '2026-11-07 05:57'
+updated_date: '2026-11-07 05:58'
 labels:
   - subagents
   - darwin
@@ -197,4 +197,6 @@ bh-01's tokens and bh-02's theme are in sync
 ```
 
 Review (reviewer, 2026-11-07, round 2): NOT closed, on one fact: close-task refuses a bug with no recorded repro. AC1, AC2 and the narrowed AC3 (stand-in ruling, committed with finish-moved in 17d28523) are met on the evidence in these notes. The worker's notes describe the failing test before the fix (test_agent_stop_ends_the_child_and_its_python_program failing at line 310), but it was never recorded through record-check --repro. To close: record it against the pre-fix code (record-check TASK-0200 --repro -- uv run pytest bh-02/plugins/subagents-cordis-plugin/tests/test_agents_wiring.py::test_agent_stop_ends_the_child_and_its_python_program -q, run on a checkout of 4dd3b2d1^), or add a note starting 'No repro:' saying why not. Full check (record-check --tier full) exits 1: 7 failed / 25 errors, none in the subagents plugin, same count as the run recorded before this round (which changed only this file); brig, warden, host-paths, runner-confined and app tests on this darwin host, in the area of TASK-0204/0205. No files rewritten. No drafts filed.
+
+Owner stand-in (Opus), 2026-11-06: Decision on the red full check: it does NOT hold up closing this task. close-work says the acceptance criteria decide whether a task closes, and TASK-0200's criteria are limited to the subagents plugin (AC3 already narrowed for TASK-0207). The full check's 7 failures and 25 errors are all outside subagents (brig, warden, host-paths, the confined runner, the app), the count is unchanged from the run before this round, and this round changed only the task file, so none is caused by this work. They stay with their own tasks: TASK-0205 (brig's run_id teardown, /usr/bin/docker, which spills ERRORs onto whichever warden/host-paths/brig test a worker ran last), TASK-0204 (test_booting's 2 s deadlines), TASK-0206 (darwin flakes), TASK-0198/0199/0170 (brig and the runner on darwin) and TASK-0207 (confined runner on Linux). Conditions: (1) the closing notes must say the full check was red, give the counts, and name which task owns each failing test; any failing test no queued task covers is filed as a draft or appended to the queued task in its area, not waved through; (2) this does not relax the check: scripts/check stays the one definition of green, and a red full check still blocks any task whose criteria cover the failing area or whose diff touches it. Separately, the missing record-check --repro is still the one thing between this task and closing; that is the worker's to supply (reproduce the line-310 failure with the fix reverted and record it), not something this ruling waives.
 <!-- SECTION:NOTES:END -->
