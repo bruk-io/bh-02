@@ -6,7 +6,7 @@ title: >-
 status: In Progress
 assignee: []
 created_date: '2026-10-25 17:39'
-updated_date: '2026-10-25 18:07'
+updated_date: '2026-11-07 19:31'
 labels:
   - size-8
 dependencies: []
@@ -59,6 +59,76 @@ The `local.env` rule exists so a key never reaches code the model writes. The ja
 - [ ] #7 Under `--no-jail`, provider keys in the process environment are not scrubbed, and the jail docs state that this exposes them to the model's code.
 - [ ] #8 README.md, docs/bh-02/using/models.md, the jail docs, get-started, GLOSSARY.md and the models plugin README describe the new `key` object, the environment source and the allow-list's home, and scripts/check passes.
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Check `scripts/check` exited 1
+
+(122 earlier lines omitted)
+```text
+>       assert [s.rsplit("\n", 1)[-1] for s in said] == ["DENIED"] * len(inputs), said
+E       AssertionError: ['(/private/var/folders/rf/f34xmczn4659gm98hrsprydc0000gn/T/pytest-of-brukhabtu/pytest-1009/popen-gw0/test_a_session_r...me/xdg/bh-02/startup.py ran first: no public functions)
+E         DENIED', 'DENIED', 'DENIED', 'DENIED', 'DENIED', 'WROTE', ...]
+E       assert ['DENIED', 'D... 'WROTE', ...] == ['DENIED', 'D...'DENIED', ...]
+E         
+E         At index 5 diff: 'WROTE' != 'DENIED'
+E         Use -v to get more diff
+
+bh-02/app/tests/test_python_repl.py:980: AssertionError
+_____________ test_a_listener_that_left_after_listening_is_refused _____________
+[gw0] darwin -- Python 3.15.0 /Users/brukhabtu/Documents/src/github.com/bruk-io/bh-02/.venv/bin/python
+
+run_id = '8abe53d6d1ad4edf8537991a5f1c38d7'
+jail_dir = '/private/tmp/bg-jy5e1it6'
+
+    @pytest.mark.integration
+    def test_a_listener_that_left_after_listening_is_refused(run_id: str, jail_dir: str) -> None:
+        """The kernel names the process that called `listen`; one that has since
+        exited is no vouching peer, even when the socket's holder is in the
+        group (the safe direction for a daemon that forks after `listen`)."""
+        jail = _create(jail_dir, confined=False)
+        reservation = jail.channel("ctl")
+        left = os.path.join(jail_dir, "own", "left")
+        body = f"python3 -c '{_FORK_AFTER_LISTEN}' {reservation.bound_path} {left}; sleep 60"
+        process = jail.start(workload_argv(run_id, body), channel=reservation)
+        try:
+            deadline = time.monotonic() + _READY_S
+            while not os.path.exists(left):
+                assert time.monotonic() < deadline, "the listener never left"
+                time.sleep(0.02)
+>           with pytest.raises(EndpointRefused, match="has left"):
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           Failed: DID NOT RAISE EndpointRefused
+
+libs/brig/tests/integration/test_channel_planted_link.py:271: Failed
+=========================== short test summary info ============================
+FAILED bh-02/app/tests/test_python_repl.py::test_a_session_run_from_home_can_t_choose_what_a_later_session_reads_as_the_person_s@jail-lock
+FAILED libs/brig/tests/integration/test_channel_planted_link.py::test_a_listener_that_left_after_listening_is_refused
+2 failed, 3853 passed, 231 skipped in 72.73s (0:01:12)
+   FAILED: tests
+== gates
+== (root)
+   ok
+== libs/brig
+   ok
+== libs/cordis
+   ok
+== libs/cordis-helpers
+   ok
+== libs/host-paths
+   ok
+   ok
+== docs
+INFO    -  Cleaning site directory
+INFO    -  Building documentation to directory: /Users/brukhabtu/src/github.com/bruk-io/bh-02/site
+INFO    -  Documentation built in 1.29 seconds
+   ok
+== tokens
+bh-01's tokens and bh-02's theme are in sync
+   ok
+```
+<!-- SECTION:NOTES:END -->
 
 ## Comments
 
