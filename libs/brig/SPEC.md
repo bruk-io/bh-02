@@ -3745,7 +3745,7 @@ and `Process.wait_ready` reported ready. Ruled, superseding that residual:
 Implementing task: TASK-0079.33. (Ruled 2026-10-12, decision-185.)
 *Amended by decision-186 (below, 2026-10-13): `Jail.wait_ready(channel)` is
 gone, and a peer the kernel can't report is a refusal, not "not yet".*
-*Amended by decision-208 (below, 2026-11-07): darwin's `LOCAL_PEERPID` is
+*Amended by decision-209 (below, 2026-11-07): darwin's `LOCAL_PEERPID` is
 now measured, and it names the connection's peer, not always the process
 that called `listen`.*
 
@@ -3823,7 +3823,7 @@ container or a remote sandbox shares no host path with it). Ruled:
 
 Implementing task: TASK-0079.32. (Ruled 2026-10-13, decision-186.)
 
-**darwin's peer is the connection's, measured (2026-11-07, decision-208).**
+**darwin's peer is the connection's, measured (2026-11-07, decision-209).**
 decision-185 described `LOCAL_PEERPID` from the platform's headers, as the
 pid of the process that called `listen`, and left it unverified. Measured on
 macOS 27.0.1 (a listener that forks and exits, its child holding the
@@ -3859,7 +3859,7 @@ as soon as it had answered. Ruled, no code change to the dial:
   process's group" rather than "has left" (a refusal either way).
 
 Implementing task: TASK-0206 (tests and this record; no code change).
-(Ruled 2026-11-07, decision-208.)
+(Ruled 2026-11-07, decision-209.)
 
 **Mailbox is deleted (2026-09-08, decision-153).** It was the second kind
 here: an asynchronous, durable, ordered, many-writer-safe framed file with
