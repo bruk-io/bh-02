@@ -1,11 +1,11 @@
 ---
 id: TASK-0200
 title: 'Six sub-agent wiring tests fail on darwin: _up never sees the child''s program'
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-11-07 04:27'
-updated_date: '2026-11-07 06:10'
+updated_date: '2026-11-07 06:11'
 labels:
   - subagents
   - darwin
@@ -335,4 +335,6 @@ INFO    -  Documentation built in 1.32 seconds
 bh-01's tokens and bh-02's theme are in sync
    ok
 ```
+
+Review (reviewer, 2026-11-07, round 3): CLOSED. AC1-AC3 were ticked in round 2 on the evidence and are unchanged. Round 2's one blocker, the missing repro, is resolved: the notes hold the real failing run at 31595fcf2e05 (4dd3b2d1^), test_agent_stop_ends_the_child_and_its_python_program failing at test_agents_wiring.py:310, which is exactly the failure the task describes. The machine 'Repro at' header was left out with a 'No repro:' note explaining why. The fix is in the same test file the header would name, so check_repro could never pass. That choice is a workaround of the tool rather than a missing repro, and it is recorded in the open. Finding (nit, not filed here): philosophy's check_repro has no way to handle a bug whose fix is in its own test file; that belongs to the plugin, not this board. Full check (record-check --tier full) exits 1 with 7 failed / 3803 passed / 25 errors. That is the same count as round 2, and none of the failures are in subagents. Per the owner stand-in ruling of 2026-11-06, each failure belongs to another task. The brig collection errors, test_supervisor_link, test_teardown_zombies, test_exit_status and test_strategies belong to TASK-0198/0199/0170. The /bin/ps teardown errors in warden, host-paths and brig belong to TASK-0205. The three test_runner_confined failures and test_python_repl belong to TASK-0207/0199. test_trajectory_view belongs to TASK-0206 (darwin flakes). The check rewrote no files. No drafts filed.
 <!-- SECTION:NOTES:END -->
