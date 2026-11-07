@@ -1,7 +1,7 @@
 ---
-id: DRAFT-0020
+id: TASK-0208
 title: 'Full-suite-only setup ERRORs in host-paths, warden and cordis tests on darwin'
-status: Draft
+status: To Do
 assignee: []
 created_date: '2026-11-07 05:00'
 updated_date: '2026-11-07 19:23'
