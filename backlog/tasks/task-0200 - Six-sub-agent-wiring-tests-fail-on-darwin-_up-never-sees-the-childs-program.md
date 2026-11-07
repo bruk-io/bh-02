@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-07 04:27'
-updated_date: '2026-11-07 05:52'
+updated_date: '2026-11-07 05:53'
 labels:
   - subagents
   - darwin
@@ -124,4 +124,6 @@ bh-01's tokens and bh-02's theme are in sync
 ```
 
 Review (reviewer, 2026-11-07): NOT closed. Full check (record-check --tier full) passed on darwin, no files rewritten. AC1 and AC2 met on the evidence (cause named; six tests pass on darwin, and on Linux via linux-jail-check). The fix matches the plan and the precedent in test_shell_command.py. AC3 is not met: on Linux test_a_child_s_python_runs_in_a_jail_of_its_own_under_the_confined_runner fails (TASK-0207). This task stays open until TASK-0207 is fixed, or until the owner narrows AC3 and labels it finish-moved.
+
+Owner stand-in (Opus), 2026-11-07: Narrow AC3; do not wait for TASK-0207. The task's scope was the six darwin liveness failures, and AC1/AC2 are met on both platforms. The one Linux failure (test_a_child_s_python_runs_in_a_jail_of_its_own_under_the_confined_runner) stops in _booted before the changed _running check, is skipped on darwin, and is already tracked as TASK-0207, so holding this task open would only stall a finished fix. Narrowing changes no check: the test still runs and still fails on Linux until TASK-0207 fixes it. New AC3 wording: 'The subagents plugin's tests pass on macOS and Linux, except test_a_child_s_python_runs_in_a_jail_of_its_own_under_the_confined_runner on Linux, which TASK-0207 owns'. Whoever applies it edits AC3, adds the finish-moved label, and commits both with this note before the task goes back to review.
 <!-- SECTION:NOTES:END -->
