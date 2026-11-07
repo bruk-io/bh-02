@@ -4,7 +4,7 @@ title: Run a session's programs in one jail
 status: To Do
 assignee: []
 created_date: '2026-10-10 18:42'
-updated_date: '2026-10-12 22:22'
+updated_date: '2026-11-07 04:30'
 labels:
   - runner
   - finish-moved
@@ -43,4 +43,6 @@ type: feature
 Owner's trim, 2026-10-12: moved out of TASK-0079's finish line to the deferred brig intent TASK-0084. Sub-agents run with a jail each from the same policy until this lands (decision-0002).
 
 Finish moved (recorded 2026-11-06): commit b6b09860 ("Accept the brig and sub-agent intents and decision-0001, and split them") added criteria #7 and #8 when this task was rewired onto decision-0001's runtime/confinement split, requiring the mount tripwire to end the jail independent of the runtime and read allows to be decided at create rather than per start.
+
+Owner stand-in (Opus), 2026-11-06: Approved for this run on the orchestrator's report that Bruk put 0048 and 0074 in it today; it starts only after TASK-0079.31 closes, in the brig lane's order. Its AC #6 needs scripts/linux-jail-check as well as scripts/check; if the lane runs out of room, stopping here is fine (stuck is information).
 <!-- SECTION:NOTES:END -->
