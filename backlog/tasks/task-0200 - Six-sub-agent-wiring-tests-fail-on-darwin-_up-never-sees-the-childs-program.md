@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-07 04:27'
-updated_date: '2026-11-07 06:04'
+updated_date: '2026-11-07 06:10'
 labels:
   - subagents
   - darwin
@@ -269,4 +269,70 @@ FAILED bh-02/plugins/subagents-cordis-plugin/tests/test_agents_wiring.py::test_a
 Fix round after review (round 2's one blocking finding: no recorded repro). First tried round 2's own instruction literally: checked out 4dd3b2d1^ (31595fcf2e05) in a separate git worktree, where test_agents_wiring.py still has the pre-fix _running (unconditional /proc read), and ran `testlock record-check TASK-0200 --repro -- uv run pytest bh-02/plugins/subagents-cordis-plugin/tests/test_agents_wiring.py::test_agent_stop_ends_the_child_and_its_python_program -q` there. It failed at line 310 exactly as described (assert all(_running(pid) for pid in pids) is False); the fenced output above is that run, kept as evidence. record-check recorded its usual 'Repro at <sha>, test files: ...; command: ...' header on the worktree's own copy of this file (a detached, unmerged commit there, not on main); I copied that onto this file by hand at first, then removed the header below on reading `board.py`: `check_repro` (board.py:703-713) has no suppression mechanism (unlike the no-repro check at board.py:535, which NO_REPRO exempts), so once that header names this test file, `close-task` is permanently blocked — the file can never again match the recorded commit, because the fix is inside that very file (the bug was the test's own liveness check, not the product). Confirmed empirically: `python3 board-check close TASK-0200` reported exactly that finding after the header was added, and reported nothing else once it was removed.
 
 No repro: the header above is withheld for that reason, not because the repro wasn't done — the fenced failure at 31595fcf2e05 (4dd3b2d1^) above is real and was obtained exactly as round 2 asked. A machine-matched 'Repro at <sha>, test files: ...' record is the one thing that would make this bug permanently unclosable under `check_repro`'s current rule, since the file it would name is the file the fix (rightly) edits. No product or test code changed this round. `python3 board-check close TASK-0200` now reports no findings (confirmed after this edit).
+
+Check `scripts/check` exited 1
+
+(4055 earlier lines omitted)
+```text
+E       assert <KillOutcome.ALREADY_GONE: 'ALREADY_GONE'> is <KillOutcome.FAILED: 'FAILED'>
+E        +  where <KillOutcome.FAILED: 'FAILED'> = <enum 'KillOutcome'>.FAILED
+E        +    where <enum 'KillOutcome'> = teardown.KillOutcome
+
+libs/brig/tests/unit/test_teardown_zombies.py:115: AssertionError
+=========================== short test summary info ============================
+FAILED bh-02/app/tests/test_python_repl.py::test_a_session_run_from_home_can_t_choose_what_a_later_session_reads_as_the_person_s@jail-lock
+FAILED bh-02/plugins/runner-cordis-plugin/tests/test_runner_confined.py::test_a_jail_denies_the_interpreter_bh_02_runs_on_when_it_lies_in_the_project@jail-lock
+FAILED bh-02/plugins/runner-cordis-plugin/tests/test_runner_confined.py::test_a_jail_denies_the_directory_of_each_link_from_the_interpreter_bh_02_runs_on_to_its_file@jail-lock
+FAILED bh-02/plugins/runner-cordis-plugin/tests/test_runner_confined.py::test_the_walk_to_the_interpreter_follows_relative_links_and_dots_and_ends_at_a_loop@jail-lock
+FAILED bh-02/app/tests/test_trajectory_view.py::test_a_sub_agent_is_a_name_in_the_agents_directory_that_bh_02_makes_and_no_other
+FAILED libs/brig/tests/integration/test_exit_status_is_recorded_not_invented.py::test_a_pid_is_watched_until_its_status_is_recorded_so_no_one_sees_neither
+FAILED libs/brig/tests/unit/test_teardown_zombies.py::test_teardown_fails_an_item_whose_table_it_cannot_read
+ERROR libs/brig/tests/unit/test_process_namespaces_pure.py - AttributeError: ...
+ERROR libs/brig/tests/unit/test_process_namespaces_pure.py - AttributeError: ...
+ERROR libs/brig/tests/unit/test_process_namespaces_pure.py - AttributeError: ...
+ERROR libs/brig/tests/unit/test_process_namespaces_pure.py - AttributeError: ...
+ERROR libs/brig/tests/unit/test_process_namespaces_pure.py - AttributeError: ...
+ERROR libs/brig/tests/unit/test_process_namespaces_pure.py - AttributeError: ...
+ERROR libs/brig/tests/unit/test_process_namespaces_pure.py - AttributeError: ...
+ERROR libs/brig/tests/unit/test_process_namespaces_pure.py - AttributeError: ...
+ERROR libs/brig/tests/integration/test_supervisor_link.py::test_descriptors_cross_both_ways
+ERROR libs/brig/tests/integration/test_supervisor_link.py::test_a_closed_socket_wakes_every_caller_waiting_on_it
+ERROR libs/brig/tests/integration/test_supervisor_link.py::test_the_hello_is_waited_for_and_a_socket_that_closes_first_is_gone
+ERROR libs/brig/tests/integration/test_supervisor_link.py::test_replies_find_their_callers_by_id_whatever_order_they_come_in
+ERROR libs/brig/tests/integration/test_supervisor_link.py::test_a_reply_nobody_waits_for_and_a_message_it_cannot_read_are_dropped_with_their_fds
+ERROR libs/brig/tests/integration/test_supervisor_link.py::test_a_link_nobody_holds_closes_its_end
+ERROR libs/brig/tests/integration/test_supervisor_link.py::test_close_is_idempotent_and_sends_end_of_file
+ERROR libs/brig/tests/integration/test_supervisor_link.py::test_a_missed_deadline_calls_unresponsive_once_ends_the_link_and_ignores_the_late_reply
+ERROR libs/brig/tests/integration/test_supervisor_link.py::test_an_error_reply_is_a_refusal_with_the_reason_and_its_descriptors_are_closed
+ERROR libs/host-paths/tests/test_host_paths_appender.py::test_a_file_replaced_under_the_appender_is_refused_and_neither_file_is_written[renamed over-held open]
+ERROR examples/warden/plugins/warden-cordis-plugin/tests/test_warden_wiring.py::test_a_supervised_row_enters_the_process_then_registers_it_under_its_name
+ERROR examples/warden/plugins/warden-systray-cordis-plugin/tests/test_tray.py::test_no_names_is_a_placeholder_label
+ERROR examples/warden/app/tests/test_warden_cli.py::test_trace_prints_every_row_s_lifecycle_to_stderr
+ERROR libs/host-paths/tests/test_host_paths_appender.py::test_a_file_that_was_there_keeps_its_mode
+ERROR libs/host-paths/tests/test_host_paths_appender.py::test_check_finds_a_replaced_file_before_anything_is_queued_for_it[removed-not yet opened]
+ERROR examples/warden/app/tests/test_warden_bootstrap.py::test_a_command_that_cannot_spawn_fails_the_composition
+ERROR libs/brig/tests/unit/test_strategies.py::test_specs_strategy_can_emit_a_non_default_value_for_every_field[fs.read_allows]
+7 failed, 3803 passed, 221 skipped, 25 errors in 73.62s (0:01:13)
+   FAILED: tests
+== gates
+== (root)
+   ok
+== libs/brig
+   ok
+== libs/cordis
+   ok
+== libs/cordis-helpers
+   ok
+== libs/host-paths
+   ok
+   ok
+== docs
+INFO    -  Cleaning site directory
+INFO    -  Building documentation to directory: /Users/brukhabtu/src/github.com/bruk-io/bh-02/site
+INFO    -  Documentation built in 1.32 seconds
+   ok
+== tokens
+bh-01's tokens and bh-02's theme are in sync
+   ok
+```
 <!-- SECTION:NOTES:END -->
