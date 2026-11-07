@@ -31,8 +31,8 @@ Cost: every worker and reviewer on macOS either scopes the check to one member (
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 scripts/check on macOS reaches its tests, gates and docs steps and reports them, with no type error from a Linux-only name in libs/brig
-- [ ] #2 The chosen fix keeps the Linux behaviour type-checked rather than silencing the modules wholesale, and a note says which approach was taken and why
+- [x] #1 scripts/check on macOS reaches its tests, gates and docs steps and reports them, with no type error from a Linux-only name in libs/brig
+- [x] #2 The chosen fix keeps the Linux behaviour type-checked rather than silencing the modules wholesale, and a note says which approach was taken and why
 <!-- AC:END -->
 
 ## Implementation Notes
