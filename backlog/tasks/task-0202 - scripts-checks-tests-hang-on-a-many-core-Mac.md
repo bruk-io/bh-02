@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-07 04:27'
-updated_date: '2026-11-07 04:56'
+updated_date: '2026-11-07 04:57'
 labels:
   - scripts
   - tests
@@ -117,4 +117,46 @@ bh-01's tokens and bh-02's theme are in sync
 ```
 
 Review (reviewer agent), 2026-11-06: not closed, one blocker. The ACs hold: AC1 cause explained and fixed (boot inside run()'s try, rt.shutdown in finally) with a regression test; AC2 reviewer's full check through testlock completed in 75.65 s, every step reported (16 failed/3794 passed/25 errors, all other steps ok), TEST_WORKERS = min(8, cpu) with its reason; AC3 load-only failures filed as TASK-0203..0206, the rest map to filed tasks. Blocker: close-task refuses a bug without a recorded repro. The worker saw test_booting.py::test_a_run_cancelled_while_its_rows_start_leaves_no_row_running fail with the fix reverted, but that run is not recorded. Record it (revert bootstrap.py's change, record-check TASK-0202 --repro -- uv run pytest bh-02/app/tests/test_booting.py::test_a_run_cancelled_while_its_rows_start_leaves_no_row_running -q, restore), then send back for close. No other findings; no drafts filed.
+
+Repro at 5c9be416d47e, test files: bh-02/app/tests/test_booting.py; command: `uv run pytest bh-02/app/tests/test_booting.py::test_a_run_cancelled_while_its_rows_start_leaves_no_row_running -q` exited 1
+
+```text
+F                                                                        [100%]
+=================================== FAILURES ===================================
+_______ test_a_run_cancelled_while_its_rows_start_leaves_no_row_running ________
+
+composition = <function composition.<locals>.layer at 0x10a4f8eb0>
+
+    async def test_a_run_cancelled_while_its_rows_start_leaves_no_row_running(
+        composition: Callable[..., Path],
+    ) -> None:
+        """A run cancelled mid-boot (Ctrl-C, or a test's deadline) shuts its rows down before the
+        cancellation goes on. Left on the loop, they were cancelled all at once when the loop closed,
+        and a row whose task was cancelled before it began left its parent waiting on it forever: the
+        hang that stalled a scripts/check worker (TASK-0202)."""
+        patch = composition('[[plugin]]\nid = "loop"\nuse = "fragile:echo_model"\n', one_reply=True)
+        running: asyncio.Task[None] | None = None
+    
+        def cancel_once_a_row_starts(line: str) -> None:
+            if running is not None and not running.cancelling() and line.startswith("reload "):
+                running.cancel()
+    
+        running = asyncio.create_task(
+            run([*layers(), patch], [Row("chat", config={"prompt": "hi"})], trace=cancel_once_a_row_starts)
+        )
+        (outcome,) = await asyncio.wait_for(asyncio.gather(running, return_exceptions=True), 10)
+        assert isinstance(outcome, asyncio.CancelledError)
+>       assert [task for task in asyncio.all_tasks() if task is not asyncio.current_task()] == []
+E       AssertionError: assert [<Task pendin...card()]>, ...] == []
+E         
+E         Left contains 35 more items, first extra item: <Task pending name='Task-8' coro=<_live() running at /Users/brukhabtu/Documents/src/github.com/bruk-io/bh-02/libs/cordis/src/cordis/runtime.py:483> wait_for=<Future pending cb=[Task.task_wakeup()]> cb=[set.discard()]>
+E         Use -v to get more diff
+
+bh-02/app/tests/test_booting.py:182: AssertionError
+=========================== short test summary info ============================
+FAILED bh-02/app/tests/test_booting.py::test_a_run_cancelled_while_its_rows_start_leaves_no_row_running
+1 failed in 1.29s
+```
+
+Fix round 2026-11-06: repro recorded above. With bootstrap.py reverted to its pre-fix form (git show 749a2d1d~1), record-check --repro under testlock ran the test: 1 failed (35 tasks left on the loop), recorded. Fix restored (git checkout), same test through testlock: 1 passed in 1.25s. Back to review for close.
 <!-- SECTION:NOTES:END -->
