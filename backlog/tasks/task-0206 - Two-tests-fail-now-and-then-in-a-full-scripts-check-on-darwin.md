@@ -240,4 +240,6 @@ INFO    -  Documentation built in 1.28 seconds
 bh-01's tokens and bh-02's theme are in sync
    ok
 ```
+
+No repro: both failures are load- and timing-dependent races that a single command cannot reproduce on demand; the worker's evidence stands in for one (20-run baseline on darwin, 4 of 20 red before the fix; plants of the has-left clause and of a stopped count seen red, recorded above).
 <!-- SECTION:NOTES:END -->
