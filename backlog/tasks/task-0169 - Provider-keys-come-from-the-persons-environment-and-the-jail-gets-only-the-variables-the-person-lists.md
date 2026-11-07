@@ -3,7 +3,7 @@ id: TASK-0169
 title: >-
   Provider keys come from the person's environment, and the jail gets only the
   variables the person lists
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-10-25 17:39'
 updated_date: '2026-11-07 19:31'
@@ -128,6 +128,8 @@ INFO    -  Documentation built in 1.29 seconds
 bh-01's tokens and bh-02's theme are in sync
    ok
 ```
+
+Review (reviewer, 2026-11-07): closed. Children .01-.06 are all Done, and their ticked criteria cover #1-#7 (.03: key object, env/cmd/op, refusals, claude-code gateway; .04: local.env retired, --no-jail docs; .05: runner.toml allow-list, unwritable by the model, test that a shell-exported key is absent from the jail; .06: !COMMAND drops declared key variables). #8: README, models.md, the jail docs (runner.toml section, --no-jail), get-started, GLOSSARY and the models README describe the key object. The only local.env, key_command and key_ttl_ms mentions left are migration notes saying which old files stop working. Full scripts/check (record-check, this run): 2 failed, 3853 passed; gates, docs and tokens ok; the check fixed or reformatted nothing. Under the owner stand-in rule, each red is outside this change and owned by an open, accepted task: test_python_repl home-session write -> TASK-0197; brig test_channel_planted_link listener-left -> TASK-0206. Findings: none blocking, no drafts filed.
 <!-- SECTION:NOTES:END -->
 
 ## Comments
