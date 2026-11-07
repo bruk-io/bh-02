@@ -242,7 +242,7 @@ def conditions_for(t: Task) -> tuple[str, ...]:
     return FILE_CONDITIONS if t.path else MCP_CONDITIONS + BASH_CONDITIONS
 
 
-def _hook_settings(
+def hook_settings(
     mode: str,
     log: Path,
     matcher: str = "mcp__.*",
@@ -267,7 +267,7 @@ def bash_channel(t: Task, condition: str, w: Path, log: Path, dials: Dials = _DI
     script.chmod(0o755)
     mode = dials.mode_for(condition)
     (w / "settings.json").write_text(
-        json.dumps(_hook_settings(mode, log, "Bash", dials.view, dials.config, dials.budget) if mode else {})
+        json.dumps(hook_settings(mode, log, "Bash", dials.view, dials.config, dials.budget) if mode else {})
     )
     return ["--strict-mcp-config", "--settings", "settings.json", "--allowedTools", "Bash,Read,Grep"]
 
@@ -285,7 +285,7 @@ def mcp_channel(t: Task, condition: str, w: Path, log: Path, dials: Dials = _DIA
     (w / "mcp.json").write_text(json.dumps({"mcpServers": {"r" if replay else "fixture": server}}))
     mode = dials.mode_for(condition)
     settings = (
-        _hook_settings(mode, log, view=dials.view, config=dials.config, budget=dials.budget) if mode else {}
+        hook_settings(mode, log, view=dials.view, config=dials.config, budget=dials.budget) if mode else {}
     )
     (w / "settings.json").write_text(json.dumps(settings))
     flags = ["--mcp-config", "mcp.json", "--strict-mcp-config", "--settings", "settings.json"]
