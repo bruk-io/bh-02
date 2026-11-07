@@ -3,9 +3,11 @@ id: TASK-0209
 title: >-
   On darwin a tree renamed onto an absent pin, or a write root renamed into
   another, carries files past a carve-out
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@claude'
 created_date: '2026-11-07 19:34'
+updated_date: '2026-11-07 22:21'
 labels:
   - security
   - brig
@@ -23,7 +25,29 @@ Found by TASK-0197 (decision-207), measured with sandbox-exec on macOS 27.0.1 un
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Each shape is reproduced by a test on darwin that fails before the fix and is seen failing with the fix removed
-- [ ] #2 On darwin neither shape lets a jailed input put a file at a write_denies path; brig's SPEC.md rules the remedy (decision-N)
-- [ ] #3 Linux unchanged: scripts/linux-jail-check passes
+- [x] #1 Each shape is reproduced by a test on darwin that fails before the fix and is seen failing with the fix removed
+- [x] #2 On darwin neither shape lets a jailed input put a file at a write_denies path; brig's SPEC.md rules the remedy (decision-N)
+- [x] #3 Linux unchanged: scripts/linux-jail-check passes
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1. SPEC.md decision-208 (TASK-0209): shape 2 - seatbelt also pins each write root that holds a carve-out with (deny file-write-unlink (literal ROOT)) (parity with bwrap, whose root is a mount); shape 1 - an absent pin is the embedder's to make before launch on darwin (every absent one, not only the topmost), the existing pin rule then holds it; amend decision-207's open-gaps sentence and the profile docstring. 2. brig: render_sbpl emits the root pins; unit golden/ordering tests; real-kernel test_seatbelt_pins gains the root-rename shape with its control (renames inside the root still work). 3. runner: on darwin make the absent pins as placeholders through the Linux record/lock/sweep machinery, release sweeps on darwin too; darwin app test: tree renamed onto absent ~/.config refused, control write inside it allowed. 4. Plant: remove each fix (scratch copy + sha256), see each test fail. 5. Checks: brig + runner member checks, linux-jail-check. Risks: placeholder cleanup on darwin leaving dirs; seatbelt root pin refusing rmdir of the project root (same as bwrap's mount).
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Shape 2 (brig): render_sbpl now emits (deny file-write-unlink (literal ROOT)) for each write root (not /) with a write deny strictly beneath it, after the carve-outs and before the decision-207 pins. New real-kernel test libs/brig/tests/integration/test_seatbelt_pins.py::test_a_write_root_above_a_carve_out_can_t_be_renamed_into_another_root: workspace renamed into a second root (scratch), carve-out file rewritten there, renamed back. Before the fix it FAILED with rename_root_away/rewrite_moved/rename_root_back all OK (file planted); after, the rename away is DENIED with seatbelt's signature and the same-jail control (rename inside the root, rename out into the scratch, write, chmod, utimes on the root) is OK. Unit golden/ordering/pin tests in test_seatbelt_profile.py updated for the root pin.
+
+Shape 1 (runner, darwin): no pure-profile remedy (a rename destination is file-write-create, the same as mkdir), so the embedder makes every absent pin before launch: BrigJail._absent_pins (brig's pins, not lexists), made through the Linux placeholder record/lock/sweep machinery, which now runs on darwin too; release() sweeps on darwin too. New darwin tests in bh-02/plugins/runner-cordis-plugin/tests/test_runner_confined.py: test_a_darwin_jail_holds_an_absent_directory_above_a_write_deny_against_a_rename_onto_it (home with no .config, ~/.config/bh-02 trusted; input renames x/bh-02/startup.py onto ~/.config) FAILED before the fix (rename OK, file planted at the denied path); after, the rename is EPERM from the sandbox and a write in ~/.config is OK. Control test test_a_darwin_jail_removes_the_directory_it_made_above_a_write_deny_once_it_stops: made while running, removed with its record after stop.
+
+Ruling: SPEC.md section 6 decision-208 (TASK-0209), decision-207 marked amended. Docs: profile.py docstring, runner jail.py docstrings, runner README.
+
+Planted (scratch copy + sha256, restored to matching digests): root-pin line replaced by pass, and runner made Linux-only again: all three new tests FAILED (rename_root_away OK; rename OK instead of Operation not permitted; ~/.config not made).
+
+Checks: testlock scripts/check libs/brig -> all ok (1310 passed, 180 skipped; gates ok; docs ok). testlock scripts/check bh-02/plugins/runner-cordis-plugin --no-gates --no-docs -> ok (82 passed, 33 skipped) after fixing two long lines. Darwin app/extensions/python tests: testlock pytest bh-02/app/tests/test_python_repl.py bh-02/plugins/extensions-cordis-plugin bh-02/plugins/python-cordis-plugin -n 8 -> 243 passed, 14 skipped.
+
+Linux: testlock scripts/linux-jail-check -> exit 0, 327 passed, 4 skipped. The runner's Linux path is unchanged (lock, placeholders and release were already Linux behaviour; only darwin gained them); the profile change is seatbelt's. README also says the root pin's cost (an input can't rename or remove the project directory itself, as on Linux).
+<!-- SECTION:NOTES:END -->

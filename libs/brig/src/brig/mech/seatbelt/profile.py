@@ -58,6 +58,7 @@ has a feature the parent does not:**
                                             (allow file-write* (subpath "JAIL_DIR/tmp"))
       [when any channel is declared]        (allow file-write* (subpath "JAIL_DIR/chan"))
       [per write_denies entry, spec order]  (deny file-write* (subpath "RESOLVED"))
+      [per write root above a carve-out]    (deny file-write-unlink (literal "RESOLVED"))
       [per pin, shallowest first]           (deny file-write-unlink (literal "RESOLVED"))
     (allow network-bind)                    [ONLY when at least one LISTEN channel]
     (deny network* (with no-log))
@@ -143,7 +144,13 @@ and renamed it back. `file-write-unlink` is what a rename's source and a
 rename over an existing directory are checked as; creating, writing and
 removing entries inside a pin, `chmod` and `utimes` on it stay allowed
 (measured). A rule on an absent pin refuses nothing until one is made there,
-so the render needs no existence answer and stays pure.
+so the render needs no existence answer and stays pure; making it is the
+embedder's (decision-208).
+
+**The root pins (decision-208).** Each write root (but `/`) with a carve-out
+strictly beneath it gets the same rule, before the pins: without it the
+workload renamed the whole root into another write root, rewrote the
+carve-out's file there and renamed the root back.
 
 **`ReadModelUnsupported`.** SPEC.md §6's roster row spells seatbelt's
 `fs_read` axis "(denylist)": the two read models are declared, not layered
@@ -384,7 +391,11 @@ def render_sbpl(
     # The pins (decision-207): the directories between a write root and a
     # carve-out can't be renamed away or renamed over, or the carve-out's files
     # would leave its path, be rewritten, and come back. After the allows, so
-    # the deny wins.
+    # the deny wins. First the write roots above a carve-out themselves
+    # (decision-208), which could be renamed whole into another root.
+    for root in spec.fs.write_allows:
+        if root != "/" and any(deny.startswith(root + "/") for deny in spec.fs.write_denies):
+            lines.append(f"(deny file-write-unlink {_sbpl_literal(_resolve(root, resolved))})")
     for path in pins(spec.fs.write_allows, spec.fs.write_denies):
         lines.append(f"(deny file-write-unlink {_sbpl_literal(_resolve(path, resolved))})")
 

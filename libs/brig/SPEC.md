@@ -1077,7 +1077,48 @@ renamed onto an ABSENT pin's path (a rename's destination is checked as
 too), so the embedder that cares holds the topmost absent one, as on bwrap;
 and a write root renamed whole into another write root, which no pin
 between root and carve-out covers; TASK-0209 tracks both. Implementing task: TASK-0197.
-(Ruled 2026-11-07, decision-207.)
+(Ruled 2026-11-07, decision-207.) *Amended 2026-11-07, decision-208:* both
+gaps are closed, the second by brig and the first by the embedder, as below.
+
+**On seatbelt the write root above a carve-out is pinned too, and an absent
+pin is the embedder's to make (2026-11-07, TASK-0209).** decision-207 left
+two shapes open, and both were reproduced against the real kernel on macOS
+27.0.1 before this ruling. (1) A write root renamed whole into another write
+root (the workspace into the jail's scratch): the rename's source is the
+root's own path, which its `(allow file-write* (subpath ROOT))` grants, so the
+workload moved the workspace, rewrote the carve-out's file under the new name
+and renamed it back, and the file at the path `write_denies` named was its own
+(`tests/integration/test_seatbelt_pins.py`,
+`test_a_write_root_above_a_carve_out_can_t_be_renamed_into_another_root`).
+Ruled: `render_sbpl` emits `(deny file-write-unlink (literal "RESOLVED"))` for
+every write root that holds a `write_denies` entry strictly beneath it (but
+`/`), before the pins and after the carve-outs: the same operation and the same
+measured cost as a pin, so such a root can't be renamed away or removed, and
+everything inside it, a rename out of it into another root included, works as
+before (that control is in the same jail). A root with no carve-out under it
+is not pinned: moving it carries nothing past one. On bwrap a write root is a
+bind mount, which can't be renamed or removed either, so this is the two
+mechanisms agreeing, not a new refusal. (2) A directory between a root and a
+carve-out that is ABSENT (bh-02 run from a home with no `~/.config`): the
+workload made `x/bh-02/startup.py` and renamed `x` onto `~/.config`, and the
+rename's destination is checked as `file-write-create`, the operation `mkdir`
+is checked as too. A rule that refused it would refuse every `mkdir` of that
+directory by the workload, which this ruling rejects; and a render that
+treated an absent pin differently would need an existence answer and stop
+being pure. So brig's profile stays as it is, and the remedy is the
+embedder's, as decision-207 said: make each absent pin, as an empty directory,
+before the workload starts, which the pin's rule then holds (renaming onto an
+existing directory is refused by it, measured by decision-207), and remove what
+it made once the jail is gone. On seatbelt that is EVERY absent pin, not only
+the topmost: a pin made above another that is still absent leaves the deeper
+one a rename destination. bh-02's runner does this on darwin
+(`runner_cordis_plugin.jail`, its
+`test_a_darwin_jail_holds_an_absent_directory_above_a_write_deny_against_a_rename_onto_it`),
+with the record, lock and sweep it already keeps for bubblewrap's
+placeholders. The cost is on the host: the person sees an empty `~/.config`
+(or `.git`, in a project that is no repository) while a jail runs (kept after it if
+something was put in it), and the workload can't remove or rename it. Implementing task:
+TASK-0209. (Ruled 2026-11-07, decision-208.)
 
 **`rlimits`' hard limit sits one second above its soft limit (2026-09-08,
 decision-161).** The roster row above says "`SIGXCPU` is real", and until this

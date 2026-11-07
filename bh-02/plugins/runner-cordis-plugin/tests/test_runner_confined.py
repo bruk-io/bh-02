@@ -1523,6 +1523,98 @@ async def test_a_killed_bh_02_s_seatbelt_jail_ends_with_it_but_not_a_program_tha
                 os.kill(program, signal.SIGKILL)
 
 
+# Listens; once the jail has seen it listen, makes argv[2]/bh-02/startup.py (a tree of its own),
+# renames argv[2] onto argv[3] (an absent directory above a write deny, `~/.config` above
+# `~/.config/bh-02`), then writes a file in argv[3], and reports each as `OK` or the error's
+# strerror in argv[4], written whole.
+_LISTEN_THEN_RENAME_ONTO = """
+import os, socket, sys, time
+server = socket.socket(socket.AF_UNIX)
+server.bind(sys.argv[1])
+server.listen(4)
+server.accept()
+mine, pin, said = sys.argv[2:5]
+def attempt(step):
+    try:
+        step()
+        return "OK"
+    except OSError as error:
+        return error.strerror
+os.makedirs(os.path.join(mine, "bh-02"))
+open(os.path.join(mine, "bh-02", "startup.py"), "w").write("MARK = 2")
+renamed = attempt(lambda: os.rename(mine, pin))
+wrote = attempt(lambda: open(os.path.join(pin, "mine.txt"), "w").write("x"))
+lines = [renamed, wrote]
+open(said + ".part", "w").write("\\n".join(lines))
+os.replace(said + ".part", said)
+time.sleep(60)
+"""
+
+
+async def test_a_darwin_jail_holds_an_absent_directory_above_a_write_deny_against_a_rename_onto_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """bh-02 run from a home with no `~/.config`: `~/.config/bh-02` is denied, and `~/.config`, the
+    directory between it and the root, is absent. seatbelt judges a rename by its two paths, so an
+    input renaming a tree of its own (`x/bh-02/startup.py`) onto `~/.config` would put its file at
+    the denied path. The jail makes `~/.config` before the program starts (decision-208), which
+    seatbelt's pin then holds: the rename is refused by the sandbox, and writing in `~/.config`
+    still works."""
+    if sys.platform != "darwin":
+        pytest.skip("seatbelt is darwin's")
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    home = tmp_path / "home"
+    home.mkdir()
+    config = home / ".config"
+    said = home / "said"
+    endpoint = _endpoint()
+    argv = [
+        sys.executable,
+        "-I",
+        "-c",
+        _LISTEN_THEN_RENAME_ONTO,
+        endpoint,
+        str(home / "x"),
+        str(config),
+        str(said),
+    ]
+    jail = BrigJail(BrigConfig(), Host(trusted=(str(config / "bh-02"),)), lock=str(tmp_path / "jails.lock"))
+    started = await jail.start(argv, cwd=str(home), endpoint=endpoint)
+    try:
+        renamed, wrote = (await _report(said, started)).split("\n")
+    finally:
+        await started.stop()
+    assert renamed == os.strerror(errno.EPERM), renamed  # the sandbox's refusal, not the filesystem's
+    assert wrote == "OK", wrote
+    assert not (config / "bh-02").exists()
+    assert (home / "x" / "bh-02" / "startup.py").read_text() == "MARK = 2"
+
+
+async def test_a_darwin_jail_removes_the_directory_it_made_above_a_write_deny_once_it_stops(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The control for the hold above: the directory the jail made is there while its program runs
+    and gone, with the jail's record of it, once it has stopped; nothing else is made."""
+    if sys.platform != "darwin":
+        pytest.skip("seatbelt is darwin's")
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    home = tmp_path / "home"
+    home.mkdir()
+    config = home / ".config"
+    endpoint = _endpoint()
+    jail = BrigJail(BrigConfig(), Host(trusted=(str(config / "bh-02"),)), lock=str(tmp_path / "jails.lock"))
+    started = await jail.start(
+        [sys.executable, "-I", "-c", _LISTEN, endpoint], cwd=str(home), endpoint=endpoint
+    )
+    try:
+        assert config.is_dir() and list(config.iterdir()) == []
+        assert len(list((tmp_path / "state" / "bh-02" / "jails").iterdir())) == 1
+    finally:
+        await started.stop()
+    assert list(home.iterdir()) == []
+    assert list((tmp_path / "state" / "bh-02" / "jails").iterdir()) == []
+
+
 async def test_the_sweep_leaves_a_record_whose_process_group_still_runs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

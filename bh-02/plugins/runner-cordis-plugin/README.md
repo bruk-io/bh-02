@@ -205,6 +205,14 @@ rewrite bh-02's config directory or its own code.
 One policy, two stacks (`stack_for`):
 
 - **darwin**: brig's `scratch_darwin()` (seatbelt), which reads by denylist: `spec_for` as it is.
+  seatbelt pins each directory between a write root and a denied path, and the root itself,
+  against being renamed away or over (brig SPEC.md section 6, decisions 207 and 208; so an input
+  can't rename or remove the project directory itself, as on Linux, where it is a mount), but a pin
+  that is absent can still be a rename's destination: an input could make `x/bh-02/startup.py`
+  and rename `x` onto a missing `~/.config`. So the jail makes each absent one on the host (an
+  empty `~/.config`, or `.git` in a project that is no repository) before its program starts,
+  records it, and removes it once the jail is gone, as Linux's placeholders are
+  (`test_a_darwin_jail_holds_an_absent_directory_above_a_write_deny_against_a_rename_onto_it`).
 - **Linux**: brig's `strict_linux()` (bubblewrap), which reads by allowlist. `allowlisted` names
   what is readable: `SYSTEM_READABLE` (`/usr`, `/bin`, `/sbin`, `/lib`, `/lib64`, `/etc`, those
   that exist), the interpreter (`sys.base_prefix`, `sys.prefix`, and every symlinked directory
@@ -432,9 +440,9 @@ itself (brig SPEC.md section 6, decision-168), so `.git` (and a layer file's dir
 host import path's) can't be renamed or removed by an input, and is as writable as before
 (`test_an_input_can_t_put_its_own_git_config_in_place_by_moving_the_directory_it_is_in`). What
 it costs: `os.rename` between such a directory and the rest of the project fails with `EXDEV`
-(`mv` and `shutil.move` copy instead). On darwin an input can rename `.git` away, which
-displaces the repository but plants nothing: seatbelt denies `.git/config` and `.git/hooks`
-by path, wherever the directory came from.
+(`mv` and `shutil.move` copy instead). On darwin seatbelt pins the same directories with a rule
+(`.git` can't be renamed away or over, and is as writable as before), and the jail makes an
+absent one first (above).
 
 Known gaps on Linux, beyond darwin's:
 

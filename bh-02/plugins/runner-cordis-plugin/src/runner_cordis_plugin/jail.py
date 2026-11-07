@@ -32,7 +32,12 @@ lists it.
 One policy, two platforms; only the stack and the read model differ:
 
 - darwin: brig's `scratch_darwin()` (seatbelt). Reads by denylist, which is `spec_for` as it is:
-  everything but the secrets.
+  everything but the secrets. seatbelt judges a rename by its two paths, and pins each directory
+  between a write root and a write deny against being renamed away or over, but not one that is
+  absent: a tree of an input's own renamed onto it would put its files at the denied path. So
+  the jail makes each absent one (`~/.config` above `~/.config/bh-02`, `.git` above `.git/hooks`)
+  before the program starts, as an empty directory the pin then holds, with the same record,
+  lock and removal as Linux's placeholders below (brig decision-208).
 - Linux: brig's `strict_linux()` (bubblewrap). Reads by allowlist, so `allowlisted` turns the
   policy into one: what is readable is the system tree (`/usr`, `/etc`, ...), the interpreter
   (`sys.base_prefix`, `sys.prefix`), the directories the command names, bh-02's own code
@@ -94,7 +99,7 @@ from brig.core import (
     ReadModel,
     Spec,
 )
-from brig.mech.bwrap import DEFAULT_BWRAP_PATH, DEFAULT_INTERPRETER, InterpreterNotMounted
+from brig.mech.bwrap import DEFAULT_BWRAP_PATH, DEFAULT_INTERPRETER, InterpreterNotMounted, pins
 from brig.run import (
     HostRuntime,
     IoPolicy,
@@ -466,7 +471,8 @@ def graded(report: Mapping[str, str], holds: Sequence[str]) -> dict[str, str]:
 
 def made_by_the_jail(absent: Sequence[str]) -> tuple[str, ...]:
     """The directories made on the host for bubblewrap to mount over at absent write-denied
-    paths (each path and each missing parent; `absent` lists them all), deepest first: the order
+    paths (each path and each missing parent; `absent` lists them all), or on darwin for
+    seatbelt's pins to hold (`BrigJail._absent_pins`), deepest first: the order
     they can be removed in once the jail is gone (and, reversed, made in)."""
     return tuple(sorted(set(absent), key=lambda p: (-p.count("/"), p)))
 
@@ -662,7 +668,7 @@ def still_running(report: KillReport) -> str:
 
 
 def records_dir(environ: Mapping[str, str], home: str) -> str:
-    """Where a Linux jail records the placeholders it made, one file per jail: bh-02's state
+    """Where a jail records the placeholders it made, one file per jail: bh-02's state
     directory (`$XDG_STATE_HOME/bh-02`, else `~/.local/state/bh-02`; `host_paths.state_home`),
     outside every jail."""
     return str(state_home(environ, Path(home)) / "bh-02" / "jails")
@@ -1037,13 +1043,10 @@ class BrigJail:
         return self._report
 
     async def release(self) -> str:
-        """For `/release`, once each owner has stopped its own program (`runner.Runner`). On
-        Linux: wait for a start under way, sweep what jails that are gone left (each stop already
-        removed what its jail made once no jail runs), and say whether a program of this jail's
-        still runs (`released_for`). Empty when there is nothing to say, and on
-        darwin, where seatbelt holds a path without anything on the host."""
-        if self._platform != "linux":
-            return ""
+        """For `/release`, once each owner has stopped its own program (`runner.Runner`): wait
+        for a start under way, sweep what jails that are gone left (each stop already removed what
+        its jail made once no jail runs), and say whether a program of this jail's still runs
+        (`released_for`). Empty when there is nothing to say."""
         await asyncio.gather(*self._starting)  # a start under way: its placeholders made first
         self._live = [started for started in self._live if not started.stopped]
         await asyncio.to_thread(self._swept, records_dir(os.environ, str(Path.home())))
@@ -1075,7 +1078,7 @@ class BrigJail:
         # Before anything looks at the filesystem: no placeholder may be removed from here on
         # (but those of jails that are gone, which `_hold` removes first when none is running).
         records = records_dir(os.environ, str(Path.home()))
-        lock = await asyncio.to_thread(self._hold, records) if self._platform == "linux" else None
+        lock: int | None = await asyncio.to_thread(self._hold, records)
         jail_dir = tempfile.mkdtemp(prefix="bh-j-", dir="/tmp")
         record: str | None = None
         placed: list[tuple[str, str]] = []
@@ -1088,7 +1091,8 @@ class BrigJail:
             jail, report = self.compile(jail_dir, endpoint, cwd, argv, author)
             absent = self._absent_secrets(jail.spec)
             facts = self._facts(jail.spec, report, absent, jail_dir, endpoint)
-            made = made_by_the_jail(self._absent_denies(jail.spec)) if self._platform == "linux" else ()
+            absent_holds = self._absent_denies if self._platform == "linux" else self._absent_pins
+            made = made_by_the_jail(absent_holds(jail.spec))
             if made:
                 # Recorded before anything is made, each by the mark it will carry, then made and
                 # marked one by one, parents first, and recorded as made: a crash at any point
@@ -1346,6 +1350,15 @@ class BrigJail:
         masks (`os.path.exists`): nothing masks one, so a jail holds it only where no input can
         create it (`held`)."""
         return frozenset(d for d in spec.fs.read_denies if not os.path.exists(d))
+
+    def _absent_pins(self, spec: Spec) -> list[str]:
+        """Every directory between a write root and a write deny under it (brig's `pins`) that
+        does not exist: what a darwin jail makes on the host before its program starts, so that
+        seatbelt's pin on it refuses a rename onto it (brig decision-208). Each one, not only the
+        topmost: a deeper one left absent could still be renamed onto."""
+        return [
+            path for path in pins(spec.fs.write_allows, spec.fs.write_denies) if not os.path.lexists(path)
+        ]
 
     def _absent_denies(self, spec: Spec) -> list[str]:
         """Every write-denied path under a write root that does not exist, and each of its

@@ -74,6 +74,7 @@ _EXPECTED_GOLDEN_PROFILE = """\
 (allow file-write* (subpath "/private/tmp/bg1/workspace"))
 (allow file-write* (subpath "/private/tmp/bg1/chan"))
 (deny file-write* (subpath "/private/tmp/bg1/workspace/.git/hooks"))
+(deny file-write-unlink (literal "/private/tmp/bg1/workspace"))
 (deny file-write-unlink (literal "/private/tmp/bg1/workspace/.git"))
 (allow network-bind)
 (deny network* (with no-log))
@@ -326,9 +327,15 @@ def test_a_write_root_at_or_above_the_jail_directory_is_denied_it_but_its_scratc
     )
     lines = profile.splitlines()
     start = lines.index('(deny file-write* (subpath "/"))')
-    # The pin (decision-207), where the root is below `/` and above `.git`.
+    # The root's pin (decision-208) and the pin (decision-207), where the root
+    # is below `/` and above `.git`.
     pinned = (
-        ['(deny file-write-unlink (literal "/private/tmp/.git"))'] if root == "/private/tmp" else []
+        [
+            '(deny file-write-unlink (literal "/private/tmp"))',
+            '(deny file-write-unlink (literal "/private/tmp/.git"))',
+        ]
+        if root == "/private/tmp"
+        else []
     )
     assert lines[start : start + 7 + len(pinned)] == [
         '(deny file-write* (subpath "/"))',
@@ -381,13 +388,15 @@ _PIN_RESOLVED = {
 def test_each_directory_between_a_write_root_and_a_carve_out_is_pinned_after_the_carve_outs() -> (
     None
 ):
-    """One `(deny file-write-unlink (literal RESOLVED))` per directory strictly
-    between the root and a carve-out, shallowest first, resolved, right after
-    the last carve-out; none for the root itself, for a carve-out directly in
-    it (`.envrc`), or for a carve-out, whose subpath deny holds it already."""
+    """One `(deny file-write-unlink (literal RESOLVED))` for the root, which
+    holds a carve-out (decision-208), then one per directory strictly between
+    the root and a carve-out, shallowest first, resolved, right after the last
+    carve-out; none for a carve-out directly in the root (`.envrc`), or for a
+    carve-out, whose subpath deny holds it already."""
     lines = render_sbpl(_PIN_SPEC, resolved=_PIN_RESOLVED, jail_dir=_GOLDEN_JAIL_DIR).splitlines()
     pinned = [line for line in lines if line.startswith("(deny file-write-unlink")]
     assert pinned == [
+        '(deny file-write-unlink (literal "/private/tmp/home"))',
         '(deny file-write-unlink (literal "/private/tmp/home/.config"))',
         '(deny file-write-unlink (literal "/private/tmp/home/xdg"))',
         '(deny file-write-unlink (literal "/private/tmp/home/.config/bh-02"))',

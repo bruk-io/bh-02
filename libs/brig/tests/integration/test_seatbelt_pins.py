@@ -105,3 +105,82 @@ def test_a_pin_refuses_a_rename_away_and_over_it_and_nothing_else(
     assert os.path.isdir(f"{workspace}/mine/bh-02")
     with open(f"{workspace}/xdg/bh-02/startup.py", encoding="utf-8") as f:
         assert f.read() == "MARK = 1\n"
+
+
+#: decision-208's shape, in a jail with two write roots: the workspace, which
+#: holds the carve-out, and a second root (the scratch).
+_ROOT_PROGRAM = """\
+import os
+def attempt(label, step):
+    try:
+        step()
+        print(f'{{label}}:OK')
+    except OSError as error:
+        print(f'{{label}}:DENIED:{{error.strerror}}')
+w, s = {workspace!r}, {scratch!r}
+attempt('rename_root_away', lambda: os.rename(w, f'{{s}}/moved'))
+attempt('rewrite_moved', lambda: open(f'{{s}}/moved/xdg/bh-02/startup.py', 'w').write('MARK = 2'))
+attempt('rename_root_back', lambda: os.rename(f'{{s}}/moved', w))
+attempt('rename_inside', lambda: os.rename(f'{{w}}/mine', f'{{w}}/yours'))
+attempt('rename_into_scratch', lambda: os.rename(f'{{w}}/yours', f'{{s}}/yours'))
+attempt('write_root', lambda: open(f'{{w}}/f', 'w').write('x'))
+attempt('chmod_root', lambda: os.chmod(w, 0o700))
+attempt('utime_root', lambda: os.utime(w))
+"""
+
+
+@pytest.mark.integration
+def test_a_write_root_above_a_carve_out_can_t_be_renamed_into_another_root(
+    new_jail_dir: NewJailDir,
+) -> None:
+    """decision-208: the workspace holds the carve-out `xdg/bh-02`. Renaming
+    the workspace whole into the scratch root, rewriting the carve-out's file
+    there and renaming it back would leave the workload's file at the path
+    `write_denies` names. The rename away is refused with seatbelt's denial
+    signature, so the rewrite finds nothing and the file stays as it was. The
+    control, in the same jail: renaming within the workspace and out of it
+    into the scratch, writing in it, `chmod` and `utimes` on it all succeed."""
+    pattern = seatbelt.compile(
+        Spec(), build_compile_ctx(Spec(), jail_dir=new_jail_dir(), platform="darwin")
+    ).denial_signatures[0]
+    jail_dir = new_jail_dir()
+    workspace = f"{jail_dir}/workspace"
+    scratch = f"{jail_dir}/scratch"
+    os.makedirs(f"{workspace}/xdg/bh-02")
+    os.makedirs(f"{workspace}/mine")
+    os.makedirs(scratch)
+    with open(f"{workspace}/xdg/bh-02/startup.py", "w", encoding="utf-8") as f:
+        f.write("MARK = 1\n")
+    spec = Spec(
+        fs=FsPolicy(write_allows=(workspace, scratch), write_denies=(f"{workspace}/xdg/bh-02",))
+    )
+    jail = Stack([seatbelt]).compile(
+        spec, ctx=build_compile_ctx(spec, jail_dir=jail_dir, platform="darwin")
+    )
+    jail, process = launch(
+        jail,
+        argv=[sys.executable, "-c", _ROOT_PROGRAM.format(workspace=workspace, scratch=scratch)],
+        cwd=jail_dir,
+        io=IoPolicy(),
+        jail_id="seatbelt-root-pin",
+        jail_dir=jail_dir,
+    )
+    status = process.wait()
+    with open(process.stdout_path, encoding="utf-8", errors="replace") as f:
+        said = dict(line.split(":", 1) for line in f.read().splitlines())
+    assert status == 0, said
+
+    assert said["rename_root_away"].startswith("DENIED:"), said
+    assert pattern.search(said["rename_root_away"]) is not None, said
+    for allowed in (
+        "rename_inside",
+        "rename_into_scratch",
+        "write_root",
+        "chmod_root",
+        "utime_root",
+    ):
+        assert said[allowed] == "OK", (allowed, said)
+    assert not os.path.exists(f"{scratch}/moved")
+    assert os.path.isdir(f"{scratch}/yours")
+    with open(f"{workspace}/xdg/bh-02/startup.py", encoding="utf-8") as f:
+        assert f.read() == "MARK = 1\n"
