@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-07 21:52'
-updated_date: '2026-11-08 22:30'
+updated_date: '2026-11-08 22:33'
 labels:
   - brig
   - size-2
@@ -146,4 +146,70 @@ Review 2026-11-08 (reviewer, at e2c6abb6 and its board-only successors): NOT CLO
 No repro: the original race did not reproduce on demand: a real close-first workload through wait_ready gave 0 refusals in 200 tries on this Mac (100 idle, 100 with every core busy twice over). The evidence is the forced-race test, test_a_server_that_closes_first_is_refused_where_the_kernel_loses_its_peer, seen failing with dial.py planted to hand back the socket on ENOTCONN (Failed: DID NOT RAISE EndpointRefused), and the failure the delegation brief reports from a full check.
 
 Second round, after the owner confirmed decision-210 on 2026-11-08. SPEC.md back to ruled wording at both decision-210 places and the decision-209 cross-reference, and a bullet on the refusal's text. dial.py: a peer read failing ENOTCONN now says the server closed the connection before its peer could be read, so who answered is unverified, and that a LISTEN workload must hold each connection until the host closes it (decision-210), without the channel-directory sentence; other failures keep their wording, and what the dial refuses is unchanged. This replaces the first round's no code change to the dial: the wording is code. Process.connect's docstring and the README say a full backlog also refuses after wait_ready. Seen failing: the forced-race test against the old text (Regex pattern did not match, expected closed the connection), green after. Unit tests cover the ENOTCONN and EINVAL wording on every platform. scripts/check libs/brig rc=0, 1314 passed, 180 skipped, gates and docs ok. scripts/linux-jail-check default rc=0, 330 passed, 4 skipped. No failures this round. Not re-run: the dial.py plant.
+
+Check `scripts/check` exited 0
+
+(32 earlier lines omitted)
+```text
+........................................................................ [ 35%]
+........................................................................ [ 36%]
+........................................................................ [ 38%]
+........................................................................ [ 40%]
+........................................................................ [ 42%]
+........................................................................ [ 43%]
+........................................................................ [ 45%]
+........................................................................ [ 47%]
+...........................................................s......ssssss [ 49%]
+sssssssssssss.ssssssssss.sss.sssssssssssssssssssssssssss..ssssssssssssss [ 50%]
+ssssssssss.s...s...s............s....................................... [ 52%]
+..................s..................................................... [ 54%]
+.......................s..ssssssssssssssssssssssssssssssssssssssssssssss [ 56%]
+ssssssssssssssssssss.s...s..s......................................sssss [ 57%]
+ssssssssssssss.s........................................................ [ 59%]
+........................................................................ [ 61%]
+........................................................................ [ 63%]
+........................................................................ [ 64%]
+........................................................................ [ 66%]
+........................................................................ [ 68%]
+........................................................................ [ 70%]
+........................................................................ [ 71%]
+........................................................s............... [ 73%]
+........................................................................ [ 75%]
+........................................................................ [ 77%]
+........................................................................ [ 79%]
+........................................................................ [ 80%]
+........................................................................ [ 82%]
+........................................................................ [ 84%]
+........................................................................ [ 86%]
+........................................................................ [ 87%]
+........................................................................ [ 89%]
+........................................................................ [ 91%]
+........................................................................ [ 93%]
+........................................................................ [ 94%]
+........................................................................ [ 96%]
+........................................................................ [ 98%]
+.....................................................................    [100%]
+3870 passed, 231 skipped in 75.43s (0:01:15)
+   ok
+== gates
+== (root)
+   ok
+== libs/brig
+   ok
+== libs/cordis
+   ok
+== libs/cordis-helpers
+   ok
+== libs/host-paths
+   ok
+   ok
+== docs
+INFO    -  Cleaning site directory
+INFO    -  Building documentation to directory: /Users/brukhabtu/src/github.com/bruk-io/bh-02/site
+INFO    -  Documentation built in 1.34 seconds
+   ok
+== tokens
+bh-01's tokens and bh-02's theme are in sync
+   ok
+```
 <!-- SECTION:NOTES:END -->
