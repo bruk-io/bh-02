@@ -3860,7 +3860,7 @@ as soon as it had answered. Ruled, no code change to the dial:
 
 Implementing task: TASK-0206 (tests and this record; no code change).
 (Ruled 2026-11-07, decision-209.) *Its close-first residual is settled by
-decision-210 (below, 2026-11-08): the refusal stands, and a workload holds a
+decision-210 (below, proposed 2026-11-08): the refusal stands, and a workload holds a
 connection.*
 
 **A LISTEN workload holds a connection until its peer closes (2026-11-08,
@@ -3890,7 +3890,7 @@ the dial unchanged:
   semantics and its residuals.
 
 Implementing task: TASK-0210 (tests, documentation and this record; no code
-change to the dial). (Ruled 2026-11-08, decision-210.)
+change to the dial). (Proposed 2026-11-08, decision-210; not yet confirmed by the owner.)
 
 **Mailbox is deleted (2026-09-08, decision-153).** It was the second kind
 here: an asynchronous, durable, ordered, many-writer-safe framed file with
