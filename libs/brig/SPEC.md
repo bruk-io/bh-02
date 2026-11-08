@@ -3859,14 +3859,14 @@ as soon as it had answered. Ruled, no code change to the dial:
   process's group" rather than "has left" (a refusal either way).
 
 Implementing task: TASK-0206 (tests and this record; no code change).
-(Ruled 2026-11-07, decision-209.) *Its close-first residual is settled by
+(Ruled 2026-11-07, decision-209.) *Its close-first residual is addressed by
 decision-210 (below, proposed 2026-11-08): the refusal stands, and a workload holds a
 connection.*
 
 **A LISTEN workload holds a connection until its peer closes (2026-11-08,
 decision-210).** decision-209 left open whether the readiness dial should treat
 otherwise a server that closes a connection before the host reads its peer,
-which darwin reports as `ENOTCONN` where Linux keeps `SO_PEERCRED`. Ruled, with
+which darwin reports as `ENOTCONN` where Linux keeps `SO_PEERCRED`. Proposed, with
 the dial unchanged:
 
 - **decision-186 stands: the refusal is raised, at once.** On darwin the host
