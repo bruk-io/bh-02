@@ -1,10 +1,10 @@
 ---
 id: TASK-0212
 title: Make bh-02/app/tests/test_arch_check.py pass in the Linux container
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-07 22:31'
-updated_date: '2026-11-08 18:23'
+updated_date: '2026-11-08 18:26'
 labels:
   - app
   - size-1
@@ -76,4 +76,6 @@ uv 0.13.7 (aarch64-unknown-linux-gnu)
 Python 3.15.2 (main, Oct 26 2026, 14:08:24) [Clang 23.1.3 ]
 25 failed, 15 passed in 6.85s
 ```
+
+Closed by review. Both criteria met. Reproduced independently in the container, rebuilding tree-sitter 0.25.2 from source with --no-cache: without CFLAGS (sysconfig OPT -O3) parsing exits 139 and test_arch_check.py gives 25 failed, 15 passed; with CFLAGS=-O2 parsing works and it gives 40 passed. The named command as committed: 40 passed. scripts/check exited 0. The repro was recorded after the fix, so it undoes the flag inside the container; it fails only because that command removes the fix. Findings, none filed: (1) low: -O2 is a workaround and the undefined behaviour was not found, so the flag can hide rather than cure it; other Linux hosts stay exposed; already TASK-0213. (2) low: only aarch64 was measured, and x86_64 was not tried. Answered here. Not run by this review: the default linux-jail-check suite, and the notes' -O0, -fno-strict-aliasing and 0.26.0 measurements.
 <!-- SECTION:NOTES:END -->
