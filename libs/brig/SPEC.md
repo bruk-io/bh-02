@@ -3859,7 +3859,38 @@ as soon as it had answered. Ruled, no code change to the dial:
   process's group" rather than "has left" (a refusal either way).
 
 Implementing task: TASK-0206 (tests and this record; no code change).
-(Ruled 2026-11-07, decision-209.)
+(Ruled 2026-11-07, decision-209.) *Its close-first residual is settled by
+decision-210 (below, 2026-11-08): the refusal stands, and a workload holds a
+connection.*
+
+**A LISTEN workload holds a connection until its peer closes (2026-11-08,
+decision-210).** decision-209 left open whether the readiness dial should treat
+otherwise a server that closes a connection before the host reads its peer,
+which darwin reports as `ENOTCONN` where Linux keeps `SO_PEERCRED`. Ruled, with
+the dial unchanged:
+
+- **decision-186 stands: the refusal is raised, at once.** On darwin the host
+  can't tell who answered a connection the server has closed, so `Process.connect`
+  and `Process.wait_ready` close it and raise `EndpointRefused` ("the kernel could
+  not report who listens there"). Nothing unverified is handed back or called
+  ready, and a closed connection is not "not yet": the dial does not retry it.
+- **What a workload must do to be dialled on every platform.** It holds each
+  connection it accepts until the host closes its end. A readiness probe connects
+  and closes at once, so holding costs a server one read that returns end of file.
+  A server that holds one connection at a time leaves the next waiting in its
+  backlog, so the backlog needs room for a readiness probe and the dial after it, or
+  it accepts concurrently: a connect to a full backlog is refused at once on darwin
+  (measured in TASK-0215).
+- **What a workload that closes first sees.** On darwin, a refusal when its close
+  beats the host's read of the peer and readiness when it does not, so `wait_ready`
+  can pass many times and then fail. brig has no setting for such a workload; it is
+  changed to hold its connections, or it is not dialled reliably on darwin. On
+  Linux it is dialled as any other.
+- **Unchanged.** Grades, decision-185's verified dial, decision-209's measured
+  semantics and its residuals.
+
+Implementing task: TASK-0210 (tests, documentation and this record; no code
+change to the dial). (Ruled 2026-11-08, decision-210.)
 
 **Mailbox is deleted (2026-09-08, decision-153).** It was the second kind
 here: an asynchronous, durable, ordered, many-writer-safe framed file with

@@ -413,7 +413,8 @@ class Process:
         Raises:
             ValueError: the process was started with no channel.
             EndpointRefused: what is at its socket is not its own listener; at
-                once, never waited out.
+                once, never waited out. On darwin also a server that closed the
+                connection before its peer was read (decision-210).
             WaitReadyTimeout: no connection succeeded within `timeout`.
         """
         if self.channel is None or self.endpoint is None:
@@ -438,7 +439,9 @@ class Process:
 
         Raises:
             ValueError: the process was started with no channel.
-            EndpointRefused: what is at its socket is not its own listener.
+            EndpointRefused: what is at its socket is not its own listener. On
+                darwin also a server that closed the connection before its peer
+                was read (decision-210).
             OSError: nothing listens there yet.
         """
         if self.channel is None:

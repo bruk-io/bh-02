@@ -13,6 +13,8 @@ Observed on the host with `socket`, never through brig: whether the outside
 listener was ever connected to is its own `accept`.
 """
 
+import contextlib
+import errno
 import os
 import shutil
 import socket
@@ -33,6 +35,7 @@ from brig.run import (
     Reservation,
     ReservationRefused,
 )
+from brig.run import dial as dial_module
 from brig.run.compile_ctx import build_compile_ctx
 from brig.run.dial import dial
 from brig.runtime.fake import FakeRuntime
@@ -40,6 +43,7 @@ from brig.stack import Stack
 from tests.conftest import teardown_group, workload_argv
 
 _READY_S = 15.0
+_SETTLE_S = 0.2
 _SYSTEM_ROOTS = ("/bin", "/usr", "/lib", "/lib64", "/etc")
 
 #: Puts a link at argv[1] pointing at argv[2], then stays.
@@ -61,6 +65,16 @@ while True:
             pass
     except OSError:
         pass
+    c.close()"""
+
+#: Listens on argv[1] and closes every connection as soon as it has accepted it: the server
+#: decision-210 rules on, kept to the one test that asks what happens to it.
+_CLOSES_FIRST = """import socket, sys
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.bind(sys.argv[1])
+s.listen(4)
+while True:
+    c, _ = s.accept()
     c.close()"""
 
 #: Listens on argv[1], then forks: the child keeps the socket, the listener
@@ -128,6 +142,19 @@ def _create(jail_dir: str, *, confined: bool) -> Jail:
         jail_id="planted-link",
         jail_dir=jail_dir,
     )
+
+
+def _until_listening(path: str) -> None:
+    """Return once a raw connect to `path` succeeds, so the next dial reaches its peer read."""
+    deadline = time.monotonic() + _READY_S
+    while True:
+        try:
+            with socket.socket(socket.AF_UNIX) as probe:
+                probe.connect(path)
+            return
+        except OSError:
+            assert time.monotonic() < deadline, "the listener never listened"
+            time.sleep(0.02)
 
 
 def _never_connected(listener: socket.socket) -> bool:
@@ -328,6 +355,53 @@ def test_a_peer_the_kernel_cannot_report_is_refused_not_waited_out(
     finally:
         jail.destroy()
         teardown_group(process)
+
+
+@pytest.mark.integration
+def test_a_server_that_closes_first_is_refused_where_the_kernel_loses_its_peer(
+    monkeypatch: pytest.MonkeyPatch, run_id: str, jail_dir: str
+) -> None:
+    """decision-210, through the kernel's own read: the host's read of the peer is held until the
+    workload has closed, so the race decision-209 measured always goes the same way. darwin has no
+    peer left to report, and that is a refusal at once with nothing handed back; Linux keeps
+    `SO_PEERCRED`, so the process answers. The control is a server holding its connection through
+    the same delay: only the close made the difference."""
+    jail = _create(jail_dir, confined=False)
+    closes, holds = jail.channel("ctl"), jail.channel("ctl")
+    closing = jail.start(_python(run_id, _CLOSES_FIRST, closes.bound_path), channel=closes)
+    holding = jail.start(_python(run_id, _SERVE, holds.bound_path, "held"), channel=holds)
+    real_read = dial_module._read_peer
+
+    def read_after_the_server_had_its_say(sock: socket.socket) -> dial_module._Peer | None:
+        sock.settimeout(_SETTLE_S)
+        with contextlib.suppress(TimeoutError):
+            while sock.recv(64):
+                pass
+        sock.settimeout(None)
+        return real_read(sock)
+
+    try:
+        holding.wait_ready(_READY_S)
+        _until_listening(closes.bound_path)
+        with monkeypatch.context() as patched:
+            patched.setattr(dial_module, "_read_peer", read_after_the_server_had_its_say)
+            holding.connect().close()
+            if sys.platform == "darwin":
+                with pytest.raises(EndpointRefused, match="could not report") as refused:
+                    closing.connect()
+                cause = refused.value.__cause__
+                assert isinstance(cause, OSError) and cause.errno == errno.ENOTCONN
+                start = time.monotonic()
+                with pytest.raises(EndpointRefused, match="could not report"):
+                    closing.wait_ready(_READY_S)
+                assert time.monotonic() - start < _READY_S / 3, "the refusal was waited out"
+            else:
+                closing.connect().close()
+                closing.wait_ready(_READY_S)
+    finally:
+        jail.destroy()
+        teardown_group(closing)
+        teardown_group(holding)
 
 
 @pytest.mark.integration

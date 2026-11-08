@@ -41,7 +41,10 @@ channel by name and kind only, `Channel(name, kind)`, never by a host path
 then `process.wait_ready(timeout)` and dial with `process.connect()`, never
 `process.endpoint` raw: the jail can write the channel directory, so the host
 connects only when the path is a socket and its own process answers
-(decision-185), and refuses with `EndpointRefused` otherwise.
+(decision-185), and refuses with `EndpointRefused` otherwise. The workload holds
+each connection until the host closes it: darwin can't report the peer of a
+connection the server has closed, so one that answers and closes at once can be
+refused there (decision-210).
 
 Read `SPEC.md` (the contract and its laws) and `MILESTONES.md` (the build
 order, and what actually shipped against it). Where the two disagree, SPEC.md

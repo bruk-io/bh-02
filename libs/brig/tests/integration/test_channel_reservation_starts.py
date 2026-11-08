@@ -27,10 +27,13 @@ from brig.stack import Stack
 from tests.conftest import teardown_group, workload_argv
 
 _READY_S = 15.0
+_HELD_S = 0.2
 _SYSTEM_ROOTS = ("/bin", "/usr", "/lib", "/lib64", "/etc")
 
 #: Listens on argv[1] and answers every connection with argv[2], until ended
-#: (a readiness probe closes at once, so a failed send is not an ending).
+#: (a readiness probe closes at once, so a failed send is not an ending). Each
+#: connection is held until the host closes it: darwin can't report the peer of
+#: a connection the server has closed, and the dial refuses one (decision-210).
 _SERVE = """import socket, sys
 s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 s.bind(sys.argv[1])
@@ -39,6 +42,8 @@ while True:
     c, _ = s.accept()
     try:
         c.sendall(sys.argv[2].encode())
+        while c.recv(64):
+            pass
     except OSError:
         pass
     c.close()"""
@@ -138,6 +143,32 @@ def test_two_starts_with_the_empty_stack_each_get_a_socket_dialled_from_the_host
     run_id: str, jail_dir: str
 ) -> None:
     _two_starts_two_sockets(run_id, jail_dir, confined=False)
+
+
+@pytest.mark.integration
+def test_the_serving_workload_holds_a_connection_until_the_host_closes_it(
+    run_id: str, jail_dir: str
+) -> None:
+    """What keeps `_SERVE` off the race with the host's peer read (decision-210), on every
+    platform: it answers, then the connection stays open, so no timing can make it close first. A
+    workload that closed after answering gives the second read an end of file, not a timeout."""
+    jail = _create(jail_dir, confined=False)
+    reservation = jail.channel("ctl")
+    process = jail.start(
+        _python(run_id, _SERVE, reservation.bound_path, "held"), channel=reservation
+    )
+    try:
+        process.wait_ready(_READY_S)
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+            client.settimeout(_READY_S)
+            client.connect(reservation.endpoint)
+            assert client.recv(64) == b"held"
+            client.settimeout(_HELD_S)
+            with pytest.raises(TimeoutError):
+                client.recv(64)
+    finally:
+        jail.destroy()
+        teardown_group(process)
 
 
 @pytest.mark.integration
