@@ -1,9 +1,9 @@
 ---
-id: DRAFT-0020
+id: TASK-0215
 title: >-
   Stop the readiness probe filling the worker's listen backlog, so an owner's
   dial is not refused on darwin
-status: Draft
+status: To Do
 assignee: []
 created_date: '2026-11-08 19:35'
 labels:
