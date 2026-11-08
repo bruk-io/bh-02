@@ -3859,21 +3859,28 @@ as soon as it had answered. Ruled, no code change to the dial:
   process's group" rather than "has left" (a refusal either way).
 
 Implementing task: TASK-0206 (tests and this record; no code change).
-(Ruled 2026-11-07, decision-209.) *Its close-first residual is addressed by
-decision-210 (below, proposed 2026-11-08): the refusal stands, and a workload holds a
+(Ruled 2026-11-07, decision-209.) *Its close-first residual is settled by
+decision-210 (below, 2026-11-08): the refusal stands, and a workload holds a
 connection.*
 
 **A LISTEN workload holds a connection until its peer closes (2026-11-08,
 decision-210).** decision-209 left open whether the readiness dial should treat
 otherwise a server that closes a connection before the host reads its peer,
-which darwin reports as `ENOTCONN` where Linux keeps `SO_PEERCRED`. Proposed, with
-the dial unchanged:
+which darwin reports as `ENOTCONN` where Linux keeps `SO_PEERCRED`. Ruled, with
+what the dial refuses unchanged:
 
 - **decision-186 stands: the refusal is raised, at once.** On darwin the host
   can't tell who answered a connection the server has closed, so `Process.connect`
-  and `Process.wait_ready` close it and raise `EndpointRefused` ("the kernel could
-  not report who listens there"). Nothing unverified is handed back or called
-  ready, and a closed connection is not "not yet": the dial does not retry it.
+  and `Process.wait_ready` close it and raise `EndpointRefused`. Nothing unverified
+  is handed back or called ready, and a closed connection is not "not yet": the
+  dial does not retry it.
+- **The refusal says what happened and what to do.** On `ENOTCONN` it says the
+  server closed the connection before its peer could be read, so who answered is
+  unverified, and that a LISTEN workload must hold each connection until the host
+  closes it, citing this decision. It leaves out the sentence about the jail
+  writing the channel directory, which reads as an attack to the author of a
+  harmless workload. Every other unreadable peer keeps decision-186's wording ("the
+  kernel could not report who listens there").
 - **What a workload must do to be dialled on every platform.** It holds each
   connection it accepts until the host closes its end. A readiness probe connects
   and closes at once, so holding costs a server one read that returns end of file.
@@ -3889,8 +3896,8 @@ the dial unchanged:
 - **Unchanged.** Grades, decision-185's verified dial, decision-209's measured
   semantics and its residuals.
 
-Implementing task: TASK-0210 (tests, documentation and this record; no code
-change to the dial). (Proposed 2026-11-08, decision-210; not yet confirmed by the owner.)
+Implementing task: TASK-0210 (the refusal's wording, tests, documentation and this
+record; the dial refuses what it refused). (Ruled 2026-11-08, decision-210, confirmed by the owner.)
 
 **Mailbox is deleted (2026-09-08, decision-153).** It was the second kind
 here: an asynchronous, durable, ordered, many-writer-safe framed file with

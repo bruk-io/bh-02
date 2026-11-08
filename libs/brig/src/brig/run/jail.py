@@ -442,7 +442,9 @@ class Process:
             EndpointRefused: what is at its socket is not its own listener. On
                 darwin also a server that closed the connection before its peer
                 was read (decision-210).
-            OSError: nothing listens there yet.
+            OSError: nothing listens there yet, or, even after `wait_ready`, the
+                workload's backlog is full (`ConnectionRefusedError`, measured on
+                darwin in TASK-0215).
         """
         if self.channel is None:
             raise ValueError(

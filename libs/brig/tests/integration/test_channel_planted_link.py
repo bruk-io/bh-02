@@ -347,8 +347,10 @@ def test_a_peer_the_kernel_cannot_report_is_refused_not_waited_out(
             with pytest.raises(EndpointRefused, match="could not report who listens"):
                 process.wait_ready(_READY_S)
             assert time.monotonic() - start < _READY_S / 3, "the refusal was waited out"
-            with pytest.raises(EndpointRefused, match="Invalid argument"):
+            with pytest.raises(EndpointRefused, match="Invalid argument") as other:
                 process.connect()
+            assert "could not report who listens" in str(other.value)
+            assert "channel directory" in str(other.value)
         process.wait_ready(_READY_S)
         with process.connect() as dialled:
             assert dialled.recv(64) == b"genuine"
@@ -387,12 +389,19 @@ def test_a_server_that_closes_first_is_refused_where_the_kernel_loses_its_peer(
             patched.setattr(dial_module, "_read_peer", read_after_the_server_had_its_say)
             holding.connect().close()
             if sys.platform == "darwin":
-                with pytest.raises(EndpointRefused, match="could not report") as refused:
+                with pytest.raises(EndpointRefused, match="closed the connection") as refused:
                     closing.connect()
                 cause = refused.value.__cause__
                 assert isinstance(cause, OSError) and cause.errno == errno.ENOTCONN
+                message = str(refused.value)
+                assert message.startswith("refused to dial")
+                assert "before its peer could be read" in message and "unverified" in message
+                assert "must hold each connection until the host closes it" in message
+                assert "decision-210" in message
+                # It reads as what it is, a workload to change, not a planted endpoint.
+                assert "channel directory" not in message
                 start = time.monotonic()
-                with pytest.raises(EndpointRefused, match="could not report"):
+                with pytest.raises(EndpointRefused, match="must hold each connection"):
                     closing.wait_ready(_READY_S)
                 assert time.monotonic() - start < _READY_S / 3, "the refusal was waited out"
             else:

@@ -44,7 +44,10 @@ connects only when the path is a socket and its own process answers
 (decision-185), and refuses with `EndpointRefused` otherwise. The workload holds
 each connection until the host closes it: darwin can't report the peer of a
 connection the server has closed, so one that answers and closes at once can be
-refused there (decision-210).
+refused there (decision-210). `wait_ready` does not promise the next `connect`
+room: a connect to a full backlog is refused too (`ConnectionRefusedError`,
+measured on darwin in TASK-0215), so a workload that holds one connection at a
+time listens with a backlog for the readiness probe and the dial after it.
 
 Read `SPEC.md` (the contract and its laws) and `MILESTONES.md` (the build
 order, and what actually shipped against it). Where the two disagree, SPEC.md

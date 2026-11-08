@@ -9,13 +9,14 @@ raises before any socket is made. The real sockets are the integration tier's
 (`tests/integration/test_channel_planted_link.py`).
 """
 
+import errno
 import stat
 
 import pytest
 
 from brig.core import Channel, ChannelKind, Spec
 from brig.run import EndpointRefused, Jail
-from brig.run.dial import _path_refusal, _Peer, _peer_refusal
+from brig.run.dial import _path_refusal, _Peer, _peer_refusal, _unread_peer_refusal
 from brig.runtime.fake import FakeRuntime
 from brig.stack import Stack
 
@@ -62,6 +63,23 @@ def test_the_refusal_names_the_endpoint_and_why() -> None:
     )
     assert isinstance(error, RuntimeError) and not isinstance(error, OSError)
     assert "only the started process's own listener" in str(error)
+
+
+def test_a_server_that_closed_first_is_told_to_hold_its_connections() -> None:
+    error = OSError(errno.ENOTCONN, "Socket is not connected")
+    refused = _unread_peer_refusal("/j/chan/a.sock", error)
+    assert refused.endpoint == "/j/chan/a.sock"
+    assert "before its peer could be read" in refused.reason
+    assert "unverified" in refused.reason
+    assert "must hold each connection until the host closes it" in str(refused)
+    assert "channel directory" not in str(refused)
+
+
+def test_any_other_unread_peer_keeps_its_wording() -> None:
+    refused = _unread_peer_refusal("/j/chan/a.sock", OSError(errno.EINVAL, "Invalid argument"))
+    assert "could not report who listens there" in refused.reason
+    assert "Invalid argument" in refused.reason
+    assert "only the started process's own listener" in str(refused)
 
 
 def _started_on_a_channel(runtime: FakeRuntime) -> Jail:

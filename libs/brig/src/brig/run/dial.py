@@ -33,21 +33,25 @@ from typing import Final
 
 from brig.run import _identity
 
+#: What a refusal says unless it knows better: why the host checks at all.
+_WHY_THE_HOST_CHECKS: Final = (
+    "A process of the jail can write the channel directory, so the host dials only the "
+    "started process's own listener"
+)
+
 
 class EndpointRefused(RuntimeError):
     """The host would not dial a reserved socket (decision-185): what is at
     its path is not a socket (a link a process of the jail planted, a file),
     or what answered is not a process of the started process's group, or brig
     can't tell on this platform. Nothing was sent; any connection made was
-    closed. `endpoint` is the path, `reason` why."""
+    closed. `endpoint` is the path, `reason` why, and `guidance` the sentence
+    the message ends on."""
 
-    def __init__(self, endpoint: str, reason: str) -> None:
+    def __init__(self, endpoint: str, reason: str, *, guidance: str = _WHY_THE_HOST_CHECKS) -> None:
         self.endpoint = endpoint
         self.reason = reason
-        super().__init__(
-            f"refused to dial {endpoint!r}: {reason}. A process of the jail can write the "
-            "channel directory, so the host dials only the started process's own listener"
-        )
+        super().__init__(f"refused to dial {endpoint!r}: {reason}. {guidance}")
 
 
 #: `SO_PEERPIDFD` (Linux 6.5): the listener's pidfd. Python names no constant
@@ -104,6 +108,21 @@ def _peer_refusal(peer: _Peer | None, *, group: int, leader_holds: bool) -> str 
             "identity, so its group's number can't vouch for the listener"
         )
     return None
+
+
+def _unread_peer_refusal(endpoint: str, error: OSError) -> EndpointRefused:
+    """The refusal for a peer the kernel would not report with `error`. `ENOTCONN` is darwin's
+    answer once the server has closed (decision-209): most likely a workload to change, so it
+    says what to do, and still that nobody was verified (decision-210). Pure."""
+    if error.errno == errno.ENOTCONN:
+        return EndpointRefused(
+            endpoint,
+            "the server closed the connection before its peer could be read, so who answered "
+            "is unverified",
+            guidance="A LISTEN workload must hold each connection until the host closes it "
+            "(decision-210)",
+        )
+    return EndpointRefused(endpoint, f"the kernel could not report who listens there ({error})")
 
 
 def _pidfd_alive(pidfd: int) -> bool:
@@ -216,9 +235,7 @@ def dial(
         except OSError as error:
             # Something answered; who, the kernel would not say. Not "not
             # yet": a caller polling readiness would wait it out (decision-186).
-            raise EndpointRefused(
-                endpoint, f"the kernel could not report who listens there ({error})"
-            ) from error
+            raise _unread_peer_refusal(endpoint, error) from error
         # Asked after the peer's group was read: while the leader holds its
         # identity, its group's number has named this group throughout.
         holds = leader_stamp != _identity.UNKNOWN and _identity.identity_holds(
