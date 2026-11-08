@@ -4,7 +4,7 @@ title: Make bh-02/app/tests/test_arch_check.py pass in the Linux container
 status: To Do
 assignee: []
 created_date: '2026-11-07 22:31'
-updated_date: '2026-11-08 18:10'
+updated_date: '2026-11-08 18:16'
 labels:
   - app
   - size-1
@@ -28,4 +28,40 @@ Run in the scripts/linux-jail-check container, serially, as the unprivileged use
 
 <!-- SECTION:NOTES:BEGIN -->
 Cause: pypeeker segfaults (exit 139) in the container, in tree_sitter's own binding at Parser.parse, seen with PYTHONFAULTHANDLER and a five-line script with no pypeeker in it. tree-sitter 0.25.2 has no 3.15 wheel, so uv sync compiles it, and at the interpreter's -O3 under gcc 13 on aarch64 it crashes. Parsing works rebuilt at -O0, at -O2 -fno-strict-aliasing, at plain -O2 through the script, and on 0.26.0, which pypeeker caps out (tree-sitter<0.26). Which optimisation or which undefined behaviour is at fault was not found. Fix: ENV CFLAGS=-O2 in the image (scripts/linux-jail-check USER_STEPS). Evidence: scripts/linux-jail-check -- bh-02/app/tests/test_arch_check.py: 40 passed, exit 0; before, 25 failed, 15 passed. Any other Linux host building 0.25.2 with gcc at -O3 may hit the same crash; the lasting fix is pypeeker's cap, filed as a follow-up.
+
+Check `scripts/check` exited 0
+
+(62 earlier lines omitted)
+```text
+........................................................................ [ 87%]
+........................................................................ [ 89%]
+........................................................................ [ 91%]
+........................................................................ [ 93%]
+........................................................................ [ 94%]
+........................................................................ [ 96%]
+........................................................................ [ 98%]
+................................................................         [100%]
+3865 passed, 231 skipped in 73.04s (0:01:13)
+   ok
+== gates
+== (root)
+   ok
+== libs/brig
+   ok
+== libs/cordis
+   ok
+== libs/cordis-helpers
+   ok
+== libs/host-paths
+   ok
+   ok
+== docs
+INFO    -  Cleaning site directory
+INFO    -  Building documentation to directory: /Users/brukhabtu/src/github.com/bruk-io/bh-02/site
+INFO    -  Documentation built in 1.34 seconds
+   ok
+== tokens
+bh-01's tokens and bh-02's theme are in sync
+   ok
+```
 <!-- SECTION:NOTES:END -->
