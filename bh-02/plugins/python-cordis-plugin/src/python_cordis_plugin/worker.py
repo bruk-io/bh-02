@@ -436,7 +436,9 @@ def main(argv: Sequence[str]) -> None:
     deadline = time.monotonic() + (float(argv[1]) if len(argv) > 1 else _HELLO_S)
     server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     server.bind(argv[0])
-    server.listen(1)
+    # The default backlog, not 1: the runner's readiness probe and the host's dial straight after it
+    # can both arrive before the first `accept`, and darwin refuses a connect to a full backlog.
+    server.listen()
     server.settimeout(_LOOK_S)
     while True:
         try:

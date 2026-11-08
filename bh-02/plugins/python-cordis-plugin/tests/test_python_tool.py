@@ -3,6 +3,7 @@ that come back as the input's text."""
 
 import asyncio
 import dataclasses
+import json
 import os
 import re
 import shutil
@@ -44,6 +45,50 @@ def _process(
     ):  # conftest: one mypy cache for the run, warm after the first
         config = dataclasses.replace(config, mypy_cache=cache)
     return PythonProcess(runner, config, access, rule=Approval(runner), tools=tools)
+
+
+# The real worker, run by path as `worker_argv` runs it, with `accept` held back until the file named
+# last appears (for a minute at most, so a host killed mid-test leaves nothing waiting for ever).
+_ACCEPT_HELD = """
+import pathlib, runpy, socket, sys, time
+release = pathlib.Path(sys.argv.pop())
+accept = socket.socket.accept
+def held(self):
+    deadline = time.monotonic() + 60
+    while not release.exists() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    socket.socket.accept = accept
+    return accept(self)
+socket.socket.accept = held
+sys.argv = sys.argv[1:]
+runpy.run_path(sys.argv[0], run_name="__main__")
+"""
+
+
+async def test_a_dial_straight_after_readiness_is_not_refused_while_the_worker_has_yet_to_accept(
+    tmp_path: Path,
+) -> None:
+    """The runner's readiness probe sits unaccepted in the worker's backlog when the host dials, as
+    it does when the worker is held up between `listen` and `accept` (a loaded machine): the dial
+    waits its turn, and is served. A backlog of one refuses it on darwin (the person would read "the
+    REPL could not be started again"); the timeout is for a platform that makes the dial wait instead."""
+    release = tmp_path / "release"
+
+    def held(endpoint: str) -> list[str]:
+        interpreter, isolated, worker, *rest = worker_argv(endpoint)
+        return [interpreter, isolated, "-c", _ACCEPT_HELD, worker, *rest, str(release)]
+
+    started = await Unjailed().start(held, cwd=str(tmp_path))
+    try:
+        reader, writer = await asyncio.wait_for(started.connect(limit=2**16), 10)
+        release.touch()
+        writer.write(b'{"op": "hello"}\n{"op": "exec", "code": "6 * 7"}\n')
+        await writer.drain()
+        answer = json.loads(await asyncio.wait_for(reader.readline(), 30))
+        writer.close()
+    finally:
+        await started.stop()
+    assert answer["output"] == "42\n", answer
 
 
 async def test_a_traceback_shows_each_line_and_the_input_it_came_from() -> None:
