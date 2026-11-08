@@ -69,10 +69,13 @@ PROXY_REDACTED = "address withheld: it may carry a credential"
 DOCKER = "docker"
 
 BASE_STEPS = "FROM ubuntu:24.04\nENV DEBIAN_FRONTEND=noninteractive\n"
+# CFLAGS: tree-sitter has no 3.15 wheel, so `uv sync` compiles it here, and 0.25.2 built with the
+# interpreter's own -O3 by this image's gcc 13 segfaults in Parser.parse on aarch64 (measured; -O2
+# and -O0 do not, and pypeeker, which every arch-check here runs, caps it below 0.26, which does not).
 USER_STEPS = """\
 RUN useradd --create-home --shell /bin/bash bh && mkdir /work && chown bh:bh /work
 USER bh
-ENV PATH=/home/bh/.local/bin:$PATH UV_LINK_MODE=copy
+ENV PATH=/home/bh/.local/bin:$PATH UV_LINK_MODE=copy CFLAGS=-O2
 """
 WORKDIR_STEP = "WORKDIR /work\n"
 
