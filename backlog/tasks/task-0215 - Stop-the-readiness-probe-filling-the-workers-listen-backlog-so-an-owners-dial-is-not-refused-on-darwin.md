@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-08 19:35'
-updated_date: '2026-11-08 20:39'
+updated_date: '2026-11-08 20:50'
 labels:
   - runner
   - python
@@ -148,4 +148,6 @@ INFO    -  Documentation built in 1.34 seconds
 bh-01's tokens and bh-02's theme are in sync
    ok
 ```
+
+No repro: the fix and its forcing test landed together in e2c6abb6, so no test fails at this commit for record-check --repro to record, and a reviewer may not plant the old backlog in the tree. The failure was reproduced instead. The worker saw the committed test fail with listen(1) planted (Errno 61). The reviewer, at 87b6d4dc with no file changed, ran the real worker with accept held and listen patched to 1 in its own -c wrapper: unjailed and jailed both raised ConnectionRefusedError Errno 61; the same harness with the shipped listen() answered 42 on both.
 <!-- SECTION:NOTES:END -->
