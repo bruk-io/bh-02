@@ -13,6 +13,7 @@ here is not the definition of green. Run it before trusting a claim about Linux.
     scripts/linux-jail-check                 # brig's bwrap tiers, then bh-02's Linux jail tests
     scripts/linux-jail-check -- PYTEST_ARGS  # pytest with these arguments instead
     scripts/linux-jail-check --shell 'LINE'  # a shell line in the prepared workspace instead
+    scripts/linux-jail-check --root [...]    # any of the above as root, under the same init
 
 Behind a TLS-intercepting proxy (every outbound connection goes through one that re-signs TLS
 with its own CA), give the script the CA bundle, in `--ca FILE` or in `SSL_CERT_FILE`, with
@@ -51,6 +52,12 @@ confinement; each only stops Docker refusing bwrap what a plain Linux host gives
                                         (measured: the strict_linux journey and the leak sweep).
 The suite runs as that unprivileged user, not root: root ignores permission bits, so a denial
 the tests expect would pass for the wrong reason, and bh-02 is not run as root.
+
+`--root` is for the one question that default cannot answer: does this also hold as uid 0 (brig
+compiles a different jail for root, decision-177)? Same image, same options, same init; what differs
+is the user, `HOME` (/root) and who owns the workspace and the interpreter's tree (root). It is
+opt-in and no substitute for the default run, for the reason above: a denial seen as root proves
+less, not more, and a green run here says nothing about the unprivileged one.
 """
 
 import os
@@ -78,6 +85,14 @@ USER bh
 ENV PATH=/home/bh/.local/bin:$PATH UV_LINK_MODE=copy CFLAGS=-O2
 """
 WORKDIR_STEP = "WORKDIR /work\n"
+
+UNPACK = "tar -xf - -C /work"
+# `--root` differs from the default by these alone, at run time, so it shares the image. Root owns
+# what it works in and runs on, as on a host of its own: tar as root would keep the laptop's uid on
+# every file, and bwrap run by uid 0 is refused the interpreter under /home/bh while bh owns that
+# directory, mode 750 ("Can't find source path ...: Permission denied"; measured: 50 tests failed).
+AS_ROOT = ("--user", "0:0")
+UNPACK_AS_ROOT = f"chown -R root:root /work /home/bh; {UNPACK} --no-same-owner"
 
 # bubblewrap is what is under test; procps is `ps`, which brig's leak sweep runs; python3 is the
 # SYSTEM interpreter brig's own journey names (`/usr/bin/python3`), not the workspace's (uv
@@ -241,8 +256,9 @@ def source_tar() -> bytes:
     type=click.Path(path_type=Path),
     help="The CA bundle behind a TLS-intercepting proxy (default: SSL_CERT_FILE); needs HTTPS_PROXY.",
 )
+@click.option("--root", "as_root", is_flag=True, help="Run as root, not the unprivileged user.")
 @click.argument("pytest_args", nargs=-1, type=click.UNPROCESSED)
-def main(line: str | None, ca_option: Path | None, pytest_args: tuple[str, ...]) -> None:
+def main(line: str | None, ca_option: Path | None, as_root: bool, pytest_args: tuple[str, ...]) -> None:
     """Run brig's Linux jail and bh-02's jailed Python process in a container with bubblewrap."""
     if subprocess.run([DOCKER, "info"], capture_output=True).returncode != 0:
         raise click.ClickException("docker is not answering: this check needs a running Docker daemon")
@@ -254,7 +270,7 @@ def main(line: str | None, ca_option: Path | None, pytest_args: tuple[str, ...])
     if line is None:
         line = f"uv run --locked pytest {shlex.join(pytest_args)}" if pytest_args else DEFAULT
     script = (
-        "set -euo pipefail; tar -xf - -C /work; /usr/bin/bwrap --version; uv --version;"
+        f"set -euo pipefail; {UNPACK_AS_ROOT if as_root else UNPACK}; /usr/bin/bwrap --version; uv --version;"
         f" uv sync --locked --all-packages --quiet; uv run python -VV; {line}"
     )
     click.echo(click.style(f"== {line}", bold=True))
@@ -265,6 +281,7 @@ def main(line: str | None, ca_option: Path | None, pytest_args: tuple[str, ...])
             "--rm",
             "-i",
             "--init",
+            *(AS_ROOT if as_root else ()),
             *run_options(proxy),
             "--security-opt",
             "seccomp=unconfined",
