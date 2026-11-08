@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-07 21:52'
-updated_date: '2026-11-08 20:14'
+updated_date: '2026-11-08 20:43'
 labels:
   - brig
   - size-2
@@ -43,4 +43,101 @@ Trade-off: a genuine answer-and-hang-up workload on darwin sees EndpointRefused 
 Alternatives rejected. (a) Read ENOTCONN as verified or hand the connection back: trusts a peer nobody checked, and a host socket reached through a link swapped after the lstat would count. (b) LOCAL_PEERCRED as a fallback: it reports a uid and groups, not a pid, so it cannot answer whether the peer is in the started process's group; from knowledge of the darwin API, not measured here. (c) Re-dial on ENOTCONN, ready() reading False: the strongest alternative, the owner may prefer it. Each dial stays fully verified and nothing unverified is handed back, and it would spare close-first workloads the random refusal. Rejected because it reverses decision-186's rule that an unreportable peer is a refusal, a workload that always loses the race gets a slow WaitReadyTimeout in place of a prompt named refusal, and a foreign closing server reached through a swapped link would be connected to repeatedly until the timeout in place of once.
 
 Evidence. New test test_the_serving_workload_holds_a_connection_until_the_host_closes_it: seen failing against the old _SERVE (Failed: DID NOT RAISE TimeoutError, the second read got end of file), green after the two-line fix, the same change TASK-0206 made. New test test_a_server_that_closes_first_is_refused_where_the_kernel_loses_its_peer forces the race by holding the host's peer read until the server has closed, through the real kernel read, with a holding server as the control: green on darwin and in the Linux container (Linux takes the branch where the process answers). Seen failing with dial.py planted to hand back the socket on ENOTCONN (Failed: DID NOT RAISE EndpointRefused); restored from a scratch copy, sha256 22209aa7 before and after. test_channel_reservation_starts.py 20 runs on darwin, 0 failed (4 passed, 1 skipped each). scripts/check libs/brig rc=0: 1312 passed, 180 skipped, gates and docs ok. scripts/linux-jail-check default run rc=1: 1 failed, 329 passed, 4 skipped; the failure is test_a_linux_jail_ends_when_the_host_replaces_or_removes_a_secret_it_holds at assert not seen.exists(), the assertion TASK-0211 already tracks, in a test this change does not touch. Rerun alone with both changed brig test files in the container, rc=0, 15 passed. That rerun does not clear the default run; it stays red for TASK-0211. Both changed brig test files are in the default jail-check list, and passed in that run too (its only failure is the one above). Not verified: the full scripts/check, and the original flake cannot be reproduced on demand, so the proof is the held-connection property, not the flake's absence.
+
+Check `scripts/check` exited 0
+
+```text
+== format
+878 files already formatted
+   ok
+== lint
+All checks passed!
+   ok
+== types
+Success: no issues found in 208 source files
+   ok
+== tests
+bringing up nodes...
+bringing up nodes...
+
+........................................................................ [  1%]
+.........................................................s...sssss..ssss [  3%]
+.s...ss....s................................................sssss.....ss [  5%]
+sssss................................................................... [  7%]
+........................................................................ [  8%]
+........................................................................ [ 10%]
+........................................................................ [ 12%]
+..................s....................................................s [ 14%]
+ss.s.s..s.s..s.ssssss..s..s.s.........s..........sss.................... [ 15%]
+........................................................................ [ 17%]
+........................................................................ [ 19%]
+........................................................................ [ 21%]
+...........................................ss........................... [ 22%]
+........................................................................ [ 24%]
+........................................................................ [ 26%]
+.......................................s................................ [ 28%]
+........................................................................ [ 29%]
+........................................................................ [ 31%]
+........................................................................ [ 33%]
+........................................................................ [ 35%]
+........................................................................ [ 36%]
+........................................................................ [ 38%]
+........................................................................ [ 40%]
+........................................................................ [ 42%]
+........................................................................ [ 43%]
+........................................................................ [ 45%]
+........................................................................ [ 47%]
+..........................................................s.....ssssssss [ 49%]
+sss.sssssssssssssssssssssssss.ssssssssssssss..ssssssssssss.sssssssssssss [ 50%]
+ssssssssss...s.............s...............s............................ [ 52%]
+........................................................................ [ 54%]
+........................sssssssss.ssssssssssssssssssssssssssssssssssssss [ 56%]
+ssssssssssssssssssssss.....s........................................ssss [ 57%]
+ssssssssssssss.s.........s.............................................. [ 59%]
+........................................................................ [ 61%]
+........................................................................ [ 63%]
+........................................................................ [ 64%]
+........................................................................ [ 66%]
+........................................................................ [ 68%]
+........................................................................ [ 70%]
+........................................................................ [ 72%]
+..........................................................s............. [ 73%]
+........................................................................ [ 75%]
+........................................................................ [ 77%]
+........................................................................ [ 79%]
+........................................................................ [ 80%]
+........................................................................ [ 82%]
+........................................................................ [ 84%]
+........................................................................ [ 86%]
+........................................................................ [ 87%]
+........................................................................ [ 89%]
+........................................................................ [ 91%]
+........................................................................ [ 93%]
+........................................................................ [ 94%]
+........................................................................ [ 96%]
+........................................................................ [ 98%]
+...................................................................      [100%]
+3868 passed, 231 skipped in 84.56s (0:01:24)
+   ok
+== gates
+== (root)
+   ok
+== libs/brig
+   ok
+== libs/cordis
+   ok
+== libs/cordis-helpers
+   ok
+== libs/host-paths
+   ok
+   ok
+== docs
+INFO    -  Cleaning site directory
+INFO    -  Building documentation to directory: /Users/brukhabtu/src/github.com/bruk-io/bh-02/site
+INFO    -  Documentation built in 1.27 seconds
+   ok
+== tokens
+bh-01's tokens and bh-02's theme are in sync
+   ok
+```
 <!-- SECTION:NOTES:END -->
