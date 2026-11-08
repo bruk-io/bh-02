@@ -3,7 +3,7 @@ id: TASK-0215
 title: >-
   Stop the readiness probe filling the worker's listen backlog, so an owner's
   dial is not refused on darwin
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-11-08 19:35'
@@ -150,4 +150,6 @@ bh-01's tokens and bh-02's theme are in sync
 ```
 
 No repro: the fix and its forcing test landed together in e2c6abb6, so no test fails at this commit for record-check --repro to record, and a reviewer may not plant the old backlog in the tree. The failure was reproduced instead. The worker saw the committed test fail with listen(1) planted (Errno 61). The reviewer, at 87b6d4dc with no file changed, ran the real worker with accept held and listen patched to 1 in its own -c wrapper: unjailed and jailed both raised ConnectionRefusedError Errno 61; the same harness with the shipped listen() answered 42 on both.
+
+Review 2026-11-08 (reviewer, at e2c6abb6 and its board-only successors): CLOSED. scripts/check exit 0, 3868 passed, 231 skipped, recorded above. AC1: forced independently, no file changed: real worker, accept held, listen patched to 1 gives Errno 61 unjailed and jailed; shipped listen() answers 42 on both. AC2: the named test passed in 13 of 13 scripts/check runs (worker 5 on the fix, orchestrator 5, reviewer 3), and the forced test removes its cause. AC3: the worker's result confirmed by that jailed run. The new test also ran on Linux inside the four suites (root and bh, 705 passed), which the worker had left unverified; that shows it passes there, not that it would catch listen(1) there. Findings, none filed: (low) brig's _oci_agent.py:155 listen(1), which the worker left unexamined, is a one-hello rendezvous with no readiness probe, so it has no such window. (low) A jailed program with a small backlog can still be refused after wait_ready; decision-210's text says so and the remaining doc gap is noted on TASK-0210. TASK-0216 stays open: this fix does not explain the killpg EPERM or the appender teardown error, and test_a_file_that_fails_is_not_checked sharing this cause is still inference.
 <!-- SECTION:NOTES:END -->
