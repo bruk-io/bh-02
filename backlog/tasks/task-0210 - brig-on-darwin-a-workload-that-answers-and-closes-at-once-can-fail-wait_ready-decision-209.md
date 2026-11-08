@@ -3,11 +3,11 @@ id: TASK-0210
 title: >-
   brig: on darwin a workload that answers and closes at once can fail wait_ready
   (decision-209)
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-11-07 21:52'
-updated_date: '2026-11-08 22:33'
+updated_date: '2026-11-08 22:38'
 labels:
   - brig
   - size-2
@@ -212,4 +212,16 @@ INFO    -  Documentation built in 1.34 seconds
 bh-01's tokens and bh-02's theme are in sync
    ok
 ```
+
+Review 2026-11-08, second round (reviewer, at 732ee14e): CLOSED. decision-210 confirmed by the owner. AC1 and AC2 met.
+
+Runs. scripts/check full tier via record-check: exit 0, 3870 passed, 231 skipped (the previous review's 3868 plus the two new unit tests), recorded above; no file changed by it. Changed test files, unpatched: 25 passed, 2 skipped. Forcing test with the dial made to trust ENOTCONN in-process, no file changed: 1 failed, 8 deselected, as it should, 'Failed: DID NOT RAISE EndpointRefused' at test_channel_planted_link.py:392, so the test forces the ruling and not only the text. scripts/linux-jail-check default: FAILED, exit 1, 1 failed, 329 passed, 4 skipped, not re-run.
+
+The failure: bh-02/plugins/runner-cordis-plugin/tests/test_runner_confined.py:755, test_a_linux_jail_ends_when_the_host_replaces_or_removes_a_secret_it_holds, 'assert not seen.exists() and absent.is_dir()', AssertionError, seen exists at /tmp/pytest-of-bh/pytest-0/test_a_linux_jail_ends_when_th0/project/seen. Only the tail of the output was kept (the reviewer's tail -15 cut the rest), so the full traceback is not on record. It matches TASK-0211's description: the same test, assertion and third start under the default run on a Mac host. It is a recurrence of that flake by that match, not a proven cause. The assertion is about a file the jail's program plants, not about the dial's text, and this commit changed only the wording in that path. The worker's run of this check gave 330 passed, 4 skipped.
+
+Prior findings. SPEC settled: handled, ruled wording at decision-210, its implementing line and the decision-209 cross-reference; no 'proposed' left in the SPEC's decision-210 lines. ENOTCONN message: handled, says the server closed first, who answered is unverified, and to hold each connection, citing decision-210. Docs on a full backlog: handled in Process.connect's docstring and the README. Repro: the 'No repro:' note is present, board-check close reports ok. Private names in tests: left as they are, gates pass.
+
+Dial refuses what it refused: yes, by reading. The one raise site now raises what _unread_peer_refusal returns, and both its branches return EndpointRefused; the surrounding close on BaseException is untouched. guidance: only formats the message, read in no control flow, passed only on the ENOTCONN branch. The _peer_refusal path and the path check keep the default. Regression guard: test_a_peer_the_kernel_cannot_report_is_refused_not_waited_out asserts the other wording stays.
+
+Findings, none filed. (low) dial's, host.py's and the runner's connect docstrings still give OSError as 'nothing listens there yet' only; Process.connect, the public one, has the backlog case. (low) A foreign closing server reached through a swapped link now gets the hold-your-connections guidance rather than the channel-directory sentence: still refused and still called unverified, as decision-210 chose. (low) The change to dial.py departs from the first round's 'no code change to the dial'; the notes explain it, and it was what the prior finding asked.
 <!-- SECTION:NOTES:END -->
