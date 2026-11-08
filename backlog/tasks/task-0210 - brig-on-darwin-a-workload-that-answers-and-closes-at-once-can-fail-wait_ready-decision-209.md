@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-07 21:52'
-updated_date: '2026-11-08 20:43'
+updated_date: '2026-11-08 20:50'
 labels:
   - brig
   - size-2
@@ -140,4 +140,6 @@ INFO    -  Documentation built in 1.27 seconds
 bh-01's tokens and bh-02's theme are in sync
    ok
 ```
+
+Review 2026-11-08 (reviewer, at e2c6abb6 and its board-only successors): NOT CLOSED, on instruction: decision-210 waits on the owner. Everything else is met. scripts/check exit 0, 3868 passed, 231 skipped, recorded above; this answers the worker's 'not verified: the full scripts/check'. scripts/linux-jail-check default exit 0, 330 passed, 4 skipped, recorded on TASK-0079.31, so both changed test files passed on Linux. Forcing test checked with no file changed: dial patched in-process to trust ENOTCONN gives 'Failed: DID NOT RAISE EndpointRefused' at test_channel_planted_link.py:390; unpatched, the two files give 12 passed, 2 skipped. AC2: by reading, the old _SERVE closes after answering, so the second recv returns end of file and the new test fails; the worker saw this. AC2's proof is the held-connection property; the original flake was never reproduced (0 of 200). Findings. (medium) SPEC.md says 'Ruled 2026-11-08' and tells decision-209's reader the residual is 'settled', with no mark that it is proposed; AC1 is ticked on that wording. Mark it proposed until the owner confirms, or confirm it. (medium, if confirmed) The refusal a close-first workload gets says 'the kernel could not report who listens there' and that a process of the jail can write the channel directory; it reads as an attack and does not say to hold the connection, which CLAUDE.md asks of an error message. (low) Process.connect's docstring gives OSError as 'nothing listens there yet', and the README says only wait_ready then connect, but a full backlog after wait_ready also refuses (TASK-0215 measured it); only the SPEC says so. (low) The new test reaches dial_module._read_peer and _Peer, private names; the gates pass, and the file's earlier test already patches _read_peer. Before close: this bug needs a repro record, or a note starting 'No repro:'; board-check close reports it. The worker's planted-mutation run and the reviewer's above would be its evidence.
 <!-- SECTION:NOTES:END -->
