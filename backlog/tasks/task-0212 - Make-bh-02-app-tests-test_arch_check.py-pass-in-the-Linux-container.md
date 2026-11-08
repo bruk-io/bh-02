@@ -20,8 +20,8 @@ Run in the scripts/linux-jail-check container, serially, as the unprivileged use
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Why the 25 fail in the container is found and said in the notes
-- [ ] #2 The file passes in scripts/linux-jail-check run on it alone, or skips there by name saying why
+- [x] #1 Why the 25 fail in the container is found and said in the notes
+- [x] #2 The file passes in scripts/linux-jail-check run on it alone, or skips there by name saying why
 <!-- AC:END -->
 
 ## Implementation Notes
