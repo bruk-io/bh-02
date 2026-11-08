@@ -4,7 +4,7 @@ title: Make bh-02/app/tests/test_arch_check.py pass in the Linux container
 status: To Do
 assignee: []
 created_date: '2026-11-07 22:31'
-updated_date: '2026-11-08 18:16'
+updated_date: '2026-11-08 18:23'
 labels:
   - app
   - size-1
@@ -63,5 +63,17 @@ INFO    -  Documentation built in 1.34 seconds
 == tokens
 bh-01's tokens and bh-02's theme are in sync
    ok
+```
+
+Repro at c5b001f4860c, test files: scripts/linux-jail-check; command: `scripts/linux-jail-check --shell 'env -u CFLAGS uv pip install --quiet --reinstall --no-cache --no-deps tree-sitter==0.25.2; .venv/bin/pytest bh-02/app/tests/test_arch_check.py -q -p no:cacheprovider --tb=no 2>&1 | tail -1; exit ${PIPESTATUS[0]}'` exited 1
+
+```text
+== image bh-02-linux-jail (ubuntu 24.04, bubblewrap, uv, Python 3.15)
+sha256:fa17ee764268fa1a5e0c664562c988baeed0af488a99326031ef01efb5b225aa
+== env -u CFLAGS uv pip install --quiet --reinstall --no-cache --no-deps tree-sitter==0.25.2; .venv/bin/pytest bh-02/app/tests/test_arch_check.py -q -p no:cacheprovider --tb=no 2>&1 | tail -1; exit ${PIPESTATUS[0]}
+bubblewrap 0.9.0
+uv 0.13.7 (aarch64-unknown-linux-gnu)
+Python 3.15.2 (main, Oct 26 2026, 14:08:24) [Clang 23.1.3 ]
+25 failed, 15 passed in 6.85s
 ```
 <!-- SECTION:NOTES:END -->
