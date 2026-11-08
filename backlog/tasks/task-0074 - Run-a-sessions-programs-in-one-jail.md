@@ -4,7 +4,7 @@ title: Run a session's programs in one jail
 status: To Do
 assignee: []
 created_date: '2026-10-10 18:42'
-updated_date: '2026-11-07 04:30'
+updated_date: '2026-11-08 20:51'
 labels:
   - runner
   - finish-moved
@@ -14,7 +14,7 @@ dependencies:
   - TASK-0079.32
 parent_task_id: TASK-0084
 priority: medium
-type: feature
+type: task
 ---
 
 ## Description
