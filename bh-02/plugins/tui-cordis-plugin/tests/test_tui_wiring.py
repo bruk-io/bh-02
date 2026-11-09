@@ -29,9 +29,10 @@ _CONFINED = {"fs_write": "enforced", "network": "enforced"}
 class _Start:
     """A start the runner tells: its grades and its notice."""
 
-    def __init__(self, report: Mapping[str, str], notice: str = "") -> None:
+    def __init__(self, report: Mapping[str, str], notice: str = "", degraded: str = "") -> None:
         self._report = report
         self._notice = notice
+        self._degraded = degraded
 
     def report(self) -> Mapping[str, str]:
         return self._report
@@ -39,24 +40,34 @@ class _Start:
     def notice(self) -> str:
         return self._notice
 
+    def degraded(self) -> str:
+        return self._degraded
+
 
 class _Runner:
     """The `runner` value's grades before any start and its `on_start`, a start told by hand
     (`started`)."""
 
-    def __init__(self, report: Mapping[str, str]) -> None:
+    def __init__(self, report: Mapping[str, str], last: _Start | None = None) -> None:
         self._report = report
+        self._last = last
         self.watches: list[Any] = []
 
     def report(self) -> Mapping[str, str]:
         return self._report
+
+    def notice(self) -> str:
+        return self._last.notice() if self._last is not None else ""
+
+    def degraded(self) -> str:
+        return self._last.degraded() if self._last is not None else ""
 
     def on_start(self, watch: Any) -> Any:
         self.watches.append(watch)
         return lambda: self.watches.remove(watch)
 
     def started(self, start: _Start) -> None:
-        self._report = start.report()
+        self._report, self._last = start.report(), start
         for watch in tuple(self.watches):
             watch(start)
 
@@ -234,3 +245,52 @@ async def test_the_app_row_under_a_runtime_and_a_row_over_frame_leaving_first() 
     assert await asyncio.wait_for(reading, 2) is None
     assert rt.root.get("frame") is None and frame.fields() == {}  # status left before the app
     await rt.shutdown()
+
+
+_LOST = (
+    "the kernel refused a mount on /dev/pts: Operation not permitted, so this jail's processes have "
+    "no namespaces of their own: ... So each program keeps a jail of its own"
+)
+
+
+async def test_the_jail_field_shows_a_refused_mount_while_that_jail_runs_and_warns_once() -> None:
+    """A host refused a mount that keeps programs apart (brig's decision-212): the field itself says
+    so beside the grades, for every start in that state, and the conversation is told once, as a
+    failure, not a plain note. A start that lost nothing takes the mark away."""
+    frame, output = Frame(lambda message: True), _Output()
+    runner = _Runner(_CONFINED)
+    effects = await drive(grades(runner=runner, approval=_Rule(runner), frame=frame, output=output))
+    told = asyncio.ensure_future(effects[0].args[0])
+    try:
+        effects[1].args[0]()
+        effects[2].args[0](*effects[2].args[1:])
+        lost = _Start(_CONFINED, _LOST, "mount refused, a jail each")
+        runner.started(lost)
+        assert frame.fields()["jail"] == "jailed fs_write ✓ network ✓ ⚠ mount refused, a jail each"
+        runner.started(lost)  # the extensions process, in a jail of its own: still shown
+        assert "⚠ mount refused" in frame.fields()["jail"]
+        await asyncio.sleep(0)
+        assert output.shown == [{"type": "note", "text": _LOST, "kind": "failure"}]
+        runner.started(_Start(_CONFINED))
+        assert frame.fields()["jail"] == "jailed fs_write ✓ network ✓"
+    finally:
+        told.cancel()
+        await asyncio.gather(told, return_exceptions=True)
+
+
+async def test_a_start_that_came_before_the_grades_row_still_shows() -> None:
+    """The runner may start a program before this row subscribes (rows come up in any order): what
+    that start's jail lost, and its notice, are read when the row comes up, not lost."""
+    frame, output = Frame(lambda message: True), _Output()
+    before = _Start(_CONFINED, _LOST, "mount refused, a jail each")
+    runner = _Runner(_CONFINED, last=before)
+    effects = await drive(grades(runner=runner, approval=_Rule(runner), frame=frame, output=output))
+    told = asyncio.ensure_future(effects[0].args[0])
+    try:
+        effects[1].args[0]()
+        assert "⚠ mount refused, a jail each" in frame.fields()["jail"]
+        await asyncio.sleep(0)
+        assert output.shown == [{"type": "note", "text": _LOST, "kind": "failure"}]
+    finally:
+        told.cancel()
+        await asyncio.gather(told, return_exceptions=True)

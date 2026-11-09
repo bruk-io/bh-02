@@ -337,7 +337,8 @@ class ChatView(VerticalScroll):
                     _tool_result(event), "tool_result -error" if event.get("is_error") else "tool_result"
                 )
             case "note":
-                self._add(Static(str(event.get("text", "")), markup=False), "note")
+                drawn_as = "failure" if event.get("kind") == "failure" else "note"
+                self._add(Static(str(event.get("text", "")), markup=False), drawn_as)
             case "cleared":
                 self.clear()
             case "stop" if not render.is_quiet_stop(event):

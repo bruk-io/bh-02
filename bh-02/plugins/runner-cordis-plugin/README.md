@@ -96,8 +96,15 @@ session holds there, payload included (measured by review in a container; a bare
 be the same). No grade says so, and approval's rule does not know of it.
 
 A host that refuses a mount this needs (`/dev/shm`'s tmpfs, devpts, one carried across: brig's
-decision-212) is on the second row, and `notice()`, which the status bar's jail field shows the person,
-says which mount and what it cost.
+decision-212) is on the second row. The person sees it twice: the status bar's jail field ends with
+`⚠ mount refused, a jail each` (`⚠` alone when the bar is narrow) for as long as the last start's jail is
+in that state (`started.degraded()`), and the conversation shows the jail's `notice()` once, drawn as a
+failure, saying which mount and what it cost. A start made before the status row came up is read when it
+does. Other refusals, and uid 0 or blocked user namespaces, put a host on that row with no warning.
+
+A jail that can write `/dev/shm` itself (a `write` entry that is `/dev/shm`, or a project there) shares
+the host's `/dev/shm` among its programs and with the host, as a jail each would, so it is no
+regression; its `notice()` says so.
 
 Which row a host is on is found at a jail's first start. In a shared jail:
 

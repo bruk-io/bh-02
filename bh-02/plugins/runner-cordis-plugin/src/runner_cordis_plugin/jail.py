@@ -762,6 +762,7 @@ class _Facts:
     notice: str = ""
     reads: tuple[str, ...] = ()
     writes: tuple[str, ...] = ()
+    degraded: str = ""
 
 
 class _Held:
@@ -893,6 +894,11 @@ class _Jailed:
         """What the person should know about this jail (`notice_for`): on Linux, the secrets it
         holds with a mount the host can undo; empty on darwin."""
         return self._held.facts.notice
+
+    def degraded(self) -> str:
+        """What this jail lost, short, for the status bar's jail field: a mount the host refused
+        (brig's decision-212); "" for nothing."""
+        return self._held.facts.degraded
 
     def reads(self) -> tuple[str, ...]:
         """The trees the jail's programs can read, when that is all they can read (`told_reads`):
@@ -1029,10 +1035,22 @@ def _started_in(jail: Jail, argv_for: ArgvFor, *, cwd: str) -> Process:
     return jail.start(argv, cwd=cwd, io=IoPolicy(), channel=reservation)
 
 
+#: What the status bar's jail field says, after `⚠`, of a jail a refused mount cost its sharing.
+_DEGRADED = "mount refused, a jail each"
+
+#: What the jail's notice says when a write root is `/dev/shm` itself (brig's decision-212).
+_SHARED_SHM = (
+    "This jail can write /dev/shm itself (a write root is /dev/shm, or the project is), so its "
+    "programs share the host's /dev/shm with each other and with the host, as a jail each would: "
+    "neither has a /dev/shm of its own."
+)
+
+
 def _lost_for(said: str) -> str:
     """What the person is told when the host refused a mount that keeps programs apart (brig's
-    decision-212), through the jail's `notice()`, which the status bar's jail field shows: what
-    brig said, and what it means for this session."""
+    decision-212), through the jail's `notice()`, which the conversation shows once as a failure
+    while the status bar's jail field shows `⚠` and `_DEGRADED` (`degraded()`): what brig said,
+    and what it means for this session."""
     return (
         f"{said}. So each program keeps a jail of its own instead of sharing the session's: they "
         "stay apart, at the cost of a jail each. Ask whoever runs this host why it refuses that mount."
@@ -1368,7 +1386,11 @@ class BrigJail:
                 fallback=lambda: os.killpg(running.instance_group or process.pid, signal.SIGKILL),
             )
         if lost:
-            facts = replace(facts, notice="\n".join(filter(None, (facts.notice, *map(_lost_for, lost)))))
+            facts = replace(
+                facts,
+                notice="\n".join(filter(None, (facts.notice, *map(_lost_for, lost)))),
+                degraded=_DEGRADED,
+            )
         return _Held(running, process, facts, jail_dir, placed, lock, record, tether, wire), process
 
     def compile(
@@ -1442,9 +1464,10 @@ class BrigJail:
         if self._platform != "linux":
             return _Facts(report, self._note, writes=writes)
         trees = (*spec.fs.read_allows, *spec.fs.write_allows)
+        shm = _SHARED_SHM if any(os.path.realpath(w) == "/dev/shm" for w in spec.fs.write_allows) else ""
         return _Facts(
             report,
-            "\n".join(filter(None, (self._note, notice_for(self._platform, held(spec, absent))))),
+            "\n".join(filter(None, (self._note, notice_for(self._platform, held(spec, absent)), shm))),
             told_reads(trees, (jail_dir,)),
             writes,
         )

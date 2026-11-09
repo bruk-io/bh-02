@@ -3150,6 +3150,7 @@ async def test_the_attack_succeeds_where_nothing_keeps_the_programs_apart(
         assert accepted == 1 and report["connect"] == "CONNECTED", report
         assert report["listed"] and report["unlink"] == "UNLINKED" and report["signalled"], report
         assert "target-marker" in report["scratch"], report
+        assert report["pids"] != [1] and len(report["pids"]) > 1, report  # `pids == [1]` can be false
         reached = _linux_media_reached(report, await _what_the_terminal_received(project))
         assert sorted(reached) == [
             "abstract",
@@ -3364,6 +3365,8 @@ async def test_a_refused_mount_costs_the_shared_jail_and_the_person_is_told(
         assert target in said and "refused" in said, said
         assert "keeps a jail of its own" in said and "namespaces" in said, said
         assert first.notice() == said == second.notice()
+        # and the status bar's jail field shows it for as long as this is the last start's jail
+        assert runner.degraded() == "mount refused, a jail each" == first.degraded() == second.degraded()
 
 
 async def test_the_tripwire_ends_the_session_s_jail_tells_every_owner_and_the_next_start_makes_a_new_one(
@@ -3442,3 +3445,19 @@ async def test_a_program_in_another_directory_gets_a_jail_of_its_own(
         second = await jail.start(_listens, cwd=str(tmp_path / "two"))
         assert len(made) == 2, made
         assert first.writes() != second.writes()
+
+
+@pytest.mark.usefixtures("_plain_launch")
+async def test_a_jail_that_writes_dev_shm_itself_says_its_programs_share_it(tmp_path: Path) -> None:
+    """A write root that is `/dev/shm` (brig's decision-212 leaves a Spec mount there as it is): the
+    jail's notice says its programs share the host's `/dev/shm`. The control: a project elsewhere
+    says nothing of it."""
+    project = tmp_path / "project"
+    project.mkdir()
+    shared = BrigJail(BrigConfig(write=(".", "/dev/shm")), Host(), lock=str(tmp_path / "jails.lock"))
+    own = BrigJail(BrigConfig(), Host(), lock=str(tmp_path / "jails.lock"))
+    async with shared, own:
+        first = await shared.start(_listens, cwd=str(project))
+        second = await own.start(_listens, cwd=str(project))
+        assert "share the host's /dev/shm" in first.notice(), first.notice()
+        assert "/dev/shm" not in second.notice(), second.notice()

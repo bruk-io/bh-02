@@ -471,27 +471,35 @@ def approval_language(question: Event) -> str:
     return str(question.get("language") or "python")
 
 
-def jail_forms(confined: bool, report: Mapping[str, str]) -> tuple[str, ...]:
+def jail_forms(confined: bool, report: Mapping[str, str], degraded: str = "") -> tuple[str, ...]:
     """The confinement of a runner start, for a status bar, fullest form first: confined or not and a
     glyph per main axis, each axis named (`jailed fs_write ✓ network ✓`), then by its initial
     (`jailed w✓ n✓`), the initials run together (`jailed w✓n✓`), and the glyphs alone, in the
-    axes' fixed order (`jailed ✓✓`). The status bar takes the first that fits."""
+    axes' fixed order (`jailed ✓✓`). The status bar takes the first that fits. `degraded` is what
+    that start's jail lost (a mount the host refused): `⚠` and it after the fullest form, `⚠` alone
+    after every other, so the narrowest bar still shows something is wrong."""
     head = "jailed" if confined else "unjailed"
     graded = [(axis, _GRADES.get(report[axis], "?")) for axis in _AXES if axis in report]
-    if not graded:
-        return (head,)
     initials = [f"{_INITIALS[axis]}{glyph}" for axis, glyph in graded]
-    return (
-        " ".join([head, *(f"{axis} {glyph}" for axis, glyph in graded)]),
-        " ".join([head, *initials]),
-        f"{head} {''.join(initials)}",
-        f"{head} {''.join(glyph for _, glyph in graded)}",
+    forms = (
+        (
+            " ".join([head, *(f"{axis} {glyph}" for axis, glyph in graded)]),
+            " ".join([head, *initials]),
+            f"{head} {''.join(initials)}",
+            f"{head} {''.join(glyph for _, glyph in graded)}",
+        )
+        if graded
+        else (head,)
     )
+    if not degraded:
+        return forms
+    return (f"{forms[0]} ⚠ {degraded}", *(f"{form} ⚠" for form in forms))
 
 
-async def noted(text: str) -> AsyncIterator[Event]:
-    """`text` as the one `note` event a reply would carry (CONTRACTS.md: event)."""
-    yield {"type": "note", "text": text}
+async def noted(text: str, kind: str = "note") -> AsyncIterator[Event]:
+    """`text` as the one `note` event a reply would carry (CONTRACTS.md: event); `kind="failure"`
+    draws it as one, for what the person must not miss."""
+    yield {"type": "note", "text": text} if kind == "note" else {"type": "note", "text": text, "kind": kind}
 
 
 def session_forms(sid: str, *, resumed: bool = False) -> tuple[str, ...]:

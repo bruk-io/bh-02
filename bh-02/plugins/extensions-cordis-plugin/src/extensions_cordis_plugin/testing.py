@@ -39,6 +39,9 @@ class _Started:
     def ended(self) -> str:
         return self.why
 
+    def degraded(self) -> str:
+        return ""
+
     async def connect(self, *, limit: int) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
         """A plain connect to the worker's socket: this fake confines nothing, so nothing checks
         what answers."""

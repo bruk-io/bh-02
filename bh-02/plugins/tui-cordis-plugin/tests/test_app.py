@@ -304,3 +304,23 @@ async def test_a_line_typed_after_clear_and_not_read_yet_stays_on_screen_after_t
         app.post_message(Shown({"type": "cleared"}, {"type": "note", "text": "cleared"}))
         await pilot.pause()
         assert _blocks(app) == [("user", "› again"), ("note", "cleared")]
+
+
+async def test_a_refused_mount_shows_in_the_status_bar_and_as_a_failure_in_the_conversation() -> None:
+    """What the person sees, drawn headless: the jail field with the mark, and the warning styled
+    as a failure, not a note."""
+    from tui_cordis_plugin import render as rendered
+
+    app = BhApp()
+    async with app.run_test(size=_SIZE) as pilot:
+        forms = rendered.jail_forms(
+            True, {"fs_write": "enforced", "network": "enforced"}, "mount refused, a jail each"
+        )
+        app.frame.status("jail", *forms)
+        app.query_one(ChatView).event(
+            {"type": "note", "text": "the kernel refused a mount on /dev/pts", "kind": "failure"}
+        )
+        await pilot.pause()
+        bar = str(app.query_one(StatusBar).content)
+        assert "jail: jailed fs_write ✓ network ✓ ⚠ mount refused, a jail each" in bar, bar
+        assert ("failure", "the kernel refused a mount on /dev/pts") in _blocks(app)

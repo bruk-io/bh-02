@@ -27,11 +27,13 @@ __all__ = ["ArgvFor", "Mechanism", "Runner", "Started"]
 
 @runtime_checkable
 class Started(Protocol):
-    """A program a runner started: what the jail it runs in is (its grades, and what the person
-    should know of it), how to dial it and how to stop it."""
+    """A program a runner started: what the jail it runs in is (its grades, what the person
+    should know of it, and what it lost that the status bar must show, '' for nothing), how to dial
+    it and how to stop it."""
 
     def report(self) -> Mapping[str, str]: ...
     def notice(self) -> str: ...
+    def degraded(self) -> str: ...
     async def connect(self, *, limit: int) -> tuple[StreamReader, StreamWriter]: ...
     async def stop(self) -> None: ...
 
@@ -74,6 +76,11 @@ class Runner:
         """What the person should know of the jail of the last start ("" before any, or when
         nothing)."""
         return self._last.notice() if self._last is not None else ""
+
+    def degraded(self) -> str:
+        """What the jail of the last start lost, short, for the status bar ("" before any, or when
+        nothing)."""
+        return self._last.degraded() if self._last is not None else ""
 
     def released(self) -> bool:
         """Whether `/release` has stopped what runs and nothing has started since."""

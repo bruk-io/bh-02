@@ -54,7 +54,10 @@ extensions' own process. Two components can fill it:
   on what both can read (`/`, `/dev`) is visible to the other, which takes both of them cooperating,
   and they share the project anyway. On macOS, as root, or where nested user namespaces are blocked,
   one jail could not keep them apart, so each keeps a jail of its own. So does a host that refuses a
-  mount this needs, and the status bar's jail field says which one.
+  mount this needs: the status bar's jail field then ends with `⚠ mount refused, a jail each`, and the
+  conversation says which mount, once, as a failure. If the jail can write `/dev/shm` itself (you
+  added it to `write`, or the project is there), both programs and the host share it, as they would
+  with a jail each, and the jail's first note says so.
 
 !!! danger "An open hole: the kernel's session keyring"
     A program in the jail can use the kernel's session keyring of whatever started bh-02, because

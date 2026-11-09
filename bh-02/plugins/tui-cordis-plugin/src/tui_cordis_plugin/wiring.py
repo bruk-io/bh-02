@@ -84,15 +84,17 @@ async def grades(*, runner: Starts, approval: Confinement, frame: StatusSink, ou
     start, and whether the `approval` rule counts them as confined. A row of its own over the
     runner, which tells it each start: it never reloads with `/clear`, and follows a Python
     process started again in place. What a start says the person should know (on Linux, the
-    paths its jail holds with a mount the host can undo) is shown once as a note."""
-    notes: asyncio.Queue[str] = asyncio.Queue()
+    paths its jail holds with a mount the host can undo) is shown once as a note; one saying a mount
+    was refused (the field then shows `⚠`) as a failure."""
+    notes: asyncio.Queue[tuple[str, str]] = asyncio.Queue()
 
     async def tell() -> None:
         while True:
-            await output.show(render.noted(await notes.get()))
+            text, kind = await notes.get()
+            await output.show(render.noted(text, kind))
 
     yield background(tell())
-    field = GradesField(frame.status, approval, runner.report(), notes.put_nowait)
+    field = GradesField(frame.status, approval, runner, notes.put_nowait)
     yield acquire(field.show)
     yield acquire(runner.on_start, field.started)
 

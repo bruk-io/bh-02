@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-10 18:42'
-updated_date: '2026-11-09 16:45'
+updated_date: '2026-11-09 16:57'
 labels:
   - runner
   - finish-moved
@@ -243,4 +243,16 @@ Reviewer, pre-merge review of f8f36725 and 65718977, 2026-11-09. Verdict: don't 
 Read and found sound: the O_PATH|O_CLOEXEC descriptors are closed in finally and closerange runs before exec. Mount points come from the process's own private mountinfo and are made on a fresh tmpfs, so I found no sibling race. The probe runs in a forked namespace and leaves nothing behind. A failed isolate at a real start fails the start (child writes err_w, exec_done replies ok=False). The positive control asserts all 12 media plus connect, list, unlink, signal and scratch, but not pids. The keyring hole is stated plainly in TASK-0219, SPEC decision-211, both READMEs and the docs (a danger admonition).
 
 Runs: scripts/linux-jail-check exit 0, 366 passed, 5 skipped, 131 s. --root on the four suites exit 0, 713 passed, 14 skipped, 38 s. I did not run scripts/check: load average was 19-27, above 8. Not done: planting failures myself, since this reviewer has no edit, and measuring startup cost, which would be noise at this load.
+
+Final review's fixes, 2026-11-09 (new commits on top of 65718977). Correction to the notes above: until this commit, the jail field did not show a refused mount. `GradesField.show` drew the grades only, and the notice reached the person once, as a plain note. What the person sees now, on a host that refuses a mount the shared jail needs:
+
+- The status bar's jail field: `jail: jailed fs_write ✓ network ✓ ⚠ mount refused, a jail each`. When the bar is narrow, the shorter forms end in `⚠` alone (`jailed w✓ n✓ ⚠`, `jailed ✓✓ ⚠`). It stays while the last start's jail is in that state, so every start of the session on such a host; the next start in a jail that lost nothing clears it.
+- The conversation, once per distinct notice, drawn as a failure (the chat view's `failure` style, not a note): brig's text and the runner's, for example "the kernel refused a mount on /dev/pts: Operation not permitted, so this jail's processes have no namespaces of their own: they can reach each other's sockets, /dev/shm, terminals, signals and IPC, and a stop no longer ends a child in a session of its own. So each program keeps a jail of its own instead of sharing the session's: they stay apart, at the cost of a jail each. Ask whoever runs this host why it refuses that mount."
+- How: `started.degraded()` and `runner.degraded()` are new on the `runner` contract ("" for nothing; `Unjailed` always ""), and a note event may carry `"kind": "failure"`. `GradesField` now starts from the runner's last start, notice and `degraded()` included, so a start made before the row subscribed is not lost.
+
+A jail that can write `/dev/shm` itself (a `write` entry that is `/dev/shm`, or a project there) now says in its notice that its programs share the host's `/dev/shm`. The runner README and the docs say so beside the keyring note. Low items: the keyring test fails pointing at TASK-0219; the positive control shows `pids == [1]` can be false; decision-212 names that only the tmpfs, devpts and carried mounts are loud, and that other refusals and the uid 0 and blocked-user-namespace fallbacks give no warning.
+
+Seen failing first, against 65718977's code: `test_the_jail_field_shows_a_refused_mount_while_that_jail_runs_and_warns_once` (`'jailed fs_write ✓ network ✓' == '... ⚠ mount refused, a jail each'`), `test_a_start_that_came_before_the_grades_row_still_shows` (no mark in the field), and the headless Pilot test `test_a_refused_mount_shows_in_the_status_bar_and_as_a_failure_in_the_conversation` (`jail_forms() takes 2 positional arguments`). `test_a_jail_that_writes_dev_shm_itself_says_its_programs_share_it` was seen failing with its notice line removed (as bh, Linux). The runner test's `degraded()` assertions fail at 65718977 because the method did not exist.
+
+Final runs for the final review's fixes, on 91f6f465's code, each under testlock: scripts/check exit 0, 3876 passed, 268 skipped in 70 s (load average 7.3 at its end, after the orphan was killed); format, lint, types, gates, docs ok; tokens skipped (no bh-01 build beside this worktree). scripts/linux-jail-check exit 0, 367 passed, 5 skipped. scripts/linux-jail-check --root on the four suites exit 0, 714 passed, 14 skipped. #6 is left for the reviewer to tick.
 <!-- SECTION:NOTES:END -->

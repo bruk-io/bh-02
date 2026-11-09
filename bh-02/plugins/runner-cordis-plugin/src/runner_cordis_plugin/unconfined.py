@@ -82,6 +82,10 @@ class _Process:
         """Nothing: the status bar says it is unjailed, and every input asks."""
         return ""
 
+    def degraded(self) -> str:
+        """Nothing: no jail to lose anything."""
+        return ""
+
     def reads(self) -> tuple[str, ...]:
         """No allowlist: an input reads what the person can."""
         return ()
