@@ -19,8 +19,11 @@ import json
 import os
 import random
 import re
+import shutil
 import signal
+import tempfile
 import time
+import warnings
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
@@ -28,7 +31,17 @@ import pytest
 
 import brig.run.teardown as teardown
 from brig.core import Grade
-from brig.run import ExecFidelity, HostRuntime, Jail, KillOutcome, Process, RuntimeKind
+from brig.run import (
+    ExecFidelity,
+    HostRuntime,
+    Jail,
+    KillOutcome,
+    NamespacesLost,
+    Process,
+    RuntimeKind,
+    build_compile_ctx,
+)
+from brig.stack import strict_linux
 from tests.conftest import NewJailDir
 from tests.supervised_jail import (
     blocked,
@@ -38,6 +51,7 @@ from tests.supervised_jail import (
     python,
     running_with,
     sh,
+    spec_for,
     stderr_of,
     the_kernel_gives_namespaces_in_a_jail,
     unique_sleep,
@@ -73,11 +87,17 @@ def make(mode: str, new_jail_dir: NewJailDir) -> Iterator[Rig]:
     made: list[Jail] = []
 
     def build(
-        *, channel: bool = False, scratch: bool = False, jail_id: str = "probed"
+        *,
+        channel: bool = False,
+        scratch: bool = False,
+        jail_id: str = "probed",
+        jail_dir: str | None = None,
+        workspace: str | None = None,
     ) -> tuple[Jail, str]:
-        jail_dir = new_jail_dir()
-        workspace = new_jail_dir()
-        os.chmod(workspace, 0o777)
+        jail_dir = new_jail_dir() if jail_dir is None else jail_dir
+        if workspace is None:
+            workspace = new_jail_dir()
+            os.chmod(workspace, 0o777)
         jail = create_jail(
             jail_dir,
             workspace=workspace,
@@ -481,6 +501,145 @@ def test_a_process_can_still_open_a_terminal_and_use_it(mode: str, make: Rig) ->
 
 
 # ---------------------------------------------------------------------------------------------
+# What the Spec mounted under /dev/shm is still there (decision-212).
+# ---------------------------------------------------------------------------------------------
+
+
+@pytest.fixture
+def under_dev_shm() -> Iterator[Callable[[], str]]:
+    """Directories on the host's `/dev/shm`, removed after: where a person with a project in memory
+    has it. A host with none has nothing to test."""
+    if not os.access("/dev/shm", os.W_OK):
+        pytest.skip("this host has no /dev/shm to write")
+    made: list[str] = []
+
+    def make_one() -> str:
+        made.append(tempfile.mkdtemp(prefix="brig-", dir="/dev/shm"))
+        os.chmod(made[-1], 0o777)
+        return made[-1]
+
+    yield make_one
+    for each in made:
+        shutil.rmtree(each, ignore_errors=True)
+
+
+_IN_A_WORKSPACE_IN_MEMORY = r"""
+import json, os, sys, time
+workspace, mine, ready = sys.argv[1:4]
+seen = open(os.path.join(workspace, 'from-host')).read()
+open(os.path.join(workspace, mine), 'w').write('jail')
+before = sorted(os.listdir('/dev/shm'))
+open(os.path.join('/dev/shm', mine), 'w').write('mine')
+print(json.dumps({"seen": seen, "before": before}), flush=True)
+open(ready, 'w').write('up')
+time.sleep(60)
+"""
+
+
+def test_a_workspace_under_dev_shm_is_there_and_each_process_keeps_its_own_dev_shm(
+    mode: str, make: Rig, under_dev_shm: Callable[[], str]
+) -> None:
+    """decision-198: a Spec's mount under `/dev/shm` stacks on it. Both processes read and write the
+    workspace, which reaches the host; what each leaves beside it in `/dev/shm` stays its own."""
+    workspace = under_dev_shm()
+    Path(workspace, "from-host").write_text("host")
+    jail, _ = make(workspace=workspace)
+    ready = [os.path.join(workspace, f"up-{n}") for n in "ab"]
+    a = jail.start(python(_IN_A_WORKSPACE_IN_MEMORY, workspace, "a.txt", ready[0]))
+    assert until(lambda: _up(ready[0]), 15.0), stderr_of(a)
+    b = jail.start(python(_IN_A_WORKSPACE_IN_MEMORY, workspace, "b.txt", ready[1]))
+    assert until(lambda: _up(ready[1]), 15.0), stderr_of(b)
+    first, second = _json_of(a), _json_of(b)
+    top = os.path.basename(workspace)
+    assert first == {"seen": "host", "before": [top]}, first
+    assert second == {
+        "seen": "host",
+        "before": [top] if _isolated(mode) else sorted([top, "a.txt"]),
+    }, second
+    assert Path(workspace, "a.txt").read_text() == Path(workspace, "b.txt").read_text() == "jail"
+
+
+def test_a_jail_directory_under_dev_shm_starts_its_processes_with_channel_and_scratch(
+    mode: str, make: Rig, under_dev_shm: Callable[[], str]
+) -> None:
+    """The jail's own directories under `/dev/shm`: a process gets its socket and its scratch over
+    them, which are mounted after its `/dev/shm` is made."""
+    del mode
+    jail, workspace = make(channel=True, scratch=True, jail_dir=under_dev_shm())
+    scratch = os.path.join(os.path.realpath(jail.jail_dir), "tmp")
+    reservation = jail.channel("ctl")
+    ready = os.path.join(workspace, "listening")
+    process = jail.start(python(_LISTEN, reservation.bound_path, ready), channel=reservation)
+    process.wait_ready(15.0)
+    process.connect().close()
+    plain = jail.start(sh(f"echo mine > {scratch}/mine && cat {scratch}/mine"))
+    assert plain.wait(15) == 0, stderr_of(plain)
+    assert "mine" in Path(plain.stdout_path).read_text()
+
+
+def test_a_spec_mount_on_dev_shm_itself_is_left_as_the_spec_made_it(mode: str, make: Rig) -> None:
+    """A write root that IS `/dev/shm` shares it by the Spec's own word, as any write root: nothing
+    covers it, so a file there reaches the host and a sibling."""
+    if not os.access("/dev/shm", os.W_OK):
+        pytest.skip("this host has no /dev/shm to write")
+    jail, _ = make(workspace="/dev/shm")
+    name = f"brig-{random.randrange(2**32)}"
+    try:
+        wrote = jail.start(sh(f"echo mine > /dev/shm/{name}"))
+        assert wrote.wait(15) == 0, stderr_of(wrote)
+        assert Path("/dev/shm", name).read_text().strip() == "mine", mode
+        read = jail.start(sh(f"cat /dev/shm/{name}"))
+        assert read.wait(15) == 0, stderr_of(read)
+    finally:
+        Path("/dev/shm", name).unlink(missing_ok=True)
+
+
+# ---------------------------------------------------------------------------------------------
+# A jail with nothing refused says nothing (decision-212; a refusal is planted in
+# tests/integration/test_namespaces_lost.py).
+# ---------------------------------------------------------------------------------------------
+
+
+def test_a_jail_whose_mounts_were_not_refused_warns_nothing(mode: str, make: Rig) -> None:
+    """Nothing is lost by a refused mount with the bundle held, or with it blocked (decision-195's
+    fallback, graded as it was): the warning means this and only this."""
+    del mode
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", NamespacesLost)
+        make()
+
+
+# ---------------------------------------------------------------------------------------------
+# An open hole: the kernel's session keyring (TASK-0219).
+# ---------------------------------------------------------------------------------------------
+
+_KEYS = r"""
+import ctypes, json, platform, sys
+libc = ctypes.CDLL(None, use_errno=True)
+libc.syscall.restype = ctypes.c_long
+add_key, keyctl = (217, 219) if platform.machine() == "aarch64" else (248, 250)
+if sys.argv[1] == "add":
+    made = libc.syscall(add_key, b"user", sys.argv[2].encode(), b"secret", 6, ctypes.c_long(-3))
+    print(json.dumps({"made": made > 0, "errno": ctypes.get_errno()}))
+else:
+    found = libc.syscall(keyctl, 10, ctypes.c_long(-3), b"user", sys.argv[2].encode(), 0)
+    print(json.dumps({"found": found > 0}))
+"""
+
+
+def test_an_open_hole_a_sibling_finds_a_key_in_the_session_keyring(mode: str, make: Rig) -> None:
+    """NOT a guarantee. This pins TASK-0219's hole so its fix turns this red and removes it: the
+    session keyring is inherited, so a process finds a key a sibling added, namespaces or none."""
+    del mode
+    jail, _ = make()
+    name = f"brig-{random.randrange(2**32)}"
+    added = _json_of(jail.start(python(_KEYS, "add", name)))
+    if not added["made"]:
+        pytest.skip(f"this host refuses add_key: errno {added['errno']}")
+    assert _json_of(jail.start(python(_KEYS, "find", name))) == {"found": True}
+
+
+# ---------------------------------------------------------------------------------------------
 # Stopping a process ends its namespace: a setsid() child goes with it.
 # ---------------------------------------------------------------------------------------------
 
@@ -780,9 +939,6 @@ def test_a_blocked_nested_user_namespace_is_a_graded_fallback_not_a_failed_start
     """The planted block, by its name: bwrap told to refuse a nested user namespace. The jail
     starts, a process in it starts, and the grade says what the host would not give, in the words
     of the call that was refused. The control: the same jail unblocked (when the host gives them)."""
-    from brig.run.compile_ctx import build_compile_ctx
-    from brig.stack import strict_linux
-    from tests.supervised_jail import spec_for
 
     # The control that the block blocks, asked of unshare(1) (not of brig): where the kernel gives
     # an unprivileged process namespaces in a jail, it gives none in the one with the block planted.

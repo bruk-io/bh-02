@@ -20,6 +20,7 @@ from __future__ import annotations
 import ast
 import re
 import sys
+from typing import Any
 
 import pytest
 
@@ -111,3 +112,35 @@ def test_the_exit_wrapper_is_told_which_descriptors_its_child_keeps() -> None:
     assert none[4:8] == ("/exit", "5", "6", "-")
     assert kept[4:8] == ("/exit", "5", "6", "9,11")
     assert none[8:] == kept[8:] == ("true",)
+
+
+def _carried(mountinfo: str, point: str) -> tuple[bool, list[str]]:
+    """The supervisor's own `carried`, from its source: importing that would run a jail's PID 1."""
+    wanted = {"carried", "unescaped_mount_point"}
+    tree = ast.parse(SUPERVISOR_SOURCE)
+    tree.body = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name in wanted]
+    found: dict[str, Any] = {}
+    exec(compile(tree, "<brig-supervisor>", "exec"), found)
+    answer: tuple[bool, list[str]] = found["carried"](mountinfo, point)
+    return answer
+
+
+def test_what_is_carried_is_each_mount_directly_under_the_point_once() -> None:
+    """decision-212, read from `mountinfo`: not one inside another, which comes with it; a name with
+    a space, spelled as the kernel spells it; not a sibling that only starts with the point's name;
+    and whether something is stacked on the point itself, which only a Spec naming it does."""
+    line = "{} {} 0:1 / {} rw - tmpfs tmpfs rw"
+    rows = [
+        line.format(1, 0, "/"),
+        line.format(2, 1, "/dev/shm"),
+        line.format(3, 2, "/dev/shm/work"),
+        line.format(4, 3, "/dev/shm/work/.git/hooks"),
+        line.format(5, 2, r"/dev/shm/my\040project"),
+        line.format(6, 1, "/dev/shmore"),
+    ]
+    assert _carried("\n".join(rows), "/dev/shm") == (
+        False,
+        ["/dev/shm/work", "/dev/shm/my project"],
+    )
+    stacked = [*rows, line.format(7, 2, "/dev/shm")]
+    assert _carried("\n".join(stacked), "/dev/shm")[0] is True

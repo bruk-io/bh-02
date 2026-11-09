@@ -1268,7 +1268,8 @@ be the copy decision-152 deleted the event stream for).
   `/dev/tty` has no controlling terminal in a test, so it is checked as a
   character device, not opened. Ruled: `/dev/shm` stays writable, as a tmpfs of its own
   (`--perms 1777 --tmpfs /dev/shm`) mounted at stage 2 over bwrap's directory, so a
-  spec-derived mount under it still stacks on top. It is mode 1777 as on the host, and
+  spec-derived mount under it still stacks on top (*amended 2026-11-09, decision-212: and is
+  carried onto the `/dev/shm` of a process with namespaces of its own*). It is mode 1777 as on the host, and
   like the root tmpfs and `/tmp` it never reaches the host; `fs_write`'s detail names it
   as the one writable path under `/dev` (a read-only `/dev/shm` was weighed and not taken:
   it breaks `multiprocessing` and any other user of POSIX semaphores). `fs_write` stays
@@ -2295,22 +2296,66 @@ terminal. Two jails keep both apart. Ruled:
   are read-only to it. Spec write roots are shared by intent (decision-0001).
 - **How.** `isolate` mounts a fresh tmpfs on `/dev/shm` (`nosuid,nodev`, mode 1777, as
   decision-198's) and a new instance of devpts on `/dev/pts` (`newinstance,ptmxmode=0666`,
-  `nosuid,noexec`, as bubblewrap's own), in the process's mount namespace. `/dev/ptmx`
+  `nosuid,noexec`; bubblewrap's own says `mode=620` too, and this leaves the kernel's default,
+  `mode=600`), in the process's mount namespace. `/dev/ptmx`
   already leads to `pts/ptmx`, so opening a terminal works as it did. A path the jail does not
   have is left alone: there is nothing there to share.
-- **Nothing else changes.** A jail's first process sees what it saw: an empty `/dev/shm`
-  and a working devpts. A process without namespaces keeps the jail's one of each, which
+- **Size.** Each `/dev/shm` is a tmpfs with no `size=`, so the kernel's default, half of RAM, per
+  mount and so per process, where a jail had one. Memory is charged as written. Not run: under
+  a container whose processes hold namespaces, it would replace Docker's 64 MB `/dev/shm` with
+  this one, which decision-203's unproven namespaced case has no battery for.
+- **Nothing else changes, for a process's own first look.** A jail's first process sees what it
+  saw: an empty `/dev/shm` but for what the Spec mounted there (decision-212), and a working
+  devpts. A process without namespaces keeps the jail's one of each, which
   `channel_exclusivity` does not claim otherwise, and decision-198 stands for the jail.
   What a process leaves in its `/dev/shm` goes when its namespace ends.
-- **It is probed.** `probe_namespaces` runs `isolate`, so a host that refuses either mount
-  gets decision-195's graded fallback with the reason, never a failed start.
-- **What this does not close.** The kernel's session keyring is inherited, so a process can
-  find a key a sibling added to it, and the same key from another jail started by the same
-  process: not one jail's medium, and two jails do not keep it apart, measured. TASK-0219.
-  Timing and load, and locks on files both can read, are not media this rules on.
+- **It is probed.** `probe_namespaces` runs `isolate`, so a host that refuses a mount gets
+  decision-195's graded fallback with the reason, and says so loudly (decision-212).
+- **An open hole, not closed here: the kernel's session keyring (TASK-0219).** It is inherited
+  and bubblewrap has no seccomp filter, so a process finds a key a sibling added, in one jail or
+  across two. Worse, it is not only a channel between co-tenants: where the process that starts
+  a jail has joined a session keyring as a login does, a namespaced process of the jail found a key
+  added there and read its payload (measured by review in this repository's Linux container,
+  not on a bare host, where it is expected to hold since nothing here filters it). So a secret in
+  that keyring is readable from the jail. `fs_read`'s grade says nothing of it.
+- **Accepted and named: `flock` on the jail's own objects.** A process can hold a lock another
+  process sees on what both can open read-only. `/`, `/dev` and `/.brig-supervisor.py` block in
+  one jail and are free across two; `/usr/bin/python3` and `/dev/null` block in both; `/dev/shm`
+  is free in both. It takes both processes' cooperation, and they already share the Spec's
+  write roots. Timing and load are not media this rules on.
 
-`tests/e2e/test_process_namespaces.py` has each, with its control in the fallback jail.
-Implementing task: TASK-0074. (Ruled 2026-11-08, decision-211.)
+`tests/e2e/test_process_namespaces.py` has each medium with its control in the fallback jail, and
+pins the keyring as the open hole it is; `tests/integration/test_namespaces_lost.py` plants a
+refused mount. What no test shows: that a process's `/dev/shm` goes when its namespace ends, which
+is the kernel's (a tmpfs is freed with its last mount) and nothing outside the namespace can look at;
+flock, whose measurement is above. Implementing task: TASK-0074. (Ruled 2026-11-08, decision-211.)
+
+**What the Spec mounted under `/dev/shm` is carried onto a process's own, and a refused mount
+is said aloud (2026-11-09, decision-212).** decision-211's fresh tmpfs covered every mount under
+`/dev/shm`, which decision-198 says stacks there: a workspace there was gone (`ENOENT`), a jail
+directory there failed every start, a bh-02 project there failed with `WorkloadSpawnFailed`. And
+what a refused mount cost reached no one: `Process.control.detail` alone. Ruled:
+
+- **Carried.** `isolate` holds an `O_PATH` descriptor on each mount directly under `/dev/shm`,
+  mounts the tmpfs, makes each mount point on it, and binds each back through its descriptor,
+  recursively, so what is mounted inside it (a read-only carve-out) comes along, with its flags.
+  So decision-198 holds, and each process's `/dev/shm` beside them stays its own.
+- **A Spec mount on `/dev/shm` itself is left alone.** Two mounts there mean the Spec named it,
+  a write root or a read-only one, and it stays as the Spec made it: shared by intent, so a process
+  then has no `/dev/shm` of its own. Tested for a write root; a read-only one is the same check, not run.
+- **The probe exercises it.** `probe_namespaces` runs `isolate` on the jail's own mount tree, what
+  the Spec mounted there included, so a host that can't carry it is found there. The process's
+  socket and scratch binds are on top of those, the same call.
+- **A refused mount is loud.** A mount `isolate` needs beyond decision-195's own (the tmpfs,
+  devpts, a carried bind) that the kernel refuses costs every process of the jail its namespaces:
+  accepted, as the graded fallback. The hello names it (`namespaces.refused`, the mount's
+  target), and `Jail.create` warns with `NamespacesLost`, naming the mount and what was lost. brig
+  has no logging, so this is the standard library's `warnings`, which an embedder sees on stderr by
+  default and can make an error. An embedder with a terminal of its own passes `told=`, a callable
+  that takes the same text instead, and must show it. decision-195's other fallbacks (uid 0,
+  nested user namespaces blocked) stay as they were: graded, in `Process.control`, no warning.
+
+Implementing task: TASK-0074. (Ruled 2026-11-09, decision-212.)
 
 **A `JAIL_LIFETIME` helper ends with the process that created the jail, as the jail's
 processes do (2026-10-17, decision-199).** A helper (the egress proxy is one) runs on

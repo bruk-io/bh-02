@@ -127,8 +127,12 @@ def namespaces_of(hello: Mapping[str, Any]) -> ProcessNamespaces:
     no claim is made on a supervisor's silence."""
     said = hello.get("namespaces")
     if isinstance(said, dict) and isinstance(said.get("held"), bool):
-        reason = said.get("reason")
-        return ProcessNamespaces(said["held"], reason if isinstance(reason, str) else "")
+        reason, refused = said.get("reason"), said.get("refused")
+        return ProcessNamespaces(
+            said["held"],
+            reason if isinstance(reason, str) else "",
+            refused if isinstance(refused, str) else "",
+        )
     return ProcessNamespaces(False, "the supervisor did not say whether it could")
 
 

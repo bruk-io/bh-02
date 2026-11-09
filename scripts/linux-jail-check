@@ -149,6 +149,7 @@ DEFAULT = (
     " libs/brig/tests/e2e/test_strict_linux_journey.py"
     " libs/brig/tests/e2e/test_supervised_jail.py"
     " libs/brig/tests/e2e/test_process_namespaces.py"
+    " libs/brig/tests/integration/test_namespaces_lost.py"
     " libs/brig/tests/integration/test_supervisor_requests.py"
     " libs/brig/tests/unit/test_bwrap_supervisor_compile.py"
     " libs/brig/tests/integration/test_tether.py"

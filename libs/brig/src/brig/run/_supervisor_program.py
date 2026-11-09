@@ -218,6 +218,84 @@ def mount(source, target, fstype, flags, options=None):
     )
 
 
+class MountRefused(OSError):
+    """A mount a process's isolation needs that the kernel refused (decision-212): `target` is
+    where, what the host is told cost the jail its processes' namespaces."""
+
+    def __init__(self, target, error):
+        why = "the kernel refused a mount on %s: %s" % (target, os.strerror(error.errno))
+        OSError.__init__(self, error.errno, why)
+        self.target = target
+
+
+def own_mount(source, target, fstype, flags, options=None):
+    """`mount`, its refusal the kind the probe tells the host of (`MountRefused`)."""
+    try:
+        mount(source, target, fstype, flags, options)
+    except OSError as error:
+        raise MountRefused(target, error) from error
+
+
+def unescaped_mount_point(field):
+    """A mount point as `/proc/self/mountinfo` spells it: space, tab, newline and backslash octal."""
+    for code, plain in (("\\040", " "), ("\\011", "\t"), ("\\012", "\n"), ("\\134", "\\")):
+        field = field.replace(code, plain)
+    return field
+
+
+def carried(mountinfo, point):
+    """What `mountinfo` says of the mounts at `point`: whether more than one is on it itself, which
+    only a Spec naming it makes (decision-212), and the mount points directly under it, each once:
+    not one mounted inside another of those, which comes with it. Pure."""
+    rows = []
+    for line in mountinfo.splitlines():
+        fields = line.split()
+        rows.append((fields[0], fields[1], unescaped_mount_point(fields[4])))
+    under = point + "/"
+    inside = {row[0] for row in rows if row[2].startswith(under)}
+    tops = [row[2] for row in rows if row[2].startswith(under) and row[1] not in inside]
+    return sum(1 for row in rows if row[2] == point) > 1, list(dict.fromkeys(tops))
+
+
+def make_mount_point(target, directory):
+    """The directory or empty file `target` needs to be mounted on, in a tmpfs just mounted."""
+    parent, walked = os.path.dirname(target), ""
+    for part in parent.split("/")[1:]:
+        walked += "/" + part
+        if not os.path.isdir(walked):
+            os.mkdir(walked, 0o755)
+    if directory:
+        os.mkdir(target, 0o755)
+    else:
+        os.close(os.open(target, os.O_WRONLY | os.O_CREAT, 0o644))
+
+
+def own_dev_shm():
+    """A fresh tmpfs on `/dev/shm` with what the Spec mounted under it carried across: each
+    held by a descriptor before the tmpfs covers it, then bound back through that descriptor,
+    recursively, so its carve-outs come too (decision-212). Nothing to do where the jail has no
+    `/dev/shm`, or the Spec named it itself."""
+    point = "/dev/shm"
+    if not os.path.isdir(point):
+        return
+    with open("/proc/self/mountinfo", "rb") as handle:
+        stacked, targets = carried(os.fsdecode(handle.read()), point)
+    if stacked:
+        return
+    held = []
+    try:
+        for target in targets:
+            directory = os.path.isdir(target)
+            held.append((target, directory, os.open(target, os.O_PATH | os.O_CLOEXEC)))
+        own_mount("tmpfs", point, "tmpfs", MS_NOSUID | MS_NODEV, "mode=1777")
+        for target, directory, descriptor in held:
+            make_mount_point(target, directory)
+            own_mount("/proc/self/fd/%d" % descriptor, target, None, MS_BIND | MS_REC)
+    finally:
+        for _, _, descriptor in held:
+            os.close(descriptor)
+
+
 def write_file(path, text):
     descriptor = os.open(path, os.O_WRONLY)
     try:
@@ -255,14 +333,14 @@ def isolate(binds):
     """In PID 1 of the new namespaces: nothing of the mounts propagates out of this mount
     namespace or into it, `/proc` is a fresh one for this pid namespace, `/dev/shm` and `/dev/pts`
     are this process's own where the jail has them, so no sibling finds its shared memory or types
-    at its terminal (decision-211), each `(source, target)` of `binds` is a bind mount (a
+    at its terminal (decision-211), what the Spec mounted under `/dev/shm` carried across
+    (decision-212), each `(source, target)` of `binds` is a bind mount (a
     directory of this process's own over the shared one), and the loopback device is up."""
     mount(None, "/", None, MS_REC | MS_PRIVATE)
     mount("proc", "/proc", "proc", MS_NOSUID | MS_NODEV | MS_NOEXEC)
-    if os.path.isdir("/dev/shm"):
-        mount("tmpfs", "/dev/shm", "tmpfs", MS_NOSUID | MS_NODEV, "mode=1777")
+    own_dev_shm()
     if os.path.isdir("/dev/pts"):
-        mount("devpts", "/dev/pts", "devpts", MS_NOSUID | MS_NOEXEC, "newinstance,ptmxmode=0666")
+        own_mount("devpts", "/dev/pts", "devpts", MS_NOSUID | MS_NOEXEC, "newinstance,ptmxmode=0666")
     for source, target in binds:
         mount(source, target, None, MS_BIND)
     bring_up_loopback()
@@ -331,6 +409,7 @@ class Supervisor:
         self.mute = False  # during the rehearsal, replies go nowhere
         self.namespaces = False  # whether each process starts in namespaces of its own
         self.namespaces_reason = ""  # why not, when it doesn't
+        self.namespaces_refused = ""  # the mount the kernel refused, when that is why (decision-212)
 
     # --- wire ---------------------------------------------------------------------------
 
@@ -798,14 +877,16 @@ class Supervisor:
     def probe_namespaces(self):
         """Whether a process of this jail can have namespaces of its own here, found out by doing
         it once: leave for them, fork the PID 1 of the new pid namespace, give it a fresh /proc and
-        a loopback, drop its capabilities. Empty when it can, else why not, in a line. Nothing is
-        left running. Whatever the interpreter loads late for it is loaded now, as for the
-        rehearsal."""
+        a loopback, drop its capabilities. It runs on this jail's own mounts, so what the Spec
+        mounted under `/dev/shm` is carried here too (decision-212). `("", "")` when it can, else
+        why not, in a line, and the target of the mount refused if that was why. Nothing is left
+        running. Whatever the interpreter loads late for it is loaded now, as for the rehearsal."""
         if os.geteuid() == 0:
             return (
                 "the jail runs as uid 0: bwrap (or a container) covers its /proc/irq and "
                 "/proc/bus there, and the kernel refuses a fresh /proc under mounts that hide "
-                "those (mount_too_revealing), so a process could have no /proc of its own"
+                "those (mount_too_revealing), so a process could have no /proc of its own",
+                "",
             )
         reader, writer = os.pipe()
         pid = os.fork()
@@ -820,6 +901,8 @@ class Supervisor:
                         isolate([])
                         drop_capabilities()
                         os.write(writer, b"ok")
+                    except MountRefused as error:
+                        os.write(writer, os.fsencode("refused\0%s\0%s" % (error.target, error.strerror)))
                     except BaseException as error:
                         os.write(writer, ("%s" % error).encode())
                     os._exit(0)
@@ -832,8 +915,11 @@ class Supervisor:
         os.close(reader)
         os.waitpid(pid, 0)
         if said == b"ok":
-            return ""
-        return said.decode(errors="replace") or "the probe ended without saying why"
+            return "", ""
+        if said.startswith(b"refused\0"):
+            _, target, why = said.split(b"\0", 2)
+            return why.decode(errors="replace"), target.decode(errors="replace")
+        return said.decode(errors="replace") or "the probe ended without saying why", ""
 
     def run(self):
         self.send(
@@ -841,7 +927,11 @@ class Supervisor:
                 "hello": 1,
                 "protocol": PROTOCOL,
                 "python": sys.version.split()[0],
-                "namespaces": {"held": self.namespaces, "reason": self.namespaces_reason},
+                "namespaces": {
+                    "held": self.namespaces,
+                    "reason": self.namespaces_reason,
+                    "refused": self.namespaces_refused,
+                },
             }
         )
         while True:
@@ -912,7 +1002,7 @@ def main():
     signal.set_wakeup_fd(supervisor.wake_w, warn_on_full_buffer=False)
     signal.signal(signal.SIGCHLD, wake)
     supervisor.rehearse()
-    supervisor.namespaces_reason = supervisor.probe_namespaces()
+    supervisor.namespaces_reason, supervisor.namespaces_refused = supervisor.probe_namespaces()
     supervisor.namespaces = not supervisor.namespaces_reason
     sys.meta_path.insert(0, NoMoreImports)
     try:

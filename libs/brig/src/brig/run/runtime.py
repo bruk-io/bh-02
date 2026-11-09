@@ -273,15 +273,24 @@ class ContainerRecord:
     init_pid: int = 0
 
 
+class NamespacesLost(UserWarning):
+    """A host refused a mount a process's isolation needs, so every process of this jail has no
+    namespaces of its own (decision-212): they can reach each other's sockets, `/dev/shm`, terminals
+    and signals, and a stop no longer ends a child in a session of its own. `Jail.create` warns with
+    it unless its caller takes the word itself (`told`)."""
+
+
 @dataclass(frozen=True, slots=True)
 class ProcessNamespaces:
     """Whether each process a supervised jail starts has namespaces of its own (decision-195),
     as its supervisor found out before it said it was ready: `held`, and when not, `reason`, the
-    line the supervisor gave. What a `Process` reads its `namespaces` and `control` from, and
+    line the supervisor gave, and `refused`, the target of the mount the kernel refused when that
+    was why (decision-212). What a `Process` reads its `namespaces` and `control` from, and
     the runtime the host paths of the sockets it reserves."""
 
     held: bool
     reason: str
+    refused: str = ""
 
 
 @dataclass(frozen=True, slots=True)

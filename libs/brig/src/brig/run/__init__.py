@@ -105,6 +105,7 @@ from brig.run.readiness import UnknownChannel as UnknownChannel
 from brig.run.readiness import WaitReadyTimeout as WaitReadyTimeout
 from brig.run.runtime import ExitStatusUnobservable as ExitStatusUnobservable
 from brig.run.runtime import IoPolicy as IoPolicy
+from brig.run.runtime import NamespacesLost as NamespacesLost
 from brig.run.runtime import NoSupervisor as NoSupervisor
 from brig.run.runtime import Reservation as Reservation
 from brig.run.runtime import ReservationRefused as ReservationRefused
@@ -130,6 +131,7 @@ __all__ = (  # noqa: RUF022
     "HostRuntime",
     "IoPolicy",
     "Jail",
+    "NamespacesLost",
     "JailDirInUse",
     "KILL_ITEM_KINDS",
     "KillItem",

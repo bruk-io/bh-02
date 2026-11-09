@@ -241,6 +241,12 @@ a rename from it to elsewhere in the root fails with `EXDEV`.
 empty environment, its source bound in read-only, every import done before it
 starts anything), and every start, signal, wait and stop is a request on a
 socketpair the host made first and passes to nothing the supervisor starts.
+**An open hole: the kernel's session keyring (TASK-0219, decision-211).** `bwrap` here has no seccomp
+filter, so a process of the jail can use the session keyring of what started it: a key one process
+adds is found by another, in this jail or another, and a key the starting process's login session
+holds was read from a jail, payload included (measured in a container; a bare host is expected to be
+the same). No grade says so. Don't count on a jail to keep such a key from what it runs.
+
 Several processes started in one jail share its confinement (fidelity
 `SAME_INSTANCE`), the supervisor reaps what is orphaned,
 and a `SIGKILL` or `SIGSTOP` a process of the jail sends it is dropped by the

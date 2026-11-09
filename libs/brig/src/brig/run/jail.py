@@ -38,6 +38,7 @@ import dataclasses
 import re
 import signal
 import socket
+import warnings
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from types import MappingProxyType
@@ -64,6 +65,7 @@ from brig.run.runtime import (
     ContainerRecord,
     IoPolicy,
     JailRecord,
+    NamespacesLost,
     NoSupervisor,
     ProcessNamespaces,
     ProcessRecord,
@@ -160,6 +162,16 @@ class _Wait(Protocol):
     """`Process.wait`'s signature, for the property that offers it."""
 
     def __call__(self, timeout: float | None = None) -> int: ...
+
+
+def _namespaces_lost(namespaces: ProcessNamespaces) -> str:
+    """What a refused mount cost (decision-212), for the embedder and its person. Pure."""
+    return (
+        f"{namespaces.reason}, so this jail's "
+        "processes have no namespaces of their own: they can reach each other's sockets, "
+        "/dev/shm, terminals, signals and IPC, and a stop no longer ends a child in a session of "
+        "its own"
+    )
 
 
 def _reason(namespaces: ProcessNamespaces | None) -> str | None:
@@ -505,6 +517,7 @@ class Jail:
         jail_id: str,
         jail_dir: str,
         tether: int | None = None,
+        told: Callable[[str], None] | None = None,
     ) -> Jail:
         """Create the jail's instance through `runtime`, with no process in
         it: every process is a `start` (decision-181). `runtime`'s kind must
@@ -518,6 +531,11 @@ class Jail:
         destroyed, and so do its helpers, except that a supervised jail's
         helpers end with its processes when the jail object is collected or
         its creator dies.
+
+        A mount a process's isolation needs that the host refused costs every process of the jail
+        its namespaces (decision-212): this warns with `NamespacesLost`, naming the mount and what
+        was lost. `told`, when given, takes that text instead, for an embedder that shows it to
+        its person itself, as one that owns the terminal must.
 
         Raises:
             ValueError: `runtime` is of another kind than the compiled jail's.
@@ -536,6 +554,12 @@ class Jail:
                 "jail's kind (or a fake one, in a test)"
             )
         record = runtime.create(jail, cwd=cwd, jail_id=jail_id, jail_dir=jail_dir, tether=tether)
+        if record.namespaces is not None and record.namespaces.refused:
+            said = _namespaces_lost(record.namespaces)
+            if told is None:
+                warnings.warn(said, NamespacesLost, stacklevel=2)
+            else:
+                told(said)
         return cls(
             jail_id=jail_id,
             jail_dir=jail_dir,
