@@ -2352,8 +2352,14 @@ what a refused mount cost reached no one: `Process.control.detail` alone. Ruled:
   target), and `Jail.create` warns with `NamespacesLost`, naming the mount and what was lost. brig
   has no logging, so this is the standard library's `warnings`, which an embedder sees on stderr by
   default and can make an error. An embedder with a terminal of its own passes `told=`, a callable
-  that takes the same text instead, and must show it. decision-195's other fallbacks (uid 0,
-  nested user namespaces blocked) stay as they were: graded, in `Process.control`, no warning.
+  that takes the same text instead, and must show it.
+- **Only these three are loud.** The tmpfs on `/dev/shm`, devpts and a carried bind raise
+  `MountRefused`, the only refusals that name a mount. Any other the probe meets (the fresh
+  `/proc`, `MS_PRIVATE` on `/`, a socket's or scratch directory's bind) loses the namespaces with
+  the plain reason in `Process.control.detail` and no warning: such a jail's processes have no
+  namespaces, so an embedder that shares a jail only where `Process.namespaces` holds, as bh-02
+  does, never shares it. decision-195's other fallbacks (uid 0, nested user namespaces blocked)
+  give no warning either and stay as they were: graded, in `Process.control`.
 
 Implementing task: TASK-0074. (Ruled 2026-11-09, decision-212.)
 

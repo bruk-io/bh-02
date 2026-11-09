@@ -636,7 +636,12 @@ def test_an_open_hole_a_sibling_finds_a_key_in_the_session_keyring(mode: str, ma
     added = _json_of(jail.start(python(_KEYS, "add", name)))
     if not added["made"]:
         pytest.skip(f"this host refuses add_key: errno {added['errno']}")
-    assert _json_of(jail.start(python(_KEYS, "find", name))) == {"found": True}
+    found = _json_of(jail.start(python(_KEYS, "find", name)))
+    assert found == {"found": True}, (
+        "a sibling no longer finds the key: TASK-0219's hole looks closed. Remove this test, and the "
+        "'open hole' notes in decision-211, brig's README, the runner's README and the docs' "
+        f"jail-and-approval page, as TASK-0219 says ({found})"
+    )
 
 
 # ---------------------------------------------------------------------------------------------
