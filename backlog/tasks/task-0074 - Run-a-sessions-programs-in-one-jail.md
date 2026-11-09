@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-10 18:42'
-updated_date: '2026-11-09 16:57'
+updated_date: '2026-11-09 17:06'
 labels:
   - runner
   - finish-moved
@@ -255,4 +255,70 @@ A jail that can write `/dev/shm` itself (a `write` entry that is `/dev/shm`, or 
 Seen failing first, against 65718977's code: `test_the_jail_field_shows_a_refused_mount_while_that_jail_runs_and_warns_once` (`'jailed fs_write ✓ network ✓' == '... ⚠ mount refused, a jail each'`), `test_a_start_that_came_before_the_grades_row_still_shows` (no mark in the field), and the headless Pilot test `test_a_refused_mount_shows_in_the_status_bar_and_as_a_failure_in_the_conversation` (`jail_forms() takes 2 positional arguments`). `test_a_jail_that_writes_dev_shm_itself_says_its_programs_share_it` was seen failing with its notice line removed (as bh, Linux). The runner test's `degraded()` assertions fail at 65718977 because the method did not exist.
 
 Final runs for the final review's fixes, on 91f6f465's code, each under testlock: scripts/check exit 0, 3876 passed, 268 skipped in 70 s (load average 7.3 at its end, after the orphan was killed); format, lint, types, gates, docs ok; tokens skipped (no bh-01 build beside this worktree). scripts/linux-jail-check exit 0, 367 passed, 5 skipped. scripts/linux-jail-check --root on the four suites exit 0, 714 passed, 14 skipped. #6 is left for the reviewer to tick.
+
+Check `scripts/check` exited 0
+
+(33 earlier lines omitted)
+```text
+........................................................................ [ 36%]
+........................................................................ [ 38%]
+........................................................................ [ 39%]
+........................................................................ [ 41%]
+........................................................................ [ 43%]
+........................................................................ [ 45%]
+........................................................................ [ 46%]
+........................................................................ [ 48%]
+...s......s...sssssssssssssssssssssssssssssssssssssssssssssssssss.s.ssss [ 50%]
+ssssssssssssssssssssss.....sssssssssssssssssssss..s........s............ [ 52%]
+........................................................................ [ 53%]
+......................................................s.......sssssss.ss [ 55%]
+.sssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss......s. [ 57%]
+...s...s.............................s.sssssssssssssssss...s............ [ 59%]
+..s..................................................................... [ 60%]
+........................................................................ [ 62%]
+........................................................................ [ 64%]
+........................................................................ [ 66%]
+........................................................................ [ 67%]
+........................................................................ [ 69%]
+........................................................................ [ 71%]
+........................................................................ [ 72%]
+.............................s.......................................... [ 74%]
+........................................................................ [ 76%]
+........................................................................ [ 78%]
+........................................................................ [ 79%]
+........................................................................ [ 81%]
+........................................................................ [ 83%]
+........................................................................ [ 85%]
+........................................................................ [ 86%]
+........................................................................ [ 88%]
+........................................................................ [ 90%]
+........................................................................ [ 92%]
+........................................................................ [ 93%]
+........................................................................ [ 95%]
+........................................................................ [ 97%]
+........................................................................ [ 99%]
+........................................                                 [100%]
+3876 passed, 268 skipped in 70.97s (0:01:10)
+   ok
+== gates
+== (root)
+   ok
+== libs/brig
+   ok
+== libs/cordis
+   ok
+== libs/cordis-helpers
+   ok
+== libs/host-paths
+   ok
+   ok
+== docs
+INFO    -  Cleaning site directory
+INFO    -  Building documentation to directory: /Users/brukhabtu/src/github.com/bruk-io/bh-02/site
+INFO    -  Documentation built in 1.25 seconds
+   ok
+== tokens
+bh-01's tokens and bh-02's theme are in sync
+   ok
+```
 <!-- SECTION:NOTES:END -->
