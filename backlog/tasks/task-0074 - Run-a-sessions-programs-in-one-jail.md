@@ -45,7 +45,7 @@ type: task
 - [x] #3 `/release` stops each program through its owner, then ends every jail nothing runs in; the next start starts a new one
 - [x] #4 `--no-jail` behaves as before
 - [x] #5 CONTRACTS.md (`runner`), the runner plugin's README and the docs' jail-and-approval page describe one jail per session where the namespaces hold, and a jail per program where they do not
-- [ ] #6 `scripts/linux-jail-check` and `scripts/check` pass
+- [x] #6 `scripts/linux-jail-check` and `scripts/check` pass
 - [x] #7 The mount tripwire ends the session's jail with a kill that doesn't depend on the runtime, tells every owner `ended()`, and the next start creates a new jail
 - [x] #8 Read allows derived from argv, and `git_author`, are decided at create, not per start
 <!-- AC:END -->
