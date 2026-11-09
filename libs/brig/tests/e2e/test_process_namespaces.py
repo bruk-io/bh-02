@@ -400,6 +400,87 @@ def test_a_process_has_a_scratch_directory_of_its_own(mode: str, make: Rig) -> N
 
 
 # ---------------------------------------------------------------------------------------------
+# /dev/shm and terminals of its own (decision-211).
+# ---------------------------------------------------------------------------------------------
+
+_USE_THE_SHARED_MEMORY = r"""
+import json, os, sys, time
+mine, ready = sys.argv[1:3]
+before = sorted(os.listdir('/dev/shm'))
+open(os.path.join('/dev/shm', mine), 'w').write('mine')
+print(json.dumps({"before": before, "mode": oct(os.stat('/dev/shm').st_mode & 0o7777)}), flush=True)
+open(ready, 'w').write('up')
+time.sleep(60)
+"""
+
+
+def test_a_process_has_a_dev_shm_of_its_own(mode: str, make: Rig) -> None:
+    jail, workspace = make()
+    ready = [os.path.join(workspace, f"shm-{n}") for n in "ab"]
+    a = jail.start(python(_USE_THE_SHARED_MEMORY, "a.shm", ready[0]))
+    assert until(lambda: _up(ready[0]), 15.0)
+    b = jail.start(python(_USE_THE_SHARED_MEMORY, "b.shm", ready[1]))
+    assert until(lambda: _up(ready[1]), 15.0)
+    first, second = _json_of(a), _json_of(b)
+    assert first == {"before": [], "mode": "0o1777"}, first
+    assert second == {"before": [] if _isolated(mode) else ["a.shm"], "mode": "0o1777"}, second
+
+
+_HOLD_A_TERMINAL = r"""
+import os, sys, time
+primary, terminal = os.openpty()
+print(os.ttyname(terminal), flush=True)
+open(sys.argv[1], 'w').write('up')
+data = os.read(primary, 1024)
+open(sys.argv[2], 'wb').write(data)
+time.sleep(60)
+"""
+
+_TYPE_AT_EVERY_TERMINAL = r"""
+import json, os
+listed = sorted(name for name in os.listdir('/dev/pts') if name.isdigit())
+typed = []
+for name in listed:
+    descriptor = os.open('/dev/pts/' + name, os.O_RDWR | os.O_NOCTTY)
+    os.write(descriptor, b'typed by a sibling\n')
+    os.close(descriptor)
+    typed.append(name)
+print(json.dumps({"listed": listed, "typed": typed}))
+"""
+
+
+def test_a_process_can_not_see_or_type_at_a_siblings_terminal(mode: str, make: Rig) -> None:
+    jail, workspace = make()
+    ready, received = os.path.join(workspace, "terminal-up"), os.path.join(workspace, "received")
+    a = jail.start(python(_HOLD_A_TERMINAL, ready, received))
+    assert until(lambda: _up(ready), 15.0)
+    assert _said(a, "/dev/pts/")
+    result = _json_of(jail.start(python(_TYPE_AT_EVERY_TERMINAL)))
+    if _isolated(mode):
+        assert result == {"listed": [], "typed": []}, result
+        time.sleep(0.5)
+        assert not os.path.exists(received)  # the target's own word: nothing arrived
+    else:
+        assert result["typed"], result  # CONTROL: in the jail's one devpts, it is there to reach
+        assert until(lambda: os.path.exists(received), 15.0)
+
+
+_OPEN_A_TERMINAL_AND_USE_IT = r"""
+import json, os
+primary, terminal = os.openpty()
+os.write(terminal, b'hello\n')
+print(json.dumps({"name": os.ttyname(terminal), "heard": os.read(primary, 64).decode()}))
+"""
+
+
+def test_a_process_can_still_open_a_terminal_and_use_it(mode: str, make: Rig) -> None:
+    """What an input's `pty.spawn` needs: its own instance of devpts works as the jail's did."""
+    jail, _ = make()
+    result = _json_of(jail.start(python(_OPEN_A_TERMINAL_AND_USE_IT)))
+    assert str(result["name"]).startswith("/dev/pts/") and "hello" in str(result["heard"]), result
+
+
+# ---------------------------------------------------------------------------------------------
 # Stopping a process ends its namespace: a setsid() child goes with it.
 # ---------------------------------------------------------------------------------------------
 

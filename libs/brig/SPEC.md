@@ -2247,7 +2247,8 @@ every process's to reach (decision-184's residual). Ruled:
   mount (the channel and scratch directories are the process's own); network (the loopback
   is the process's own, so an abstract Unix socket is too); IPC (a System V message queue a
   sibling made is not found; POSIX message queues are the same namespace's, not probed, as a
-  jail mounts no `mqueue`); user (no capability, and `mount(2)` is `EPERM`).
+  jail mounts no `mqueue`); user (no capability, and `mount(2)` is `EPERM`). *Amended
+  2026-11-08 (decision-211, TASK-0074): mount also gives it its own `/dev/shm` and terminals.*
 - **A signal to the process is what it would be to any process.** The kernel drops a signal
   a process outside a pid namespace sends its PID 1 unless the PID 1 handles it (`SIGKILL`
   and `SIGSTOP` excepted), so a `SIGTERM` or `SIGINT` to a program that installed no
@@ -2278,6 +2279,38 @@ every process's to reach (decision-184's residual). Ruled:
   is refused whatever the map.
 
 Implementing task: TASK-0079.07. (Ruled 2026-10-16, decision-195.)
+
+**A process with namespaces of its own has its own `/dev/shm` and its own terminals
+(2026-11-08, decision-211).** decision-195 gave such a process its own channel and scratch
+directories and left the jail's other writable mounts as they were, and two of them are
+media between co-tenants. Measured for TASK-0074, from inside a jail with namespaces held,
+every mount in `/proc/self/mountinfo` and every medium: a process read and changed a file a
+sibling left in `/dev/shm`, one tmpfs per jail (decision-198), and listed, opened and wrote
+to a sibling's `/dev/pts/N`, one devpts per jail, so it could type at a program holding a
+terminal. Two jails keep both apart. Ruled:
+
+- **The guarantee.** A process with namespaces of its own (`Process.namespaces`) shares
+  with a sibling only what the Spec lets both write. It has its own socket, scratch
+  directory, `/dev/shm`, terminals, pid, network and IPC namespaces; the jail's other mounts
+  are read-only to it. Spec write roots are shared by intent (decision-0001).
+- **How.** `isolate` mounts a fresh tmpfs on `/dev/shm` (`nosuid,nodev`, mode 1777, as
+  decision-198's) and a new instance of devpts on `/dev/pts` (`newinstance,ptmxmode=0666`,
+  `nosuid,noexec`, as bubblewrap's own), in the process's mount namespace. `/dev/ptmx`
+  already leads to `pts/ptmx`, so opening a terminal works as it did. A path the jail does not
+  have is left alone: there is nothing there to share.
+- **Nothing else changes.** A jail's first process sees what it saw: an empty `/dev/shm`
+  and a working devpts. A process without namespaces keeps the jail's one of each, which
+  `channel_exclusivity` does not claim otherwise, and decision-198 stands for the jail.
+  What a process leaves in its `/dev/shm` goes when its namespace ends.
+- **It is probed.** `probe_namespaces` runs `isolate`, so a host that refuses either mount
+  gets decision-195's graded fallback with the reason, never a failed start.
+- **What this does not close.** The kernel's session keyring is inherited, so a process can
+  find a key a sibling added to it, and the same key from another jail started by the same
+  process: not one jail's medium, and two jails do not keep it apart, measured. TASK-0219.
+  Timing and load, and locks on files both can read, are not media this rules on.
+
+`tests/e2e/test_process_namespaces.py` has each, with its control in the fallback jail.
+Implementing task: TASK-0074. (Ruled 2026-11-08, decision-211.)
 
 **A `JAIL_LIFETIME` helper ends with the process that created the jail, as the jail's
 processes do (2026-10-17, decision-199).** A helper (the egress proxy is one) runs on

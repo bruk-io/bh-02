@@ -205,14 +205,14 @@ def libc_call(result, what):
         raise OSError(code, "%s: %s" % (what, os.strerror(code)))
 
 
-def mount(source, target, fstype, flags):
+def mount(source, target, fstype, flags, options=None):
     libc_call(
         LIBC.mount(
             None if source is None else os.fsencode(source),
             os.fsencode(target),
             None if fstype is None else os.fsencode(fstype),
             flags,
-            None,
+            None if options is None else options.encode(),
         ),
         "mount %s on %s" % (fstype or source or "-", target),
     )
@@ -253,11 +253,16 @@ def bring_up_loopback():
 
 def isolate(binds):
     """In PID 1 of the new namespaces: nothing of the mounts propagates out of this mount
-    namespace or into it, `/proc` is a fresh one for this pid namespace, each `(source, target)` of
-    `binds` is a bind mount (a directory of this process's own over the shared one), and the
-    loopback device is up."""
+    namespace or into it, `/proc` is a fresh one for this pid namespace, `/dev/shm` and `/dev/pts`
+    are this process's own where the jail has them, so no sibling finds its shared memory or types
+    at its terminal (decision-211), each `(source, target)` of `binds` is a bind mount (a
+    directory of this process's own over the shared one), and the loopback device is up."""
     mount(None, "/", None, MS_REC | MS_PRIVATE)
     mount("proc", "/proc", "proc", MS_NOSUID | MS_NODEV | MS_NOEXEC)
+    if os.path.isdir("/dev/shm"):
+        mount("tmpfs", "/dev/shm", "tmpfs", MS_NOSUID | MS_NODEV, "mode=1777")
+    if os.path.isdir("/dev/pts"):
+        mount("devpts", "/dev/pts", "devpts", MS_NOSUID | MS_NOEXEC, "newinstance,ptmxmode=0666")
     for source, target in binds:
         mount(source, target, None, MS_BIND)
     bring_up_loopback()
