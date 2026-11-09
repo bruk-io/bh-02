@@ -85,9 +85,19 @@ starts follows from what keeps programs apart (the owner's ruling, TASK-0074):
 
 | Host | Jails | What a program can do to a sibling |
 |---|---|---|
-| Linux, unprivileged, nested user namespaces allowed (`Process.namespaces`) | one per session, per directory | nothing but the project's files (and the kernel's session keyring, as with a jail each: TASK-0219): each is PID 1 of namespaces of its own, seeing only its own socket, scratch, `/dev/shm`, terminals and processes (brig's decision-195, decision-211) |
+| Linux, unprivileged, nested user namespaces allowed (`Process.namespaces`) | one per session, per directory | nothing but the project's files, a `flock` on what both read, and the session keyring below: each is PID 1 of namespaces of its own, seeing only its own socket, scratch, `/dev/shm`, terminals and processes (brig's decision-195, decision-211) |
 | Linux as uid 0, or nested user namespaces blocked | one per program | the same, by a jail each: in one jail it could connect to a sibling's socket, signal it and unlink its socket (measured) |
 | darwin | one per program | seatbelt refuses connect and signal either way; in one jail it could unlink a sibling's socket and share its scratch (measured; TASK-0217 is what would change this) |
+
+**An open hole on Linux, on every row: the kernel's session keyring (TASK-0219,
+brig's decision-211).** Nothing filters those system calls, so a jailed program can use the session
+keyring of what started bh-02: it can leave a key for a sibling, and read a key the person's login
+session holds there, payload included (measured by review in a container; a bare host is expected to
+be the same). No grade says so, and approval's rule does not know of it.
+
+A host that refuses a mount this needs (`/dev/shm`'s tmpfs, devpts, one carried across: brig's
+decision-212) is on the second row, and `notice()`, which the status bar's jail field shows the person,
+says which mount and what it cost.
 
 Which row a host is on is found at a jail's first start. In a shared jail:
 

@@ -17,6 +17,7 @@ import tempfile
 import threading
 import time
 import uuid
+import warnings
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -2823,10 +2824,11 @@ def test_what_a_teardown_could_not_end_is_named_and_nothing_added_when_it_ended_
 # Listens on its reserved socket, having marked every medium a sibling might reach (on Linux: the
 # others are the host's own on darwin, where a planted key would outlive the test) and said where the
 # socket is and which IPC namespace it has (argv[2]). It counts each connection in argv[3] and
-# anything typed at its terminal in argv[3] + ".typed", which the host reads, so what reached it is
-# not the attacker's to report.
+# keeps all its terminal receives in argv[3] + ".typed", which the host reads, so what reached it is
+# not the attacker's to report. Once argv[3] + ".flush" is there it writes `flushed` at the terminal
+# itself: the terminal keeps order, so all that came before is in the file once that is.
 _THE_TARGET = """
-import ctypes, json, os, socket, sys, threading
+import ctypes, json, os, socket, sys, threading, time
 open(os.path.join(os.environ["TMPDIR"], "target-marker"), "w").write("mine")
 kept = []
 if sys.platform == "linux":
@@ -2836,11 +2838,18 @@ if sys.platform == "linux":
     kept += [primary, terminal]
 
     def typed():
-        data = os.read(primary, 1024)
-        with open(sys.argv[3] + ".typed", "wb") as out:
-            out.write(data)
+        while True:
+            data = os.read(primary, 1024)
+            with open(sys.argv[3] + ".typed", "ab") as out:
+                out.write(data)
+
+    def flushes():
+        while not os.path.exists(sys.argv[3] + ".flush"):
+            time.sleep(0.01)
+        os.write(terminal, b"flushed")
 
     threading.Thread(target=typed, daemon=True).start()
+    threading.Thread(target=flushes, daemon=True).start()
     libc.mq_open.argtypes = [ctypes.c_char_p, ctypes.c_int, ctypes.c_uint, ctypes.c_void_p]
     assert libc.mq_open(b"/target", os.O_CREAT | os.O_RDWR, 0o600, None) >= 0
     assert libc.shmget(0x74074, 4096, 0o1600) >= 0
@@ -2959,7 +2968,16 @@ while True:
 """
 
 
-def _linux_media_reached(report: Mapping[str, Any], typed: Path) -> dict[str, Any]:
+async def _what_the_terminal_received(project: Path) -> str:
+    """All the target's terminal received until the attacker had reported (Linux): the target
+    writes `flushed` there when asked, and the terminal keeps order."""
+    (project / "count.flush").write_text("")
+    typed = project / "count.typed"
+    assert await _until(lambda: typed.exists() and b"flushed" in typed.read_bytes(), 10.0)
+    return typed.read_text(errors="replace")
+
+
+def _linux_media_reached(report: Mapping[str, Any], received: str) -> dict[str, Any]:
     """What the attacker reached of the media beyond the socket (Linux), each by what it reported
     but the typing, which the target itself wrote down: nothing, where a program is kept apart."""
     reached = {
@@ -2967,7 +2985,7 @@ def _linux_media_reached(report: Mapping[str, Any], typed: Path) -> dict[str, An
         "dev_shm_changed": report["dev_shm_changed"] == "CHANGED",
         "ptys": bool(report["ptys"]),
         "typed_at": bool(report["typed_at"]),
-        "typed_received": typed.exists(),
+        "typed_received": "typed by the attacker" in received,
         "mq": report["mq"],
         "sysv_shm": report["sysv_shm"],
         "sysv_sem": report["sysv_sem"],
@@ -3070,9 +3088,88 @@ async def test_a_program_in_the_session_s_jail_can_t_reach_its_sibling(
         assert "target-marker" not in report["scratch"], report
         assert report["unlink"] == "FileNotFoundError", report
         assert report["signalled"] == [], report
-        assert _linux_media_reached(report, project / "count.typed") == {}, report
+        assert _linux_media_reached(report, await _what_the_terminal_received(project)) == {}, report
         _, writer = await target.connect(limit=1024)  # the host still reaches the target: it lives
         writer.close()
+
+
+@dataclass
+class _OneJail:
+    """Two programs in one brig jail with nothing keeping them apart: `start` as `BrigJail.start`,
+    for the attack, in a jail the mechanism itself would never share."""
+
+    jail: Any
+    io: Any
+
+    async def start(self, argv_for: Callable[[str], list[str]], *, cwd: str) -> Any:
+        reservation = self.jail.channel("program")
+        process = self.jail.start(argv_for(reservation.bound_path), cwd=cwd, io=self.io, channel=reservation)
+        await asyncio.to_thread(process.wait_ready, 15.0)
+
+        async def connect(*, limit: int) -> Any:
+            return await asyncio.open_connection(sock=await asyncio.to_thread(process.connect), limit=limit)
+
+        return SimpleNamespace(ended=lambda: "", connect=connect)
+
+
+async def test_the_attack_succeeds_where_nothing_keeps_the_programs_apart(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The positive control for every probe the isolation test expects to fail: the same target and
+    attacker, one jail, the supervisor giving no process namespaces of its own (as uid 0 is, and
+    planted for anyone else). Each probe reaches what it looks for, so its failing in the tests above
+    means the program was kept apart, not that the probe is broken."""
+    _needs_bwrap()
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    adapter = sys.modules["runner_cordis_plugin.jail"]
+    host_module = sys.modules["brig.run.host"]
+    probing = (
+        "    supervisor.namespaces_reason, supervisor.namespaces_refused = supervisor.probe_namespaces()"
+    )
+    assert host_module.SUPERVISOR_SOURCE.count(probing) == 1
+    monkeypatch.setattr(
+        "brig.run.host.SUPERVISOR_SOURCE",
+        host_module.SUPERVISOR_SOURCE.replace(probing, "    supervisor.namespaces_reason = 'planted'"),
+    )
+    project = tmp_path / "project"
+    project.mkdir()
+    jail_dir = Path(tempfile.mkdtemp(prefix="bh-c-", dir="/tmp"))  # short: a socket's path has a limit
+    mechanism = BrigJail(BrigConfig(), Host(), lock=str(tmp_path / "jails.lock"))
+    compiled, _ = mechanism.compile(str(jail_dir), str(project), (sys.executable, "-c"))
+    read, write = os.pipe()
+    jail = adapter.Jail.create(
+        compiled,
+        runtime=adapter.HostRuntime(),
+        cwd=str(project),
+        jail_id="control",
+        jail_dir=str(jail_dir),
+        tether=read,
+    )
+    try:
+        _, report, accepted = await _attack(_OneJail(jail, adapter.IoPolicy()), project)
+        assert accepted == 1 and report["connect"] == "CONNECTED", report
+        assert report["listed"] and report["unlink"] == "UNLINKED" and report["signalled"], report
+        assert "target-marker" in report["scratch"], report
+        reached = _linux_media_reached(report, await _what_the_terminal_received(project))
+        assert sorted(reached) == [
+            "abstract",
+            "dev_shm",
+            "dev_shm_changed",
+            "loopback",
+            "mq",
+            "ptys",
+            "same_ipc",
+            "sysv_msg",
+            "sysv_sem",
+            "sysv_shm",
+            "typed_at",
+            "typed_received",
+        ], report
+    finally:
+        jail.destroy()
+        os.close(read)
+        os.close(write)
+        shutil.rmtree(jail_dir, ignore_errors=True)
 
 
 async def test_a_host_without_namespaces_keeps_a_jail_per_program_and_they_stay_apart(
@@ -3099,7 +3196,7 @@ async def test_a_host_without_namespaces_keeps_a_jail_per_program_and_they_stay_
         assert "target-marker" not in report["scratch"], report
         assert report["signalled"] == [], report
         if sys.platform == "linux":
-            assert _linux_media_reached(report, project / "count.typed") == {}, report
+            assert _linux_media_reached(report, await _what_the_terminal_received(project)) == {}, report
         _, writer = await target.connect(limit=1024)
         writer.close()
 
@@ -3232,6 +3329,41 @@ async def test_release_stops_through_owners_then_ends_the_jail_and_the_next_star
         assert list((tmp_path / "state" / "bh-02" / "jails").iterdir()) == []
         again = await runner.start(_listens, cwd=str(project))
         assert len(made) == 2 and placeholder.is_dir() and again.ended() == "", made
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="uid 0 never tries the namespaces, so never refuses them")
+@pytest.mark.parametrize(
+    ("fstype", "target"), [("devpts", "/dev/pts"), ("tmpfs", "/dev/shm")], ids=["devpts", "tmpfs"]
+)
+async def test_a_refused_mount_costs_the_shared_jail_and_the_person_is_told(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fstype: str, target: str
+) -> None:
+    """A host that refuses a mount a program's isolation needs: each program keeps a jail of its own,
+    and `notice()`, which the status bar's jail field shows the person (`tui:grades`), says which
+    mount and what it cost. Nothing is written to the terminal the app owns."""
+    made = await _shared_or_skip(tmp_path, monkeypatch)
+    host_module = sys.modules["brig.run.host"]
+    start = "def mount(source, target, fstype, flags, options=None):\n"
+    monkeypatch.setattr(
+        "brig.run.host.SUPERVISOR_SOURCE",
+        host_module.SUPERVISOR_SOURCE.replace(
+            start,
+            f"{start}    if fstype == {fstype!r}:\n        raise OSError(1, 'Operation not permitted')\n",
+        ),
+    )
+    project = tmp_path / "project"
+    project.mkdir()
+    async with BrigJail(BrigConfig(), Host(), lock=str(tmp_path / "jails.lock")) as jail:
+        runner = Runner(jail)
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            first = await runner.start(_listens, cwd=str(project))
+            second = await runner.start(_listens, cwd=str(project))
+        assert len(made) == 2, made  # a jail each: the ruling's fallback
+        said = runner.notice()
+        assert target in said and "refused" in said, said
+        assert "keeps a jail of its own" in said and "namespaces" in said, said
+        assert first.notice() == said == second.notice()
 
 
 async def test_the_tripwire_ends_the_session_s_jail_tells_every_owner_and_the_next_start_makes_a_new_one(

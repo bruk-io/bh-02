@@ -11,6 +11,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass
@@ -663,6 +664,70 @@ async def test_on_linux_release_frees_the_placeholder_while_the_extensions_worke
             assert not runner.released() and placeholder.is_dir()
         finally:
             await extensions.stop()
+
+
+_CARRIED_CARVE_OUTS = """
+import errno, pathlib
+print("read", pathlib.Path({host!r}).read_text())
+pathlib.Path({jail!r}).write_text("jail")
+try:
+    open({config!r}, "a").write("# planted")
+    print("config WRITTEN")
+except OSError as error:
+    print("config", errno.errorcode[error.errno])
+try:
+    print("secret READ", open({secret!r}).read())
+except OSError as error:
+    print("secret", errno.errorcode[error.errno])
+"""
+
+
+@pytest.mark.parametrize("held", [True, False], ids=["held", "control"])
+async def test_on_linux_a_python_process_runs_with_its_project_under_dev_shm(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, held: bool
+) -> None:
+    """A project in memory: a real Python process starts in it and writes in it, and what the jail
+    mounts inside the project is carried with its flags (brig's decision-212): `.git/config`, a file
+    bound read-only, refuses with `EROFS`, which only a read-only mount gives, and a hidden file
+    refuses too. The control: neither held, the same write lands and the same read reads, so the
+    probes can."""
+    if sys.platform != "linux" or not Path(_BWRAP).exists():
+        pytest.skip("the allowlist is bubblewrap's: Linux with /usr/bin/bwrap only")
+    if not os.access("/dev/shm", os.W_OK):
+        pytest.skip("this host has no /dev/shm to write")
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    project = Path(tempfile.mkdtemp(prefix="bh-", dir="/dev/shm"))
+    try:
+        subprocess.run(["git", "init", "-q", str(project)], check=True)
+        config = project / ".git" / "config"
+        before = config.read_text()
+        (project / "from-host.txt").write_text("host")
+        (project / "private.txt").write_text("SECRET=1\n")  # a stand-in: never a real one
+        config_for = (
+            BrigConfig(hide=("private.txt",))
+            if held
+            else BrigConfig(allow=("CLAUDE.md", "AGENTS.md", ".git/config"))
+        )
+        jail = BrigJail(config_for, _Host(), lock=str(tmp_path / "jails.lock"))
+        async with _python(jail, PythonProcessConfig(root=str(project), startup=())) as process:
+            out = await process.run(
+                _CARRIED_CARVE_OUTS.format(
+                    host=str(project / "from-host.txt"),
+                    jail=str(project / "from-jail.txt"),
+                    config=str(config),
+                    secret=str(project / "private.txt"),
+                )
+            )
+            assert "read host" in out, out
+            assert (project / "from-jail.txt").read_text() == "jail"
+            if held:
+                assert "config EROFS" in out and config.read_text() == before, out
+                assert "secret EACCES" in out and "SECRET=1" not in out, out
+            else:
+                assert "config WRITTEN" in out and "# planted" in config.read_text(), out
+                assert "secret READ SECRET=1" in out, out
+    finally:
+        shutil.rmtree(project, ignore_errors=True)
 
 
 @pytest.mark.parametrize("first", ["python", "extensions"])

@@ -50,10 +50,20 @@ extensions' own process. Two components can fill it:
   user, where each process gets namespaces of its own, a session has one jail and both run in it.
   They share the project's files, by design. Each has its own socket, scratch directory, `/dev/shm`,
   terminals, processes, network and System V and POSIX IPC, so neither can see or reach the other's;
-  everything else outside the project is read-only to both. The one thing not kept apart is the
-  kernel's session keyring, shared with whatever started bh-02 even with a jail each (TASK-0219). On
-  macOS, as root, or where nested user namespaces are blocked, one jail could not keep them apart, so
-  each keeps a jail of its own.
+  everything else outside the project is read-only to both. Two things are not kept apart. A `flock`
+  on what both can read (`/`, `/dev`) is visible to the other, which takes both of them cooperating,
+  and they share the project anyway. On macOS, as root, or where nested user namespaces are blocked,
+  one jail could not keep them apart, so each keeps a jail of its own. So does a host that refuses a
+  mount this needs, and the status bar's jail field says which one.
+
+!!! danger "An open hole: the kernel's session keyring"
+    A program in the jail can use the kernel's session keyring of whatever started bh-02, because
+    nothing in the jail filters those system calls. So it can leave a key for another program, in
+    this jail or another, and it can **read a key the person's login session holds there**: a review
+    measured this in a container, reading a key's payload from a jailed program, and a bare Linux host
+    is expected to be the same. Until
+    TASK-0219 closes it, don't count on
+    the jail to keep a secret in your session keyring from the model's code.
 - **`runner:unconfined`** (`--no-jail`) starts them as plain processes. Every part is graded
   unenforced, so approval asks.
 

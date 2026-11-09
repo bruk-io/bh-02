@@ -1029,8 +1029,25 @@ def _started_in(jail: Jail, argv_for: ArgvFor, *, cwd: str) -> Process:
     return jail.start(argv, cwd=cwd, io=IoPolicy(), channel=reservation)
 
 
+def _lost_for(said: str) -> str:
+    """What the person is told when the host refused a mount that keeps programs apart (brig's
+    decision-212), through the jail's `notice()`, which the status bar's jail field shows: what
+    brig said, and what it means for this session."""
+    return (
+        f"{said}. So each program keeps a jail of its own instead of sharing the session's: they "
+        "stay apart, at the cost of a jail each. Ask whoever runs this host why it refuses that mount."
+    )
+
+
 def _launch(
-    compiled: CompiledJail, *, argv_for: ArgvFor, cwd: str, jail_id: str, jail_dir: str, tether: int
+    compiled: CompiledJail,
+    *,
+    argv_for: ArgvFor,
+    cwd: str,
+    jail_id: str,
+    jail_dir: str,
+    tether: int,
+    told: Callable[[str], None],
 ) -> tuple[Jail, Process]:
     """A new jail, with `argv_for` its first program: brig's `Jail.create` through the host runtime,
     tethered to `tether` (the read end; the jail holds a duplicate), then `_started_in`. A refused
@@ -1052,7 +1069,13 @@ def _launch(
         OSError: the jail directory or a record could not be written.
     """
     jail = Jail.create(
-        compiled, runtime=HostRuntime(), cwd=cwd, jail_id=jail_id, jail_dir=jail_dir, tether=tether
+        compiled,
+        runtime=HostRuntime(),
+        cwd=cwd,
+        jail_id=jail_id,
+        jail_dir=jail_dir,
+        tether=tether,
+        told=told,  # never a warning on the stderr of a terminal the app owns
     )
     try:
         return jail, _started_in(jail, argv_for, cwd=cwd)
@@ -1306,6 +1329,7 @@ class BrigJail:
                 # After the placeholders are made, before bubblewrap mounts over them: from here
                 # on, the host undoing a mount is seen.
                 wire = Tripwire(tripwired(jail.spec, absent))
+            lost: list[str] = []
             launching = asyncio.ensure_future(
                 asyncio.to_thread(
                     _launch,
@@ -1315,6 +1339,7 @@ class BrigJail:
                     jail_id=Path(jail_dir).name,
                     jail_dir=jail_dir,
                     tether=watched,
+                    told=lost.append,
                 )
             )
             try:
@@ -1342,6 +1367,8 @@ class BrigJail:
                 lambda: still_running(running.destroy(grace=0.0)),
                 fallback=lambda: os.killpg(running.instance_group or process.pid, signal.SIGKILL),
             )
+        if lost:
+            facts = replace(facts, notice="\n".join(filter(None, (facts.notice, *map(_lost_for, lost)))))
         return _Held(running, process, facts, jail_dir, placed, lock, record, tether, wire), process
 
     def compile(

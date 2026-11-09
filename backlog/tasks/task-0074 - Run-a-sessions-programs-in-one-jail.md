@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-10 18:42'
-updated_date: '2026-11-09 01:37'
+updated_date: '2026-11-09 16:30'
 labels:
   - runner
   - finish-moved
@@ -199,4 +199,36 @@ How each attack was seen failing:
 Not verified: `/dev/shm` and devpts on a host other than this container; darwin is not touched (no namespaces, a jail per program).
 
 Final runs with decision-211, each under testlock, on the final code. `scripts/check` exit 0: 3872 passed, 248 skipped; gates and docs ok; tokens skipped (no bh-01 build beside this worktree). `scripts/linux-jail-check` exit 0: 347 passed, 5 skipped. `scripts/linux-jail-check --root` on the four suites exit 1: 1 failed, 709 passed, 12 skipped. The failure: `test_a_linux_jail_ends_when_the_host_replaces_or_removes_a_secret_it_holds`, `assert not seen.exists()` at the third start, as root. That is TASK-0211's failure: `seen` is never removed between starts, and the second jail's program can write it in the tripwire's window. As root this path is a jail per program, which this change's mounts do not touch. Not rerun. The same run on the code one docstring earlier exited 0, 710 passed, 12 skipped. #6 stays unticked: the reviewer's, and this root run is not green.
+
+Owner's rulings on the second pre-merge review, 2026-11-09. c7f67abb and c60d5fe2 are on origin as `task-0074-one-jail`; this work is new commits on top.
+
+1. `/dev/shm` regression, fixed by carrying (brig decision-212). decision-211's fresh tmpfs covered what the Spec mounted under `/dev/shm`. `isolate` now holds each such mount by an `O_PATH` descriptor, mounts the tmpfs, and binds each back recursively, so a process's own `/dev/shm` stays private beside them. A Spec mount on `/dev/shm` itself is left as the Spec made it. The probe runs `isolate` on the jail's own mounts, so a host that can't carry is found there.
+
+2. Keyring: does not block merge, on condition it is noted where a reader sees it. TASK-0219 is rewritten as a confinement hole, high priority, with the review's evidence. It is named as an open hole in decision-211, brig's README, the runner's README and the jail-and-approval page.
+
+3. A refused mount is loud. Signal chosen: brig had no logging or warnings path, so this adds the standard library's `warnings` with a category of its own, `NamespacesLost`, from `Jail.create`, naming the mount and what was lost. An embedder that owns its terminal passes `told=`, which takes the same text instead and is then its to show. bh-02 passes `told=` and appends the text, with what it costs the session, to the jail's `notice()`, which the status bar's jail field (`tui:grades`) already shows the person. decision-195's other fallbacks (uid 0, nested user namespaces blocked) stay as they were, with no warning.
+
+4. flock on the jail's own objects: accepted, named in decision-211 with the review's measurements; the docs agree.
+
+Text findings fixed: decision-211's "as bubblewrap's own" (devpts is mode=600 here), `bwrap.py`'s "a tmpfs of the jail's own", the claim that the test file has each with its control (it now says what it has and what no test shows), and a line on `/dev/shm`'s size and the unrun OCI case. `typed_received` no longer races: the target writes `flushed` at its own terminal when asked, and the terminal keeps order.
+
+How each new test was seen failing:
+- Against the code before this fix, as bh. `test_a_workspace_under_dev_shm_is_there_and_each_process_keeps_its_own_dev_shm[namespaces]`: `FileNotFoundError .../from-host`. `test_a_jail_directory_under_dev_shm_starts_its_processes_with_channel_and_scratch[namespaces]`: `WorkloadSpawnFailed: mount .../chan/... on .../chan: No such file`. `test_on_linux_a_python_process_runs_with_its_project_under_dev_shm`: `WorkloadSpawnFailed ... No such file or directory: '/dev/shm/bh-...'`.
+- With each guard planted off, as bh. Stacked check off: `test_a_spec_mount_on_dev_shm_itself_is_left_as_the_spec_made_it[namespaces]` `FileNotFoundError`. Mount-inside-mount filter off: `test_what_is_carried_is_each_mount_directly_under_the_point_once`. The hello's `refused` off: `test_a_refused_mount_warns_the_embedder_naming_it_and_what_it_cost` (all three) `DID NOT WARN`, `test_an_embedder_that_shows_it_itself_is_told_and_nothing_is_warned` `len([]) == 1`, `test_a_refused_mount_costs_the_shared_jail_and_the_person_is_told` (both) `'/dev/pts' in ''`.
+- Positive control `test_the_attack_succeeds_where_nothing_keeps_the_programs_apart`, with isolation left on: failed, its probes finding nothing (see the commit's run in the worker's report).
+- Not seen failing: `test_a_jail_whose_mounts_were_not_refused_warns_nothing` and `test_an_open_hole_a_sibling_finds_a_key_in_the_session_keyring`, which pins a hole until TASK-0219 fixes it.
+
+A plant is the supervisor's `mount` raising EPERM in its source, since the kernel has no switch for one type of mount: no host that really refuses them was run.
+
+Final runs for decision-212, each under testlock, on the final code. `scripts/check` exit 1: 2 failed, 3871 passed, 266 skipped in 214.83 s; format, lint, types, gates and docs ok; tokens skipped (no bh-01 build beside this worktree). The failures, both on darwin: `test_real_launch.py::test_keys_typed_as_the_modal_comes_up_do_not_answer_it` (`assert "denied" not in app.text()[asked:]`: keys typed as the modal came up answered it) and `test_destroy_at_once.py::test_a_program_that_ignores_sigterm_is_ended_at_once_and_a_grace_period_is_waited_out` (`assert elapsed[0] < 0.5`, with {0: 0.57, 1.0: 2.22}). Both depend on timing. The machine was loaded: load average 24, an orphaned test binary of another project using about 940% CPU for 14 hours (pid 94880, `gpui-plugin` scratchpad, not started here and left alone), the run taking 214 s against 79 s earlier, and that test's own 1.0 s control taking 2.2 s. Run alone once afterwards, under the same load: 2 passed. That characterises them; it is not a green run, and they were not rerun inside the check. Neither is shown unrelated to this change beyond that: their code paths on darwin run no `isolate`, and `Jail.create`'s new check does nothing without a refused mount.
+
+`scripts/linux-jail-check` exit 0: 365 passed, 5 skipped. `scripts/linux-jail-check --root` on the four suites exit 0: 712 passed, 14 skipped, 10 of them the sharing and refusal tests, by name. #6 stays unticked: the reviewer's, and this `scripts/check` is not green.
+
+Final runs on the final code (these replace the note above, which came before the carve-out test), each under testlock. `scripts/check` exit 1: 3 failed, 3870 passed, 267 skipped in 209 s; format, lint, types, gates and docs ok; tokens skipped. Failed on darwin: `test_booting.py::test_the_shipped_stack_boots_around_a_patched_model` and `test_an_unrelated_providers_background_work_does_not_keep_run_from_returning` (each `TimeoutError` at a 2 s limit, in `rt.settle()`), and `test_destroy_at_once.py::test_a_program_that_ignores_sigterm_is_ended_at_once_and_a_grace_period_is_waited_out` ({0: 0.75, 1.0: 1.57}, limit 0.5). That last one is in brig and on no flake list; it failed in the run before too ({0: 0.57, 1.0: 2.22}), with `test_real_launch.py::test_keys_typed_as_the_modal_comes_up_do_not_answer_it`.
+
+The machine: load average about 21, from an orphaned test binary of another project at about 920% CPU for 14 hours (pid 94880, `gpui-plugin`; not started here, left alone). Control under that load: the same test step at main 4d432d2e's code: 6 failed, 3864 passed, 231 skipped, among them both boot tests, a third boot test, and the same brig test at {0: 1.69, 1.0: 1.76}, plus `test_kill_group.py::test_control_kill_ends_a_cooperative_group_without_needing_escalation` and `test_python_repl.py::test_a_jailed_input_cannot_read_a_file_the_project_hides_but_reads_beside_it`. So main fails these under this load without this change. One control run; it does not show that this change adds nothing, and no green `scripts/check` exists for this code. The last green one was c60d5fe2's. `test_keys_typed...` and the two failed tests here passed alone once when tried (keys and destroy only).
+
+`scripts/linux-jail-check` exit 0: 366 passed, 5 skipped. `scripts/linux-jail-check --root` on the four suites exit 0: 713 passed, 14 skipped, 10 of them the sharing and refusal tests, by name. #6 stays unticked.
+
+Carried carve-outs: `test_on_linux_a_python_process_runs_with_its_project_under_dev_shm[held]` shows `.git/config` refusing with `EROFS` and a hidden file with `EACCES`; `[control]`, neither held, shows the same write land and read read. An earlier form of this test probed a placeholder directory, which refuses whatever the mount is, and proved nothing; replaced. The session keyring's sibling half has a test here; its host-secret half is the review's measurement, relayed, with no test here.
 <!-- SECTION:NOTES:END -->
