@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-10 18:42'
-updated_date: '2026-11-09 16:30'
+updated_date: '2026-11-09 16:45'
 labels:
   - runner
   - finish-moved
@@ -231,4 +231,16 @@ The machine: load average about 21, from an orphaned test binary of another proj
 `scripts/linux-jail-check` exit 0: 366 passed, 5 skipped. `scripts/linux-jail-check --root` on the four suites exit 0: 713 passed, 14 skipped, 10 of them the sharing and refusal tests, by name. #6 stays unticked.
 
 Carried carve-outs: `test_on_linux_a_python_process_runs_with_its_project_under_dev_shm[held]` shows `.git/config` refusing with `EROFS` and a hidden file with `EACCES`; `[control]`, neither held, shows the same write land and read read. An earlier form of this test probed a placeholder directory, which refuses whatever the mount is, and proved nothing; replaced. The session keyring's sibling half has a test here; its host-secret half is the review's measurement, relayed, with no test here.
+
+Reviewer, pre-merge review of f8f36725 and 65718977, 2026-11-09. Verdict: don't merge yet. One fix is needed first, and it is text only.
+
+1. Medium, blocks ruling 3. The notice is not in the status bar's jail field. GradesField.show renders only render.jail_forms(confined, report) (tui status.py:226). notice() reaches the person once, as a plain note in the conversation (status.py:246-248 and wiring.py:88-97), and scrolls away. The false claim is at runner README.md:99, jail.py:1034, docs jail-and-approval.md:57 and this task's notes. Fix: correct the wording, or put the loss into the field itself. The owner should say whether a one-time note counts as loud and clear.
+2. Low. GradesField never reads runner.notice() when it starts (wiring.py:95). A start made before tui:grades subscribes loses its notice until a different notice arrives. Rows come up concurrently, so this is unlikely but possible. It predates this change.
+3. Low, for the owner. A Spec mount exactly on /dev/shm (cwd /dev/shm, or write = ["/dev/shm"]) leaves one /dev/shm shared in a shared jail, with no notice (_supervisor_program own_dev_shm, the stacked early return). That fits 'shared by intent', but the runner README and docs don't say it.
+4. Low. Only the tmpfs, devpts and carried mounts are loud. The /proc mount, MS_PRIVATE and the chan/scratch binds use plain mount, so a refusal there loses namespaces silently. It is safe here, because a jail with no namespaces is never shared.
+5. Low. Flags on the carried mount: there is no explicit remount. MS_BIND|MS_REC clones each mount with its mnt_flags, and locked-mount rules stop the nested user namespace from relaxing them. The worker's EROFS test agrees. Read only.
+
+Read and found sound: the O_PATH|O_CLOEXEC descriptors are closed in finally and closerange runs before exec. Mount points come from the process's own private mountinfo and are made on a fresh tmpfs, so I found no sibling race. The probe runs in a forked namespace and leaves nothing behind. A failed isolate at a real start fails the start (child writes err_w, exec_done replies ok=False). The positive control asserts all 12 media plus connect, list, unlink, signal and scratch, but not pids. The keyring hole is stated plainly in TASK-0219, SPEC decision-211, both READMEs and the docs (a danger admonition).
+
+Runs: scripts/linux-jail-check exit 0, 366 passed, 5 skipped, 131 s. --root on the four suites exit 0, 713 passed, 14 skipped, 38 s. I did not run scripts/check: load average was 19-27, above 8. Not done: planting failures myself, since this reviewer has no edit, and measuring startup cost, which would be noise at this load.
 <!-- SECTION:NOTES:END -->
