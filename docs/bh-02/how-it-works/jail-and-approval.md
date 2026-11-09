@@ -46,16 +46,24 @@ the jail's. [The memory plugin](../reference/plugins/memory.md#auto-memory) says
 The `runner` row starts the programs the model's code runs in: the Python process, and the
 extensions' own process. Two components can fill it:
 
-- **`runner:confined`** (the default) confines both, each in a jail of its own built from one
-  policy.
+- **`runner:confined`** (the default) confines both, from one policy. On Linux as an unprivileged
+  user, where each process gets namespaces of its own, a session has one jail and both run in it.
+  They share the project's files, by design. Each has its own socket, scratch directory, `/dev/shm`,
+  terminals, processes, network and System V and POSIX IPC, so neither can see or reach the other's;
+  everything else outside the project is read-only to both. The one thing not kept apart is the
+  kernel's session keyring, shared with whatever started bh-02 even with a jail each (TASK-0219). On
+  macOS, as root, or where nested user namespaces are blocked, one jail could not keep them apart, so
+  each keeps a jail of its own.
 - **`runner:unconfined`** (`--no-jail`) starts them as plain processes. Every part is graded
   unenforced, so approval asks.
 
 The runner starts a program, and the row that started it is the one that stops it. On
 `/release` (`runner:release`) the runner asks each such row to stop its own (the python row its
-Python process, the extensions row its process), then lets go of the placeholders its jails hold on the
-host. It never stops a row's program itself: if one still runs, `/release` says so. The next
-start ends the release, whoever starts: the next input, or an extension that changed.
+Python process, the extensions row its process), then ends every jail nothing runs in, and lets go of
+the placeholders those held on the host. It never stops a row's program itself: if one still runs,
+`/release` says so. The next start ends the release, whoever starts: the next input, or an extension
+that changed. A Python process that got stuck or crashed starts again in the jail it was in, when that
+jail is shared.
 
 The policy (`spec_for` in the runner plugin) is one pure function: writes only to the project and
 a few places bh-02 names, never to what bh-02 itself reads and trusts (its layer files, its config
@@ -89,8 +97,8 @@ full: [models-cordis-plugin](../reference/plugins/models.md#the-credential).
 
 On Linux every path the jail protects inside the project is a mount the host can undo: an editor
 saving by rename, `git config` rewriting `.git/config`. The jail watches them, and when one is
-undone it ends itself at once. The next input starts a new jail that holds the path again, and is
-told why its variables are gone.
+undone it ends itself at once, with every program in it. The next input starts a new jail that holds
+the path again, and is told why its variables are gone.
 
 The jail is also tied to bh-02: when bh-02 exits, however it exits, the jail goes too, and with it
 the programs an input left running. On Linux that is every one of them. On macOS a program that

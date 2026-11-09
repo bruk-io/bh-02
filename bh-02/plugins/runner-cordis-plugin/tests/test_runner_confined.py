@@ -5,6 +5,7 @@ import asyncio
 import contextlib
 import ctypes
 import errno
+import json
 import os
 import shutil
 import signal
@@ -512,8 +513,9 @@ def test_allow_takes_names_off_brig_s_self_modification_list_and_only_those() ->
 
 async def test_the_row_binds_a_runner_over_a_brig_jail_over_the_layers_it_was_given() -> None:
     effects = await drive(confined(config=BrigConfig(), host=Host()))
-    assert [(e.name, e.args[0]) for e in effects] == [("bind", "runner")]
-    assert isinstance(effects[0].args[1], Runner)
+    enter, bound = effects  # the jail first: its end is the row's, so what the row made ends with it
+    assert enter.name == "enter" and isinstance(enter.args[0], BrigJail)
+    assert (bound.name, bound.args[0]) == ("bind", "runner") and isinstance(bound.args[1], Runner)
 
 
 def test_on_linux_the_policy_reads_by_allowlist_and_keeps_every_deny() -> None:
@@ -934,9 +936,11 @@ async def test_the_sweep_leaves_a_jail_a_server_holds_after_the_program_that_sta
             return [sys.executable, "-I", "-c", _LISTEN_THEN_WRITE, endpoint, str(tmp_path / "elsewhere")]
 
         await (await other.start(argv_for_2, cwd=str(project))).stop()  # it swept
+        await other.close()
         assert held.is_dir() and record.exists(), "the sweep removed what a running jail holds"
     finally:
         await started.stop()
+        await one.close()
     assert not (project / ".claude").exists() and not list(records.iterdir())  # now it is gone
 
 
@@ -1074,6 +1078,7 @@ class _Plain:
             pid=self._process.pid,
             stderr_path="",
             endpoint=self._socket,
+            namespaces=False,
             interrupt=self._interrupt,
             wait_ready=self._wait_ready,
             connect=self._connect,
@@ -1245,12 +1250,13 @@ async def test_an_owner_s_dial_refuses_a_link_the_jailed_program_planted_at_its_
 
 
 @pytest.mark.usefixtures("_plain_launch")
-async def test_each_start_keeps_what_it_is_whatever_the_jail_starts_after_it(tmp_path: Path) -> None:
-    """The runner starts two programs, the Python process and the extensions process, each
-    from a command of its own. What a start is (the trees its program reads, which name the
-    program's own directory; the roots it writes; its notice and grades) is that start's: the
-    second start replaces none of the first's, so the Python process's notice never names the
-    extensions' worker's trees. The jail's own grades are what was known before either."""
+async def test_a_jail_per_program_keeps_what_it_is_whatever_starts_after_it(tmp_path: Path) -> None:
+    """Where each program keeps a jail of its own (`_Plain`: no namespaces), what that jail is (the
+    trees its program reads, which name the program's own directory; the roots it writes; its notice
+    and grades) is its own: the second start replaces none of the first's, so the Python process's
+    notice never names the extensions' worker's trees. The grades are what was known before either.
+    In a shared jail both programs read the one jail's, and a second start from these directories
+    would be refused (`test_what_a_shared_jail_reads_and_who_commits_is_decided_when_it_is_created`)."""
     project = tmp_path / "project"
     project.mkdir()
     secret = project / "private.txt"  # a secret under the project: masked, so held
@@ -1567,6 +1573,7 @@ async def test_a_killed_bh_02_s_jail_ends_with_it_and_the_next_jail_removes_what
     one = BrigJail(BrigConfig(), Host(), lock=str(tmp_path / "jails.lock"))
     argv = _program(_LISTEN_THEN_WRITE, str(tmp_path / "elsewhere"))
     await (await one.start(argv, cwd=str(project))).stop()  # the sweep ran
+    await one.close()
     assert sorted(p.name for p in project.iterdir()) == ["alive", "alive.pid"]
     assert list((tmp_path / "state" / "bh-02" / "jails").iterdir()) == []
 
@@ -1698,6 +1705,7 @@ async def test_the_sweep_leaves_a_record_whose_process_group_still_runs(
         one = BrigJail(BrigConfig(), Host(), lock=str(tmp_path / "jails.lock"))
         argv = _program(_LISTEN_THEN_WRITE, str(tmp_path / "elsewhere"))
         await (await one.start(argv, cwd=str(project))).stop()
+        await one.close()
         assert held.is_dir() and record.exists()
     finally:
         living.kill()
@@ -1705,6 +1713,7 @@ async def test_the_sweep_leaves_a_record_whose_process_group_still_runs(
     one = BrigJail(BrigConfig(), Host(), lock=str(tmp_path / "jails.lock"))
     argv = _program(_LISTEN_THEN_WRITE, str(tmp_path / "elsewhere"))
     await (await one.start(argv, cwd=str(project))).stop()
+    await one.close()
     assert not held.exists() and not record.exists()  # its group gone, so are they
 
 
@@ -1778,6 +1787,7 @@ async def test_the_sweep_removes_what_a_jail_left_whose_group_is_only_zombies(
     one = BrigJail(BrigConfig(), Host(), lock=str(tmp_path / "jails.lock"))
     argv = _program(_LISTEN_THEN_WRITE, str(tmp_path / "elsewhere"))
     await (await one.start(argv, cwd=str(project))).stop()
+    await one.close()
     assert not held.exists() and not record.exists()  # its group is zombies only, so gone
 
 
@@ -1821,6 +1831,7 @@ async def test_a_placeholder_is_made_and_marked_before_bubblewrap_starts(
     one = BrigJail(BrigConfig(), Host(), lock=str(tmp_path / "jails.lock"))
     argv = _program(_LISTEN_THEN_WRITE, str(tmp_path / "elsewhere"))
     await (await one.start(argv, cwd=str(project))).stop()
+    await one.close()
     assert list(project.iterdir()) == [] and not record.exists()
 
 
@@ -2329,6 +2340,7 @@ async def test_a_record_with_unmarked_paths_removes_nothing_it_can_t_prove(
     one = BrigJail(BrigConfig(), Host(), lock=str(tmp_path / "jails.lock"))
     argv = _program(_LISTEN_THEN_WRITE, str(tmp_path / "elsewhere"))
     await (await one.start(argv, cwd=str(project))).stop()
+    await one.close()
     assert mine.is_dir() and not record.exists()
 
 
@@ -2367,6 +2379,7 @@ async def test_placeholders_a_crashed_session_left_are_removed_by_the_next_jail_
     argv = _program(_LISTEN_THEN_WRITE, str(tmp_path / "elsewhere"))
     started = await one.start(argv, cwd=str(project))
     await started.stop()
+    await one.close()
     assert sorted(p.name for p in project.iterdir()) == [".claude", ".vscode"]
     assert list((project / ".claude").iterdir()) == [project / ".claude" / "mine.json"]
     assert list((tmp_path / "state" / "bh-02" / "jails").iterdir()) == []  # no record outlives its jail
@@ -2803,3 +2816,497 @@ def test_what_a_teardown_could_not_end_is_named_and_nothing_added_when_it_ended_
     assert (
         note.startswith("; ending it did not complete: helper 77: EPERM") and "ps -eo pid,pgid,args" in note
     )
+
+
+# One jail for a session's programs, where brig keeps them apart in it (TASK-0074).
+
+# Listens on its reserved socket, having marked every medium a sibling might reach (on Linux: the
+# others are the host's own on darwin, where a planted key would outlive the test) and said where the
+# socket is and which IPC namespace it has (argv[2]). It counts each connection in argv[3] and
+# anything typed at its terminal in argv[3] + ".typed", which the host reads, so what reached it is
+# not the attacker's to report.
+_THE_TARGET = """
+import ctypes, json, os, socket, sys, threading
+open(os.path.join(os.environ["TMPDIR"], "target-marker"), "w").write("mine")
+kept = []
+if sys.platform == "linux":
+    libc = ctypes.CDLL(None, use_errno=True)
+    open("/dev/shm/target-marker", "w").write("mine")
+    primary, terminal = os.openpty()
+    kept += [primary, terminal]
+
+    def typed():
+        data = os.read(primary, 1024)
+        with open(sys.argv[3] + ".typed", "wb") as out:
+            out.write(data)
+
+    threading.Thread(target=typed, daemon=True).start()
+    libc.mq_open.argtypes = [ctypes.c_char_p, ctypes.c_int, ctypes.c_uint, ctypes.c_void_p]
+    assert libc.mq_open(b"/target", os.O_CREAT | os.O_RDWR, 0o600, None) >= 0
+    assert libc.shmget(0x74074, 4096, 0o1600) >= 0
+    assert libc.semget(0x74074, 1, 0o1600) >= 0
+    assert libc.msgget(0x74074, 0o1600) >= 0
+    abstract = socket.socket(socket.AF_UNIX)
+    abstract.bind(b"\\0target")
+    abstract.listen(4)
+    loopback = socket.socket()
+    loopback.bind(("127.0.0.1", 47074))
+    loopback.listen(4)
+    kept += [abstract, loopback]
+server = socket.socket(socket.AF_UNIX)
+server.bind(sys.argv[1])
+server.listen(8)
+ipc = os.readlink("/proc/self/ns/ipc") if sys.platform == "linux" else ""
+with open(sys.argv[2] + ".tmp", "w") as out:
+    json.dump({"socket": sys.argv[1], "ipc": ipc}, out)
+os.replace(sys.argv[2] + ".tmp", sys.argv[2])
+while True:
+    conn, _ = server.accept()
+    with open(sys.argv[3], "a") as count:
+        count.write("x")
+    conn.close()
+"""
+
+# Tries the target every way a program can reach a sibling, then says what happened in argv[3]. It
+# listens too (the runner waits for that), once it has reported: the host reads the report.
+_THE_ATTACKER = """
+import ctypes, json, os, socket, sys
+own, there, said = sys.argv[1:4]
+found = json.load(open(there))
+target = found["socket"]
+what = {"pid": os.getpid()}
+
+def tried(name, act):
+    try:
+        what[name] = act()
+    except OSError as error:
+        what[name] = type(error).__name__
+
+def connect():
+    with socket.socket(socket.AF_UNIX) as client:
+        client.connect(target)
+    return "CONNECTED"
+
+def signalled():
+    hit = []
+    for pid in range(2, 512):
+        if pid != os.getpid():
+            try:
+                os.kill(pid, 0)
+                hit.append(pid)
+            except OSError:
+                pass
+    return hit
+
+def unlink():
+    os.unlink(target)
+    return "UNLINKED"
+
+tried("connect", connect)
+tried("listed", lambda: os.listdir(os.path.dirname(target)))
+tried("pids", lambda: sorted(int(p) for p in os.listdir("/proc") if p.isdigit()))
+tried("scratch", lambda: os.listdir(os.environ["TMPDIR"]))
+if sys.platform == "linux":
+    libc = ctypes.CDLL(None, use_errno=True)
+    libc.mq_open.argtypes = [ctypes.c_char_p, ctypes.c_int, ctypes.c_uint, ctypes.c_void_p]
+
+    def reach_loopback():
+        with socket.socket() as client:
+            client.connect(("127.0.0.1", 47074))
+        return "CONNECTED"
+
+    def reach_abstract():
+        with socket.socket(socket.AF_UNIX) as client:
+            client.connect(b"\\0target")
+        return "CONNECTED"
+
+    def typed_at():
+        hit = []
+        for name in os.listdir("/dev/pts"):
+            if name.isdigit():
+                descriptor = os.open("/dev/pts/" + name, os.O_RDWR | os.O_NOCTTY)
+                os.write(descriptor, b"typed by the attacker\\n")
+                os.close(descriptor)
+                hit.append(name)
+        return hit
+
+    def changed_shm():
+        with open("/dev/shm/target-marker", "r+") as marker:  # never creating one of its own
+            marker.write("changed")
+        return "CHANGED"
+
+    tried("dev_shm", lambda: os.listdir("/dev/shm"))
+    tried("dev_shm_changed", changed_shm)
+    tried("ptys", lambda: [n for n in os.listdir("/dev/pts") if n.isdigit()])
+    tried("typed_at", typed_at)
+    what["mq"] = libc.mq_open(b"/target", os.O_RDWR, 0, None) >= 0
+    what["sysv_shm"] = libc.shmget(0x74074, 4096, 0o600) >= 0
+    what["sysv_sem"] = libc.semget(0x74074, 1, 0o600) >= 0
+    what["sysv_msg"] = libc.msgget(0x74074, 0o600) >= 0
+    tried("abstract", reach_abstract)
+    tried("loopback", reach_loopback)
+    what["same_ipc"] = os.readlink("/proc/self/ns/ipc") == found["ipc"]
+tried("unlink", unlink)
+tried("signalled", signalled)
+server = socket.socket(socket.AF_UNIX)
+server.bind(own)
+server.listen(4)
+with open(said + ".tmp", "w") as out:
+    json.dump(what, out)
+os.replace(said + ".tmp", said)
+while True:
+    server.accept()[0].close()
+"""
+
+
+def _linux_media_reached(report: Mapping[str, Any], typed: Path) -> dict[str, Any]:
+    """What the attacker reached of the media beyond the socket (Linux), each by what it reported
+    but the typing, which the target itself wrote down: nothing, where a program is kept apart."""
+    reached = {
+        "dev_shm": "target-marker" in report["dev_shm"],
+        "dev_shm_changed": report["dev_shm_changed"] == "CHANGED",
+        "ptys": bool(report["ptys"]),
+        "typed_at": bool(report["typed_at"]),
+        "typed_received": typed.exists(),
+        "mq": report["mq"],
+        "sysv_shm": report["sysv_shm"],
+        "sysv_sem": report["sysv_sem"],
+        "sysv_msg": report["sysv_msg"],
+        "abstract": report["abstract"] == "CONNECTED",
+        "loopback": report["loopback"] == "CONNECTED",
+        "same_ipc": report["same_ipc"],
+    }
+    return {name: True for name, hit in reached.items() if hit}
+
+
+def _spy_on_jail_starts(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Each jail brig creates from here on, by its directory: real ones, only counted."""
+    made: list[str] = []
+    real = sys.modules["runner_cordis_plugin.jail"].Jail.create
+
+    def create(compiled: Any, **rest: Any) -> Any:
+        made.append(str(rest["jail_dir"]))
+        return real(compiled, **rest)
+
+    monkeypatch.setattr("brig.run.Jail.create", create)
+    return made
+
+
+# Says in argv[2] whether it is PID 1, and listens.
+_SAYS_ITS_PID = """
+import os, socket, sys
+with open(sys.argv[2] + ".tmp", "w") as out:
+    out.write(str(os.getpid()))
+os.replace(sys.argv[2] + ".tmp", sys.argv[2])
+server = socket.socket(socket.AF_UNIX)
+server.bind(sys.argv[1])
+server.listen(4)
+while True:
+    server.accept()[0].close()
+"""
+
+
+async def _namespaces_held(tmp_path: Path) -> bool:
+    """Whether a program of a real jail on this host is PID 1 of a pid namespace of its own: what
+    brig's `Process.namespaces` says of it, seen from inside. Nothing else in these tests depends
+    on knowing how brig found out."""
+    project = tmp_path / "probe"
+    project.mkdir()
+    async with BrigJail(BrigConfig(), Host(), lock=str(tmp_path / "probe.lock")) as probe:
+        said = project / "pid"
+        await probe.start(_program(_SAYS_ITS_PID, str(said)), cwd=str(project))
+        return said.read_text() == "1"
+
+
+async def _attack(one: Any, project: Path) -> tuple[Any, dict[str, Any], int]:
+    """A target and an attacker started by `one` in `project`: the target, what the attacker
+    reports, and how many connections the target saw while it ran. The target counts a connection
+    some time after the kernel took it: the count starts once the host's readiness dial is in it,
+    and ends after a dial of the host's own, which the target, accepting in order, counts after
+    whatever the attacker's was. An attacker that unlinked the socket leaves no such dial: then a
+    moment's wait, and the report says what it did."""
+    there, count, said = project / "where", project / "count", project / "said"
+    target = await one.start(_program(_THE_TARGET, str(there), str(count)), cwd=str(project))
+    await _report(there, target)
+    assert await _until(count.exists, 10.0), "CONTROL failed: the host's readiness dial was never counted"
+    before = len(count.read_text())
+    attacker = await one.start(_program(_THE_ATTACKER, str(there), str(said)), cwd=str(project))
+    report = json.loads(await _report(said, attacker))
+    ours = 0
+    with contextlib.suppress(OSError):
+        _, writer = await target.connect(limit=1024)
+        writer.close()
+        ours = 1
+    assert await _until(lambda: len(count.read_text()) >= before + ours, 10.0)
+    await asyncio.sleep(0.2)  # what the attacker's dial would add, were it counted just after ours
+    return target, report, len(count.read_text()) - before - ours
+
+
+async def test_a_program_in_the_session_s_jail_can_t_reach_its_sibling(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The security this task's one jail rests on, attacked for real. Two programs in one jail, as
+    the Python process and the extensions process are: the second tries the first's socket
+    (connect, list, unlink), its signals (signal 0 to every pid it can name), `/proc`, its scratch,
+    its `/dev/shm`, its terminal, its POSIX and System V IPC, its abstract socket and its loopback
+    port. What reached the target is read from the target's own count, what its terminal received
+    and the host's dial where it can be, not from the attacker. brig's own battery proves the
+    namespaces; this proves the runner's jail uses them, so what fails here is a session whose
+    programs can touch each other."""
+    _needs_bwrap()
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    if not await _namespaces_held(tmp_path):
+        pytest.skip("this host gives a program no namespaces of its own (uid 0, or blocked)")
+    project = tmp_path / "project"
+    project.mkdir()
+    made = _spy_on_jail_starts(monkeypatch)
+    async with BrigJail(BrigConfig(), Host(), lock=str(tmp_path / "jails.lock")) as one:
+        target, report, accepted = await _attack(one, project)
+        assert len(made) == 1, made  # they are in one jail: the attack is on a co-tenant
+        assert accepted == 0, report
+        assert report["connect"] == "FileNotFoundError", report
+        assert report["listed"] == [], report
+        assert report["pids"] == [1], report
+        assert "target-marker" not in report["scratch"], report
+        assert report["unlink"] == "FileNotFoundError", report
+        assert report["signalled"] == [], report
+        assert _linux_media_reached(report, project / "count.typed") == {}, report
+        _, writer = await target.connect(limit=1024)  # the host still reaches the target: it lives
+        writer.close()
+
+
+async def test_a_host_without_namespaces_keeps_a_jail_per_program_and_they_stay_apart(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The owner's ruling: where a program has no namespaces of its own (darwin; Linux as uid 0, or
+    nested user namespaces blocked) one jail would let it connect to a sibling's socket, or unlink
+    it (measured: TASK-0074's notes). So each program keeps a jail of its own, and the same attack
+    that a shared jail would let through does nothing."""
+    if sys.platform == "linux":
+        _needs_bwrap()
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    if await _namespaces_held(tmp_path):
+        pytest.skip("this host gives a program namespaces of its own: it shares a jail")
+    project = tmp_path / "project"
+    project.mkdir()
+    made = _spy_on_jail_starts(monkeypatch)
+    async with BrigJail(BrigConfig(), Host(), lock=str(tmp_path / "jails.lock")) as one:
+        target, report, accepted = await _attack(one, project)
+        assert len(set(made)) == 2, made  # a jail per program, never a shared one
+        assert accepted == 0, report
+        assert report["connect"] != "CONNECTED", report
+        assert report["unlink"] != "UNLINKED", report
+        assert "target-marker" not in report["scratch"], report
+        assert report["signalled"] == [], report
+        if sys.platform == "linux":
+            assert _linux_media_reached(report, project / "count.typed") == {}, report
+        _, writer = await target.connect(limit=1024)
+        writer.close()
+
+
+@pytest.mark.usefixtures("_plain_launch")
+async def test_a_program_with_no_namespaces_of_its_own_is_not_followed_into_its_jail(tmp_path: Path) -> None:
+    """The same rule on a Linux host that does hold namespaces, whatever runs the test: the jail's
+    first program says it has none (`_Plain`, as a jail with them blocked does), and the next start
+    gets a jail of its own, and each stop ends its own."""
+    project = tmp_path / "project"
+    project.mkdir()
+    one = BrigJail(BrigConfig(), Host(), lock=str(tmp_path / "jails.lock"))
+    first = await one.start(_listens, cwd=str(project))
+    second = await one.start(_listens, cwd=str(project))
+    jails = tmp_path / "state" / "bh-02" / "jails"
+    groups = [recorded_group(record.read_text()) for record in jails.iterdir()]
+    assert len(groups) == 2 and None not in groups, groups
+    await first.stop()
+    assert await _until(lambda: sum(group_alive(g or 0) for g in groups) == 1, 5.0)  # its own alone
+    _, writer = await second.connect(limit=1024)
+    writer.close()
+    await second.stop()
+    assert await one.release() == ""
+    assert list(jails.iterdir()) == []
+
+
+async def _shared_or_skip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """A real jail's starts counted, on a host that shares one; else the test does not apply."""
+    _needs_bwrap()
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    if not await _namespaces_held(tmp_path):
+        pytest.skip("this host gives a program no namespaces of its own (uid 0, or blocked): no shared jail")
+    return _spy_on_jail_starts(monkeypatch)
+
+
+async def test_a_session_starts_one_jail_for_both_programs_even_starting_at_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The Python process and the extensions process start as their rows come up, at the same
+    moment: one jail for both, and what each says of itself is that jail's."""
+    made = await _shared_or_skip(tmp_path, monkeypatch)
+    project = tmp_path / "project"
+    project.mkdir()
+    async with BrigJail(BrigConfig(), Host(), lock=str(tmp_path / "jails.lock")) as jail:
+        runner = Runner(jail)
+        python_process, extensions = await asyncio.gather(
+            runner.start(_listens, cwd=str(project)), runner.start(_listens, cwd=str(project))
+        )
+        assert len(made) == 1, made
+        assert python_process.report() == extensions.report() == runner.report()
+        assert python_process.reads() == extensions.reads()
+        assert python_process.writes() == extensions.writes() == (str(project.resolve()),)
+
+
+async def test_starting_a_program_again_starts_no_new_jail_and_leaves_its_sibling_running(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A stuck input or a crash stops the Python process and starts it again: in the same jail,
+    the extensions process running throughout, what stopped ended whole (its `setsid()` child
+    too, with its pid namespace)."""
+    made = await _shared_or_skip(tmp_path, monkeypatch)
+    project = tmp_path / "project"
+    project.mkdir()
+    marker = f"{uuid.uuid4().int % 10**9 + 10**9}.{uuid.uuid4().int % 10**6:06d}"
+    async with BrigJail(BrigConfig(), Host(), lock=str(tmp_path / "jails.lock")) as one:
+        sibling = await one.start(_listens, cwd=str(project))
+        first = await one.start(_program(_LISTEN_WITH_A_SESSION_OF_ITS_OWN, marker), cwd=str(project))
+        assert await _until(lambda: bool(_marked_groups(marker)), 5.0), "CONTROL failed: it never ran"
+        await first.stop()
+        assert await _until(lambda: not _marked_groups(marker), 10.0), "what it left outlived its stop"
+        again = await one.start(_listens, cwd=str(project))
+        assert len(made) == 1, made
+        for each in (sibling, again):
+            _, writer = await each.connect(limit=1024)
+            writer.close()
+
+
+async def test_a_program_that_crashed_starts_again_in_the_same_jail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The jail outlives a program that ended by itself, with nothing else in it: the next start
+    finds it, though brig's `Jail.alive` reads gone with no program running."""
+    made = await _shared_or_skip(tmp_path, monkeypatch)
+    project = tmp_path / "project"
+    project.mkdir()
+    ready = project / "ready"
+    crashes = """
+import os, socket, sys, time
+server = socket.socket(socket.AF_UNIX)
+server.bind(sys.argv[1])
+server.listen(4)
+open(sys.argv[2], "w").write("x")
+time.sleep(0.3)
+os._exit(3)
+"""
+    async with BrigJail(BrigConfig(), Host(), lock=str(tmp_path / "jails.lock")) as one:
+        first = await one.start(_program(crashes, str(ready)), cwd=str(project))
+        await _report(ready, first)
+        await asyncio.sleep(1.0)
+        await first.stop()
+        again = await one.start(_listens, cwd=str(project))
+        assert len(made) == 1, made
+        _, writer = await again.connect(limit=1024)
+        writer.close()
+
+
+async def test_release_stops_through_owners_then_ends_the_jail_and_the_next_start_makes_a_new_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`/release`: each owner stops its own, then the shared jail ends and what it made on the host
+    goes (the absent `.envrc`, free to create). A program its owner kept keeps the jail, and
+    `/release` says so. The next start is a new jail."""
+    made = await _shared_or_skip(tmp_path, monkeypatch)
+    project = tmp_path / "project"
+    project.mkdir()
+    placeholder = project / ".envrc"
+    async with BrigJail(BrigConfig(), Host(), lock=str(tmp_path / "jails.lock")) as jail:
+        runner = Runner(jail)
+        owned = await runner.start(_listens, cwd=str(project))
+        kept = await runner.start(_listens, cwd=str(project))
+        assert placeholder.is_dir() and len(made) == 1
+        removes = runner.on_release(_stops(owned))
+        said = await runner.release()
+        assert "still runs" in said and placeholder.is_dir(), said  # kept holds the jail
+        removes()
+        runner.on_release(_stops(kept))
+        group = _jail_group(tmp_path)
+        assert await runner.release() == ""
+        assert await _gone(group) and not placeholder.exists()
+        assert list((tmp_path / "state" / "bh-02" / "jails").iterdir()) == []
+        again = await runner.start(_listens, cwd=str(project))
+        assert len(made) == 2 and placeholder.is_dir() and again.ended() == "", made
+
+
+async def test_the_tripwire_ends_the_session_s_jail_tells_every_owner_and_the_next_start_makes_a_new_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The host undoes a mount: the whole shared jail ends at once, both programs with it; every
+    started program says why, an owner that has not stopped its own included; and the next start
+    is a new jail holding the path again."""
+    made = await _shared_or_skip(tmp_path, monkeypatch)
+    project = tmp_path / "project"
+    project.mkdir()
+    absent = project / ".envrc"
+    async with BrigJail(BrigConfig(), Host(), lock=str(tmp_path / "jails.lock")) as one:
+        first = await one.start(_listens, cwd=str(project))
+        second = await one.start(_listens, cwd=str(project))
+        assert first.ended() == second.ended() == ""
+        group = _jail_group(tmp_path)
+        absent.rmdir()  # a placeholder removed by hand
+        assert await _gone(group)
+        assert str(absent) in first.ended() and first.ended() == second.ended()
+        again = await one.start(_listens, cwd=str(project))
+        assert len(made) == 2, made
+        assert again.ended() == "" and absent.is_dir()
+        assert str(absent) in first.ended()  # still says why, once the next jail is up
+        await first.stop()
+        await second.stop()
+        _, writer = await again.connect(limit=1024)  # stopping what the old jail ran leaves the new
+        writer.close()
+
+
+async def test_what_a_shared_jail_reads_and_who_commits_is_decided_when_it_is_created(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The creating start's argv, `host.code` and the interpreter are what the jail reads; git's
+    identity is asked once. A later start that names anywhere else is refused, saying so, and
+    never widens the jail: its sibling runs on, and a start inside what it reads still works."""
+    made = await _shared_or_skip(tmp_path, monkeypatch)
+    project = tmp_path / "project"
+    project.mkdir()
+    for name in ("first", "elsewhere"):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "worker.py").write_text(_LISTEN)
+    run = subprocess.run
+    asked: list[Sequence[str]] = []
+
+    def counted(argv: Sequence[str], **rest: Any) -> Any:
+        if "config" in argv:
+            asked.append(argv)
+        return run(argv, **rest)
+
+    monkeypatch.setattr(sys.modules["runner_cordis_plugin.jail"].subprocess, "run", counted)
+    async with BrigJail(BrigConfig(), Host(), lock=str(tmp_path / "jails.lock")) as one:
+        first = await one.start(_worker_at(tmp_path / "first" / "worker.py"), cwd=str(project))
+        before = first.reads()
+        assert str(tmp_path / "first") in before
+        assert len(asked) == 2, asked  # user.name and user.email, for the jail
+        with pytest.raises(RuntimeError, match="never widened") as refused:
+            await one.start(_worker_at(tmp_path / "elsewhere" / "worker.py"), cwd=str(project))
+        assert str(tmp_path / "elsewhere" / "worker.py") in str(refused.value)
+        beside = await one.start(_worker_at(tmp_path / "first" / "worker.py"), cwd=str(project))
+        assert len(made) == 1 and len(asked) == 2, (made, asked)
+        assert beside.reads() == before == first.reads()
+        _, writer = await first.connect(limit=1024)
+        writer.close()
+
+
+async def test_a_program_in_another_directory_gets_a_jail_of_its_own(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A jail's write roots come from where it was created for, and one jail can't widen them."""
+    made = await _shared_or_skip(tmp_path, monkeypatch)
+    for name in ("one", "two"):
+        (tmp_path / name).mkdir()
+    async with BrigJail(BrigConfig(), Host(), lock=str(tmp_path / "jails.lock")) as jail:
+        first = await jail.start(_listens, cwd=str(tmp_path / "one"))
+        second = await jail.start(_listens, cwd=str(tmp_path / "two"))
+        assert len(made) == 2, made
+        assert first.writes() != second.writes()

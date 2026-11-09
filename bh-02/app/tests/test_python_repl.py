@@ -12,7 +12,7 @@ import stat
 import subprocess
 import sys
 import time
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -34,6 +34,7 @@ from bh_02.bootstrap import (
 from cordis import Row
 from cordis.loader import boot
 from extensions_cordis_plugin import Extensions, ExtensionsConfig
+from extensions_cordis_plugin import worker_argv as extensions_worker_argv
 from python_cordis_plugin import PythonProcess, PythonProcessConfig, worker_argv
 from runner_cordis_plugin import (
     Approval,
@@ -449,6 +450,24 @@ class _Host:
     auto_memory: str = ""
 
 
+@pytest.fixture(autouse=True)
+async def _every_jail_ended(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[None]:
+    """A shared jail outlives its programs until the runner row ends (`BrigJail.close`), and these
+    tests have no row: each jail a test started ends with it, as a session's does, so none holds
+    the jail lock, or a supervisor, into the next test."""
+    started: list[BrigJail] = []
+    real = BrigJail.start
+
+    async def start(self: BrigJail, argv_for: Any, *, cwd: str) -> Any:
+        started.append(self)
+        return await real(self, argv_for, cwd=cwd)
+
+    monkeypatch.setattr(BrigJail, "start", start)
+    yield
+    for jail in started:
+        await jail.close()
+
+
 def _python(jail: BrigJail | Runner, config: PythonProcessConfig) -> PythonProcess:
     """The python tool's process over `jail`, as the python row builds it: started by a runner,
     its inputs confined as the approval rule says of that runner."""
@@ -582,18 +601,19 @@ async def test_on_linux_the_python_process_tells_the_model_its_own_worker_s_tree
     project.mkdir()
     elsewhere.mkdir()
     (elsewhere / "worker.py").write_text(_LISTENS)
-    jail = BrigJail(BrigConfig(), _Host())
+    jail = BrigJail(BrigConfig(), _Host(code=(str(elsewhere),)))
     async with _python(jail, PythonProcessConfig(root=str(project))) as process:
-        told = process.instructions()
+        told, before = process.instructions(), process.reads()
         own = str(Path(worker_argv("")[2]).parent)  # the Python process's worker's directory
-        assert own in process.reads() and own in told, process.reads()
+        assert own in before and own in told, before
+        assert str(elsewhere) in before  # `host.code`: what every jail reads, before the other starts
         other = await jail.start(_worker_at(elsewhere / "worker.py"), cwd=str(project))
         try:
-            assert str(elsewhere) not in process.reads(), process.reads()
-            assert process.instructions() == told
-            assert str(elsewhere) in other.reads()  # the other program's own
+            assert process.instructions() == told and process.reads() == before
+            assert str(elsewhere) in other.reads()
         finally:
             await other.stop()
+        assert process.instructions() == told  # nor did the other's stop
 
 
 async def test_on_linux_release_frees_the_placeholder_while_the_extensions_worker_runs(
@@ -615,7 +635,7 @@ async def test_on_linux_release_frees_the_placeholder_while_the_extensions_worke
     elsewhere.mkdir()
     (elsewhere / "worker.py").write_text(_LISTENS)
     placeholder = project / ".envrc"
-    jail = BrigJail(BrigConfig(), _Host(), lock=str(tmp_path / "jails.lock"))
+    jail = BrigJail(BrigConfig(), _Host(code=(str(elsewhere),)), lock=str(tmp_path / "jails.lock"))
     runner = Runner(jail)
     async with _python(runner, PythonProcessConfig(root=str(project))) as process:
         runner.on_release(process.stopped)
@@ -629,18 +649,48 @@ async def test_on_linux_release_frees_the_placeholder_while_the_extensions_worke
         try:
             records = sorted((tmp_path / "state" / "bh-02" / "jails").iterdir())
             groups = [recorded_group(record.read_text()) for record in records]
-            assert len(groups) == 2 and placeholder.is_dir()
+            pid = await process.run("import os; print(os.getpid())")
+            # one jail where its programs have namespaces of their own (each is PID 1), else one each
+            assert len(groups) == (1 if pid.strip() == "1" else 2) and placeholder.is_dir(), pid
             said = await runner.release()
             assert "stays held" not in said and "still runs" not in said, said
             assert not placeholder.exists()
             for group in groups:
                 assert group is not None
-                assert not group_alive(group)  # both jails are gone, the extensions process's too
+                assert not group_alive(group)  # every jail is gone, the extensions process's too
             assert runner.released()
             await process.run("1")  # the next input
             assert not runner.released() and placeholder.is_dir()
         finally:
             await extensions.stop()
+
+
+@pytest.mark.parametrize("first", ["python", "extensions"])
+async def test_on_linux_the_real_workers_share_one_jail_whichever_starts_first(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, first: str
+) -> None:
+    """The two programs a session runs, as they are installed: where each has namespaces of its own
+    (it is PID 1 of them) one jail holds both, one record; else one each. Each program's directory is
+    in `host.code`, so what the first to start names is not what the second depends on."""
+    if sys.platform != "linux" or not Path(_BWRAP).exists():
+        pytest.skip("the allowlist is bubblewrap's: Linux with /usr/bin/bwrap only")
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    project = tmp_path / "project"
+    project.mkdir()
+    runner = Runner(BrigJail(BrigConfig(), _Host(code=_code()), lock=str(tmp_path / "jails.lock")))
+    started = []
+    if first == "extensions":
+        started.append(await runner.start(extensions_worker_argv, cwd=str(project)))
+    async with _python(runner, PythonProcessConfig(root=str(project), startup=())) as process:
+        pid = await process.run("import os; print(os.getpid())")
+        if first == "python":
+            started.append(await runner.start(extensions_worker_argv, cwd=str(project)))
+        records = list((tmp_path / "state" / "bh-02" / "jails").iterdir())
+        assert len(records) == (1 if pid.strip() == "1" else 2), (pid, records)
+        _, writer = await started[0].connect(limit=1024)  # the extensions process, listening
+        writer.close()
+        assert "2" in await process.run("print(1 + 1)")
+    await started[0].stop()
 
 
 def _worker_at(worker: Path) -> Callable[[str], list[str]]:

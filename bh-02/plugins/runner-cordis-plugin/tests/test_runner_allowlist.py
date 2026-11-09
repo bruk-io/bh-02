@@ -215,7 +215,7 @@ async def _names_in_the_jail(runner: Runner, project: Path) -> list[str]:
 
 async def _runner_of(config: BrigConfig, host: _Host) -> Any:
     effects = await drive(confined(config=config, host=host))
-    return effects[0].args[1]
+    return effects[-1].args[1]
 
 
 @pytest.mark.usefixtures("_jailable")

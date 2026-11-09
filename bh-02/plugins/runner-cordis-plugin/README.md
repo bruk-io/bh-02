@@ -7,7 +7,7 @@ over it; and `/release`. The only package in the workspace that imports brig (th
 
 | Row | Binds | Consumes |
 |---|---|---|
-| `runner:confined` | `runner` over brig's `scratch_darwin()` (darwin) or `strict_linux()` (Linux), a jail per start; config: `write` (default `["."]`), `deny`, `allow` (names taken off brig's self-modification list; default `["CLAUDE.md", "AGENTS.md"]`), `hide` (files in the project inputs may not read; none by default), `env` (the names that survive the scrub; unset, they are the baseline `PATH`, `HOME`, `LANG`, `LC_ALL`, `TERM` plus the names in the person's `runner.toml`, below) | `host` (also `key_envs` and `models_file`, below) |
+| `runner:confined` | `runner` over brig's `scratch_darwin()` (darwin) or `strict_linux()` (Linux), one jail per session where brig keeps its programs apart, else a jail per program (below); config: `write` (default `["."]`), `deny`, `allow` (names taken off brig's self-modification list; default `["CLAUDE.md", "AGENTS.md"]`), `hide` (files in the project inputs may not read; none by default), `env` (the names that survive the scrub; unset, they are the baseline `PATH`, `HOME`, `LANG`, `LC_ALL`, `TERM` plus the names in the person's `runner.toml`, below) | `host` (also `key_envs` and `models_file`, below) |
 | `runner:unconfined` | `runner`: each program as a plain subprocess (`--no-jail`), every axis reported `unenforced`, its environment without `CLAUDE*` (`CLAUDE_CODE_OAUTH_TOKEN`, and what a Claude Code that launched bh-02 leaves, a messaging token among them), `ANTHROPIC_*`, `TMUX` or `TMUX_PANE` (hygiene, not a boundary: an input without a jail can find the tmux socket itself; the confined runner's `env` allowlist never passes them, `tests/test_runner_tmux.py` shows both) | |
 | `runner:approval` | `approval`: `confined` (whether the runner confines what runs in it), `unasked(question) -> bool` (whether it runs without asking the person) | `runner` (`report`) |
 | `runner:release` | (nothing: registers `/release`) | `runner` (`release`), `commands` (`register`) |
@@ -24,15 +24,15 @@ over it; and `/release`. The only package in the workspace that imports brig (th
   decision-185: the host's one check that what answers is the started process's own, never a link
   a process of the jail could plant at its socket's path) -- never a raw path, which `started` has
   none of to give. Each watcher (`on_start(watch) -> remover`) is told of a start after, so the
-  status bar's jail field (`tui:grades`) follows a Python process started again in place. What one
-  start is stays with it (`started.report()`, `notice()`, `reads()`, `writes()`): the Python
-  process and the extensions process each start from a command of their own. `report()` and
-  `notice()` are the last start's (before any, the mechanism's grades and "").
+  status bar's jail field (`tui:grades`) follows a Python process started again in place. What
+  the jail it runs in is stays with it (`started.report()`, `notice()`, `reads()`, `writes()`), and
+  `report()` and `notice()` are those of the last start's jail (before any, the mechanism's grades
+  and "").
 - **Each owner stops its own program.** A row that starts something registers its stop
   (`on_release(stop) -> remover`, `stop: async () -> str`): the python row its Python process,
-  the extensions row the extensions process. `release()` asks each in turn, then has the mechanism let go of
-  what it holds on the host (on Linux, the placeholders it holds in place of write-denied paths
-  that do not exist yet, below), and joins what each said
+  the extensions row the extensions process. `release()` asks each in turn, then has the mechanism end every jail
+  nothing runs in and let go of what that held on the host (on Linux, the placeholders it holds in
+  place of write-denied paths that do not exist yet, below), and joins what each said
   (`test_release_asks_each_owner_to_stop_its_own_then_the_mechanism_and_says_what_each_said`).
   The runner never stops a row's program itself (`test_the_runner_stops_no_program_itself`): a
   program its owner did not stop keeps running, its jail keeps what it holds, and `/release`
@@ -80,7 +80,33 @@ replaces it; an extension has no way to bind or reach it. It answers about code 
 to hand to the runner, not about each effect a component yields (that is cordis's planned
 policy seam, not this).
 
-`runner:confined`'s mechanism, `BrigJail`, compiles a jail for each start from one policy.
+`runner:confined`'s mechanism, `BrigJail`, compiles its jails from one policy. How many it
+starts follows from what keeps programs apart (the owner's ruling, TASK-0074):
+
+| Host | Jails | What a program can do to a sibling |
+|---|---|---|
+| Linux, unprivileged, nested user namespaces allowed (`Process.namespaces`) | one per session, per directory | nothing but the project's files (and the kernel's session keyring, as with a jail each: TASK-0219): each is PID 1 of namespaces of its own, seeing only its own socket, scratch, `/dev/shm`, terminals and processes (brig's decision-195, decision-211) |
+| Linux as uid 0, or nested user namespaces blocked | one per program | the same, by a jail each: in one jail it could connect to a sibling's socket, signal it and unlink its socket (measured) |
+| darwin | one per program | seatbelt refuses connect and signal either way; in one jail it could unlink a sibling's socket and share its scratch (measured; TASK-0217 is what would change this) |
+
+Which row a host is on is found at a jail's first start. In a shared jail:
+
+- A jail is decided **once**, when its first program starts: the grades, the notice, `git`'s identity
+  and what it reads. What it reads is the system tree, the interpreter's trees, `host.code` and the
+  absolute paths the creating start names, so the two shipped programs need nothing of each other:
+  each worker is in its package's directory, in `host.code`. A later start naming a path outside
+  those is refused (`cannot start this program in the session's jail ... never widened`) and the
+  jail's reads stay as they were. A start in another directory gets a jail of its own, since a
+  jail's write roots are its directory's.
+- **A program's stop ends that program**, a child it left in a session of its own with it (its pid
+  namespace ends), and the jail stays for the next: a stuck or crashed Python process starts again
+  in it. A stop that can't end the program ends the jail, so nothing its owner stopped runs on.
+- **The jail ends** on `/release` when nothing runs in it, when the host undoes a mount it holds
+  (below: every program in it then ends, and every `started.ended()` says why), and with the
+  `runner` row. The next start then makes a new one. Two owners starting at once share one jail:
+  one start at a time chooses.
+- A session-long jail keeps its placeholders, and the wider window for an absent secret (brig's
+  decision-164), for the whole session: `/release` is how to create one of those paths mid-session.
 `spec_for` is the policy, as a pure function:
 
 - **writes**: the project root, a scratch directory of the jail's own (`TMPDIR`), and the
@@ -185,7 +211,7 @@ policy seam, not this).
   the host's one check that what answers is the started process's own, never a link a process of
   the jail planted at its socket's path), and an owner dials it the same way (`started.connect()`),
   never the raw path. The runner
-  starts two programs, each with a jail of its own compiled from this one policy: the Python
+  starts two programs from this one policy (a socket reserved for each): the Python
   process (`python:tool`), and the extensions process (`extensions:process`), where the
   model's own plugins run;
 - **env**: scrubbed to `env`. The person's standing list is `~/.config/bh-02/runner.toml`

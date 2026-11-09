@@ -62,9 +62,18 @@ One policy, two platforms; only the stack and the read model differ:
   running in it can get one write or read in, so while the jail holds a secret under a writable
   root `fs_read` stays best-effort (`graded`) and `notice()` says which paths (`held`, `notice_for`).
 
-On both, the jail is launched tethered to bh-02 (`_Jailed`): when bh-02 ends, however it ends,
+On both, the jail is launched tethered to bh-02 (`_Held`): when bh-02 ends, however it ends,
 brig kills the jail's process group, so a program an input left running doesn't outlive it (on
 Linux, bubblewrap's whole namespace; on darwin, what stayed in the group).
+
+How many jails a session starts follows from what keeps its programs apart. Where brig gives a
+program namespaces of its own (`Process.namespaces`: bubblewrap as an unprivileged user, nested
+user namespaces allowed) a session has one jail for each directory its programs work in, and every
+program starts in it: a sibling's socket, signals, `/proc` and scratch are out of its reach, and
+stopping one ends its own pid namespace. Where brig does not (darwin; bubblewrap as uid 0; nested
+user namespaces blocked) each program keeps a jail of its own, since in one jail a program could
+connect to a sibling's socket, or unlink it (measured: TASK-0074's notes). What a shared jail reads
+is decided once, when it is created (`_outside`).
 
 Anywhere else `start` refuses and names `runner:unconfined`.
 """
@@ -109,6 +118,9 @@ from brig.run import (
     KillOutcome,
     KillReport,
     Process,
+    SupervisorGone,
+    SupervisorUnresponsive,
+    TetherClosed,
     build_compile_ctx,
     group_alive,
 )
@@ -741,12 +753,10 @@ def remove_placeholders(made: Sequence[tuple[str, str]]) -> None:
 
 @dataclass(frozen=True, slots=True)
 class _Facts:
-    """What one start of the jail is, kept with that start for whoever started it (CONTRACTS.md:
-    runner): its grades (`graded`), what the person should know about it (`notice_for`), the trees
-    its program reads when that is all it reads (`told_reads`: a Linux jail's; empty on darwin)
-    and the roots it may write but its scratch. A jail starts more than one program (the
-    Python process, the extensions process), each from its own command: what one start is never
-    replaces what another is."""
+    """What one jail is, kept with it for every program it runs (CONTRACTS.md: runner): its grades
+    (`graded`), what the person should know about it (`notice_for`), the trees its programs read
+    when that is all they read (`told_reads`: a Linux jail's; empty on darwin) and the roots they
+    may write but its scratch. All decided when the jail is created, never by a later start."""
 
     report: Mapping[str, str]
     notice: str = ""
@@ -754,20 +764,19 @@ class _Facts:
     writes: tuple[str, ...] = ()
 
 
-class _Jailed:
-    """A program brig started (`process`, the one process of its own `jail`): interrupt is
-    SIGINT to its group, stop is brig's teardown of the jail (`Jail.destroy`), then the
-    directories the jail made on the host (`made`, deepest first) once it is gone. `facts` is
-    what this start is (`report`, `notice`, `reads`, `writes`), read whether or not it still
-    runs.
+class _Held:
+    """One brig jail and what bh-02 holds on the host for it: `jail`, `facts` (what it is), the
+    directories it made (`made`, deepest first) and the programs running in it (`programs`).
+    `shared` says whether another program may start in it (`Process.namespaces`, found at its first
+    start), and `cwd` is the directory it was created for, its write roots' own.
 
     `tether` is the write end of the jail's tether (brig SPEC.md section 8): held by this
     process alone, so when bh-02 ends, however it ends (`SIGKILL` included), the kernel closes
     it and brig's watcher kills the jail's whole process group, a program an input left running
-    in the background with it. `stop` closes it once brig's teardown is done.
+    in the background with it. `end` closes it once brig's teardown is done.
 
     `wire` (Linux) watches the paths the jail holds with a mount and ends the jail when the host
-    undoes one (`Tripwire`); `ended` says so. `stop` stops it first: removing the placeholders
+    undoes one (`Tripwire`); `ended` says so. `end` stops it first: removing the placeholders
     would read as the host undoing them.
 
     `lock` (Linux) is this jail's shared hold on the user's bh-02 jail lock, taken before the
@@ -776,12 +785,12 @@ class _Jailed:
     mounted over one (a second session in the same project binds the first one's `.claude/`
     read-only, and removing it on the host detaches that bind; measured). `record` is the file
     that names them meanwhile (`records_dir`): if this jail can't remove them (another runs) or
-    never stops (bh-02 crashed), the next jail to start with none running does."""
+    never ends (bh-02 crashed), the next jail to start with none running does."""
 
     def __init__(
         self,
         jail: Jail,
-        process: Process,
+        first: Process,
         facts: _Facts,
         jail_dir: str,
         made: Sequence[tuple[str, str]],
@@ -790,46 +799,112 @@ class _Jailed:
         tether: int | None = None,
         wire: Tripwire | None = None,
     ) -> None:
-        self._jail = jail
-        self._process = process
-        self._facts = facts
+        self.jail = jail
+        self.facts = facts
+        self.shared = False
+        self.programs: list[_Jailed] = []
+        self._first_pid = first.pid
         self._wire = wire
         self._tether = tether
         self._jail_dir = jail_dir
         self._made: list[tuple[str, str]] = list(made)
         self._lock = lock
         self._record = record
-        self._stopping: asyncio.Future[None] | None = None
+        self._ending: asyncio.Future[None] | None = None
         self._write()
+
+    def ended(self) -> str:
+        """Why the jail ended its programs itself (the host undid a mount, `tripped_for`), or ""."""
+        return self._wire.tripped if self._wire is not None else ""
+
+    @property
+    def over(self) -> bool:
+        """Whether `end` has been asked for."""
+        return self._ending is not None
+
+    def usable(self) -> bool:
+        """Whether another program can start in it: a shared jail still there. PID 1 of its
+        namespaces is what lives as long as they do; `Jail.alive` reads gone with no program in
+        it, as this jail is between one Python process and the next."""
+        group = self.jail.instance_group
+        return self.shared and not self.over and not self.ended() and group is not None and group_alive(group)
+
+    def _write(self) -> None:
+        """The record as it stands: the placeholders, and which process group holds the jail they
+        are mounted in: a Linux jail's instance (`Jail.instance_group`: PID 1 of its namespaces,
+        which lives as long as they do, though the program ends first and a `setsid()` child of
+        it runs on), else the first program's own, which leads its group. A sweep that read the
+        program's group would call a jail dead that a background server still holds."""
+        if self._record is not None:
+            group = self.jail.instance_group
+            with contextlib.suppress(OSError):
+                Path(self._record).write_text(
+                    record_text(self._made, self._first_pid if group is None else group)
+                )
+
+    async def end(self) -> None:
+        """brig's teardown, then what the jail made, once: whoever asks first does it, and anyone
+        after waits for that."""
+        if self._ending is None:
+            self._ending = asyncio.ensure_future(self._teardown())
+        await asyncio.shield(self._ending)
+
+    async def _teardown(self) -> None:
+        if self._wire is not None:
+            await asyncio.to_thread(self._wire.stop)
+        report = await asyncio.to_thread(self.jail.destroy)
+        gone = all(item.outcome in (KillOutcome.ENDED, KillOutcome.ALREADY_GONE) for item in report.items)
+        if gone and self._lock is not None:
+            _clear_up(self._lock, self._made, self._record)
+        if self._lock is not None:
+            os.close(self._lock)
+            self._lock = None
+        if self._tether is not None:
+            os.close(self._tether)
+            self._tether = None
+        shutil.rmtree(self._jail_dir, ignore_errors=True)
+
+
+class _Jailed:
+    """A program brig started (`process`) in the jail `held`: interrupt is SIGINT to its group;
+    stop ends this program alone where the jail is shared (brig's `Process.stop`, which ends its
+    pid namespace), and the whole jail where it is this program's own. `report`, `notice`, `reads`
+    and `writes` are the jail's, read whether or not the program still runs."""
+
+    def __init__(self, held: _Held, process: Process) -> None:
+        self._held = held
+        self._process = process
+        self._stopping: asyncio.Future[None] | None = None
 
     def interrupt(self) -> bool:
         return self._process.interrupt()
 
     def ended(self) -> str:
-        """Why the jail ended its program itself (the host undid a mount, `tripped_for`), or ""."""
-        return self._wire.tripped if self._wire is not None else ""
+        """Why the jail ended its programs itself, this one among them (the host undid a mount,
+        `tripped_for`), or "". Every program in the jail says the same."""
+        return self._held.ended()
 
     def report(self) -> Mapping[str, str]:
-        """This start's grades: brig's, with `fs_read` best-effort while it holds a secret with a
+        """The jail's grades: brig's, with `fs_read` best-effort while it holds a secret with a
         mount the host can undo (`graded`)."""
-        return self._facts.report
+        return self._held.facts.report
 
     def notice(self) -> str:
-        """What the person should know about this start's jail (`notice_for`): on Linux, the
-        secrets it holds with a mount the host can undo; empty on darwin."""
-        return self._facts.notice
+        """What the person should know about this jail (`notice_for`): on Linux, the secrets it
+        holds with a mount the host can undo; empty on darwin."""
+        return self._held.facts.notice
 
     def reads(self) -> tuple[str, ...]:
-        """The trees this start's program can read, when that is all it can read (`told_reads`):
-        a Linux jail's allowlist (the system, the interpreter, the program's own directory,
-        bh-02's own code) and the roots it may write. Empty on darwin, whose jail reads
+        """The trees the jail's programs can read, when that is all they can read (`told_reads`):
+        a Linux jail's allowlist (the system, the interpreter, the directories its creating start
+        named, bh-02's own code) and the roots it may write. Empty on darwin, whose jail reads
         everything but the secrets."""
-        return self._facts.reads
+        return self._held.facts.reads
 
     def writes(self) -> tuple[str, ...]:
-        """The directories this start's program may write, but the jail's own scratch: the
-        project and what `write` adds."""
-        return self._facts.writes
+        """The directories the jail's programs may write, but its own scratch: the project and
+        what `write` adds."""
+        return self._held.facts.writes
 
     async def connect(self, *, limit: int) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
         """A stream to this start's program, through brig's verified dial (`Process.connect`,
@@ -848,45 +923,33 @@ class _Jailed:
             raise ConnectionError(str(refused)) from refused
         return await asyncio.open_connection(sock=sock, limit=limit)
 
-    def _write(self) -> None:
-        """The record as it stands: the placeholders, and which process group holds the jail they
-        are mounted in: a Linux jail's instance (`Jail.instance_group`: PID 1 of its namespaces,
-        which lives as long as they do, though the program ends first and a `setsid()` child of
-        it runs on), else the program's own, which leads its group. A sweep that read the
-        program's group would call a jail dead that a background server still holds."""
-        if self._record is not None:
-            group = self._jail.instance_group
-            with contextlib.suppress(OSError):
-                Path(self._record).write_text(
-                    record_text(self._made, self._process.pid if group is None else group)
-                )
-
     @property
     def stopped(self) -> bool:
-        """Whether it has been stopped, by whoever started it or by the jail's `release`."""
+        """Whether its owner has stopped it."""
         return self._stopping is not None
 
     async def stop(self) -> None:
-        """brig's teardown, then what the jail made, once: whoever started the program and the
-        jail's `release` may both stop it, and the second waits for the first."""
+        """End this program, once: a second stop waits for the first."""
         if self._stopping is None:
-            self._stopping = asyncio.ensure_future(self._teardown())
+            self._stopping = asyncio.ensure_future(self._stopped())
         await asyncio.shield(self._stopping)
 
-    async def _teardown(self) -> None:
-        if self._wire is not None:
-            await asyncio.to_thread(self._wire.stop)
-        report = await asyncio.to_thread(self._jail.destroy)
-        gone = all(item.outcome in (KillOutcome.ENDED, KillOutcome.ALREADY_GONE) for item in report.items)
-        if gone and self._lock is not None:
-            _clear_up(self._lock, self._made, self._record)
-        if self._lock is not None:
-            os.close(self._lock)
-            self._lock = None
-        if self._tether is not None:
-            os.close(self._tether)
-            self._tether = None
-        shutil.rmtree(self._jail_dir, ignore_errors=True)
+    async def _stopped(self) -> None:
+        """A jail of its own, or one already over, ends whole. In a shared jail, `Process.stop`
+        alone; a stop that could not end the program ends the jail, so what its owner stopped
+        never runs on."""
+        if not self._held.usable():
+            await self._held.end()
+            return
+        try:
+            report = await asyncio.to_thread(lambda: self._process.stop())
+        except AttributeError, SupervisorGone, SupervisorUnresponsive:
+            await self._held.end()  # its supervisor is gone, and the jail with it, or as good as
+            return
+        if any(item.outcome not in (KillOutcome.ENDED, KillOutcome.ALREADY_GONE) for item in report.items):
+            await self._held.end()
+        with contextlib.suppress(ValueError):
+            self._held.programs.remove(self)
 
 
 def _clear_up(lock: int, made: Sequence[tuple[str, str]], record: str | None) -> None:
@@ -944,16 +1007,35 @@ def _mark_of(path: str) -> str | None:
         return None
 
 
+def _started_in(jail: Jail, argv_for: ArgvFor, *, cwd: str) -> Process:
+    """Reserve-then-start (decision-184, decision-185, TASK-0079.31): `jail.channel("program")`
+    reserves a socket in the jail's own channel directory, `argv_for(reservation.bound_path)` is the
+    program's, and `channel=` the reservation binds it there, never a path `argv_for` chose on its
+    own.
+
+    Raises:
+        UnknownChannel: the compiled `Spec` declares no "program" channel (a bug here).
+        ReservationRefused: a reservation `jail.channel` just made was refused (unreachable
+            outside brig's own bugs: nothing else could race it, one reservation per start).
+        ExecWrapNotAPrefix: the compiled wrap is not a pure argv prefix.
+        TetherClosed: the jail's tether has already ended.
+        WorkloadSpawnFailed: the argv could not be spawned in the jail.
+        SupervisorGone: a supervised jail's control socket is closed.
+        SupervisorUnresponsive: its supervisor did not answer, and the jail was destroyed.
+        OSError: a record could not be written.
+    """
+    reservation = jail.channel("program")
+    argv = list(argv_for(reservation.bound_path))
+    return jail.start(argv, cwd=cwd, io=IoPolicy(), channel=reservation)
+
+
 def _launch(
     compiled: CompiledJail, *, argv_for: ArgvFor, cwd: str, jail_id: str, jail_dir: str, tether: int
 ) -> tuple[Jail, Process]:
-    """A jail of its own for `argv_for`: brig's `Jail.create` through the host runtime, tethered
-    to `tether` (the read end; the jail holds a duplicate), then reserve-then-start (decision-184,
-    decision-185, TASK-0079.31): `jail.channel("program")` reserves a socket in the jail's own
-    channel directory, `argv_for(reservation.bound_path)` is the program's, and `channel=` the
-    reservation binds it there, never a path `argv_for` chose on its own. A refused start (the
-    reservation included) changes nothing in brig (the jail is its creator's), so this ends the
-    jail itself before saying why: what `create` started (a `JAIL_LIFETIME` helper) never
+    """A new jail, with `argv_for` its first program: brig's `Jail.create` through the host runtime,
+    tethered to `tether` (the read end; the jail holds a duplicate), then `_started_in`. A refused
+    start (the reservation included) changes nothing in brig (the jail is its creator's), so this
+    ends the jail itself before saying why: what `create` started (a `JAIL_LIFETIME` helper) never
     outlives a start nobody was handed. The start's error is the one that crosses, whatever the
     ending found: each item it could not end, or its own failure, is a note on it (`_unended`).
 
@@ -973,9 +1055,7 @@ def _launch(
         compiled, runtime=HostRuntime(), cwd=cwd, jail_id=jail_id, jail_dir=jail_dir, tether=tether
     )
     try:
-        reservation = jail.channel("program")
-        argv = list(argv_for(reservation.bound_path))
-        return jail, jail.start(argv, cwd=cwd, io=IoPolicy(), channel=reservation)
+        return jail, _started_in(jail, argv_for, cwd=cwd)
     except BaseException as error:
         try:
             report = jail.destroy()
@@ -988,6 +1068,29 @@ def _launch(
             for note in _unended(jail_id, report.items):
                 error.add_note(note)
         raise
+
+
+def _outside(argv: Sequence[str], spec: Spec) -> tuple[str, ...]:
+    """The absolute paths `argv` names that a jail compiled to `spec` neither reads nor writes: what
+    a program started in it could not reach. A shared jail's reads are decided when it is created,
+    so a later start never adds to them, and one that names these is refused. Pure."""
+    roots = (*spec.fs.read_allows, *spec.fs.write_allows)
+    named = (arg for arg in argv if arg.startswith("/"))
+    return tuple(
+        path
+        for path in named
+        if not any(PurePosixPath(os.path.normpath(path)).is_relative_to(r) for r in roots)
+    )
+
+
+def _unreachable_message(paths: Sequence[str], cwd: str) -> str:
+    """What an owner reads when a start names what the session's jail can't reach."""
+    return (
+        f"runner:confined cannot start this program in the session's jail for {cwd}: it names "
+        f"{', '.join(paths)}, which that jail does not read. A jail's reads are decided when it is "
+        "created and never widened by a later start. Put the program in a directory bh-02's own "
+        "code is in (`host.code`), or under the project"
+    )
 
 
 def _unended(jail_id: str, items: Sequence[KillItem]) -> tuple[str, ...]:
@@ -1034,46 +1137,129 @@ class BrigJail:
         self._interpreters = host_interpreters() if interpreters is None else tuple(interpreters)
         # The grades are known before anything starts: compile once against a throwaway directory.
         # A platform brig has no preset for grades nothing; `start` says what to use instead.
-        # What each start is (its own grades among it) is kept with that start (`_Facts`).
+        # What a jail is (its own grades among it) is kept with it (`_Facts`).
         self._report: Mapping[str, str] = {}
-        # every program this jail started that may still run, and the starts under way: what
-        # `release` waits for (a start under way) and says still runs (an owner that kept its own)
-        self._live: list[_Jailed] = []
+        # every jail that may still run; the shared one for each directory, what the next start
+        # there joins; the starts under way, which `release` waits for; and what makes one start at
+        # a time choose a jail, so two owners starting at once share one
+        self._held: list[_Held] = []
+        self._shared: dict[str, _Held] = {}
         self._starting: set[asyncio.Future[None]] = set()
+        self._choosing = asyncio.Lock()
         if platform in _STACKS:
             with tempfile.TemporaryDirectory(prefix="bh-j-", dir="/tmp") as probe:
                 self._report = self.compile(probe, ".", ())[1]
 
     def report(self) -> Mapping[str, str]:
         """The grades, known before anything starts (what `approval` reads); no start changes
-        them. A started program's own are its `report()`."""
+        them. A started program's jail's are its `report()`."""
         return self._report
+
+    async def __aenter__(self) -> BrigJail:
+        return self
+
+    async def __aexit__(self, *_: object) -> None:
+        await self.close()
+
+    async def close(self) -> None:
+        """End every jail, whatever runs in it: for the runner row's own end, by when the rows that
+        depend on it have stopped their programs. A shared jail outlives its programs (the next one
+        starts in it), and this is what ends it, so what it made on the host goes with it."""
+        await asyncio.gather(*self._starting)
+        async with self._choosing:
+            for held in self._held:
+                await held.end()
+            self._held = []
+            self._shared = {}
 
     async def release(self) -> str:
         """For `/release`, once each owner has stopped its own program (`runner.Runner`): wait
-        for a start under way, sweep what jails that are gone left (each stop already removed what
-        its jail made once no jail runs), and say whether a program of this jail's still runs
-        (`released_for`). Empty when there is nothing to say."""
+        for a start under way, end every jail nothing runs in (the next start creates one), sweep
+        what jails that are gone left, and say whether a program still runs (`released_for`), whose
+        jail stays. Empty when there is nothing to say."""
         await asyncio.gather(*self._starting)  # a start under way: its placeholders made first
-        self._live = [started for started in self._live if not started.stopped]
+        async with self._choosing:
+            running = [
+                held
+                for held in self._held
+                if not held.over and any(not program.stopped for program in held.programs)
+            ]
+            for held in self._held:
+                if held not in running:
+                    await held.end()
+            self._held = running
+            self._shared = {cwd: held for cwd, held in self._shared.items() if held in running}
         await asyncio.to_thread(self._swept, records_dir(os.environ, str(Path.home())))
-        return released_for(running=bool(self._live))
+        return released_for(running=bool(running))
 
     async def start(self, argv_for: ArgvFor, *, cwd: str) -> _Jailed:
-        """Start `argv_for(path)` in `cwd`, in a jail of its own compiled from the policy, `path`
-        the socket it reserves for the program (reserve-then-start, `_launch`)."""
+        """Start `argv_for(path)` in `cwd`, `path` the socket reserved for the program
+        (reserve-then-start, `_started_in`): in the shared jail for `cwd` if there is one that can
+        take it, else in a new jail compiled from the policy, which only a program with namespaces
+        of its own shares with those after it (the module's docstring).
+
+        Raises:
+            RuntimeError: this platform has no preset, the jail can't start here, its program never
+                listened, or `argv_for` names what the shared jail can't reach (`_outside`).
+        """
         starting: asyncio.Future[None] = asyncio.get_running_loop().create_future()
         self._starting.add(starting)
         try:
-            started = await self._launched(argv_for, cwd=cwd)
-            self._live = [*(each for each in self._live if not each.stopped), started]
+            async with self._choosing:
+                held, process = await self._placed(argv_for, cwd=cwd)
+                started = _Jailed(held, process)
+                held.programs.append(started)
+            await self._until_ready(started, process)
             return started
         finally:
             self._starting.discard(starting)
             if not starting.done():  # a `release` cancelled as it waited cancels it
                 starting.set_result(None)
 
-    async def _launched(self, argv_for: ArgvFor, *, cwd: str) -> _Jailed:
+    async def _until_ready(self, started: _Jailed, process: Process) -> None:
+        """Readiness through the same verified dial as `connect` (decision-185): a planted link, or
+        an answer from outside the process's own group, refuses at once rather than waiting out
+        the timeout (decision-186).
+
+        Raises:
+            RuntimeError: the program never listened; it is stopped first.
+        """
+        try:
+            await asyncio.to_thread(process.wait_ready, _READY_TIMEOUT_S)
+        except BaseException as error:
+            log = Path(process.stderr_path)
+            detail = log.read_text(errors="replace")[-2000:] if log.is_file() else ""
+            await started.stop()
+            raise RuntimeError(f"the jailed program never listened: {error}\n{detail}") from error
+
+    async def _placed(self, argv_for: ArgvFor, *, cwd: str) -> tuple[_Held, Process]:
+        """A jail for `argv_for` and its program started there: the shared one for `cwd` while it
+        can take one, else a new one. A shared jail found over, or that ends as this start asks,
+        is ended, and this start goes to a new one: no owner's start fails for that.
+
+        Raises:
+            RuntimeError: `argv_for` names what the shared jail can't reach (`_outside`).
+        """
+        where = str(Path(cwd).resolve())
+        held = self._shared.get(where)
+        if held is not None and held.usable():
+            unreachable = _outside(tuple(argv_for("")), held.jail.spec)
+            if unreachable:
+                raise RuntimeError(_unreachable_message(unreachable, where))
+            with contextlib.suppress(SupervisorGone, SupervisorUnresponsive, TetherClosed):
+                return held, await asyncio.to_thread(_started_in, held.jail, argv_for, cwd=cwd)
+        if held is not None:
+            del self._shared[where]
+            await held.end()
+            self._held = [each for each in self._held if each is not held]
+        held, process = await self._launched(argv_for, cwd=cwd)
+        self._held = [*(each for each in self._held if not each.over), held]
+        held.shared = process.namespaces
+        if held.shared:
+            self._shared[where] = held
+        return held, process
+
+    async def _launched(self, argv_for: ArgvFor, *, cwd: str) -> tuple[_Held, Process]:
         stack_for(self._platform)  # refuses on a platform brig has no preset for
         if self._platform == "linux" and not Path(DEFAULT_BWRAP_PATH).exists():
             raise RuntimeError(
@@ -1090,7 +1276,7 @@ class BrigJail:
         record: str | None = None
         placed: list[tuple[str, str]] = []
         wire: Tripwire | None = None
-        # The jail ends with this process, however it ends (`_Jailed`). os.pipe's ends are not
+        # The jail ends with this process, however it ends (`_Held`). os.pipe's ends are not
         # inherited, so no other child of bh-02 (the Claude Code CLI) holds the write end.
         watched, tether = os.pipe()
         try:
@@ -1156,18 +1342,7 @@ class BrigJail:
                 lambda: still_running(running.destroy(grace=0.0)),
                 fallback=lambda: os.killpg(running.instance_group or process.pid, signal.SIGKILL),
             )
-        started = _Jailed(running, process, facts, jail_dir, placed, lock, record, tether, wire)
-        try:
-            # Readiness through the same verified dial as `connect` (decision-185): a planted
-            # link, or an answer from outside the process's own group, refuses at once rather
-            # than waiting out the timeout (decision-186).
-            await asyncio.to_thread(process.wait_ready, _READY_TIMEOUT_S)
-        except BaseException as error:
-            log = Path(process.stderr_path)
-            detail = log.read_text(errors="replace")[-2000:] if log.is_file() else ""
-            await started.stop()
-            raise RuntimeError(f"the jailed program never listened: {error}\n{detail}") from error
-        return started
+        return _Held(running, process, facts, jail_dir, placed, lock, record, tether, wire), process
 
     def compile(
         self,
@@ -1231,8 +1406,8 @@ class BrigJail:
         return jail, graded(report, holds)
 
     def _facts(self, spec: Spec, report: Mapping[str, str], absent: Collection[str], jail_dir: str) -> _Facts:
-        """What a start compiled to `spec` (in `jail_dir`; `absent`, the read denies that are not
-        there) is, for whoever started it: its grades, its notice, the trees it reads (Linux) and
+        """What a jail compiled to `spec` (in `jail_dir`; `absent`, the read denies that are not
+        there) is, for every program in it: its grades, its notice, the trees it reads (Linux) and
         the roots it may write but its scratch. The program's reserved socket lives in `jail_dir`
         (brig's own channel directory, decision-186), so excluding `jail_dir` excludes it too;
         `spec.fs.write_allows` never names it (the mechanism grants it on its own)."""

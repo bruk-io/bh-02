@@ -28,12 +28,16 @@ class _Started:
         self._endpoint = endpoint
         self._directory = directory
         self.connects = 0  # how often its owner dialled it: through `connect`, the only way
+        self.why = ""  # why the jail ended it itself: a test sets it, as a tripwire would
 
     def report(self) -> Mapping[str, str]:
         return _UNENFORCED
 
     def notice(self) -> str:
         return ""
+
+    def ended(self) -> str:
+        return self.why
 
     async def connect(self, *, limit: int) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
         """A plain connect to the worker's socket: this fake confines nothing, so nothing checks

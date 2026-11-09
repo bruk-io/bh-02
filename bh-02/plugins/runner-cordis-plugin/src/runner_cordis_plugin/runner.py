@@ -12,8 +12,8 @@ brig jail (`jail.BrigJail`, `runner:confined`) or none (`unconfined.Unjailed`,
 - A release ends with the next start, whoever starts: while `released()`, an owner that would
   start only to keep something warm (the extensions process) waits, and one the person asked for
   (an input, a change the model made) starts, ending it.
-- The grades of each start are reported to whoever watches (`on_start`): the status bar's
-  field, and an owner waiting for a release to end.
+- The grades of the jail each start runs in are reported to whoever watches (`on_start`): the
+  status bar's field, and an owner waiting for a release to end.
 """
 
 from asyncio import StreamReader, StreamWriter
@@ -27,8 +27,8 @@ __all__ = ["ArgvFor", "Mechanism", "Runner", "Started"]
 
 @runtime_checkable
 class Started(Protocol):
-    """A program a runner started: what its own start is (its grades, and what the person should
-    know of it), how to dial it and how to stop it."""
+    """A program a runner started: what the jail it runs in is (its grades, and what the person
+    should know of it), how to dial it and how to stop it."""
 
     def report(self) -> Mapping[str, str]: ...
     def notice(self) -> str: ...
@@ -44,8 +44,8 @@ class Mechanism(Protocol):
     """What starts a program: a brig jail, or nothing at all. Reserve-then-start: the mechanism
     picks where the program listens (a brig jail's channel directory; `unconfined`'s own scratch
     directory), never a path the owner chose, and calls `argv_for` with it for the argv to start
-    (a pure function: it may be called more than once, with the same path each time). `release`
-    lets go of what it holds on the host once no program of its runs, and says what that freed."""
+    (a pure function: it may be called more than once). `release` ends what nothing runs in, lets
+    go of what that held on the host, and says what still runs."""
 
     def report(self) -> Mapping[str, str]: ...
     async def start(self, argv_for: ArgvFor, *, cwd: str) -> Started: ...
@@ -67,11 +67,12 @@ class Runner:
         self._starts: Hooks[Watch] = Hooks()
 
     def report(self) -> Mapping[str, str]:
-        """The grades of the last start (before any, the mechanism's own)."""
+        """The grades of the jail of the last start (before any, the mechanism's own)."""
         return self._last.report() if self._last is not None else self._mechanism.report()
 
     def notice(self) -> str:
-        """What the person should know of the last start ("" before any, or when nothing)."""
+        """What the person should know of the jail of the last start ("" before any, or when
+        nothing)."""
         return self._last.notice() if self._last is not None else ""
 
     def released(self) -> bool:
@@ -99,8 +100,9 @@ class Runner:
         return self._starts.add(watch)
 
     async def release(self) -> str:
-        """`/release`: each owner stops its own process (`on_release`), then the mechanism lets
-        go of what it holds on the host; what each says, in that order. The runner is then
+        """`/release`: each owner stops its own process (`on_release`), then the mechanism ends
+        every jail nothing runs in and lets go of what it held on the host; what each says, in that
+        order. The runner is then
         `released` until its next start."""
         self._released = True  # before anything waits: from here on, an owner that waits starts nothing
         said = [await stop() for stop in tuple(self._releases)]

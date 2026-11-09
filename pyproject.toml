@@ -336,7 +336,7 @@ exclude = [
     # a copy of the text in a scratch directory of its own), the lines it prints
     "python_cordis_plugin.startup_check:main", "python_cordis_plugin.startup_check:_read",
     "python_cordis_plugin.startup_check:_ruffed", "python_cordis_plugin.startup_check:_mypied",
-    "runner_cordis_plugin.jail:BrigJail.*", "runner_cordis_plugin.jail:_Jailed.*",
+    "runner_cordis_plugin.jail:BrigJail.*", "runner_cordis_plugin.jail:_Jailed.*", "runner_cordis_plugin.jail:_Held.*",
     # the model's extensions: the directory they are written to, read every `watch` seconds, and
     # the status file the model reads; a socket to a worker a jail started, the worker program
     # itself (a cordis runtime of model-written modules), and the tests' plain-subprocess jail

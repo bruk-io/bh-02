@@ -101,8 +101,10 @@ _RELEASED = (
 @runtime_checkable
 class _Jailed(Protocol):
     """A program a jail started: dialled through the mechanism's own verified dial (`connect`),
-    never a path this row chose."""
+    never a path this row chose. `ended` says why the jail ended it itself (the host undid a mount,
+    which ends every program in the jail), or ""."""
 
+    def ended(self) -> str: ...
     async def connect(self, *, limit: int) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]: ...
     async def stop(self) -> None: ...
 
@@ -243,6 +245,7 @@ class Extensions:
         self._seen: dict[str, tuple[int, int]] = {}  # each file as last loaded: (mtime_ns, size)
         self._halted: dict[str, tuple[int, int]] | None = None  # the directory when the worker ended
         self._ended = False  # the worker ended (or `/release` kept one from starting) since the last look
+        self._why = ""  # why the jail ended the last worker itself, told with its status
         self._waiting = False  # `/release` stopped the worker: all load again once the runner starts again
         self._at_release: dict[str, tuple[int, int]] = {}  # the directory when `/release` stopped it
         self._leaving = False
@@ -361,7 +364,7 @@ class Extensions:
             self._statuses = {name: Status(error=_RELEASED) for name in found}
         else:
             self._halted = dict(found)
-            self._statuses = {name: Status(error=_ENDED) for name in found}
+            self._statuses = {name: Status(error=self._told()) for name in found}
         self._publish()
 
     async def _watch(self) -> None:
@@ -625,8 +628,12 @@ class Extensions:
 
     def _send(self, message: Mapping[str, Any]) -> None:
         if self._writer is None:
-            raise _Gone(_ENDED)
+            raise _Gone(self._told())
         self._writer.write((json.dumps(message) + "\n").encode("utf-8"))
+
+    def _told(self) -> str:
+        """That the worker ended, and why when the jail ended it itself."""
+        return f"{_ENDED} ({self._why})" if self._why else _ENDED
 
     async def _start(self) -> None:
         """Start the worker in the runner, unless it is running. A start ends a release
@@ -661,6 +668,7 @@ class Extensions:
             return
         self._writer.close()
         self._writer = None
+        self._why = self._process.ended() if self._process is not None else ""
         self._ended = not self._leaving
         for entry in self._entries.values():
             if entry.remove is not None:
@@ -669,7 +677,7 @@ class Extensions:
         waiting: list[asyncio.Future[Any]] = [*self._answers.values(), *self._calls.values()]
         for question in waiting:
             if not question.done():
-                question.set_exception(_Gone(_ENDED))
+                question.set_exception(_Gone(self._told()))
         self._answers.clear()
         self._calls.clear()
 

@@ -330,6 +330,18 @@ async def test_unjailed_each_extension_is_put_to_the_person_with_its_source(tmp_
         assert "todo" in h.commands.runs and h.extensions.statuses["todo"].ok
 
 
+async def test_a_worker_the_jail_ended_says_why_as_every_owner_of_that_jail_is_told(tmp_path: Path) -> None:
+    """The host undid a mount, which ends every program in the jail: the status says what the jail
+    says (`started.ended()`), and the extensions' worker is told as the Python process is."""
+    async with _running(tmp_path) as h:
+        h.write("todo", _TODO)
+        await h.extensions.look()
+        h.jail.started[0].why = "something on the host replaced .envrc"
+        h.write("exits", "import os\nos._exit(3)\n")
+        await h.extensions.look()
+        assert "something on the host replaced .envrc" in h.status()["todo"]["error"]
+
+
 async def test_an_extension_that_ends_the_worker_is_not_loaded_again_until_something_changes(
     tmp_path: Path,
 ) -> None:
