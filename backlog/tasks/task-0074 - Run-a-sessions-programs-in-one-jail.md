@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-10 18:42'
-updated_date: '2026-11-09 17:06'
+updated_date: '2026-11-10 18:26'
 labels:
   - runner
   - finish-moved
@@ -323,4 +323,6 @@ bh-01's tokens and bh-02's theme are in sync
 ```
 
 Reviewer close, 2026-11-09. Merged code equals the reviewed branch (git diff worktree-agent-ac718fdbbb720d740 main outside backlog is empty). #1-#5, #7, #8 judged met by the three pre-merge reviews; their remaining findings are TASK-0220 and TASK-0221. #6 met: record-check --tier full on main exit 0 (3876 passed, 268 skipped; format, lint, types, gates, docs, tokens ok), and the orchestrator's merged-main runs of scripts/linux-jail-check (exit 0, 367 passed, 5 skipped) and --root (exit 0, 714 passed, 14 skipped). The check reformatted nothing. TASK-0207: both criteria look met (cause named in these notes, the fake missing key_envs/models_file; renamed test passes under linux-jail-check); left open for the owner, and its title names the old test.
+
+2026-11-10: Shared session jail dropped by the port onto bruk-io/brig v0.1.0 (TASK-0176); now tracked as bruk-io/brig TASK-0060 (with TASK-0055 to TASK-0057).
 <!-- SECTION:NOTES:END -->
