@@ -13,8 +13,7 @@ has a CLAUDE.md of its own; read it before working there.
   - `libs/cordis/`: the composition framework - parts that can be added, replaced and removed while the program runs. Its `README.md` is the authoritative design doc; `libs/cordis/CLAUDE.md` is the code layout and its gate.
   - `libs/cordis-helpers/`: conveniences built on cordis with no domain in them: `Registry[T]` (the paper's broker, section 6.2, minus what the entries are), `Hooks[F]` (a set of callables, order-free) and `perform` (a row's queue of its own work, for what a command must not run in its caller's task). cordis stays the paper's mechanisms; a pattern goes here once a second use shows up.
   - `libs/host-paths/`: paths as bh-02's own process must judge them when the model can write some of them: the XDG config and state directories, every place reading a file goes through (`walked`, `passes`), the one opener, writer and remover of a file beneath a root through no link (`read_beneath`, `write_beneath`), and the one appender of a file kept for the person off the event loop at 0600 (`Appender`: the transcript, a sub-agent's event log, a session's row log). Standard library only, no cordis; the one definition for every package that trusts a file by where it is (`libs/host-paths/CLAUDE.md`).
-  - `libs/brig/`: a standalone sandbox library that knows nothing of cordis or any app (`libs/brig/CLAUDE.md`).
-- `bh-02/`: the coding harness. `plugins/` is its plugin family (one member per plugin, import name `<name>_cordis_plugin`), `CONTRACTS.md` their keys and shapes, `GLOSSARY.md` every term a bh-02 user meets (cordis's and bh-02's, one line each), `bh-02/CLAUDE.md` how the family and the running harness work. `bh-02/app/` is the app (package `bh_02`, the `bh-02` command: a Textual TUI over a CodeAct composition); its `README.md` is how it runs and the map of the compositions, rows and plugins.
+- `bh-02/`: the coding harness. `plugins/` is its plugin family (one member per plugin, import name `<name>_cordis_plugin`), `CONTRACTS.md` their keys and shapes, `GLOSSARY.md` every term a bh-02 user meets (cordis's and bh-02's, one line each), `bh-02/CLAUDE.md` how the family and the running harness work. `bh-02/app/` is the app (package `bh_02`, the `bh-02` command: a Textual TUI over a CodeAct composition); its `README.md` is how it runs and the map of the compositions, rows and plugins. The runner plugin (`runner:confined`) jails through [`bruk-io/brig`](https://github.com/bruk-io/brig) `v0.1.0` (one bubblewrap jail per program on Linux; on a Mac `runner:confined` refuses to start until `TASK-0196` lands Seatbelt, and `bh-02` runs with `runner:unconfined` via `--no-jail`).
 - `examples/warden/`: a second example app on cordis (a process supervisor), `app/` + `plugins/`, with its own README and CONTRACTS.md.
 - `pypeeker_rules/apps.py`: the custom rules that span packages. `scripts/`: repo tools. `backlog/`: Backlog.md task data.
 
@@ -32,7 +31,7 @@ uv sync --all-packages
 scripts/check                                             # the one definition of green: format, lint, types, tests, gates, docs; the steps run at once (it takes as long as the tests)
 scripts/check bh-02/plugins/python-cordis-plugin          # the same for one member (the gates always see everything)
 uv run pytest -q                                          # every member
-uv run pytest -q -n auto --dist loadgroup                 # every member on every core, as scripts/check runs it; tests that share host state (the jail lock) are grouped in the root conftest.py
+uv run pytest -q -n auto --dist loadgroup                 # every member on every core, as scripts/check runs it; tests that start real jails are grouped in the root conftest.py
 uv run pytest libs/cordis -q                              # one member
 uv run pytest libs/cordis/tests/test_runtime.py::test_name -q
 uv run ruff format .                                      # format
@@ -43,11 +42,11 @@ scripts/linux-jail-check                                  # the Linux jail (bubb
 uv run pytest -m "not real_launch"                        # skip the tests that launch the real app in a pty
 scripts/sync-tokens [--check] [--bh-01 PATH]              # bh-01's token CSS -> bh-02's Textual theme (reads ../bh-01)
 scripts/model-friction [--model NAME] [--examples N] [--json]  # where models trip in bh-02 sessions here: wrong tools, shell habits, errors, lost output, nudges
-uv run bh-02                                              # the harness: a CodeAct session in a TUI, Claude through Claude Code, with the subscription token or a company gateway
-uv tool install --editable ./bh-02/app                    # bh-02 as a command on your PATH, every plugin from this checkout (--reinstall after a pull that adds or renames one)
+uv run bh-02                                              # the harness: a CodeAct session in a TUI (confined on Linux, one bubblewrap jail per program; on a Mac, pass --no-jail)
+uv tool install --editable ./bh-02/app                    # use it daily: bh-02 as a command on your PATH, every plugin from this checkout (--reinstall after a pull that adds or renames one)
 uv run bh-02 --resume [ID]                                # continue this directory's newest session (or ID: whole, its start, or its last part)
 uv run bh-02 sessions                                     # this directory's sessions, newest first
-uv run bh-02 --no-jail                                    # the Python process runs with your permissions; every input asks
+uv run bh-02 --no-jail                                    # runner:unconfined (required on a Mac until TASK-0196 lands Seatbelt): the Python process runs with your permissions; every input asks
 uv run bh-02 --model claude/opus                          # choose the model, ENDPOINT/MODEL, from the endpoints in ~/.config/bh-02/models.toml (no models are built in; its `default` is used otherwise; a session keeps it; /model lists and switches)
 uv run bh-02 --patch mine.toml                            # a layer of your own over the shipped composition
 uv run bh-02 --trace FILE                                 # every row's lifecycle event, appended to FILE
@@ -71,7 +70,7 @@ Formatting and fixing happen by default. A `PostToolUse` hook in `.claude/settin
 hand-format. Files changed outside Claude Code still need `uv run ruff format . && uv run ruff check .`.
 
 pytest runs with `asyncio_mode = "auto"`, so async tests need no marker. Tests import members by
-package name with no `sys.path` changes (brig is the one exception; see its CLAUDE.md). pytest
+package name with no `sys.path` changes. pytest
 uses `--import-mode=importlib`, so test modules are named from the repo root
 (`libs.cordis.tests.test_runtime`; a row naming a test module's component uses `__name__`) and
 pytest itself accepts the same test file name in two members. pypeeker names a test module by

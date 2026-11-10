@@ -119,14 +119,16 @@ What to keep when changing it; the detail is where each line points.
 - **No command restarts rows in the chat row's task**: it queues them in `jobs`, and the chat row
   reads its next line only once `jobs.settled()`.
 - **Only a layer's rows act in bh-02's process**: only they add to `asides` or claim a line prefix
-  (`!` runs in the person's shell). An extension gets four keys that only add, never one that
+  (`!` runs in the person's shell). An extension gets five keys that only add or ask, never one that
   replaces or reaches the composition (the loader, `runner`, `model`) (extensions plugin).
 - **Never read on the host a file the model can write, or follow a link it could make, and hand
   its text to the model**: read it through `host_paths`, or in the jail. Nor write one on the host
   through a link it could have made: `host_paths.write_beneath`.
 - **What the host trusts, the jail keeps from the model**: a file the host reads and trusts, or
   code it imports, is in `host` and `runner:confined` denies writing it; a secret is in
-  `host.secrets`. The policy is one pure function, `spec_for`
+  `host.secrets`. `runner:confined` starts one `brig` (`bruk-io/brig` `v0.1.0`) jail per program on
+  Linux, and refuses to start on darwin naming `runner:unconfined` and `TASK-0196`. The policy is
+  one pure function, `spec_for`
   ([runner plugin's README](plugins/runner-cordis-plugin/README.md)).
 - **Each owner stops its own program** on `/release`; the runner never stops a row's program.
 - **Claude Code only carries steps**: no built-in tool, settings (but a gateway's one layer of

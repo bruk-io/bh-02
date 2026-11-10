@@ -57,7 +57,6 @@ These guarantees are asserted as the paper's theorems over random histories of o
 | [`libs/cordis`](libs/cordis) | the pattern: components, effects, keys, fibers, rows, layers, the loader |
 | [`libs/cordis-helpers`](libs/cordis-helpers) | small building blocks on cordis: a broker's registry, a set of hooks |
 | [`libs/host-paths`](libs/host-paths) | where the person's directories are, and every place reading a file goes through: the one definition for every package that trusts a file by where it is |
-| [`libs/brig`](libs/brig) | a sandbox library, independent of cordis: a spec compiled into honestly graded enforcement |
 | [`bh-02`](bh-02) | a coding agent built as cordis rows: its app in `app/`, its plugins in `plugins/` |
 | [`examples/warden`](examples/warden) | a process supervisor built the same way, with no model in it |
 
@@ -72,7 +71,7 @@ plugin:
 | `loop` | `agent:loop` | the agent loop: sends the conversation, runs the tool calls |
 | `tools` | `agent:tools` | the tools the model is offered: a broker rows register a tool with, offered in name order |
 | `python` | `python:tool` | the `python(code)` tool it registers: a Python REPL of the model's own, which persists for this run of bh-02 |
-| `runner` | `runner:confined` | what starts the Python process: in brig's sandbox |
+| `runner` | `runner:confined` | what starts each program: in [brig](https://github.com/bruk-io/brig)'s sandbox (one jail per program on Linux; on a Mac it refuses and bh-02 runs with `runner:unconfined`) |
 | `ui` | `tui:ui` | the terminal app, on [bh-01](https://github.com/bruk-io/bh-01)'s design tokens |
 | `extensions` | `extensions:process` | the model's own plugins: cordis components it writes, loaded while bh-02 runs, in a jail of their own |
 | `chat`, `transcript`, `system`, `commands`, ... | | the conversation, its record, the project context, the slash commands |
@@ -86,34 +85,50 @@ defines every term.
 
 ### Running it
 
-You need [uv](https://docs.astral.sh/uv/) and Python 3.15 (uv fetches it). The sandbox runs on
-macOS, and on Linux with bubblewrap installed (the `bubblewrap` package); elsewhere, pass
-`--no-jail`.
+You need [uv](https://docs.astral.sh/uv/) and Python 3.15 (uv fetches it). On Linux, the sandbox
+runs with bubblewrap installed (the `bubblewrap` package), one jail per program. On a Mac,
+`runner:confined` refuses to start (until `TASK-0196` lands a Seatbelt jail in `bruk-io/brig`) and
+`bh-02` runs with `runner:unconfined` (`bh-02 --no-jail`).
 
 ```sh
 git clone https://github.com/bruk-io/bh-02 && cd bh-02
 uv sync --all-packages
 claude setup-token                        # the subscription's token; a gateway (base_url, key) needs none
 export CLAUDE_CODE_OAUTH_TOKEN=<the token>   # or from direnv, `op run`, your profile: the endpoint's `key` names it
-cd ~/some/project && ~/path/to/bh-02/.venv/bin/bh-02
+cd ~/some/project && ~/path/to/bh-02/.venv/bin/bh-02             # Linux (bubblewrap)
+cd ~/some/project && ~/path/to/bh-02/.venv/bin/bh-02 --no-jail   # macOS (runner:unconfined)
 ```
 
-Or install it as a command on your `PATH`, from the checkout:
+### Use it daily
+
+Install `bh-02` once as a command on your `PATH`, directly from the checkout:
 
 ```sh
 uv tool install --editable ./bh-02/app    # every plugin installed from the checkout, so a git pull updates it
-cd ~/some/project && bh-02
 ```
 
 The plugins and libraries are installed from the checkout itself. After a pull that adds or renames a
-plugin, or changes a dependency, run the same command with `--reinstall`: a command reads its
-plugins from what is installed, so until then a row naming a renamed plugin is reported as
+plugin, or changes a dependency, run `uv tool install --editable --reinstall ./bh-02/app`: a command
+reads its plugins from what is installed, so until then a row naming a renamed plugin is reported as
 unresolved.
 
-The model acts in Python, at a REPL of its own that persists for this run of bh-02. In the sandbox its
-code runs without asking: it can write inside
-the project, but it can't reach the network, read credentials, or touch what could run code later
-(`.git/hooks`, shell rc files, bh-02's own layers). With `--no-jail`, every input asks first.
+With `~/.config/bh-02/models.toml` in place and your model credential exported in your shell profile
+(or loaded through `direnv` or `op run`), start it from any project directory:
+
+```sh
+cd ~/some/project
+bh-02                  # on Linux: confined in brig (one bubblewrap jail per program)
+bh-02 --no-jail        # on a Mac: runs with runner:unconfined and asks before each input
+bh-02 --resume         # continue this directory's latest session (or pass a session ID)
+bh-02 sessions         # list this directory's sessions, newest first
+```
+
+The model acts in Python, at a REPL of its own that persists for this run of bh-02. In the sandbox
+(one jail for the Python REPL, another for the extensions process) its code runs without asking: it
+can write inside the project, but it can't reach the network, read credentials, or touch what could
+run code later (`.git/hooks`, shell rc files, bh-02's own layers). With `--no-jail`
+(`runner:unconfined`), every input asks first. The jail can be given more, one grant at a time, only
+when you say so (once, always or no): [Grants](docs/bh-02/using/jail.md#grants).
 Ctrl-C stops a reply, Ctrl-P opens the command palette, `bh-02 --resume` continues a session.
 
 bh-02 has no models built in: name yours in `~/.config/bh-02/models.toml`, one table per endpoint
@@ -145,7 +160,7 @@ A layer of your own changes a row, applied with `bh-02 --patch mine.toml`:
 ```toml
 [[plugin]]
 id = "runner"
-config = { allow = ["CLAUDE.md", "AGENTS.md", ".git/config"] }   # let inputs write .git/config too
+config = { env = ["PATH", "HOME", "LANG", "LC_ALL", "TERM", "GITHUB_TOKEN"] }   # let this variable through
 ```
 
 A new part is a plugin: a package with components, registered as a `cordis.plugins` entry point,
@@ -178,27 +193,25 @@ The techniques above, and where to read them in real code:
 | **Watching the program change** (`observe`) | `tui:ui` | the terminal app hears every lifecycle event and shows `↻ model reloaded` as rows reload |
 | **Two consumers, two contracts** | the `runner` key | the python row needs a start (`start`, `on_release`); the grades row needs each start's grades (`report`, `on_start`); each declares its own Protocol for the same value |
 | **Stable rows around volatile ones** | bh-02's `ui`, `status` and `grades` rows | the app's row depends on nothing but its config, so it never reloads; the small status-bar rows depend on what never restarts (the grades row is told each start by the runner), so `/clear` reloads none of the screen |
-| **A program's own user adds parts while it runs** | `extensions:process` | the model writes cordis components into the project's `.bh-02/plugins/`; each loads in the extensions process, a second jailed process, reaches bh-02 only through four keys that add (a command, a status field, prompt text, a tool whose calls run in that process), and is undone in reverse when its file changes or goes |
+| **A program's own user adds parts while it runs** | `extensions:process` | the model writes cordis components into the project's `.bh-02/plugins/`; each loads in the extensions process, a second jailed process, reaches bh-02 only through five keys that add or ask (a command, a status field, prompt text, a tool whose calls run in that process, a grant), and is undone in reverse when its file changes or goes |
 | **Who owns the main thread** | `warden --tray` | the macOS menu-bar app needs the main thread, so the composition runs on a background thread and quitting the tray unwinds it through the same shutdown |
 
 ## brig: sandboxes that say what they enforce
 
-[`libs/brig`](libs/brig) runs untrusted processes in a jail. A `Spec` describes the jail
-(filesystem, network, limits, environment, channels), and mechanisms compile parts of it and
-compose into a stack: Seatbelt on macOS, bubblewrap and cgroups on Linux, an egress proxy,
-rlimits, environment scrubbing, containers.
+[brig](https://github.com/bruk-io/brig) runs untrusted processes in a jail and grades how well
+each part of it is enforced: every axis is reported as `enforced`, `best_effort`, `cooperative`
+or `unenforced`, according to what the jail can actually deliver. A sandbox that quietly
+enforces less than you asked for is worse than none; brig says exactly what you got.
 
-Its central idea is **honest grading**. Every axis of enforcement is reported as `enforced`,
-`best_effort`, `cooperative` or `unenforced`, according to what the stack can actually deliver,
-and `probe()` proves the grades by attempting violations from inside the jail. A sandbox that
-quietly enforces less than you asked for is worse than none; brig says exactly what you got.
-
-brig stands alone: it imports only the standard library, knows nothing of cordis or bh-02, and
-has its own architecture gate. bh-02 reaches it through one plugin, the runner's `runner:confined`, which turns
-bh-02's rules into a `Spec`: the project writable, bh-02's own files and the sessions' state not, no
-network. bh-02's status bar shows the grades it got (`jail: jailed fs_write ✓ network ✓ ...`).
-bh-02 wires brig's macOS stack (seatbelt) and its Linux one (bubblewrap).
-[`libs/brig/SPEC.md`](libs/brig/SPEC.md) is its contract.
+brig is a standalone repository ([`bruk-io/brig`](https://github.com/bruk-io/brig)), which bh-02
+depends on at tag `v0.1.0` (in the runner plugin's `pyproject.toml`, outside this workspace).
+bh-02 reaches it through one plugin, the runner's `runner:confined`, which turns
+bh-02's rules into one jail per program: the project writable, bh-02's own files and the sessions'
+state not, no network but the destinations you grant, through its egress proxy. bh-02's status bar
+shows the grades it got (`jail: jailed fs_write ✓ network ✓ ...`).
+brig's jail is bubblewrap, on Linux only for now (on a Mac, `runner:confined` refuses to start and
+names `runner:unconfined` until `TASK-0196` lands a Seatbelt jail); its contract is in its own
+repository (`docs/spec/index.md`).
 
 ## Development
 
