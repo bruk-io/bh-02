@@ -56,6 +56,11 @@ def test_every_shipped_layer_names_a_plugin_component_for_every_row() -> None:
     assert resolve(rows["executor"].use or "").inject == set()
     assert "executor" in resolve(rows["loop"].use or "").inject
     assert resolve(rows["python"].use or "").name == "tool"  # CodeAct, whichever model
+    # what /compact tells the model of the REPL: the python row adds to `carried`, a broker that
+    # depends on nothing, and the conversation row reads it, so neither reloads the other
+    assert rows["carried"].use == "agent:carried" and resolve(rows["carried"].use or "").inject == set()
+    assert "carried" in resolve(rows["python"].use or "").inject
+    assert "carried" in resolve(rows["conversation"].use or "").inject
     # one rule decides whether the model's code runs unasked, for the loop, the extensions and
     # the python tool alike; it depends on the runner alone, so /clear leaves it up, and asking
     # the person is the asker's (the loop and the extensions depend on `output` for it)

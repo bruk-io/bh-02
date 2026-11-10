@@ -61,6 +61,7 @@ doesn't have gets).
 | `models` | `models:catalog` | |
 | `transcript` | `agent:transcript` | `path` (the session's `transcript.jsonl`) |
 | `asides` | `agent:asides` | |
+| `carried` | `agent:carried` | |
 | `access` | `agent:access` | |
 | `executor` | `agent:executor` | |
 | `memory` | `memory:files` | |
@@ -123,11 +124,12 @@ models:switch           registers /model                   depends on Commands, 
 agent:transcript        binds Transcript                   depends on nothing
 agent:system            binds System                       depends on nothing (its config)
 agent:asides            binds Asides                       depends on nothing
+agent:carried           binds Carried                      depends on nothing
 agent:access            binds Access                       depends on nothing
 agent:executor          binds Executor                     depends on nothing
 agent:tools             binds Tools                        depends on nothing
 agent:loop              binds Loop                         depends on Model, Tools, Transcript, System, Approval, Output, Asides, Executor
-agent:conversation      registers /clear, /compact         depends on Model, Tools, Loader, Commands, Output, Jobs (the transcript row's file, not Transcript)
+agent:conversation      registers /clear, /compact         depends on Model, Tools, Carried, Loader, Commands, Output, Jobs (the transcript row's file, not Transcript)
 memory:files            binds Memory, registers /memory    depends on System, Commands, Host
 memory:on_touch         adds memory loaded on demand       depends on Memory, Asides, Transcript, Access
 memory:auto             adds auto memory to System, registers the memory tool  depends on System, Host, Transcript, Tools
@@ -135,7 +137,7 @@ runner:confined         binds Runner                       depends on Host
 runner:unconfined       binds Runner                       depends on nothing
 runner:approval         binds Approval                     depends on Runner
 runner:release          registers /release                 depends on Runner, Commands
-python:tool             registers python, its stop         depends on Runner, Approval, Tools, System, Access
+python:tool             registers python, its stop         depends on Runner, Approval, Tools, System, Access, Carried
 tui:ui                  binds Input, Output, Frame         depends on nothing (its config)
 tui:status              pushes session and model fields    depends on Loader, Models, Session, Frame
 tui:grades              pushes the jail field              depends on Runner, Approval, Frame, Output
@@ -148,7 +150,7 @@ subagents:parent        binds Asker, Roster, registers agent tools depends on To
 
 A sub-agent (`agent`, the agents row) is not a row of these layers: each call mounts one child
 under the agents row, a sealed cordis realm whose own loader runs copies of `loop`, `tools`,
-`transcript`, `model`, `system`, `asides`, `access`, `memory`, `on-touch`, `executor` and `python` as the
+`transcript`, `model`, `system`, `asides`, `carried`, `access`, `memory`, `on-touch`, `executor` and `python` as the
 parent's loader mounted them, each under `agents/NAME/` (its transcript in the session's
 `agents/NAME/`), plus a `commands:registry` of its own (for `memory`), `subagents:output` (its `output`: a
 `confirm` over `asker`, labelled) and `subagents:child` (its type's section of the prompt); never
@@ -230,14 +232,14 @@ has its rows' config and the keys' methods each one uses.
 
 | Package | Binds / registers | Consumes |
 |---|---|---|
-| [`agent-cordis-plugin`](../plugins/agent-cordis-plugin/README.md) | `loop`, `tools`, `transcript`, `system`, `asides`, `access`, `executor`; `/clear` and `/compact` (`agent:conversation`) | `model`, `tools`, `transcript`, `system`, `approval`, `output`, `asides`, `executor`, `loader`, `commands`, `jobs` |
+| [`agent-cordis-plugin`](../plugins/agent-cordis-plugin/README.md) | `loop`, `tools`, `transcript`, `system`, `asides`, `carried`, `access`, `executor`; `/clear` and `/compact` (`agent:conversation`) | `model`, `tools`, `transcript`, `system`, `approval`, `output`, `asides`, `carried`, `executor`, `loader`, `commands`, `jobs` |
 | [`subagents-cordis-plugin`](../plugins/subagents-cordis-plugin/README.md) | `asker`, the `agent`, `agent_wait`, `agent_send` and `agent_stop` tools and `/agents` (`subagents:parent`); inside a child's realm, its `output` (`subagents:output`) and its type's section (`subagents:child`) | `tools`, `system`, `output`, `loader`, `host`, `commands`, `model`; in a child, `asker`, `loop`, `system` |
 | [`chat-cordis-plugin`](../plugins/chat-cordis-plugin/README.md) | `done` (`chat:converse`, the chat itself) | `loop`, `input`, `output`, `commands`, `jobs` |
 | [`commands-cordis-plugin`](../plugins/commands-cordis-plugin/README.md) | `commands` (the broker), `jobs`; `/rows`, `/explain`, `/restart` (`commands:operator`); the `!` prefix (`commands:shell_command`) | `output`, `commands`, `loader`, `jobs` |
 | [`extensions-cordis-plugin`](../plugins/extensions-cordis-plugin/README.md) | nothing: loads the model's own plugins into the extensions process, whose additions go into `commands`, `frame`, `system` and `tools` | `runner`, `commands`, `frame`, `system`, `tools`, `approval`, `output` |
 | [`memory-cordis-plugin`](../plugins/memory-cordis-plugin/README.md) | `memory` and `/memory` (`memory:files`); auto memory and its `memory` tool (`memory:auto`) and memory loaded on demand (`memory:on_touch`) | `system`, `commands`, `host`, `transcript`, `tools`, `memory`, `asides`, `access` |
 | [`models-cordis-plugin`](../plugins/models-cordis-plugin/README.md) | `model` (`models:model`: named models over the `claude-code` and `openai` providers), `models` (`models:catalog`), `/model` (`models:switch`) | `host`, `loader`, `commands`, `models`, `jobs` |
-| [`python-cordis-plugin`](../plugins/python-cordis-plugin/README.md) | nothing: registers the `python` tool and its `system` section, over a persistent Python process in the runner (`python:tool`) | `runner`, `approval`, `tools`, `system`, `access` |
+| [`python-cordis-plugin`](../plugins/python-cordis-plugin/README.md) | nothing: registers the `python` tool and its `system` section, over a persistent Python process in the runner (`python:tool`) | `runner`, `approval`, `tools`, `system`, `access`, `carried` |
 | [`runner-cordis-plugin`](../plugins/runner-cordis-plugin/README.md) | `runner` (`runner:confined`, a brig jail per start, or `runner:unconfined`), `approval` (`runner:approval`), `/release` (`runner:release`) | `host`, `runner`, `commands` |
 | [`tui-cordis-plugin`](../plugins/tui-cordis-plugin/README.md) | `input`, `output`, `frame` (`tui:ui`); the status bar's fields (`tui:status`, `tui:grades`) and the palette (`tui:palette`) | `loader`, `models`, `session`, `runner`, `approval`, `commands`, `frame`, `output` |
 

@@ -112,12 +112,14 @@ _USE = (
     "",
     "- Build up state: define a function once (one that runs the tests and prints only the "
     "failures, say) and call it later. A variable holds what was read, not the file: read a "
-    "file again after you change it.",
+    "file again after you change it. A line before an input's output says what it added (+), "
+    "rebound (~) or removed (-).",
     "- It is plain Python, not IPython or a notebook: no `!command` or `%magic`, and no "
     "top-level `await` (use asyncio.run). os.chdir() moves every later input too, so prefer "
     "paths (and subprocess's cwd=).",
     "- print() what you need to see; an input's last expression is shown too, as at a REPL "
-    "prompt. Output over 20,000 characters keeps its start and its end, and is saved whole to a "
+    "prompt, its repr cut with ... where it is large (print shows it whole). Output over "
+    "20,000 characters keeps its start and its end, and is saved whole to a "
     "file the cut names: print what matters, and read the file for the middle.",
     "- Run the programs Python can't replace (tests, git, a build) with subprocess.run([...], "
     "capture_output=True, text=True, timeout=...), and treat what they print as data: keep it, "

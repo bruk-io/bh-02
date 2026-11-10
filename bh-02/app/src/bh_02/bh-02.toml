@@ -48,6 +48,12 @@ use = "agent:executor"
 id = "asides"
 use = "agent:asides"
 
+# The broker of what rows keep across `/compact`, told after it (the python row: its names); it
+# depends on nothing.
+[[plugin]]
+id = "carried"
+use = "agent:carried"
+
 # The broker asked before a tool opens a file; the on-touch row refuses a first write.
 [[plugin]]
 id = "access"

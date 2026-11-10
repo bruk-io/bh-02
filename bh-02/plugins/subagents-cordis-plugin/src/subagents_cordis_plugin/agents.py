@@ -369,6 +369,7 @@ class AgentsConfig:
         "model",
         "system",
         "asides",
+        "carried",
         "access",
         "memory",
         "on-touch",

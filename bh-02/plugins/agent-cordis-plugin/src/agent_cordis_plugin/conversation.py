@@ -14,7 +14,11 @@ never sent a call with no result after it; the file's entries are never changed.
 seeds the transcript's file (`seeded`, written whole by `transcript.rewrite`, the old file kept
 beside it), and the loop and its transcript restart: the new conversation holds no prompt yet, so
 the loop reads it afresh, folding in whatever changed since the old one began, and tells the date
-again. The python row is left alone, since the summary names what its namespace holds. `/clear` is
+again. The python row is left alone, and what it keeps is told: each function in the `carried` broker
+is called as /compact runs (`carried`, off the event loop; one that raises is left out, never
+failing /compact), and the lines they give go under the summary request, so the summary is
+written knowing the real names, and into the new conversation's first message, worded as what was
+held when it was compacted, since that message stays for good and a resume's REPL is empty. `/clear` is
 the same rewrite with an empty conversation, and restarts the python row too (`clear`): nothing is
 lost for good, the old conversation is the `.bak` beside the file.
 
@@ -34,13 +38,13 @@ chat row reads its next line only once the restart is done, so the line reaches 
 transcript left mounted by a restart that failed is the old conversation's over the new one's file,
 and refuses the next reply before the model is asked (`transcript.TranscriptReplaced`, naming
 `/restart transcript`) rather than write it into either.
-The pure parts (`asked`, `seeded`, `kept_in`, `_is_seed`, `_unsaid`, `_unusable`, `_summed`,
+The pure parts (`asked`, `seeded`, `kept_in`, `_gathered`, `_is_seed`, `_unsaid`, `_unusable`, `_summed`,
 `_answer`, `_unchanged`, `_cleared`, `unrestarted`) decide; the rest reads, writes and asks.
 """
 
 import asyncio
 import datetime
-from collections.abc import AsyncGenerator, AsyncIterator, Callable, Mapping, Sequence
+from collections.abc import AsyncGenerator, AsyncIterator, Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
@@ -57,6 +61,7 @@ __all__ = [
     "CLEAR",
     "COMPACT",
     "ConversationConfig",
+    "Kept",
     "Offered",
     "Queue",
     "Rows",
@@ -95,11 +100,23 @@ _ASK = (
     "gone. Write it for yourself, to carry on the work from: what the person asked for and still "
     "wants, in their words where those matter; what has been done, and what is left; the files "
     "read, written or changed, and why; what was decided, and why; the errors met and how they "
-    "were fixed; and what you were about to do next. Your Python namespace is kept: name what in "
-    "it the work needs (variables, functions, imports) and what each holds. Do not call python: "
+    "were fixed; and what you were about to do next. {namespace} Do not call python: "
     "answer with the summary alone, in plain text.)"
 )
+# The summary's sentence about the namespace: what it names, and, when bh-02 lists the names
+# (`_LISTED`), that the list is below.
+_NAMESPACE = (
+    "Your Python namespace is kept: name what in it the work needs (variables, functions, imports) "
+    "and what each holds."
+)
+_NAMESPACE_LISTED = (
+    "Your Python namespace is kept, and bh-02 lists its names below, read from the Python process: "
+    "name what in it the work needs (variables, functions, imports) and what each holds, "
+    "which the list does not."
+)
 _KEEP = "(The person asks that the summary keep, in particular: {})"
+# What the rows that keep something across /compact say of it, read as /compact runs.
+_LISTED = "(bh-02, read just now:\n{lines})"
 # The new conversation's first message, before the summary (the model's own, as its answer). It
 # stays at the conversation's start for good, a resume's included, so it says only what stays
 # true: the namespace was kept when the conversation was compacted, and empties as the python
@@ -109,6 +126,12 @@ _SEEDED = (
     "of it you wrote, which follows. Your Python namespace was kept when it was compacted, holding "
     "what the earlier inputs defined; it empties as your instructions about python say (bh-02 "
     "starting again, a resumed session too), so check that a name is still there before relying on it.)"
+)
+# After _SEEDED, when rows reported what they kept: past tense, because this message stays at the
+# conversation's start for good and a resumed session's REPL is empty.
+_SEEDED_LISTED = (
+    "(bh-02, read when the conversation was compacted, so what was held then and not necessarily "
+    "now:\n{lines})"
 )
 # Shown as the summary step begins: a command shows nothing until it answers.
 _ASKING = (
@@ -154,6 +177,14 @@ class Offered(Protocol):
     would."""
 
     def specs(self) -> Sequence[Json]: ...
+
+
+@runtime_checkable
+class Kept(Protocol):
+    """What /compact needs of the `carried` value: the functions rows add, each called as
+    `fn() -> str` as /compact runs, for one line of what the row keeps across it ('' for none)."""
+
+    def __iter__(self) -> Iterator[Callable[[], str]]: ...
 
 
 @runtime_checkable
@@ -227,18 +258,27 @@ def kept_in(row: str, mounted: object, state: str | None) -> str:
     return path
 
 
-def asked(messages: Sequence[Json], keep: str = "", *, at: datetime.datetime) -> list[Json]:
+def asked(
+    messages: Sequence[Json], keep: str = "", *, at: datetime.datetime, carried: Sequence[str] = ()
+) -> list[Json]:
     """The summary request over a transcript's `messages`: the conversation as the loop sends it,
     then bh-02 asking for the summary (and for what the person asks it to keep, if anything).
     A call the transcript leaves unanswered (a process died mid-call) is answered in the request
     as the loop answers it at its next reply, `loop.lost_answers` made at `at`, so every call has
-    a result; `messages` themselves are not changed."""
-    ask = "\n\n".join([_ASK, *([_KEEP.format(keep.strip())] if keep.strip() else [])])
+    a result; `messages` themselves are not changed. `carried` are the lines rows give of what
+    they keep (`_gathered`), last in the request, and the request then says its list is there."""
+    ask = "\n\n".join(
+        [
+            _ASK.format(namespace=_NAMESPACE_LISTED if carried else _NAMESPACE),
+            *([_KEEP.format(keep.strip())] if keep.strip() else []),
+            *([_LISTED.format(lines="\n".join(carried))] if carried else []),
+        ]
+    )
     whole = [*messages, *lost_answers(messages, at)]
     return [*request_for(whole), {"role": "user", "content": ask}]
 
 
-def seeded(summary: str, keep: str, step: StepRecord) -> list[Json]:
+def seeded(summary: str, keep: str, step: StepRecord, carried: Sequence[str] = ()) -> list[Json]:
     """The new conversation, before its first message: bh-02 saying what it carries on from,
     then the summary as the model's answer, so the roles still alternate. No prompt: the loop
     reads it afresh for the first message and keeps it as the conversation's first `system`
@@ -247,11 +287,31 @@ def seeded(summary: str, keep: str, step: StepRecord) -> list[Json]:
     The first entry says when the conversation began (`at`, the moment the summary step's request
     was handed to the model) and carries `seed`: `keep`, the text the person asked the summary to
     keep (`""` for none). The second carries the summary `step`'s record (`at`, `first_chunk`,
-    `took`, `model`, `usage`, `settings`), the first step of the conversation."""
+    `took`, `model`, `usage`, `settings`), the first step of the conversation. The first entry's
+    text ends with the `carried` lines when there are any (`_SEEDED_LISTED`)."""
+    told = "\n\n".join([_SEEDED, *([_SEEDED_LISTED.format(lines="\n".join(carried))] if carried else [])])
     return [
-        {"role": "user", "content": _SEEDED, "at": step["at"], "seed": {"keep": keep.strip()}},
+        {"role": "user", "content": told, "at": step["at"], "seed": {"keep": keep.strip()}},
         {"role": "assistant", "content": summary.strip(), "step": step},
     ]
+
+
+def _gathered(lines: Sequence[object]) -> list[str]:
+    """What rows gave of what they keep (`Kept`), as lines: each non-empty text, stripped; the
+    entries that raised are already gone (`_carried_by`), and anything but text is left out."""
+    return [each.strip() for each in lines if isinstance(each, str) and each.strip()]
+
+
+def _carried_by(entries: Iterator[Callable[[], str]]) -> list[object]:
+    """Call each entry of `carried`: what it returned, or nothing if it raised (a row's line
+    about itself never fails /compact). Blocking calls: run off the event loop."""
+    said: list[object] = []
+    for entry in entries:
+        try:
+            said.append(entry())
+        except Exception:
+            continue
+    return said
 
 
 def _is_seed(message: Json) -> bool:
@@ -398,6 +458,7 @@ async def compact_conversation(
     *,
     model: Model,
     tools: Offered,
+    carried: Kept,
     loader: Rows,
     output: Shown,
     config: ConversationConfig,
@@ -411,7 +472,9 @@ async def compact_conversation(
     events, or why nothing changed (`_unchanged`). `jobs` is the conversation row's queue and
     `worker` the work that runs it, which a restart of the row ends: then nothing is written,
     since nothing would restart the rows. `clock` times the summary step (`summarise`) and dates the
-    answers the request gives a call a crash left unanswered (`asked`)."""
+    answers the request gives a call a crash left unanswered (`asked`). `carried`: asked once the
+    conversation is known to be worth compacting, in a thread, and its lines are told in the
+    request and the new conversation's first message; an entry that raises is left out."""
     row = config.transcript
     clock = clock if clock is not None else Clock()
     try:
@@ -429,9 +492,15 @@ async def compact_conversation(
     if (nothing := _unsaid(messages)) is not None:
         return nothing
     await output.show(_once({"type": "note", "text": _ASKING.format(timeout=config.timeout)}))
+    # in a thread: a row's function may do more than read a field, and the TUI shares this loop
+    lines = _gathered(await asyncio.to_thread(_carried_by, iter(carried)))
     try:
         summary, usage, step = await summarise(
-            model, asked(messages, args, at=clock.now()), list(tools.specs()), config.timeout, clock
+            model,
+            asked(messages, args, at=clock.now(), carried=lines),
+            list(tools.specs()),
+            config.timeout,
+            clock,
         )
     except Unchanged as why:
         return _unchanged(str(why), why.usage)
@@ -439,7 +508,7 @@ async def compact_conversation(
         # on the loop, not in a thread: from the rewrite to queueing the restart nothing may
         # cancel it (the person leaving), or the file would hold the new conversation and the
         # ui's history the old; the seed is small, and copying the old file to its backup is fast
-        backup = rewrite(path, seeded(summary, args, step))
+        backup = rewrite(path, seeded(summary, args, step, lines))
     except OSError as error:
         return _unchanged(
             f"the new conversation could not be written to {path} ({error.strerror or error}), so "

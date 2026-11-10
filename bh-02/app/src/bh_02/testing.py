@@ -145,9 +145,10 @@ def slow_provider(table: Mapping[str, Any]) -> _SlowStart:
 
 def _printed(content: str) -> str:
     """What an input printed, from its result: without the python tool's note of bh-02's other
-    tools in the namespace (`(bh-02's other tools are functions ...)`), told with the first."""
+    tools in the namespace (`(bh-02's other tools are functions ...)`), told with the first, nor
+    its namespace line (`(namespace: + os (module))`), told when an input changed a name."""
     lines = content.strip().splitlines()
-    while lines and lines[0].startswith("(bh-02's "):
+    while lines and lines[0].startswith(("(bh-02's ", "(namespace: ")):
         lines.pop(0)
     return "\n".join(lines)
 

@@ -1511,7 +1511,7 @@ async def main():
         f"subprocess.Popen([sys.executable, '-c', {LOOP!r}, 'alive'], start_new_session={setsid})\\n"
         "print('started')"
     )
-    print(await process.run(code), flush=True)
+    print((await process.run(code)).splitlines()[-1], flush=True)  # after the namespace line
     time.sleep(600)
 
 asyncio.run(main())

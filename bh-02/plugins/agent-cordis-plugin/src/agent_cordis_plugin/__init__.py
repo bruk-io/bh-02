@@ -2,7 +2,8 @@
 as a `loop`.
 
 Also the transcript row, so the conversation outlives the loop; `system`, the system prompt rows add
-sections to; `asides`, what the model is told beside a call's result; `access`, what is asked
+sections to; `asides`, what the model is told beside a call's result; `carried`, what rows keep
+across `/compact`, told after it; `access`, what is asked
 before a file is read or written; `executor`, where the loop
 reads the prompt and asks `asides`, one call at a time across the loop's reloads; and the
 conversation row's `/clear` and `/compact`, which begin a new conversation, empty or from the
@@ -71,6 +72,7 @@ from agent_cordis_plugin.wiring import (
     TranscriptConfig,
     access,
     asides,
+    carried,
     conversation,
     executor,
     loop,
@@ -125,6 +127,7 @@ __all__ = [
     "asked",
     "branch_of",
     "called",
+    "carried",
     "changes",
     "classify",
     "clear_conversation",

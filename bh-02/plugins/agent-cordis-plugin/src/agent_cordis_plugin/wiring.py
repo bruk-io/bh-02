@@ -1,14 +1,15 @@
 """The rows: the loop, which consumes a model and provides the `loop` value; the transcript;
 `tools`, the broker of the tools the model is offered; `system`, the system prompt rows add
-sections to; `asides`, the broker of what the model is told beside a call's result; `access`,
+sections to; `asides`, the broker of what the model is told beside a call's result; `carried`, the
+broker of what rows keep across `/compact`, told after it; `access`,
 the broker of what is asked before a file is read or written; `executor`, where the loop reads
 the prompt and asks `asides`; and the conversation's commands, `/clear` and `/compact`.
 
 The transcript is its own row so the conversation outlives the loop: replace the `model` row
 and the loop reloads against the new provider while the conversation carries on. `asides` is
 its own row too, depending on nothing, so neither the loop nor a row adding to it reloads the
-other, and `tools`, so a tool's row restarting (the python row's) reloads neither the loop nor
-another tool's row. So is `executor`, so a reloaded loop keeps the call a stopped reply left
+other, as is `carried`, and `tools`, so a tool's row restarting (the python row's) reloads neither
+the loop nor another tool's row. So is `executor`, so a reloaded loop keeps the call a stopped reply left
 running and waits for it. `/clear` and `/compact` are one row's (`conversation`), over the
 model, `tools`, the loader, `commands` and `output`, which depends on neither the loop nor the
 transcript, which they restart.
@@ -24,6 +25,7 @@ from agent_cordis_plugin.conversation import (
     CLEAR,
     COMPACT,
     ConversationConfig,
+    Kept,
     Offered,
     Queue,
     Rows,
@@ -56,6 +58,7 @@ __all__ = [
     "TranscriptConfig",
     "access",
     "asides",
+    "carried",
     "conversation",
     "executor",
     "loop",
@@ -170,6 +173,17 @@ async def asides() -> Effects:
     yield bind("asides", Hooks[Aside]())
 
 
+@component(provides=("carried",))
+async def carried() -> Effects:
+    """Fills a `carried` row: `use = "agent:carried"`. A broker (CONTRACTS.md: carried): a row
+    with something to say of what it keeps across `/compact` (the python row: the names its
+    namespace holds) `acquire`s `carried.add(fn)`, and `/compact` calls each `fn() -> str` as it
+    runs, putting the lines in the summary request and in the new conversation's first message.
+    Each says one line or nothing (''); they compose in any order. It depends on nothing, so a
+    row adding to it, or leaving, reloads neither the conversation nor another row."""
+    yield bind("carried", Hooks[Callable[[], str]]())
+
+
 @component(provides=("access",))
 async def access() -> Effects:
     """Fills an `access` row: `use = "agent:access"`. A broker (CONTRACTS.md: access): a row with
@@ -204,6 +218,7 @@ async def conversation(
     *,
     model: Model,
     tools: Offered,
+    carried: Kept,
     loader: Rows,
     commands: _Registrar,
     output: Shown,
@@ -222,7 +237,14 @@ async def conversation(
     queues each restart in `jobs`, never running it in the chat row's task, which it reloads; a
     restart that fails is told to the person there: the new conversation is written by then."""
     compacting = partial(
-        compact_conversation, model=model, tools=tools, loader=loader, output=output, config=config, jobs=jobs
+        compact_conversation,
+        model=model,
+        tools=tools,
+        carried=carried,
+        loader=loader,
+        output=output,
+        config=config,
+        jobs=jobs,
     )
     yield acquire(
         commands.register, CLEAR, partial(clear_conversation, loader=loader, config=config, jobs=jobs)
