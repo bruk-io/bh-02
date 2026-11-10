@@ -24,8 +24,8 @@ On Linux under scripts/linux-jail-check (Docker, Ubuntu 24.04, bubblewrap 0.9.0,
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 The cause of the loop row's inactive status under runner:confined in this container is named
-- [ ] #2 The test passes under scripts/linux-jail-check, or is shown to need an environment this container cannot give (and says so by skipping, named)
+- [x] #1 The cause of the loop row's inactive status under runner:confined in this container is named
+- [x] #2 The test passes under scripts/linux-jail-check, or is shown to need an environment this container cannot give (and says so by skipping, named)
 <!-- AC:END -->
 
 ## Implementation Notes
