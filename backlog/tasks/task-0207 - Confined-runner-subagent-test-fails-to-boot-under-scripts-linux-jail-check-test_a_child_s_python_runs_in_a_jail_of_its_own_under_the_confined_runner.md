@@ -6,7 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-11-07 05:39'
-updated_date: '2026-11-10 16:56'
+updated_date: '2026-11-10 16:57'
 labels:
   - subagents
   - linux
@@ -98,4 +98,6 @@ INFO    -  Documentation built in 1.32 seconds
 bh-01's tokens and bh-02's theme are in sync
    ok
 ```
+
+No repro: the defect was in the test itself (its fake _Host lacked key_envs and models_file, made required by TASK-0169.05, a1d94488), so the failing test was the bug and its fix (TASK-0074, c60d5fe2) had to edit it; no separate failing test can exist on main. Before the fix it failed under linux-jail-check (137 passed, 1 failed, per the description).
 <!-- SECTION:NOTES:END -->
