@@ -3,7 +3,7 @@ id: TASK-0207
 title: >-
   Confined-runner subagent test fails to boot under scripts/linux-jail-check:
   test_a_child_s_python_runs_in_a_jail_of_its_own_under_the_confined_runner
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-07 05:39'
 updated_date: '2026-11-10 16:57'
@@ -100,4 +100,6 @@ bh-01's tokens and bh-02's theme are in sync
 ```
 
 No repro: the defect was in the test itself (its fake _Host lacked key_envs and models_file, made required by TASK-0169.05, a1d94488), so the failing test was the bug and its fix (TASK-0074, c60d5fe2) had to edit it; no separate failing test can exist on main. Before the fix it failed under linux-jail-check (137 passed, 1 failed, per the description).
+
+Review (reviewer agent, 2026-11-10): closed. #1 met: cause named in the No repro note. #2 met: scripts/linux-jail-check -- bh-02/plugins/subagents-cordis-plugin -> 138 passed, 0 failed (bubblewrap 0.9.0, Python 3.15.2); the renamed test alone: 1 passed. Full check exited 0: 3876 passed, 268 skipped. Title still names the old test (test_a_child_s_python_runs_in_a_jail_of_its_own_under_the_confined_runner); renaming it to test_a_child_s_python_shares_the_session_s_jail_only_where_they_are_kept_apart is right, but the reviewer's guardrail blocks title edits, so it is left for the owner. No other findings, no drafts.
 <!-- SECTION:NOTES:END -->
