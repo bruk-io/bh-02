@@ -11,6 +11,7 @@ thing goes into the group, in this table.
 import contextlib
 import os
 import shutil
+import sys
 import tempfile
 import time
 from collections.abc import Iterator
@@ -75,16 +76,18 @@ _STALE_S = 24 * 3600  # a run's temp directory older than this is a run that is 
 
 @pytest.hookimpl(tryfirst=True)
 def pytest_configure(config: pytest.Config) -> None:
-    """Every test's `tmp_path` is under `$XDG_CACHE_HOME/bh-02-pytest/` (else `~/.cache/...`), in a
-    directory of this run's own, not under `/tmp`, unless `--basetemp` says otherwise. A jail refuses
-    a root at or under a place hosts keep sockets (`/tmp`, `/var/tmp`, `/run`, `$XDG_RUNTIME_DIR`:
+    """On Linux, where default temp directories live under `/tmp`, every test's `tmp_path` is put under
+    `$XDG_CACHE_HOME/bh-02-pytest/` (else `~/.cache/...`), in a directory of this run's own, unless
+    `--basetemp` says otherwise (on darwin, `TMPDIR` is under `/var/folders`, outside both `/tmp` and
+    `$HOME`, where the person's `~/.claude/CLAUDE.md` would sit above `tmp_path`). A jail refuses a
+    root at or under a place hosts keep sockets (`/tmp`, `/var/tmp`, `/run`, `$XDG_RUNTIME_DIR`:
     `runner_cordis_plugin.policy.socket_refusal`), and the tests that start real jails make their
     projects, state and memory under `tmp_path`. Not inside the checkout: a test's project there would
     be a directory of a git repository, and bh-02's own project. One directory per run, never shared,
     so two runs at once (a lead's and a worker's) never empty each other's; it is removed when the run
     passes and kept when it fails, and one older than a day is swept. pytest-xdist's workers are handed
     the controller's, so only the controller makes one."""
-    if config.option.basetemp is None and not hasattr(config, "workerinput"):
+    if sys.platform == "linux" and config.option.basetemp is None and not hasattr(config, "workerinput"):
         cache = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "bh-02-pytest"
         cache.mkdir(parents=True, exist_ok=True)
         now = time.time()

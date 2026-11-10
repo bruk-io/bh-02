@@ -127,8 +127,7 @@ The model acts in Python, at a REPL of its own that persists for this run of bh-
 (one jail for the Python REPL, another for the extensions process) its code runs without asking: it
 can write inside the project, but it can't reach the network, read credentials, or touch what could
 run code later (`.git/hooks`, shell rc files, bh-02's own layers). With `--no-jail`
-(`runner:unconfined`), every input asks first. The jail can be given more, one grant at a time, only
-when you say so (once, always or no): [Grants](docs/bh-02/using/jail.md#grants).
+(`runner:unconfined`), every input asks first.
 Ctrl-C stops a reply, Ctrl-P opens the command palette, `bh-02 --resume` continues a session.
 
 bh-02 has no models built in: name yours in `~/.config/bh-02/models.toml`, one table per endpoint
@@ -160,7 +159,7 @@ A layer of your own changes a row, applied with `bh-02 --patch mine.toml`:
 ```toml
 [[plugin]]
 id = "runner"
-config = { env = ["PATH", "HOME", "LANG", "LC_ALL", "TERM", "GITHUB_TOKEN"] }   # let this variable through
+config = { allow = ["CLAUDE.md", "AGENTS.md", ".git/config"] }   # let inputs write .git/config too
 ```
 
 A new part is a plugin: a package with components, registered as a `cordis.plugins` entry point,
@@ -193,7 +192,7 @@ The techniques above, and where to read them in real code:
 | **Watching the program change** (`observe`) | `tui:ui` | the terminal app hears every lifecycle event and shows `↻ model reloaded` as rows reload |
 | **Two consumers, two contracts** | the `runner` key | the python row needs a start (`start`, `on_release`); the grades row needs each start's grades (`report`, `on_start`); each declares its own Protocol for the same value |
 | **Stable rows around volatile ones** | bh-02's `ui`, `status` and `grades` rows | the app's row depends on nothing but its config, so it never reloads; the small status-bar rows depend on what never restarts (the grades row is told each start by the runner), so `/clear` reloads none of the screen |
-| **A program's own user adds parts while it runs** | `extensions:process` | the model writes cordis components into the project's `.bh-02/plugins/`; each loads in the extensions process, a second jailed process, reaches bh-02 only through five keys that add or ask (a command, a status field, prompt text, a tool whose calls run in that process, a grant), and is undone in reverse when its file changes or goes |
+| **A program's own user adds parts while it runs** | `extensions:process` | the model writes cordis components into the project's `.bh-02/plugins/`; each loads in the extensions process, a second jailed process, reaches bh-02 only through four keys that add (a command, a status field, prompt text, a tool whose calls run in that process), and is undone in reverse when its file changes or goes |
 | **Who owns the main thread** | `warden --tray` | the macOS menu-bar app needs the main thread, so the composition runs on a background thread and quitting the tray unwinds it through the same shutdown |
 
 ## brig: sandboxes that say what they enforce
@@ -207,8 +206,8 @@ brig is a standalone repository ([`bruk-io/brig`](https://github.com/bruk-io/bri
 depends on at tag `v0.1.0` (in the runner plugin's `pyproject.toml`, outside this workspace).
 bh-02 reaches it through one plugin, the runner's `runner:confined`, which turns
 bh-02's rules into one jail per program: the project writable, bh-02's own files and the sessions'
-state not, no network but the destinations you grant, through its egress proxy. bh-02's status bar
-shows the grades it got (`jail: jailed fs_write ✓ network ✓ ...`).
+state not, no network (every start enforces an egress proxy that grants nothing). bh-02's status
+bar shows the grades it got (`jail: jailed fs_write ~ network ~ fs_read ~ env ✓`).
 brig's jail is bubblewrap, on Linux only for now (on a Mac, `runner:confined` refuses to start and
 names `runner:unconfined` until `TASK-0196` lands a Seatbelt jail); its contract is in its own
 repository (`docs/spec/index.md`).
