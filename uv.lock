@@ -6,7 +6,6 @@ requires-python = ">=3.15"
 members = [
     "agent-cordis-plugin",
     "bh-02",
-    "brig",
     "chat-cordis-plugin",
     "commands-cordis-plugin",
     "cordis",
@@ -179,8 +178,8 @@ wheels = [
 
 [[package]]
 name = "brig"
-version = "0.0.1"
-source = { editable = "libs/brig" }
+version = "0.1.0"
+source = { git = "https://github.com/bruk-io/brig?tag=v0.1.0#ae454f2b5c7de509e5dc04aa349395b2b6eff8b8" }
 
 [[package]]
 name = "cffi"
@@ -1253,7 +1252,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "brig", editable = "libs/brig" },
+    { name = "brig", git = "https://github.com/bruk-io/brig?tag=v0.1.0" },
     { name = "cordis", editable = "libs/cordis" },
     { name = "cordis-helpers", editable = "libs/cordis-helpers" },
     { name = "host-paths", editable = "libs/host-paths" },

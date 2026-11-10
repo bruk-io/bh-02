@@ -61,8 +61,8 @@ _MAX_DIFF_LINES = 40
 # Every provider's word for "the model finished on its own"; anything else is worth showing.
 _QUIET_STOPS = frozenset({"answered", "end_turn", "stop", "success", "stop_sequence", "tool_use"})
 _FAILURES = frozenset({"failed", "work-failed", "observe-failed", "teardown-error"})
-# brig's grades, strongest first, as one glyph each (CONTRACTS.md: report).
-_GRADES = {"enforced": "✓", "best_effort": "~", "cooperative": "?", "unenforced": "✗"}
+# brig's grades, strongest first, as one glyph each (CONTRACTS.md: report); `violated` is a claim broken.
+_GRADES = {"enforced": "✓", "best_effort": "~", "cooperative": "?", "unenforced": "✗", "violated": "!"}
 # The axes worth a glance in a status bar; the rest are in `report()` for whoever asks.
 _AXES = ("fs_write", "network", "fs_read", "env")
 # Each axis as the one letter a shorter form of the jail's field keeps.
@@ -471,35 +471,27 @@ def approval_language(question: Event) -> str:
     return str(question.get("language") or "python")
 
 
-def jail_forms(confined: bool, report: Mapping[str, str], degraded: str = "") -> tuple[str, ...]:
+def jail_forms(confined: bool, report: Mapping[str, str]) -> tuple[str, ...]:
     """The confinement of a runner start, for a status bar, fullest form first: confined or not and a
     glyph per main axis, each axis named (`jailed fs_write ✓ network ✓`), then by its initial
     (`jailed w✓ n✓`), the initials run together (`jailed w✓n✓`), and the glyphs alone, in the
-    axes' fixed order (`jailed ✓✓`). The status bar takes the first that fits. `degraded` is what
-    that start's jail lost (a mount the host refused): `⚠` and it after the fullest form, `⚠` alone
-    after every other, so the narrowest bar still shows something is wrong."""
+    axes' fixed order (`jailed ✓✓`). The status bar takes the first that fits."""
     head = "jailed" if confined else "unjailed"
     graded = [(axis, _GRADES.get(report[axis], "?")) for axis in _AXES if axis in report]
+    if not graded:
+        return (head,)
     initials = [f"{_INITIALS[axis]}{glyph}" for axis, glyph in graded]
-    forms = (
-        (
-            " ".join([head, *(f"{axis} {glyph}" for axis, glyph in graded)]),
-            " ".join([head, *initials]),
-            f"{head} {''.join(initials)}",
-            f"{head} {''.join(glyph for _, glyph in graded)}",
-        )
-        if graded
-        else (head,)
+    return (
+        " ".join([head, *(f"{axis} {glyph}" for axis, glyph in graded)]),
+        " ".join([head, *initials]),
+        f"{head} {''.join(initials)}",
+        f"{head} {''.join(glyph for _, glyph in graded)}",
     )
-    if not degraded:
-        return forms
-    return (f"{forms[0]} ⚠ {degraded}", *(f"{form} ⚠" for form in forms))
 
 
-async def noted(text: str, kind: str = "note") -> AsyncIterator[Event]:
-    """`text` as the one `note` event a reply would carry (CONTRACTS.md: event); `kind="failure"`
-    draws it as one, for what the person must not miss."""
-    yield {"type": "note", "text": text} if kind == "note" else {"type": "note", "text": text, "kind": kind}
+async def noted(text: str) -> AsyncIterator[Event]:
+    """`text` as the one `note` event a reply would carry (CONTRACTS.md: event)."""
+    yield {"type": "note", "text": text}
 
 
 def session_forms(sid: str, *, resumed: bool = False) -> tuple[str, ...]:

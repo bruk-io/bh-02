@@ -35,7 +35,7 @@ async def _done(*codes: str) -> list[dict[str, Any]]:
     short = tempfile.mkdtemp(prefix="bh-nm-")  # the worker's cwd; the runner reserves its socket
     started = await Unjailed().start(worker_argv, cwd=short)
     try:
-        reader, writer = await started.connect(limit=1 << 20)
+        reader, writer = await asyncio.open_unix_connection(sock=started.connection, limit=1 << 20)
         writer.write(b'{"op": "hello"}\n')
         answers: list[dict[str, Any]] = []
         async with asyncio.timeout(30):

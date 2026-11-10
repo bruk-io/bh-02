@@ -71,7 +71,7 @@ markdown_extensions:
   - pymdownx.highlight:
       use_pygments: true
   - pymdownx.superfences
-  # GitHub's ~~strikethrough~~, which brig's SPEC.md uses; no ~subscript~
+  # GitHub's ~~strikethrough~~; no ~subscript~
   - pymdownx.tilde:
       subscript: false
 
@@ -119,9 +119,6 @@ nav:
           - cordis.loader: cordis/api/loader.md
           - cordis.composition: cordis/api/composition.md
           - cordis.testing: cordis/api/testing.md
-  - brig:
-      - Overview: brig/index.md
-      - Specification: brig/spec.md
   - warden:
       - Overview: warden/index.md
       - Contracts: warden/contracts.md

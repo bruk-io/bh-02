@@ -7,7 +7,9 @@ import asyncio
 import contextlib
 import json
 import os
-from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+import shutil
+import tempfile
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
@@ -133,10 +135,15 @@ class _Harness:
 
 @contextlib.asynccontextmanager
 async def _running(
-    root: Path, *, confined: bool = True, answer: bool = True, tools: ToolBroker | None = None
+    root: Path,
+    *,
+    confined: bool = True,
+    answer: bool = True,
+    tools: ToolBroker | None = None,
+    jail: PlainJail | None = None,
 ) -> AsyncIterator[_Harness]:
     jail, commands, frame, system, approval = (
-        PlainJail(),
+        jail if jail is not None else PlainJail(),
         _Commands(),
         _Frame(),
         _System(),
@@ -150,6 +157,49 @@ async def _running(
         yield _Harness(root, runner, jail, commands, frame, system, broker, approval, running)
 
 
+async def test_the_extensions_dial_the_endpoint_the_runner_chose_for_their_worker(tmp_path: Path) -> None:
+    """TASK-0179: the worker's command is built from the endpoint the runner reserved, and the
+    host dials that one (a load that works proves the worker listens where the host dialled)."""
+    async with _running(tmp_path) as h:
+        h.write("todo", _TODO)
+        await h.extensions.look()
+        assert h.extensions.statuses["todo"].ok
+        (worker,) = h.jail.started
+        assert Path(worker.endpoint).exists() and worker.endpoint.endswith(".sock")
+        await h.runner.release()
+        assert not Path(worker.endpoint).exists()  # its stop removed the directory the runner made
+
+
+async def test_the_extensions_use_the_runners_connection_and_never_dial_the_endpoint(tmp_path: Path) -> None:
+    """TASK-0079.31: a jailed worker can swap its socket for a link to another one once it is
+    ready. The runner hands over the connection it made, and the host speaks over that."""
+    decoys: list[int] = []
+
+    async def decoy_connected(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        decoys.append(1)
+        writer.close()
+
+    short = Path(tempfile.mkdtemp(prefix="bh-kt-", dir="/tmp"))  # a Unix socket path must be short
+    server = await asyncio.start_unix_server(decoy_connected, path=str(short / "decoy.sock"))
+
+    class Swapping(PlainJail):
+        async def start(self, argv_for: Callable[[str], Sequence[str]], *, cwd: str) -> Any:
+            started = await super().start(argv_for, cwd=cwd)
+            Path(started.endpoint).unlink()
+            Path(started.endpoint).symlink_to(short / "decoy.sock")
+            return started
+
+    try:
+        async with _running(tmp_path, jail=Swapping()) as h:
+            h.write("todo", _TODO)
+            await h.extensions.look()
+            assert h.extensions.statuses["todo"].ok
+            assert decoys == []
+    finally:
+        server.close()
+        shutil.rmtree(short, ignore_errors=True)
+
+
 async def test_an_extension_the_model_writes_is_loaded_and_what_it_adds_reaches_bh_02(tmp_path: Path) -> None:
     async with _running(tmp_path) as h:
         assert h.jail.started == []  # nothing to load, so no worker
@@ -161,7 +211,6 @@ async def test_an_extension_the_model_writes_is_loaded_and_what_it_adds_reaches_
         assert await h.commands.runs["todo"]("milk") == "milk"
         assert await h.commands.runs["todo"]("") == "milk"  # its state lives in the worker
         assert h.frame.fields() == {"todo:count": "todo: 0", "extensions": "ext: todo ✓"}
-        assert [started.connects for started in h.jail.started] == [1]  # dialled through its start
         assert h.system.texts() == ["The person keeps a to-do list with /todo."]
         assert h.extensions.section().endswith(
             "Extensions here: todo. How each one is, is in .bh-02/plugins/status.json."
@@ -328,18 +377,6 @@ async def test_unjailed_each_extension_is_put_to_the_person_with_its_source(tmp_
         h.write("todo", _TODO + "\n")
         await h.extensions.look()
         assert "todo" in h.commands.runs and h.extensions.statuses["todo"].ok
-
-
-async def test_a_worker_the_jail_ended_says_why_as_every_owner_of_that_jail_is_told(tmp_path: Path) -> None:
-    """The host undid a mount, which ends every program in the jail: the status says what the jail
-    says (`started.ended()`), and the extensions' worker is told as the Python process is."""
-    async with _running(tmp_path) as h:
-        h.write("todo", _TODO)
-        await h.extensions.look()
-        h.jail.started[0].why = "something on the host replaced .envrc"
-        h.write("exits", "import os\nos._exit(3)\n")
-        await h.extensions.look()
-        assert "something on the host replaced .envrc" in h.status()["todo"]["error"]
 
 
 async def test_an_extension_that_ends_the_worker_is_not_loaded_again_until_something_changes(

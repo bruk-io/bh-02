@@ -5,7 +5,7 @@
   landmark, and a status bar with the build's branch and commit, Search and the theme toggle.
   The command palette searches MkDocs' own search index. assets/bh-docs.js wires it up.
 -#}
-{%- set icons = {"Home": "home", "bh-02": "terminal", "cordis": "blocks", "brig": "lock", "warden": "pulse", "Contributing": "pencil"} -%}
+{%- set icons = {"Home": "home", "bh-02": "terminal", "cordis": "blocks", "warden": "pulse", "Contributing": "pencil"} -%}
 {%- macro view_id(item) -%}{{ item.title | lower | replace(" ", "-") }}{%- endmacro -%}
 {%- macro section_of(item) -%}{%- if item.parent -%}{{ section_of(item.parent) }}{%- else -%}{{ item.title }}{%- endif -%}{%- endmacro -%}
 {%- macro tree_items(items, depth, prefix, nested) -%}

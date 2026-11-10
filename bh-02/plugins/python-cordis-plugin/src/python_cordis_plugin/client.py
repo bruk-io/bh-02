@@ -36,7 +36,7 @@ One that is there, or whose way passes through there, the worker reads, as it do
 project's, and if that fails the aside says why the host did not; it is still the person's, not
 the model's to edit, which is what the model is told. (The jail also keeps an input from
 writing in the person's config directory, so a session run from the home directory can't
-choose what a later one reads there: brig's `trusted`.) A startup file that ends the worker is
+choose what a later one reads there: the policy denies `host.trusted`.) A startup file that ends the worker is
 passed over by the workers after it, until `/restart python`, and the input it cut short says
 which it was, after what the opening had to tell by then (that the worker was started again,
 and why).
@@ -66,6 +66,7 @@ import asyncio
 import contextlib
 import json
 import os
+import socket
 import unicodedata
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
@@ -111,15 +112,18 @@ _STRIPPED = frozenset({"Cc", "Cf"})
 
 @runtime_checkable
 class Jailed(Protocol):
-    """A program a jail started: it can be interrupted, dialled (`connect`, through the
-    mechanism's own verified dial; never a path of this row's own) and stopped, and says why, when
-    the jail ended it itself (`ended`: a Linux `runner:confined` whose hold on a path the host
-    undid; "" when it did not), and what its start is (`report`, `notice`, `reads`, `writes`: this
-    program's jail's, whatever else the jail starts)."""
+    """A program a jail started, listening on the socket the runner chose for it (`endpoint`, for its
+    argv alone) and connected to it by the runner (`connection`, the only way in: never dial `endpoint`):
+    it can be interrupted and stopped, and says why, when the jail ended it itself (`ended`: a Linux
+    `runner:confined` whose hold on a path the host undid; "" when it did not), and what its start is
+    (`report`, `notice`, `reads`, `writes`: this program's jail's, whatever else the jail starts)."""
 
+    @property
+    def endpoint(self) -> str: ...
+    @property
+    def connection(self) -> socket.socket: ...
     def interrupt(self) -> bool: ...
     def ended(self) -> str: ...
-    async def connect(self, *, limit: int) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]: ...
     async def stop(self) -> None: ...
     def report(self) -> Mapping[str, str]: ...
     def notice(self) -> str: ...
@@ -138,9 +142,8 @@ class Access(Protocol):
 
 @runtime_checkable
 class Runner(Protocol):
-    """What the Python process needs of the `runner` value (CONTRACTS.md: runner): its start
-    (reserve-then-start: `argv_for(path)` is the worker's argv, `path` the socket the runner
-    reserves for it, never one this row chose), and the runner's own grades before any."""
+    """What the Python process needs of the `runner` value (CONTRACTS.md: runner): its start,
+    and the runner's own grades before any."""
 
     async def start(self, argv_for: Callable[[str], Sequence[str]], *, cwd: str) -> Jailed: ...
     def report(self) -> Mapping[str, str]: ...
@@ -1060,7 +1063,9 @@ class PythonProcess:
     async def _start(self) -> None:
         root = str(Path(self._config.root).resolve())
         self._process = self._worker = await self._runner.start(worker_argv, cwd=root)
-        self._reader, self._writer = await self._process.connect(limit=_LINE_LIMIT)
+        self._reader, self._writer = await asyncio.open_unix_connection(
+            sock=self._process.connection, limit=_LINE_LIMIT
+        )
         self._send({"op": "hello"})
         self._fresh, self._pending = True, ""  # a new worker runs its startup files afresh
         self._gone = tuple(name for name in self._names if name not in self._startup_told) or self._gone

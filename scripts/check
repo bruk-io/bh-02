@@ -36,7 +36,7 @@ BH_01 = ROOT.parent / "bh-01"  # where scripts/sync-tokens reads bh-01's token C
 # one group (the root conftest.py names them: what they share on the host) on one of them. Eight at
 # most, whatever the core count (TASK-0202): every worker boots compositions, Python processes and
 # jails at once, so on a 28-core Mac `-n auto` (28) pushed boots past the tests' deadlines and one
-# worker hung, while 8 run the whole suite in about 84 s. The suite's long pole is the jail-lock
+# worker hung, while 8 run the whole suite in about 84 s. The suite's long pole is the jails
 # group, serial on one worker, so more workers buy little.
 TEST_WORKERS = str(min(8, os.cpu_count() or 1))
 

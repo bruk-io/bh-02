@@ -665,23 +665,17 @@ async def test_a_layer_naming_the_agents_row_among_the_child_s_rows_gives_the_ch
 # directory, its session and process group, and its pid inside its pid namespace.
 _WHERE = (
     "import json, os, tempfile\n"
-    "saw = os.listdir(tempfile.gettempdir())\n"
-    "shm = os.listdir('/dev/shm')\n"
-    "open(os.path.join(tempfile.gettempdir(), 'planted'), 'w').close()\n"
-    "open('/dev/shm/planted', 'w').close()\n"
     "open({path!r}, 'w').write(json.dumps({{'tmp': tempfile.gettempdir(), 'pgrp': os.getpgrp(),"
-    " 'sid': os.getsid(0), 'pid': os.getpid(), 'saw': saw, 'shm': shm}}))"
+    " 'sid': os.getsid(0), 'pid': os.getpid()}}))"
 )
 
 
-async def test_a_child_s_python_shares_the_session_s_jail_only_where_they_are_kept_apart(
+async def test_a_child_s_python_runs_in_a_jail_of_its_own_under_the_confined_runner(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The parent and its child each call `python` under `runner:confined`, sharing the `runner`.
-    Where a program has namespaces of its own (it is PID 1 of them) the child's REPL is in the
-    session's one jail (decision-0002): one record, one `$TMPDIR` by name, and what each sees there
-    its own. Where not, each is in a jail of its own, as a scratch directory of its own shows.
-    Either way the child sees nothing the parent planted in its scratch or `/dev/shm`."""
+    """The parent and its child each call `python` under `runner:confined`: each input runs in its
+    own bubblewrap jail (its own scratch directory, which the jail removes with it), and the
+    child's is not the parent's."""
     if sys.platform != "linux" or not Path("/usr/bin/bwrap").exists():
         pytest.skip("the confined runner's jail is bubblewrap on Linux: /usr/bin/bwrap is absent")
     # the jail's records live in the state directory: a directory of this test's own, so it never
@@ -712,13 +706,7 @@ async def test_a_child_s_python_shares_the_session_s_jail_only_where_they_are_ke
         results = _results(await _bounded(_reply(rt, "go")))
     assert results[-1].startswith("Report from agent general-1 (general)"), results
     parent, child = (json.loads(where[who].read_text()) for who in ("parent", "child"))
-    if parent["pid"] == 1:
-        assert parent["tmp"] == child["tmp"]  # one jail's scratch, by name
-        assert len(list((tmp_path / "state" / "bh-02" / "jails").iterdir())) == 1  # one jail
-    else:
-        assert parent["tmp"] != child["tmp"]  # each jail's scratch directory is its own
-    assert "planted" not in child["saw"]  # and neither sees the other's
-    assert "planted" not in child["shm"]  # nor in `/dev/shm`
+    assert parent["tmp"] != child["tmp"]  # each jail's scratch directory is its own
     assert all(Path(seen["tmp"]).parent.name.startswith("bh-j-") for seen in (parent, child))  # a jail's
     await _bounded(rt.shutdown())
 

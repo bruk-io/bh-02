@@ -46,37 +46,16 @@ the jail's. [The memory plugin](../reference/plugins/memory.md#auto-memory) says
 The `runner` row starts the programs the model's code runs in: the Python process, and the
 extensions' own process. Two components can fill it:
 
-- **`runner:confined`** (the default) confines both, from one policy. On Linux as an unprivileged
-  user, where each process gets namespaces of its own, a session has one jail and both run in it.
-  They share the project's files, by design. Each has its own socket, scratch directory, `/dev/shm`,
-  terminals, processes, network and System V and POSIX IPC, so neither can see or reach the other's;
-  everything else outside the project is read-only to both. Two things are not kept apart. A `flock`
-  on what both can read (`/`, `/dev`) is visible to the other, which takes both of them cooperating,
-  and they share the project anyway. On macOS, as root, or where nested user namespaces are blocked,
-  one jail could not keep them apart, so each keeps a jail of its own. So does a host that refuses a
-  mount this needs: the status bar's jail field then ends with `⚠ mount refused, a jail each`, and the
-  conversation says which mount, once, as a failure. If the jail can write `/dev/shm` itself (you
-  added it to `write`, or the project is there), both programs and the host share it, as they would
-  with a jail each, and the jail's first note says so.
-
-!!! danger "An open hole: the kernel's session keyring"
-    A program in the jail can use the kernel's session keyring of whatever started bh-02, because
-    nothing in the jail filters those system calls. So it can leave a key for another program, in
-    this jail or another, and it can **read a key the person's login session holds there**: a review
-    measured this in a container, reading a key's payload from a jailed program, and a bare Linux host
-    is expected to be the same. Until
-    TASK-0219 closes it, don't count on
-    the jail to keep a secret in your session keyring from the model's code.
+- **`runner:confined`** (the default) confines both, each in a jail of its own built from one
+  policy.
 - **`runner:unconfined`** (`--no-jail`) starts them as plain processes. Every part is graded
   unenforced, so approval asks.
 
 The runner starts a program, and the row that started it is the one that stops it. On
 `/release` (`runner:release`) the runner asks each such row to stop its own (the python row its
-Python process, the extensions row its process), then ends every jail nothing runs in, and lets go of
-the placeholders those held on the host. It never stops a row's program itself: if one still runs,
-`/release` says so. The next start ends the release, whoever starts: the next input, or an extension
-that changed. A Python process that got stuck or crashed starts again in the jail it was in, when that
-jail is shared.
+Python process, the extensions row its process), then says whether a program of its jails still runs, brig having removed the placeholders its jails held on the
+host. It never stops a row's program itself: if one still runs, `/release` says so. The next
+start ends the release, whoever starts: the next input, or an extension that changed.
 
 The policy (`spec_for` in the runner plugin) is one pure function: writes only to the project and
 a few places bh-02 names, never to what bh-02 itself reads and trusts (its layer files, its config
@@ -84,12 +63,8 @@ directory, the paths it imports from) or what could run code later; reads of eve
 credentials; no network; a scrubbed environment. [The jail](../using/jail.md) lists it as you meet
 it.
 
-Two stacks enforce it, from [brig](../../brig/index.md):
-
-| Platform | Mechanism | Reads |
-|---|---|---|
-| macOS | Seatbelt | by denylist: everything but what the policy hides |
-| Linux | bubblewrap | by allowlist: the system, the interpreter, the project; nothing else exists |
+brig's bubblewrap jail enforces it on Linux (by allowlist: the system, the interpreter, the project;
+nothing else exists). brig has no jail for macOS yet, so the confined runner refuses there.
 
 brig grades every part of what it enforces (`enforced`, `best_effort`, `cooperative`,
 `unenforced`) by what the stack can deliver, and the status bar's `jail` field (the `grades`
@@ -110,8 +85,8 @@ full: [models-cordis-plugin](../reference/plugins/models.md#the-credential).
 
 On Linux every path the jail protects inside the project is a mount the host can undo: an editor
 saving by rename, `git config` rewriting `.git/config`. The jail watches them, and when one is
-undone it ends itself at once, with every program in it. The next input starts a new jail that holds
-the path again, and is told why its variables are gone.
+undone it ends itself at once. The next input starts a new jail that holds the path again, and is
+told why its variables are gone.
 
 The jail is also tied to bh-02: when bh-02 exits, however it exits, the jail goes too, and with it
 the programs an input left running. On Linux that is every one of them. On macOS a program that

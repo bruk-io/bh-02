@@ -7,6 +7,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import sys
 import tempfile
 import time
@@ -80,7 +81,9 @@ async def test_a_dial_straight_after_readiness_is_not_refused_while_the_worker_h
 
     started = await Unjailed().start(held, cwd=str(tmp_path))
     try:
-        reader, writer = await asyncio.wait_for(started.connect(limit=2**16), 10)
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_unix_connection(sock=started.connection, limit=2**16), 10
+        )
         release.touch()
         writer.write(b'{"op": "hello"}\n{"op": "exec", "code": "6 * 7"}\n')
         await writer.drain()
@@ -1330,6 +1333,8 @@ class Told:
         writes: Sequence[str] = (),
     ) -> None:
         self._started = started
+        self.endpoint: str = started.endpoint
+        self.connection: socket.socket = started.connection
         self._report, self._notice, self._reads, self._writes = report, notice, tuple(reads), tuple(writes)
 
     def interrupt(self) -> bool:
@@ -1353,9 +1358,6 @@ class Told:
     def writes(self) -> tuple[str, ...]:
         return self._writes
 
-    async def connect(self, *, limit: int) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
-        return await self._started.connect(limit=limit)  # type: ignore[no-any-return]
-
 
 class Confined(Unjailed):
     """The unjailed process, reported as confined: what a jail looks like to the Python process, without
@@ -1367,52 +1369,9 @@ class Confined(Unjailed):
     def report(self) -> Mapping[str, str]:
         return _CONFINED
 
-    async def start(self, build: Callable[[str], Sequence[str]], *, cwd: str) -> Any:
-        started = await super().start(build, cwd=cwd)
+    async def start(self, argv_for: Callable[[str], Sequence[str]], *, cwd: str) -> Any:
+        started = await super().start(argv_for, cwd=cwd)
         return Told(started, report=_CONFINED, writes=self.writable)
-
-
-class Dialled(Told):
-    """A start that counts how its owner dialled it: only through `connect`, the mechanism's own."""
-
-    def __init__(self, started: Any) -> None:
-        super().__init__(started)
-        self.connects = 0
-
-    async def connect(self, *, limit: int) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
-        self.connects += 1
-        return await super().connect(limit=limit)
-
-
-class Recording(Unjailed):
-    """The unjailed process, recording what the owner asked of each start: the argv its own
-    `argv_for` made of the path this mechanism chose, and each start, which counts its dials."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.argvs: list[list[str]] = []
-        self.started: list[Dialled] = []
-
-    async def start(self, build: Callable[[str], Sequence[str]], *, cwd: str) -> Any:
-        def recorded(path: str) -> list[str]:
-            self.argvs.append([*build(path), path])
-            return self.argvs[-1][:-1]
-
-        self.started.append(Dialled(await super().start(recorded, cwd=cwd)))
-        return self.started[-1]
-
-
-async def test_the_python_process_listens_where_the_runner_says_and_dials_only_through_its_start() -> None:
-    """Reserve-then-start: the worker's argv holds the path the mechanism chose, never one of the
-    row's own, and the row dials its worker once, through the start's `connect` (a jail's
-    verified dial), never by a path."""
-    jail = Recording()
-    async with _process(jail, PythonProcessConfig()) as k:
-        assert await k.run("1 + 1") == "2"
-        [argv] = jail.argvs
-        *command, path = argv
-        assert command == worker_argv(path)
-        assert [started.connects for started in jail.started] == [1]
 
 
 # The worker, run under an audit hook that refuses to open anything under a directory (the
@@ -1437,12 +1396,12 @@ class Hiding(Confined):
     def __init__(self, hidden: str) -> None:
         self._hidden = hidden
 
-    async def start(self, build: Callable[[str], Sequence[str]], *, cwd: str) -> Any:
-        def hiding(endpoint: str) -> list[str]:
-            executable, isolated, *worker = build(endpoint)
+    async def start(self, argv_for: Callable[[str], Sequence[str]], *, cwd: str) -> Any:
+        def hidden(endpoint: str) -> list[str]:
+            executable, isolated, *worker = argv_for(endpoint)
             return [executable, isolated, "-c", _HIDING, self._hidden, *worker]
 
-        return await super().start(hiding, cwd=cwd)
+        return await super().start(hidden, cwd=cwd)
 
 
 class _Tripped:
@@ -1450,6 +1409,8 @@ class _Tripped:
 
     def __init__(self, process: Any) -> None:
         self.process = process
+        self.endpoint: str = process.endpoint
+        self.connection: socket.socket = process.connection
         self.why = ""
 
     def interrupt(self) -> bool:
@@ -1473,9 +1434,6 @@ class _Tripped:
     def writes(self) -> tuple[str, ...]:
         return tuple(self.process.writes())
 
-    async def connect(self, *, limit: int) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
-        return await self.process.connect(limit=limit)  # type: ignore[no-any-return]
-
 
 class Tripping(Confined):
     """A confined jail that can end its worker itself and say why, as a Linux `runner:confined` does
@@ -1485,8 +1443,8 @@ class Tripping(Confined):
     def __init__(self) -> None:
         self.started: list[_Tripped] = []
 
-    async def start(self, build: Callable[[str], Sequence[str]], *, cwd: str) -> _Tripped:
-        started = _Tripped(await super().start(build, cwd=cwd))
+    async def start(self, argv_for: Callable[[str], Sequence[str]], *, cwd: str) -> _Tripped:
+        started = _Tripped(await super().start(argv_for, cwd=cwd))
         self.started.append(started)
         return started
 
@@ -1570,6 +1528,64 @@ async def test_an_answer_that_cannot_be_read_restarts_the_python_process_instead
         assert again.startswith("(the REPL was started again") and again.endswith("False")
 
 
+async def test_the_python_process_builds_its_command_from_the_endpoint_the_runner_chose_and_dials_it() -> (
+    None
+):
+    """TASK-0179: the runner reserves the socket, the Python process puts it in the worker's argv
+    and dials the one the started program names."""
+
+    class Choosing(Unjailed):
+        def __init__(self) -> None:
+            super().__init__()
+            self.argvs: list[list[str]] = []
+            self.started: list[Any] = []
+
+        async def start(self, argv_for: Callable[[str], Sequence[str]], *, cwd: str) -> Any:
+            def recorded(endpoint: str) -> Sequence[str]:
+                self.argvs.append(list(argv_for(endpoint)))
+                return self.argvs[-1]
+
+            self.started.append(await super().start(recorded, cwd=cwd))
+            return self.started[-1]
+
+    jail = Choosing()
+    async with _process(jail, PythonProcessConfig()) as k:
+        assert await k.run("1 + 1") == "2"
+        (argv,) = jail.argvs
+        (started,) = jail.started
+        assert argv[-1] == started.endpoint and started.endpoint.endswith(".sock")
+        assert Path(started.endpoint).exists()
+    assert not Path(started.endpoint).exists()  # its stop removed the directory the runner made
+
+
+async def test_the_python_process_uses_the_runners_connection_and_never_dials_the_endpoint() -> None:
+    """TASK-0079.31: a jailed program can swap its socket for a link to another one once it is
+    ready. The runner hands over the connection it made, and the Python process speaks over that."""
+    decoys: list[int] = []
+
+    async def decoy_connected(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        decoys.append(1)
+        writer.close()
+
+    short = Path(_short_dir())
+    server = await asyncio.start_unix_server(decoy_connected, path=str(short / "decoy.sock"))
+
+    class Swapping(Unjailed):
+        async def start(self, argv_for: Callable[[str], Sequence[str]], *, cwd: str) -> Any:
+            started = await super().start(argv_for, cwd=cwd)
+            Path(started.endpoint).unlink()
+            Path(started.endpoint).symlink_to(short / "decoy.sock")
+            return started
+
+    try:
+        async with _process(Swapping(), PythonProcessConfig()) as k:
+            assert await k.run("6 * 7") == "42"
+            assert decoys == []
+    finally:
+        server.close()
+        shutil.rmtree(short, ignore_errors=True)
+
+
 async def test_a_python_process_that_cannot_start_again_says_so_as_the_input_and_tries_again_next_time() -> (
     None
 ):
@@ -1578,10 +1594,10 @@ async def test_a_python_process_that_cannot_start_again_says_so_as_the_input_and
             super().__init__()
             self.refuse = False
 
-        async def start(self, build: Callable[[str], Sequence[str]], *, cwd: str) -> Any:
+        async def start(self, argv_for: Callable[[str], Sequence[str]], *, cwd: str) -> Any:
             if self.refuse:
                 raise RuntimeError("the jail is broken")
-            return await super().start(build, cwd=cwd)
+            return await super().start(argv_for, cwd=cwd)
 
     jail = Flaky()
     async with _process(jail, PythonProcessConfig()) as k:
@@ -1647,11 +1663,14 @@ class Ending(Unjailed):
         super().__init__()
         self.why = ""
 
-    async def start(self, build: Callable[[str], Sequence[str]], *, cwd: str) -> Any:
-        started = await super().start(build, cwd=cwd)
+    async def start(self, argv_for: Callable[[str], Sequence[str]], *, cwd: str) -> Any:
+        started = await super().start(argv_for, cwd=cwd)
         jail = self
 
         class Said:
+            endpoint: str = started.endpoint
+            connection: socket.socket = started.connection
+
             def interrupt(self) -> bool:
                 return started.interrupt()
 
@@ -1673,9 +1692,6 @@ class Ending(Unjailed):
 
             def writes(self) -> tuple[str, ...]:
                 return tuple(started.writes())
-
-            async def connect(self, *, limit: int) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
-                return await started.connect(limit=limit)  # type: ignore[no-any-return]
 
         return Said()
 
@@ -1793,9 +1809,9 @@ async def test_the_row_starts_the_worker_registers_python_and_leaving_stops_it()
 
 async def test_a_worker_whose_host_goes_away_ends_even_mid_input() -> None:
     """If bh-02 dies while an input spins, the worker must not outlive it."""
-    short = tempfile.mkdtemp(prefix="bh-t-", dir="/tmp")  # the worker's own cwd
+    short = tempfile.mkdtemp(prefix="bh-t-", dir="/tmp")  # a socket path must fit in ~100 bytes
     started = await Unjailed().start(worker_argv, cwd=short)
-    reader, writer = await started.connect(limit=2**16)
+    reader, writer = await asyncio.open_unix_connection(sock=started.connection)
     writer.write(b'{"op": "hello"}\n{"op": "exec", "code": "while True: pass"}\n')
     await writer.drain()
     await asyncio.sleep(0.2)

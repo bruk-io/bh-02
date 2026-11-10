@@ -3,7 +3,7 @@
 # member: adding one is creating its directory (bh-02/plugins/<name>, libs/<name>, ...).
 #
 #   bh-02/            the app (bh-02/app, the TUI harness) and bh-02/plugins/, its plugin family
-#   libs/             cordis, cordis-helpers, brig: libraries with no first-party dependencies
+#   libs/             cordis, cordis-helpers, host-paths: libraries with no first-party dependencies
 #   examples/warden/  a second app on cordis: examples/warden/app and examples/warden/plugins/
 #
 # An app's folder is not itself a project: its package is <app>/app and its plugins sit beside
@@ -21,7 +21,7 @@ dev = [
     "mypy @ git+https://github.com/python/mypy@539f6e67b6743d39ce1c643f4cea08fa60602093",
     # pypeeker is pre-1.0 and past its breaking DSL rewrite; pin a commit, never track main.
     "pypeeker @ git+https://github.com/brukhabtu/pypeeker@cd78c2c",
-    # brig's property tests
+    # property tests
     "hypothesis>=6.112",
     # the documentation site (mkdocs.yml, docs/): MkDocs, the plugin that includes the READMEs,
     # the API reference from cordis's docstrings, and the Markdown extensions mkdocs.yml names
@@ -34,17 +34,13 @@ dev = [
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["bh-02/app/tests", "bh-02/plugins/*/tests", "libs/*/tests", "examples/*/app/tests", "examples/*/plugins/*/tests"]
+testpaths = ["bh-02/app/tests", "bh-02/plugins/*/tests", "libs/cordis/tests", "libs/cordis-helpers/tests", "libs/host-paths/tests", "examples/*/app/tests", "examples/*/plugins/*/tests"]
 # importlib mode names test modules from the repo root (libs.cordis.tests.test_runtime), so test
 # file names need not be unique across members. consider_namespace_packages is what keeps that
 # from breaking imports: without it, a member directory named like its package (libs/cordis)
 # is registered as that package and shadows the installed one.
 addopts = ["--import-mode=importlib"]
 consider_namespace_packages = true
-# brig's suite imports its own helpers as `tests.conftest` / `tests.unit.strategies`, the way it
-# did in its own repository; `libs/brig/` on the path is what resolves them. brig's conftest
-# makes a tier marker mandatory for its own tests, and only those.
-pythonpath = ["libs/brig"]
 markers = [
     "unit: single module, all dependencies mocked, no I/O",
     "integration: multiple in-repo components, external deps mocked",
@@ -70,7 +66,13 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RET"]
 strict = true
 python_version = "3.15"
 # docs/hooks: the documentation site's MkDocs hook
-files = ["bh-02/app/src", "bh-02/plugins/*/src", "libs/*/src", "examples/*/app/src", "examples/*/plugins/*/src", "docs/hooks"]
+files = ["bh-02/app/src", "bh-02/plugins/*/src", "libs/cordis/src", "libs/cordis-helpers/src", "libs/host-paths/src", "examples/*/app/src", "examples/*/plugins/*/src", "docs/hooks"]
+
+# bruk-io/brig ships no py.typed marker (at the commit the runner plugin pins), so mypy would skip
+# it as untyped; the runner plugin's jail and brig_spec are the only modules that import it.
+[[tool.mypy.overrides]]
+module = "brig"
+follow_untyped_imports = true
 
 # venusian is untyped upstream; cordis.authoring is the only module that touches it.
 [[tool.mypy.overrides]]
@@ -231,6 +233,8 @@ exclude = [
     "bh_02.bootstrap:project_of",                             # reads .git: a worktree's main repository
     "bh_02.bootstrap:models_keys",                            # reads the models file for the variables its keys read (host.key_envs); the pure part is key_variables
     "runner_cordis_plugin.allowlist:read",                    # reads the person's runner.toml (the jail's environment list); the pure parts are parsed and effective
+    "runner_cordis_plugin.runner:reserved_endpoint",          # makes the directory a start's socket lives in (it moved here from the owners, whose methods were already in the budget)
+    "runner_cordis_plugin.runner:unreserve_endpoint",         # removes it once the program is stopped
     # the session's rows.jsonl: a listener that reads the clock and queues each kept lifecycle event
     # to host_paths.Appender (a thread writes it), and `run`, which mounts it around the composition
     "bh_02.bootstrap:_row_log", "bh_02.bootstrap:_row_log.hear", "bh_02.bootstrap:run",
@@ -336,19 +340,15 @@ exclude = [
     # a copy of the text in a scratch directory of its own), the lines it prints
     "python_cordis_plugin.startup_check:main", "python_cordis_plugin.startup_check:_read",
     "python_cordis_plugin.startup_check:_ruffed", "python_cordis_plugin.startup_check:_mypied",
-    "runner_cordis_plugin.jail:BrigJail.*", "runner_cordis_plugin.jail:_Jailed.*", "runner_cordis_plugin.jail:_Held.*",
+    "runner_cordis_plugin.jail:BrigJail.*", "runner_cordis_plugin.jail:_Jailed.*",
     # the model's extensions: the directory they are written to, read every `watch` seconds, and
     # the status file the model reads; a socket to a worker a jail started, the worker program
     # itself (a cordis runtime of model-written modules), and the tests' plain-subprocess jail
     "extensions_cordis_plugin.host:Extensions.*",
     "extensions_cordis_plugin.worker:*",
     "extensions_cordis_plugin.testing:*",
-    "runner_cordis_plugin.jail:remove_placeholders",  # rmdir what a gone jail made (its stop, or the next start's sweep)
-    "runner_cordis_plugin.jail:_lives",               # whether a recorded jail's process group still runs
-    "runner_cordis_plugin.jail:_place",               # mkdir a placeholder and mark it, before bubblewrap starts
-    "runner_cordis_plugin.jail:_clear_up",            # take the jail lock alone, then remove_placeholders
-    "runner_cordis_plugin.jail:_launch",              # brig's Jail.create, its first start, destroy when refused
-    "runner_cordis_plugin.jail:_links_on_the_way",    # readlink, one component at a time, from the interpreter bh-02 runs on to its file
+    "runner_cordis_plugin.jail:planned",              # makes the jail's scratch directory and reads the host (the interpreter's links)
+    "runner_cordis_plugin.facts:*",                   # what the host is: the links on the way to its interpreter (readlink), which paths exist, its git identity (a subprocess)
     "runner_cordis_plugin.tripwire:Tripwire.*",       # inotify on the held paths' directories; kills the jail at a lift
     # pure by the design's own rule (they yield a value), charged for referencing an impure function
     "chat_cordis_plugin.wiring:converse", "models_cordis_plugin.wiring:model",

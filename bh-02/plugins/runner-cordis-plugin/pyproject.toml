@@ -17,7 +17,8 @@ runner = "runner_cordis_plugin"
 cordis = { workspace = true }
 cordis-helpers = { workspace = true }
 host-paths = { workspace = true }
-brig = { workspace = true }
+# brig (bruk-io/brig), pinned to v0.1.0
+brig = { git = "https://github.com/bruk-io/brig", tag = "v0.1.0" }
 
 [build-system]
 requires = ["hatchling"]

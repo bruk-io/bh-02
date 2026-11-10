@@ -8,13 +8,12 @@ bh-02 can, and `approval`'s rule puts each input (and each extension to load) to
 import asyncio
 import contextlib
 import os
-import shutil
 import signal
-import tempfile
+import socket
 from collections.abc import Mapping
 from pathlib import Path
 
-from runner_cordis_plugin.runner import ArgvFor
+from runner_cordis_plugin.runner import ArgvFor, reserved_endpoint, unreserve_endpoint
 
 __all__ = ["Unjailed", "UNENFORCED"]
 
@@ -54,14 +53,23 @@ def _program_env(environ: Mapping[str, str]) -> dict[str, str]:
 
 
 class _Process:
-    """The worker in a session of its own, so a terminal's Ctrl-C never reaches it directly.
-    `endpoint` is the socket it was started with, picked by `Unjailed.start` (reserve-then-start,
-    the unconfined mechanism's own way of it), in `directory`, removed once the worker stops."""
+    """The worker in a session of its own, so a terminal's Ctrl-C never reaches it directly."""
 
-    def __init__(self, process: asyncio.subprocess.Process, endpoint: str, directory: str) -> None:
+    def __init__(self, process: asyncio.subprocess.Process, endpoint: str) -> None:
         self._process = process
-        self._endpoint = endpoint
-        self._directory = directory
+        self.endpoint = endpoint
+        self._connection: socket.socket | None = None
+
+    @property
+    def connection(self) -> socket.socket:
+        """The connected socket to the program, made when it was ready (see `runner.Started`)."""
+        if self._connection is None:
+            raise RuntimeError("the program is not ready: it has no connection yet")
+        return self._connection
+
+    def ready(self, connection: socket.socket) -> None:
+        """Keep the connection made once the program listened: this start owns it until its owner takes it."""
+        self._connection = connection
 
     def interrupt(self) -> bool:
         if self._process.returncode is not None:
@@ -82,10 +90,6 @@ class _Process:
         """Nothing: the status bar says it is unjailed, and every input asks."""
         return ""
 
-    def degraded(self) -> str:
-        """Nothing: no jail to lose anything."""
-        return ""
-
     def reads(self) -> tuple[str, ...]:
         """No allowlist: an input reads what the person can."""
         return ()
@@ -95,17 +99,21 @@ class _Process:
         to them first; nothing runs unasked here, a startup file included)."""
         return ()
 
-    async def connect(self, *, limit: int) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
-        """A plain connect to the worker's socket: nothing confines this mechanism, so nothing
-        checks what answers beyond the kernel's own refusal of an absent or unbound path (every
-        axis `unenforced`, `channel_exclusivity` and `control` included)."""
-        return await asyncio.open_unix_connection(self._endpoint, limit=limit)
-
     async def stopped(self) -> None:
         """Return once the process has ended, however it ended."""
         await self._process.wait()
 
     async def stop(self) -> None:
+        """End the process, then close the connection and remove the directory its socket and log
+        were in."""
+        try:
+            await self._ended()
+        finally:
+            if self._connection is not None:
+                self._connection.close()
+            unreserve_endpoint(self.endpoint)
+
+    async def _ended(self) -> None:
         if self._process.returncode is None:
             with contextlib.suppress(*_GONE):
                 os.killpg(self._process.pid, signal.SIGTERM)
@@ -116,7 +124,6 @@ class _Process:
                 with contextlib.suppress(*_GONE):
                     os.killpg(self._process.pid, signal.SIGKILL)
                 await self._process.wait()
-        shutil.rmtree(self._directory, ignore_errors=True)
 
 
 class Unjailed:
@@ -125,16 +132,16 @@ class Unjailed:
     def report(self) -> Mapping[str, str]:
         return UNENFORCED
 
+    def notice(self) -> str:
+        """Nothing: the status bar says it is unjailed, and every input asks."""
+        return ""
+
     async def release(self) -> str:
         """Nothing: no jail holds anything on the host."""
         return ""
 
     async def start(self, argv_for: ArgvFor, *, cwd: str) -> _Process:
-        """Reserve-then-start, this mechanism's own way of it: a socket path of its own, in a
-        short directory of its own (a Unix socket path must fit in about 100 bytes), that
-        `argv_for` gets, as a brig jail's reserved path is."""
-        directory = tempfile.mkdtemp(prefix="bh-k-", dir="/tmp")
-        endpoint = str(Path(directory) / "k.sock")
+        endpoint = reserved_endpoint()
         log = Path(endpoint).with_name("stderr.log")
         try:
             with log.open("wb") as stderr:
@@ -148,26 +155,30 @@ class Unjailed:
                     start_new_session=True,
                 )
         except BaseException:
-            shutil.rmtree(directory, ignore_errors=True)
+            unreserve_endpoint(endpoint)
             raise
-        started = _Process(process, endpoint, directory)
+        started = _Process(process, endpoint)
         try:
-            await _until_listening(endpoint, process)
+            started.ready(await _until_listening(endpoint, process))
         except BaseException:
             await started.stop()
             raise
         return started
 
 
-async def _until_listening(endpoint: str, process: asyncio.subprocess.Process) -> None:
-    """Wait until something accepts on `endpoint` (connect, then leave without a word)."""
+async def _until_listening(endpoint: str, process: asyncio.subprocess.Process) -> socket.socket:
+    """Wait until something accepts on `endpoint`, and return that connection, the one the owner
+    uses (it never dials `endpoint` again: the contract is the same as a jail's)."""
     async with asyncio.timeout(_READY_TIMEOUT_S):
         while True:
             if process.returncode is not None:
                 log = Path(endpoint).with_name("stderr.log").read_text(errors="replace")[-2000:]
                 raise RuntimeError(f"the program exited before it was ready ({process.returncode}):\n{log}")
-            with contextlib.suppress(OSError):
-                _, writer = await asyncio.open_unix_connection(endpoint)
-                writer.close()
-                return
+            connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            try:
+                connection.connect(endpoint)
+            except OSError:
+                connection.close()
+            else:
+                return connection
             await asyncio.sleep(0.05)

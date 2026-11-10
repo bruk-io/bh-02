@@ -2,6 +2,7 @@
 is a fake, which calls scripted inputs. An input is plain Python: it reads and writes files and
 runs programs itself, the jail decides what it may touch, and unjailed every input is asked about."""
 
+import ast
 import asyncio
 import contextlib
 import importlib.metadata
@@ -11,9 +12,8 @@ import shutil
 import stat
 import subprocess
 import sys
-import tempfile
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -24,26 +24,24 @@ import cordis
 import memory_cordis_plugin
 from agent_cordis_plugin import ToolBroker
 from bh_02.bootstrap import (
-    CompositionError,
     code_directories,
     code_packages,
     config_directories,
     layers,
+    memory_directory,
     run,
     unreadable,
 )
 from cordis import Row
 from cordis.loader import boot
 from extensions_cordis_plugin import Extensions, ExtensionsConfig
-from extensions_cordis_plugin import worker_argv as extensions_worker_argv
 from python_cordis_plugin import PythonProcess, PythonProcessConfig, worker_argv
 from runner_cordis_plugin import (
+    CREDENTIALS,
     Approval,
     BrigConfig,
     BrigJail,
     Runner,
-    group_alive,
-    recorded_group,
     self_modify_denied,
 )
 from subagents_cordis_plugin import EventLog
@@ -57,11 +55,12 @@ _BWRAP = "/usr/bin/bwrap"
 
 @pytest.fixture
 def _needs_a_jail() -> None:
-    """runner:confined runs on darwin (seatbelt) and on Linux with bubblewrap installed. A fixture,
-    not `skipif`: looking for the binary at import time is an import-time side effect."""
-    if sys.platform not in ("darwin", "linux"):
-        pytest.skip(f"runner:confined runs on darwin and Linux; this is {sys.platform}")
-    if sys.platform == "linux" and not Path(_BWRAP).exists():
+    """runner:confined runs on Linux with bubblewrap installed (darwin has no brig jail yet:
+    TASK-0196). A fixture, not `skipif`: looking for the binary at import time is an
+    import-time side effect."""
+    if sys.platform != "linux":
+        pytest.skip(f"runner:confined runs on Linux for now (TASK-0196 is darwin's); this is {sys.platform}")
+    if not Path(_BWRAP).exists():
         pytest.skip(
             f"runner:confined on Linux needs bubblewrap at {_BWRAP}; install the `bubblewrap` package"
         )
@@ -218,8 +217,8 @@ async def test_a_jailed_input_does_coding_work_in_the_project_without_asking(
     assert (project / "new.py").read_text() == "X = 1\n"
     if git:
         assert (
-            "[3] (namespace: + s (CompletedProcess), a (CompletedProcess), c (CompletedProcess),"
-            " n (CompletedProcess))\n['??', '??', 'greet.py', 'new.py'] 0 0  1"
+            "[3] (namespace: + s (CompletedProcess), a (CompletedProcess),"
+            " c (CompletedProcess), n (CompletedProcess))\n['??', '??', 'greet.py', 'new.py'] 0 0  1"
         ) in out, out  # status, add, commit
 
 
@@ -246,7 +245,8 @@ async def test_a_jailed_input_cannot_rewrite_the_composition_or_leave_the_projec
     )
     ssh = Path.home() / ".ssh"
     credentials = (
-        f"import os\ntry:\n    os.listdir({str(ssh)!r}); print('WROTE')\nexcept OSError:\n    print('DENIED')"
+        f"import os\ntry:\n    print('WROTE' if os.listdir({str(ssh)!r}) else 'DENIED')\n"
+        "except OSError:\n    print('DENIED')"
     )
     patch = _inputs(
         composition,
@@ -263,11 +263,14 @@ async def test_a_jailed_input_cannot_rewrite_the_composition_or_leave_the_projec
     await run([*layers(), patch], [Row("chat", config={"prompt": "go"})])
     out = _shown()
     assert "[0] WROTE" in out, out  # the project is writable
-    assert all(f"[{n}] DENIED" in out for n in range(1, 4)), out
-    assert "[4] (namespace: + socket (module))\nDENIED" in out, out
+    # hooks and the network are refused outright; a path outside the project is not in the jail, so a
+    # write there lands on the jail's own scratch root and is gone with it (and a masked directory is
+    # an empty one): what is asserted is the host, which neither the outside file nor the patch touched
+    assert "[3] DENIED" in out, out  # hooks
+    assert "[4] (namespace: + socket (module))\nDENIED" in out, out  # network
     assert ("[5] (namespace: + os (module))\nDENIED" if ssh.is_dir() else "[5] DENIED") in out, (
         out
-    )  # outside, the patch, hooks, network, ~/.ssh
+    )  # ~/.ssh (listed empty)
     assert not outside.exists() and not patch.read_text().endswith("x")  # neither was touched
     assert _asked() == []
 
@@ -384,29 +387,22 @@ async def test_a_jailed_python_process_starts_in_a_worktree_and_cannot_write_its
 
 
 async def test_on_linux_a_host_with_no_interpreter_the_jail_mounts_does_not_start_and_says_brig_s_reason(
-    composition: Callable[..., Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The jail is compiled when the runner row starts, and brig's supervisor runs under a Python
-    the jail must mount: on a host with no `/usr` and no Python among what is mounted, brig refuses
-    (`InterpreterNotMounted`), and the runner says so in its own words in the composition's
-    diagnosis of the row that did not start: the Python it looked for, brig's reason, and what a
-    bh-02 user does (install python3, or `--no-jail`)."""
+    """brig runs its supervisor under bh-02's own Python and refuses a policy that does not mount
+    it: on a host with no `/usr` and no Python among what is mounted, the first program the runner
+    starts is refused before anything is made, and brig says what to add."""
     if sys.platform != "linux":
         pytest.skip("brig's supervisor is bubblewrap's: Linux only")
     monkeypatch.setattr("runner_cordis_plugin.jail.SYSTEM_READABLE", ("/etc",))
     monkeypatch.setattr("runner_cordis_plugin.jail.base_prefix", "/opt/py")
     monkeypatch.setattr("runner_cordis_plugin.jail.prefix", "/opt/py")
-    monkeypatch.setattr("runner_cordis_plugin.jail.host_interpreters", lambda: ())
+    monkeypatch.setattr("runner_cordis_plugin.jail.host_executable", "/usr/bin/python3")
     project = tmp_path / "project"
     project.mkdir()
-    patch = _inputs(composition, "1", extra=_jailed_in(project))
-    with pytest.raises(CompositionError) as raised:
-        await asyncio.wait_for(run([*layers(), patch], [Row("chat", config={"prompt": "go"})]), 10)
-    said = raised.value.message
-    assert "could not start" in said and "runner" in said
-    assert "Install python3" in said and "`bh-02 --no-jail`" in said, said
-    assert "(InterpreterNotMounted): /usr/bin/python3 is under no path the jail mounts" in said, said
-    assert "strict_linux" not in said, said  # brig's advice to an embedder stays in its cause
+    with pytest.raises(Exception, match="add a readable root") as raised:
+        await Runner(BrigJail(BrigConfig(), _Host())).start(lambda endpoint: ["true"], cwd=str(project))
+    assert "supervisor runs under this interpreter" in str(raised.value)
 
 
 @pytest.mark.usefixtures("_needs_a_jail")
@@ -466,24 +462,6 @@ class _Host:
     auto_memory: str = ""
 
 
-@pytest.fixture(autouse=True)
-async def _every_jail_ended(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[None]:
-    """A shared jail outlives its programs until the runner row ends (`BrigJail.close`), and these
-    tests have no row: each jail a test started ends with it, as a session's does, so none holds
-    the jail lock, or a supervisor, into the next test."""
-    started: list[BrigJail] = []
-    real = BrigJail.start
-
-    async def start(self: BrigJail, argv_for: Any, *, cwd: str) -> Any:
-        started.append(self)
-        return await real(self, argv_for, cwd=cwd)
-
-    monkeypatch.setattr(BrigJail, "start", start)
-    yield
-    for jail in started:
-        await jail.close()
-
-
 def _python(jail: BrigJail | Runner, config: PythonProcessConfig) -> PythonProcess:
     """The python tool's process over `jail`, as the python row builds it: started by a runner,
     its inputs confined as the approval rule says of that runner."""
@@ -505,7 +483,7 @@ async def test_on_linux_release_frees_the_jail_s_placeholder_until_the_next_inpu
     project = tmp_path / "project"
     project.mkdir()
     placeholder = project / ".envrc"
-    jail = BrigJail(BrigConfig(), _Host(), lock=str(tmp_path / "jails.lock"))
+    jail = BrigJail(BrigConfig(), _Host())
     reach = (
         "try:\n"
         f"    open({str(placeholder)!r}, 'w')\n"
@@ -517,12 +495,11 @@ async def test_on_linux_release_frees_the_jail_s_placeholder_until_the_next_inpu
     async with _python(runner, PythonProcessConfig(root=str(project))) as process:
         runner.on_release(process.stopped)
         assert placeholder.is_dir()  # held: the person can't create it
-        (record,) = (tmp_path / "state" / "bh-02" / "jails").iterdir()
-        group = recorded_group(record.read_text())
-        assert group is not None
+        group = _group(project)
         said = await runner.release()
         assert said.startswith("The Python process is stopped"), said
         assert not placeholder.exists() and runner.released()
+        await _ended(group)
         assert not group_alive(group)  # the jail is gone, not only its worker
         await process.run("1")
         assert placeholder.is_dir() and not runner.released()  # an input came first: held again
@@ -555,10 +532,10 @@ async def test_on_linux_a_module_an_input_plants_in_the_project_runs_nowhere_out
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The Python process works in the project root, which an input may write, and brig starts
-    its own programs there, on the host: the exit wrapper, the tether's watcher, the rlimits
-    trampoline. An input plants `subprocess.py`, `signal.py` and a `brig/` package in the root;
+    its own program there, on the host: the supervisor
+    supervisor. An input plants `subprocess.py`, `signal.py` and a `brig/` package in the root;
     the Python process starts again (`/restart python`) and runs the next input, and none of them
-    ran outside the jail (brig's decision-169: each of its interpreters runs `-I`). THE CONTROL:
+    ran outside the jail (brig runs each of its interpreters with `-I`). THE CONTROL:
     an interpreter started in the root without `-I` runs every one."""
     if sys.platform != "linux" or not Path(_BWRAP).exists():
         pytest.skip("the project-root start is bubblewrap's: Linux with /usr/bin/bwrap only")
@@ -583,11 +560,7 @@ async def test_on_linux_a_module_an_input_plants_in_the_project_runs_nowhere_out
         assert "started again" in out, out
     assert not record.exists(), f"planted modules ran outside the jail: {record.read_text()}"
 
-    for argv in (
-        [sys.executable, "-c", "import subprocess"],
-        [sys.executable, "-m", "brig.trampoline", "--", "true"],
-    ):
-        subprocess.run(argv, cwd=project, check=True)
+    subprocess.run([sys.executable, "-c", "import subprocess, brig"], cwd=project, check=True)
     assert set(record.read_text().split()) == {"brig", "signal", "subprocess"}
 
 
@@ -617,19 +590,20 @@ async def test_on_linux_the_python_process_tells_the_model_its_own_worker_s_tree
     project.mkdir()
     elsewhere.mkdir()
     (elsewhere / "worker.py").write_text(_LISTENS)
-    jail = BrigJail(BrigConfig(), _Host(code=(str(elsewhere),)))
+    jail = BrigJail(BrigConfig(), _Host())
     async with _python(jail, PythonProcessConfig(root=str(project))) as process:
-        told, before = process.instructions(), process.reads()
-        own = str(Path(worker_argv("")[2]).parent)  # the Python process's worker's directory
-        assert own in before and own in told, before
-        assert str(elsewhere) in before  # `host.code`: what every jail reads, before the other starts
-        other = await jail.start(_worker_at(elsewhere / "worker.py"), cwd=str(project))
+        told = process.instructions()
+        own = str(Path(worker_argv("x.sock")[2]).parent)  # the Python process's worker's directory
+        assert own in process.reads() and own in told, process.reads()
+        other = await jail.start(
+            lambda endpoint: [sys.executable, "-I", str(elsewhere / "worker.py"), endpoint], cwd=str(project)
+        )
         try:
-            assert process.instructions() == told and process.reads() == before
-            assert str(elsewhere) in other.reads()
+            assert str(elsewhere) not in process.reads(), process.reads()
+            assert process.instructions() == told
+            assert str(elsewhere) in other.reads()  # the other program's own
         finally:
             await other.stop()
-        assert process.instructions() == told  # nor did the other's stop
 
 
 async def test_on_linux_release_frees_the_placeholder_while_the_extensions_worker_runs(
@@ -651,11 +625,13 @@ async def test_on_linux_release_frees_the_placeholder_while_the_extensions_worke
     elsewhere.mkdir()
     (elsewhere / "worker.py").write_text(_LISTENS)
     placeholder = project / ".envrc"
-    jail = BrigJail(BrigConfig(), _Host(code=(str(elsewhere),)), lock=str(tmp_path / "jails.lock"))
+    jail = BrigJail(BrigConfig(), _Host())
     runner = Runner(jail)
     async with _python(runner, PythonProcessConfig(root=str(project))) as process:
         runner.on_release(process.stopped)
-        extensions = await runner.start(_worker_at(elsewhere / "worker.py"), cwd=str(project))
+        extensions = await runner.start(
+            lambda endpoint: [sys.executable, "-I", str(elsewhere / "worker.py"), endpoint], cwd=str(project)
+        )
 
         async def stop() -> str:
             await extensions.stop()
@@ -663,128 +639,20 @@ async def test_on_linux_release_frees_the_placeholder_while_the_extensions_worke
 
         runner.on_release(stop)
         try:
-            records = sorted((tmp_path / "state" / "bh-02" / "jails").iterdir())
-            groups = [recorded_group(record.read_text()) for record in records]
-            pid = (await process.run("import os; print(os.getpid())")).splitlines()[
-                -1
-            ]  # after the namespace line
-            # one jail where its programs have namespaces of their own (each is PID 1), else one each
-            assert len(groups) == (1 if pid.strip() == "1" else 2) and placeholder.is_dir(), pid
+            groups = _jail_groups(project)
+            assert len(groups) == 2 and placeholder.is_dir()
             said = await runner.release()
             assert "stays held" not in said and "still runs" not in said, said
             assert not placeholder.exists()
             for group in groups:
-                assert group is not None
-                assert not group_alive(group)  # every jail is gone, the extensions process's too
+                assert await _ended(group) is None and not group_alive(
+                    group
+                )  # both jails are gone, the extensions process's too
             assert runner.released()
             await process.run("1")  # the next input
             assert not runner.released() and placeholder.is_dir()
         finally:
             await extensions.stop()
-
-
-_CARRIED_CARVE_OUTS = """
-import errno, pathlib
-print("read", pathlib.Path({host!r}).read_text())
-pathlib.Path({jail!r}).write_text("jail")
-try:
-    open({config!r}, "a").write("# planted")
-    print("config WRITTEN")
-except OSError as error:
-    print("config", errno.errorcode[error.errno])
-try:
-    print("secret READ", open({secret!r}).read())
-except OSError as error:
-    print("secret", errno.errorcode[error.errno])
-"""
-
-
-@pytest.mark.parametrize("held", [True, False], ids=["held", "control"])
-async def test_on_linux_a_python_process_runs_with_its_project_under_dev_shm(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, held: bool
-) -> None:
-    """A project in memory: a real Python process starts in it and writes in it, and what the jail
-    mounts inside the project is carried with its flags (brig's decision-212): `.git/config`, a file
-    bound read-only, refuses with `EROFS`, which only a read-only mount gives, and a hidden file
-    refuses too. The control: neither held, the same write lands and the same read reads, so the
-    probes can."""
-    if sys.platform != "linux" or not Path(_BWRAP).exists():
-        pytest.skip("the allowlist is bubblewrap's: Linux with /usr/bin/bwrap only")
-    if not os.access("/dev/shm", os.W_OK):
-        pytest.skip("this host has no /dev/shm to write")
-    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
-    project = Path(tempfile.mkdtemp(prefix="bh-", dir="/dev/shm"))
-    try:
-        subprocess.run(["git", "init", "-q", str(project)], check=True)
-        config = project / ".git" / "config"
-        before = config.read_text()
-        (project / "from-host.txt").write_text("host")
-        (project / "private.txt").write_text("SECRET=1\n")  # a stand-in: never a real one
-        config_for = (
-            BrigConfig(hide=("private.txt",))
-            if held
-            else BrigConfig(allow=("CLAUDE.md", "AGENTS.md", ".git/config"))
-        )
-        jail = BrigJail(config_for, _Host(), lock=str(tmp_path / "jails.lock"))
-        async with _python(jail, PythonProcessConfig(root=str(project), startup=())) as process:
-            out = await process.run(
-                _CARRIED_CARVE_OUTS.format(
-                    host=str(project / "from-host.txt"),
-                    jail=str(project / "from-jail.txt"),
-                    config=str(config),
-                    secret=str(project / "private.txt"),
-                )
-            )
-            assert "read host" in out, out
-            assert (project / "from-jail.txt").read_text() == "jail"
-            if held:
-                assert "config EROFS" in out and config.read_text() == before, out
-                assert "secret EACCES" in out and "SECRET=1" not in out, out
-            else:
-                assert "config WRITTEN" in out and "# planted" in config.read_text(), out
-                assert "secret READ SECRET=1" in out, out
-    finally:
-        shutil.rmtree(project, ignore_errors=True)
-
-
-@pytest.mark.parametrize("first", ["python", "extensions"])
-async def test_on_linux_the_real_workers_share_one_jail_whichever_starts_first(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, first: str
-) -> None:
-    """The two programs a session runs, as they are installed: where each has namespaces of its own
-    (it is PID 1 of them) one jail holds both, one record; else one each. Each program's directory is
-    in `host.code`, so what the first to start names is not what the second depends on."""
-    if sys.platform != "linux" or not Path(_BWRAP).exists():
-        pytest.skip("the allowlist is bubblewrap's: Linux with /usr/bin/bwrap only")
-    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
-    project = tmp_path / "project"
-    project.mkdir()
-    runner = Runner(BrigJail(BrigConfig(), _Host(code=_code()), lock=str(tmp_path / "jails.lock")))
-    started = []
-    if first == "extensions":
-        started.append(await runner.start(extensions_worker_argv, cwd=str(project)))
-    async with _python(runner, PythonProcessConfig(root=str(project), startup=())) as process:
-        pid = (await process.run("import os; print(os.getpid())")).splitlines()[
-            -1
-        ]  # after the namespace line
-        if first == "python":
-            started.append(await runner.start(extensions_worker_argv, cwd=str(project)))
-        records = list((tmp_path / "state" / "bh-02" / "jails").iterdir())
-        assert len(records) == (1 if pid.strip() == "1" else 2), (pid, records)
-        _, writer = await started[0].connect(limit=1024)  # the extensions process, listening
-        writer.close()
-        assert "2" in await process.run("print(1 + 1)")
-    await started[0].stop()
-
-
-def _worker_at(worker: Path) -> Callable[[str], list[str]]:
-    """An argv that runs the script at `worker` by path, the socket the runner reserves its one
-    argument."""
-
-    def argv_for(endpoint: str) -> list[str]:
-        return [sys.executable, "-I", str(worker), endpoint]
-
-    return argv_for
 
 
 def _code() -> tuple[str, ...]:
@@ -883,7 +751,7 @@ async def test_a_jailed_input_can_t_write_bh_02_s_own_code_when_the_project_is_i
         Path(cordis.__file__).with_name("planted_by_an_input.py"),
     ]
     before = shipped.read_bytes()
-    # brig's self-modification list let through, so the jail makes no placeholder in the checkout
+    # the self-modification list let through, so the jail makes no placeholder in the checkout
     # (`.envrc/`, ...): what this is about is bh-02's own code alone
     config = BrigConfig(allow=self_modify_denied(()))
     inputs = [
@@ -1027,8 +895,8 @@ async def test_on_linux_the_checks_run_in_the_jail_on_a_file_with_findings_and_o
         ".bh-02/startup.py ran next: functions run(cmd), go(x: int) -> str, fine() -> None. "
         ".bh-02/startup.py findings: run D415, example, no-untyped-def; go doctest, return-value; "
         "elsewhere in the file: import-not-found)\n"
-        "(namespace: + os (module), subprocess (module), sys (module), "
-        "ruff (CompletedProcess), rule (CompletedProcess), types (CompletedProcess))\n"
+        "(namespace: + os (module), subprocess (module), sys (module),"
+        " ruff (CompletedProcess), rule (CompletedProcess), types (CompletedProcess))\n"
         "False\n1 1 1 True\n1 1 1\n'<1>'"
     ), out
     cache = project / ".bh-02" / "mypy_cache"
@@ -1083,7 +951,7 @@ async def test_a_session_run_from_home_can_t_choose_what_a_later_session_reads_a
     (home / ".config").mkdir()  # the default directory's parent, without a bh-02 of its own
     person = xdg / "startup.py"
     person.write_text("MARK = 1\n")
-    key = home / ".ssh" / "id_ed25519"  # a file the jail hides (brig's credential list)
+    key = home / ".ssh" / "id_ed25519"  # a file the jail hides (the runner's credential paths)
     key.parent.mkdir()
     key.write_text("-----BEGIN STAND-IN KEY, NOT A SECRET-----\nc3RhbmQtaW4K\n")
     monkeypatch.setenv("HOME", str(home))
@@ -1122,9 +990,8 @@ async def test_a_session_run_from_home_can_t_choose_what_a_later_session_reads_a
         BrigJail(BrigConfig(), _Host(trusted=trusted)), PythonProcessConfig(root=str(project))
     ) as process:
         seen = await process.run(f"import linecache\n''.join(linecache.getlines({str(person)!r})), MARK")
-    assert (
-        seen
-        == f"({person} ran first: no public functions)\n(namespace: + linecache (module))\n('MARK = 1\\n', 1)"
+    assert seen == (
+        f"({person} ran first: no public functions)\n(namespace: + linecache (module))\n('MARK = 1\\n', 1)"
     ), seen
     assert "STAND-IN" not in seen
 
@@ -1141,6 +1008,36 @@ def _append_to(path: Path, mode: str = "a", text: str = "# planted by an input\n
     )
 
 
+def group_alive(group: int) -> bool:
+    """Whether a process of process group `group` lives (a zombie counts as gone)."""
+    for entry in Path("/proc").iterdir():
+        if entry.name.isdigit():
+            try:
+                fields = (entry / "stat").read_text().rsplit(")", 1)[1].split()
+            except OSError:
+                continue
+            if fields[0] != "Z" and fields[2] == str(group):
+                return True
+    return False
+
+
+def _jail_groups(project: Path) -> list[int]:
+    """The process groups of the running bubblewrap jails that mount `project` (bubblewrap's command
+    line names every path it mounts): one for each jail, as brig starts each as the leader of a group."""
+    found = set()
+    for entry in Path("/proc").iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            command = (entry / "cmdline").read_bytes().split(b"\0")
+            fields = (entry / "stat").read_text().rsplit(")", 1)[1].split()
+        except OSError:
+            continue
+        if command[0].endswith(b"bwrap") and fields[0] != "Z" and str(project).encode() in command:
+            found.add(int(fields[2]))
+    return sorted(found)
+
+
 async def _ended(group: int, within: float = 2.0) -> None:
     """Wait until the process group `group` has no process left, or `within` seconds pass."""
     for _ in range(int(within / 0.02)):
@@ -1149,11 +1046,9 @@ async def _ended(group: int, within: float = 2.0) -> None:
         await asyncio.sleep(0.02)
 
 
-def _group(state: Path) -> int:
-    """The process group of the one running jail recorded under the state directory `state`."""
-    (record,) = (state / "bh-02" / "jails").iterdir()
-    group = recorded_group(record.read_text())
-    assert group is not None
+def _group(project: Path) -> int:
+    """The process group of the one running jail that mounts `project`."""
+    (group,) = _jail_groups(project)
     return group
 
 
@@ -1174,7 +1069,7 @@ async def test_on_linux_a_host_rename_over_a_denied_path_ends_the_jail_and_the_n
     jail = BrigJail(BrigConfig(), _Host())
     async with _python(jail, PythonProcessConfig(root=str(project))) as process:
         assert "DENIED" in await process.run(_append_to(config))
-        group = _group(tmp_path / "state")
+        group = _group(project)
         subprocess.run(["git", "config", "user.name", "Pat"], cwd=project, check=True)  # by rename
         await _ended(group)
         out = await process.run(_append_to(config))
@@ -1218,23 +1113,6 @@ async def test_an_input_can_t_put_its_own_git_config_in_place_by_moving_the_dire
     assert "hooksPath" not in config.read_text() if config.exists() else True
     if sys.platform == "linux":
         assert "rename DENIED" in out and config.read_text() == was, out  # .git stays where it is
-
-
-async def test_on_darwin_a_host_rename_over_a_denied_path_lifts_nothing(tmp_path: Path) -> None:
-    """seatbelt matches paths, not directory entries: after a host `git config` renames a new
-    `.git/config` into place, the same jail still refuses an input's write, and nothing restarts."""
-    if sys.platform != "darwin":
-        pytest.skip("seatbelt is darwin's")
-    project = tmp_path / "project"
-    project.mkdir()
-    subprocess.run(["git", "init", "-q"], cwd=project, check=True)
-    config = project / ".git" / "config"
-    async with _python(BrigJail(BrigConfig(), _Host()), PythonProcessConfig(root=str(project))) as process:
-        assert "DENIED" in await process.run("x = 1\n" + _append_to(config))
-        subprocess.run(["git", "config", "user.name", "Pat"], cwd=project, check=True)
-        out = await process.run("print(x)\n" + _append_to(config))
-        assert "DENIED" in out and "started again" not in out and out.startswith("1"), out
-    assert "planted" not in config.read_text()
 
 
 @pytest.mark.usefixtures("_needs_a_jail")
@@ -1284,7 +1162,7 @@ async def test_on_linux_a_layer_file_saved_by_rename_reloads_and_no_later_input_
         async with _python(jail, PythonProcessConfig(root=str(project))) as process:
             rewrite = _append_to(mine, "w", row("planted"))
             assert "DENIED" in await process.run(rewrite)
-            group = _group(tmp_path / "state")
+            group = _group(project)
             saved = project / "mine.toml.tmp"
             saved.write_text(row("two"))
             saved.replace(mine)  # the person's save
@@ -1397,17 +1275,22 @@ async def test_a_linux_jailed_git_commit_carries_the_person_s_own_name_without_t
     out = _shown()
     # committed as the person; the alias of their config is not there (only the identity is)
     assert (
-        "[0] (namespace: + subprocess (module), c (CompletedProcess), a (CompletedProcess),"
-        " who (CompletedProcess))\n"
+        "[0] (namespace: + subprocess (module), c (CompletedProcess),"
+        " a (CompletedProcess), who (CompletedProcess))\n"
         "0 1 Pat Person <pat@example.invalid> / Pat Person <pat@example.invalid>"
     ) in out, out
-    # the home directory is not there: at most the way to an interpreter installed under it
+    # the home directory is not there: at most the way to an interpreter installed under it, and
+    # to the project's auto memory, which the jail writes by design (`host.auto_memory`), and to the
+    # project itself (pytest's base directory is under the home, not `/tmp`: a jail refuses a root there)
     on_the_way = {
         Path(p).relative_to(home).parts[0]
-        for p in (sys.base_prefix, sys.prefix)
+        for p in (sys.base_prefix, sys.prefix, project, memory_directory(project, os.environ, home))
         if Path(p).is_relative_to(home)
     }
-    assert f"[1] (namespace: + os (module))\n{sorted(on_the_way)}" in out, out
+    # (and the credential directories, each an empty directory in the home brig masks it with)
+    masked = {name.split("/")[0] for name in CREDENTIALS}
+    listed = out.split("[1] (namespace: + os (module))\n", 1)[1].splitlines()[0]
+    assert set(ast.literal_eval(listed)) <= on_the_way | masked, out
 
 
 @pytest.mark.usefixtures("_needs_a_jail")
@@ -1447,9 +1330,10 @@ async def test_a_jailed_input_cannot_read_under_the_sessions_state_directory(
     composition: Callable[..., Path],
     tmp_path: Path,
 ) -> None:
-    """The sessions' state is a directory in `secrets`: an input can't list it nor open a file
-    deep under it (the shape of the Claude Code child's peer-token file), in-process or from a
-    program it starts; a sibling directory stays readable."""
+    """The sessions' state is a directory in `secrets`, under no root the jail reads, so it is
+    absent from the jail, not masked: an input can't list it nor open a file deep under it (the
+    shape of the Claude Code child's peer-token file), in-process or from a program it starts; a
+    sibling directory stays readable. A mask inside a root is the sub-agent event-log test's."""
     project, state, beside = tmp_path / "project", tmp_path / "state", tmp_path / "beside"
     project.mkdir()
     beside.mkdir()
@@ -1464,7 +1348,11 @@ async def test_a_jailed_input_cannot_read_under_the_sessions_state_directory(
     patch = _inputs(
         composition,
         attempt(f"open({str(token)!r}).read()"),
-        attempt(f"__import__('os').listdir({str(state)!r})"),
+        # outside every root the jail has it is not there at all (brig is not handed a mask for it):
+        # nothing to list, or an empty directory, is nothing readable
+        "import os\ntry:\n"
+        f"    print('READ' if os.listdir({str(state)!r}) else 'DENIED')\n"
+        "except OSError:\n    print('DENIED')",
         attempt(f"open({str(beside / 'notes.txt')!r}).read()"),
         "import subprocess\n"
         f"r = subprocess.run(['/bin/cat', {str(token)!r}], capture_output=True, text=True)\n"
@@ -1477,7 +1365,7 @@ async def test_a_jailed_input_cannot_read_under_the_sessions_state_directory(
     out = _shown()
     assert (
         "[0] DENIED" in out
-        and "[1] DENIED" in out
+        and "[1] (namespace: + os (module))\nDENIED" in out
         and "[3] (namespace: + subprocess (module), r (CompletedProcess))\nDENIED" in out
     ), out
     assert f"[2] {'READ' if _READS_EVERYWHERE_ELSE else 'DENIED'}" in out, out  # Linux: not allowlisted

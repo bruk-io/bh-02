@@ -23,13 +23,14 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from host_paths import config_home, passes, roots
-from runner_cordis_plugin.jail import BASELINE_ENV, BrigConfig
+from runner_cordis_plugin.policy import BASELINE_ENV, BrigConfig
 
 __all__ = ["FILE", "Refused", "Standing", "effective", "location", "parsed", "read"]
 
 FILE = "runner.toml"
 _KEYS = ("env",)
 _NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+_PROXY_VARIABLES = frozenset({"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"})
 _EXAMPLE = 'env = ["GITHUB_TOKEN", "AWS_PROFILE"]'
 
 
@@ -125,8 +126,9 @@ def effective(
     (the `host` value), in `models_file`.
 
     Raises:
-        Refused: a variable in the list that an endpoint's `key = { env = ... }` reads, naming the
-            variable, the endpoint and both files.
+        Refused: a proxy variable (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY` or `NO_PROXY`, in
+            either case), or a variable in the list that an endpoint's `key = { env = ... }`
+            reads, naming the variable, the endpoint and both files.
     """
     note = standing.unread
     if config.env is not None:
@@ -139,6 +141,14 @@ def effective(
     else:
         env, where = (*BASELINE_ENV, *standing.names), str(file)
     for name in env:
+        if name.upper() in _PROXY_VARIABLES:
+            raise Refused(
+                f"{name} is in {where}, but the jail sets the proxy variables itself: every start "
+                "routes its network through bh-02's egress proxy, and a list that named one could "
+                f"point a program elsewhere. Remove {name} from "
+                f"{'the layer' if config.env is not None else str(file)}; a destination the "
+                "program needs is granted, not routed"
+            )
         if endpoints := readers.get(name):
             raise Refused(
                 f"{name} is in {where} and endpoint {', '.join(map(repr, endpoints))} reads it as its "

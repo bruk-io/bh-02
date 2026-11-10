@@ -1,7 +1,10 @@
 """The `runner` value over any mechanism: each owner stops its own program on `/release`, a start
 ends a release, and each start is told to whoever watches; and the rows that bind it."""
 
+import os
+import sys
 from collections.abc import Callable, Mapping, Sequence
+from pathlib import Path
 from typing import Any
 
 from cordis.loader import resolve
@@ -14,6 +17,7 @@ class _Start:
 
     def __init__(self, n: int) -> None:
         self.n = n
+        self.endpoint = f"/s/{n}"
         self.stopped = False
 
     def report(self) -> Mapping[str, str]:
@@ -33,13 +37,19 @@ class _Mechanism:
     def __init__(self, log: list[str]) -> None:
         self.log = log
         self.starts: list[_Start] = []
+        self.argvs: list[list[str]] = []
 
     def report(self) -> Mapping[str, str]:
         return UNENFORCED
 
+    def notice(self) -> str:
+        return ""
+
     async def start(self, argv_for: Callable[[str], Sequence[str]], *, cwd: str) -> _Start:
-        self.starts.append(_Start(len(self.starts) + 1))
-        return self.starts[-1]
+        started = _Start(len(self.starts) + 1)
+        self.starts.append(started)
+        self.argvs.append(list(argv_for(started.endpoint)))
+        return started
 
     async def release(self) -> str:
         self.log.append("mechanism")
@@ -74,18 +84,56 @@ async def test_a_start_ends_a_release_and_is_told_to_each_watcher() -> None:
     stop_watching = runner.on_start(lambda started: seen.append(started.n))  # type: ignore[attr-defined]
     await runner.release()
     assert runner.released()
-    await runner.start(lambda path: ["x", path], cwd="/w")
+    await runner.start(lambda endpoint: ["x", endpoint], cwd="/w")
     assert not runner.released() and seen == [1]
     assert runner.report()["fs_read"] == "grade 1" and runner.notice() == "notice 1"
     stop_watching()
-    await runner.start(lambda path: ["y", path], cwd="/w")
+    await runner.start(lambda endpoint: ["y", endpoint], cwd="/w")
     assert seen == [1] and runner.report()["fs_read"] == "grade 2"  # the last start's
+
+
+async def test_the_runner_hands_the_command_the_endpoint_it_started_the_program_on() -> None:
+    mechanism = _Mechanism([])
+    started = await Runner(mechanism).start(lambda endpoint: ["x", endpoint], cwd="/w")
+    assert mechanism.argvs == [["x", "/s/1"]] and started.endpoint == "/s/1"
+
+
+_LISTENS = """
+import socket, sys, time
+s = socket.socket(socket.AF_UNIX)
+s.bind(sys.argv[1])
+s.listen(1)
+time.sleep(30)
+"""
+
+
+async def test_an_unconfined_start_chooses_a_short_socket_in_a_directory_of_its_own_and_stop_removes_it(
+    tmp_path: Path,
+) -> None:
+    """TASK-0179: the mechanism chooses the path (it must fit a Unix socket's 108 bytes), builds the
+    command from it before anything starts, and the program listens on what `started.endpoint` says."""
+    given: list[str] = []
+
+    def argv_for(endpoint: str) -> list[str]:
+        given.append(endpoint)
+        return [sys.executable, "-I", "-c", _LISTENS, endpoint]
+
+    started = await Unjailed().start(argv_for, cwd=str(tmp_path))
+    try:
+        assert given == [started.endpoint] and len(os.fsencode(started.endpoint)) < 108
+        assert Path(started.endpoint).exists()
+        connection = started.connection  # the runner's own connect: the owner's way in, never a dial
+        assert connection.getpeername() == started.endpoint and connection.fileno() != -1
+    finally:
+        await started.stop()
+    assert connection.fileno() == -1  # stop closed it
+    assert not Path(started.endpoint).parent.exists()
 
 
 async def test_the_runner_stops_no_program_itself() -> None:
     mechanism = _Mechanism([])
     runner = Runner(mechanism)
-    await runner.start(lambda path: ["x", path], cwd="/w")
+    await runner.start(lambda endpoint: ["x", endpoint], cwd="/w")
     await runner.release()
     assert not mechanism.starts[0].stopped  # its owner registered no stop: it is the owner's
 

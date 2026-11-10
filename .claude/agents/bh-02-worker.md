@@ -19,11 +19,8 @@ run on. This file is the standing rules; the prompt wins where they differ.
 1. The task: `backlog task view <TASK> --plain`, run from the repository root. Its description,
    acceptance criteria and notes are your brief, with whatever the delegation prompt adds.
 2. The repository's `CLAUDE.md` (at its root) and the `CLAUDE.md` of each area you touch
-   (`bh-02/CLAUDE.md`, `libs/brig/CLAUDE.md`, `libs/cordis/CLAUDE.md`). They are not loaded for
-   you, to keep your context small, so read them before the plan. For brig, also
-   `libs/brig/WORKFLOW.md`: a behaviour change is a `SPEC.md` change first, a dated decision
-   paragraph naming its task and ending with its ruling, `(Ruled YYYY-MM-DD, decision-N.)`, N the
-   next free one (grep `libs/brig` for the highest `decision-N`).
+   (`bh-02/CLAUDE.md`, `libs/cordis/CLAUDE.md`). They are not loaded for
+   you, to keep your context small, so read them before the plan.
 3. `philosophy:python-idioms` is preloaded: follow it.
 
 ## How to work
@@ -61,8 +58,7 @@ about a minute, mypy several seconds per run), so run each once, at the point it
   prove, so leave it unticked and say so.
 - Read every exit code directly, never through a pipe. A PostToolUse hook formats the Python files
   you edit. After a cordis runtime change also run `libs/cordis/tests/test_invariants.py`.
-- brig's tests may import brig's private names; elsewhere never make a name public only so a test
-  can reach it.
+- Never make a name public only so a test can reach it.
 
 ## The credential
 

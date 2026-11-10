@@ -9,7 +9,6 @@ started in each, from a process that has them set (stand-in values: never a real
 import asyncio
 import json
 import sys
-import tempfile
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -52,7 +51,6 @@ def _keys_exported(monkeypatch: pytest.MonkeyPatch) -> None:
 def _inside_tmux(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("TMUX", "/tmp/tmux-0/default,123,0")
     monkeypatch.setenv("TMUX_PANE", "%7")
-    monkeypatch.setenv("XDG_STATE_HOME", tempfile.mkdtemp(prefix="bh-s-", dir="/tmp"))
 
 
 async def _environment_of(
@@ -61,10 +59,10 @@ async def _environment_of(
     """The environment a program the runner starts sees."""
     seen = project / "env.json"
 
-    def argv_for(endpoint: str) -> list[str]:
+    def argv(endpoint: str) -> list[str]:
         return [sys.executable, "-I", "-c", _LISTEN_AND_LIST, endpoint, str(seen)]
 
-    started = await start(argv_for, str(project))
+    started = await start(argv, str(project))
     try:
         for _ in range(200):
             if seen.exists() and seen.read_text().endswith("}"):
@@ -79,8 +77,8 @@ async def test_the_unconfined_runner_starts_programs_without_tmux_s_variables(tm
     project = tmp_path / "project"
     project.mkdir()
 
-    async def start(argv_for: Callable[[str], list[str]], cwd: str) -> Any:
-        return await Unjailed().start(argv_for, cwd=cwd)
+    async def start(argv: Callable[[str], list[str]], cwd: str) -> Any:
+        return await Unjailed().start(argv, cwd=cwd)
 
     seen = await _environment_of(start, project)
     assert seen["TMUX"] is None and seen["TMUX_PANE"] is None
@@ -95,8 +93,8 @@ async def test_the_unconfined_runner_keeps_the_claude_token_out_and_passes_provi
     project = tmp_path / "project"
     project.mkdir()
 
-    async def start(argv_for: Callable[[str], list[str]], cwd: str) -> Any:
-        return await Unjailed().start(argv_for, cwd=cwd)
+    async def start(argv: Callable[[str], list[str]], cwd: str) -> Any:
+        return await Unjailed().start(argv, cwd=cwd)
 
     seen = await _environment_of(start, project)
     assert "CLAUDE_CODE_OAUTH_TOKEN" not in seen["names"]
@@ -104,16 +102,16 @@ async def test_the_unconfined_runner_keeps_the_claude_token_out_and_passes_provi
 
 
 async def test_the_confined_runner_starts_programs_without_tmux_s_variables(tmp_path: Path) -> None:
-    if sys.platform not in ("darwin", "linux") or (
-        sys.platform == "linux" and not Path("/usr/bin/bwrap").exists()
-    ):
-        pytest.skip("the confined runner is brig's: darwin, or Linux with /usr/bin/bwrap")
+    if sys.platform != "linux" or not Path("/usr/bin/bwrap").exists():
+        pytest.skip(
+            "the confined runner jails only on Linux with /usr/bin/bwrap (darwin has no brig jail yet)"
+        )
     project = tmp_path / "project"
     project.mkdir()
     jail = BrigJail(BrigConfig(), _Host())
 
-    async def start(argv_for: Callable[[str], list[str]], cwd: str) -> Any:
-        return await jail.start(argv_for, cwd=cwd)
+    async def start(argv: Callable[[str], list[str]], cwd: str) -> Any:
+        return await jail.start(argv, cwd=cwd)
 
     seen = await _environment_of(start, project)
     assert seen["TMUX"] is None and seen["TMUX_PANE"] is None
@@ -121,16 +119,16 @@ async def test_the_confined_runner_starts_programs_without_tmux_s_variables(tmp_
 
 
 async def test_the_confined_runner_passes_neither_the_claude_token_nor_a_provider_key(tmp_path: Path) -> None:
-    if sys.platform not in ("darwin", "linux") or (
-        sys.platform == "linux" and not Path("/usr/bin/bwrap").exists()
-    ):
-        pytest.skip("the confined runner is brig's: darwin, or Linux with /usr/bin/bwrap")
+    if sys.platform != "linux" or not Path("/usr/bin/bwrap").exists():
+        pytest.skip(
+            "the confined runner jails only on Linux with /usr/bin/bwrap (darwin has no brig jail yet)"
+        )
     project = tmp_path / "project"
     project.mkdir()
     jail = BrigJail(BrigConfig(), _Host())
 
-    async def start(argv_for: Callable[[str], list[str]], cwd: str) -> Any:
-        return await jail.start(argv_for, cwd=cwd)
+    async def start(argv: Callable[[str], list[str]], cwd: str) -> Any:
+        return await jail.start(argv, cwd=cwd)
 
     seen = await _environment_of(start, project)
     assert "CLAUDE_CODE_OAUTH_TOKEN" not in seen["names"] and "OPENROUTER_API_KEY" not in seen["names"]

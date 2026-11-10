@@ -44,6 +44,7 @@ import importlib.util
 import itertools
 import json
 import os
+import socket
 import stat
 import uuid
 from collections.abc import Awaitable, Callable, Iterator, Mapping, Sequence
@@ -100,22 +101,21 @@ _RELEASED = (
 
 @runtime_checkable
 class _Jailed(Protocol):
-    """A program a jail started: dialled through the mechanism's own verified dial (`connect`),
-    never a path this row chose. `ended` says why the jail ended it itself (the host undid a mount,
-    which ends every program in the jail), or ""."""
+    """A program a jail started: the socket the runner chose for it (`endpoint`, for its argv alone),
+    the runner's connection to it (`connection`, the only way in), and how to stop it."""
 
-    def ended(self) -> str: ...
-    async def connect(self, *, limit: int) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]: ...
+    @property
+    def endpoint(self) -> str: ...
+    @property
+    def connection(self) -> socket.socket: ...
     async def stop(self) -> None: ...
 
 
 @runtime_checkable
 class Runner(Protocol):
     """What the extensions need of the `runner` value (CONTRACTS.md: runner): their worker
-    started (reserve-then-start: `argv_for(path)` is the worker's argv, `path` the socket the
-    runner reserves for it, never one this row chose), and whether `/release` has stopped what
-    runs until the next start (`released`), when it waits rather than start again only to come
-    back."""
+    started, and whether `/release` has stopped what runs until the next start (`released`),
+    when it waits rather than start again only to come back."""
 
     async def start(self, argv_for: Callable[[str], Sequence[str]], *, cwd: str) -> _Jailed: ...
     def released(self) -> bool: ...
@@ -210,10 +210,7 @@ class _Refused(Exception):
 
 
 def worker_argv(endpoint: str) -> list[str]:
-    """The worker, run by path under this interpreter, isolated (-I: no PYTHON* env, no cwd on
-    path), listening on `endpoint`: the socket the runner reserves for it (reserve-then-start),
-    never a path of this row's own choosing (`Extensions._start` passes this function itself as
-    the runner's `argv_for`)."""
+    """The worker, run by path under this interpreter, isolated (-I: no PYTHON* env, no cwd on path)."""
     return [executable, "-I", str(_WORKER), endpoint]
 
 
@@ -245,7 +242,6 @@ class Extensions:
         self._seen: dict[str, tuple[int, int]] = {}  # each file as last loaded: (mtime_ns, size)
         self._halted: dict[str, tuple[int, int]] | None = None  # the directory when the worker ended
         self._ended = False  # the worker ended (or `/release` kept one from starting) since the last look
-        self._why = ""  # why the jail ended the last worker itself, told with its status
         self._waiting = False  # `/release` stopped the worker: all load again once the runner starts again
         self._at_release: dict[str, tuple[int, int]] = {}  # the directory when `/release` stopped it
         self._leaving = False
@@ -364,7 +360,7 @@ class Extensions:
             self._statuses = {name: Status(error=_RELEASED) for name in found}
         else:
             self._halted = dict(found)
-            self._statuses = {name: Status(error=self._told()) for name in found}
+            self._statuses = {name: Status(error=_ENDED) for name in found}
         self._publish()
 
     async def _watch(self) -> None:
@@ -628,12 +624,8 @@ class Extensions:
 
     def _send(self, message: Mapping[str, Any]) -> None:
         if self._writer is None:
-            raise _Gone(self._told())
+            raise _Gone(_ENDED)
         self._writer.write((json.dumps(message) + "\n").encode("utf-8"))
-
-    def _told(self) -> str:
-        """That the worker ended, and why when the jail ended it itself."""
-        return f"{_ENDED} ({self._why})" if self._why else _ENDED
 
     async def _start(self) -> None:
         """Start the worker in the runner, unless it is running. A start ends a release
@@ -645,7 +637,9 @@ class Extensions:
         root = str(Path(self._config.root).resolve())
         try:
             self._process = await self._runner.start(worker_argv, cwd=root)
-            reader, self._writer = await self._process.connect(limit=_LINE_LIMIT)
+            reader, self._writer = await asyncio.open_unix_connection(
+                sock=self._process.connection, limit=_LINE_LIMIT
+            )
         except Exception as error:
             await self._stop()
             raise _Gone(f"the extensions' jailed worker could not be started: {error}") from None
@@ -668,7 +662,6 @@ class Extensions:
             return
         self._writer.close()
         self._writer = None
-        self._why = self._process.ended() if self._process is not None else ""
         self._ended = not self._leaving
         for entry in self._entries.values():
             if entry.remove is not None:
@@ -677,7 +670,7 @@ class Extensions:
         waiting: list[asyncio.Future[Any]] = [*self._answers.values(), *self._calls.values()]
         for question in waiting:
             if not question.done():
-                question.set_exception(_Gone(self._told()))
+                question.set_exception(_Gone(_ENDED))
         self._answers.clear()
         self._calls.clear()
 

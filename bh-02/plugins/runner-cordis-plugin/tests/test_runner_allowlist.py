@@ -153,6 +153,22 @@ def test_a_name_a_key_reads_is_refused_naming_the_variable_the_endpoint_and_both
     assert "/c/runner.toml" in message and "/c/models.toml" in message
 
 
+@pytest.mark.parametrize("name", ["HTTP_PROXY", "https_proxy", "All_Proxy", "NO_PROXY", "no_proxy"])
+def test_a_proxy_variable_is_refused_in_either_case_from_the_file_and_from_a_layer(name: str) -> None:
+    """The jail sets the proxy variables itself (every start routes through the egress proxy), so a list
+    naming one is refused here, in bh-02's words, before brig refuses it."""
+    for config, standing, where in (
+        (BrigConfig(), allowlist.Standing((name,)), "/c/runner.toml"),
+        (BrigConfig(env=("PATH", name)), allowlist.Standing(), "layer"),
+    ):
+        with pytest.raises(allowlist.Refused) as raised:
+            allowlist.effective(
+                config, standing, file=Path("/c/runner.toml"), readers={}, models_file="/c/models.toml"
+            )
+        message = str(raised.value)
+        assert name in message and where in message and "proxy" in message and "Remove" in message
+
+
 def test_a_layer_s_env_naming_a_key_is_refused_too() -> None:
     with pytest.raises(allowlist.Refused, match="layer"):
         allowlist.effective(
@@ -190,10 +206,10 @@ while True:
 
 @pytest.fixture
 def _jailable() -> None:
-    if sys.platform not in ("darwin", "linux") or (
-        sys.platform == "linux" and not Path("/usr/bin/bwrap").exists()
-    ):
-        pytest.skip("the confined runner is brig's: darwin, or Linux with /usr/bin/bwrap")
+    if sys.platform != "linux" or not Path("/usr/bin/bwrap").exists():
+        pytest.skip(
+            "the confined runner jails only on Linux with /usr/bin/bwrap (darwin has no brig jail yet)"
+        )
 
 
 async def _names_in_the_jail(runner: Runner, project: Path) -> list[str]:
@@ -215,7 +231,7 @@ async def _names_in_the_jail(runner: Runner, project: Path) -> list[str]:
 
 async def _runner_of(config: BrigConfig, host: _Host) -> Any:
     effects = await drive(confined(config=config, host=host))
-    return effects[-1].args[1]
+    return effects[0].args[1]
 
 
 @pytest.mark.usefixtures("_jailable")

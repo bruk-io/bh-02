@@ -7,7 +7,7 @@
 
 A gate is a directory whose pyproject.toml has a `[tool.pypeeker]` table: the workspace root
 (the rules that span packages) and each library under libs/ that keeps its own (cordis,
-cordis-helpers, brig). pypeeker reads the nearest pyproject.toml, so each gate runs from its
+cordis-helpers). pypeeker reads the nearest pyproject.toml, so each gate runs from its
 own directory, with the repository root on PYTHONPATH so any gate can load the shared rules
 in pypeeker_rules/.
 
@@ -269,7 +269,7 @@ def run_gate(gate: Path, fix: bool) -> Outcome:
 
 
 def gate_name(gate: Path) -> str:
-    """The gate as the repository names it: `(root)`, or its directory (`libs/brig`)."""
+    """The gate as the repository names it: `(root)`, or its directory (`libs/cordis`)."""
     return "(root)" if gate == ROOT else gate.relative_to(ROOT).as_posix()
 
 

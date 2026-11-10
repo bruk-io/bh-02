@@ -56,23 +56,20 @@ class StatusSink(Protocol):
 
 @runtime_checkable
 class Started(Protocol):
-    """A start the runner reports (CONTRACTS.md: runner): its grades, what the person should
-    know of it, and what its jail lost that the status bar must show ('' for nothing)."""
+    """A start the runner reports (CONTRACTS.md: runner): its grades, and what the person should
+    know of it."""
 
     def report(self) -> Mapping[str, str]: ...
     def notice(self) -> str: ...
-    def degraded(self) -> str: ...
 
 
 @runtime_checkable
 class Starts(Protocol):
-    """What the grades row needs of the `runner` value (CONTRACTS.md: runner): the grades of the
-    last start (before any, its own), that start's notice and what its jail lost, read when the row
-    comes up so a start made before it is not missed, and each start told as it happens."""
+    """What the grades row needs of the `runner` value (CONTRACTS.md: runner): the grades before
+    any start, and each start told as it happens."""
 
     def report(self) -> Mapping[str, str]: ...
     def notice(self) -> str: ...
-    def degraded(self) -> str: ...
     def on_start(self, watch: Callable[[Started], None]) -> Callable[[], None]: ...
 
 
@@ -211,36 +208,26 @@ class GradesField:
     last start (before any, the runner's own), and whether the `approval` rule counts them as
     confined (`render.jail_forms`). The runner tells each start (`started`, its `on_start`), so
     the field follows a Python process started again in place, never showing a start gone by.
-    What a start's jail lost (`degraded`: a mount the host refused, brig's decision-212) is in the
-    field itself, `⚠` and why, for as long as the last start's jail is in that state. What a start
-    says the person should know (`notice`: on Linux, the paths its jail holds with a mount the
-    host can undo, and what a refused mount cost) is shown once in the conversation, `note` (text
-    and kind: `failure` when the jail lost something, else `note`), each time it reads differently
-    from the last told. The field starts from the runner's last start, notice included, so one made
-    before this row came up is shown too.
+    What a start says the person should know (`notice`: on Linux, the paths its jail holds with a
+    mount the host can undo) is shown once as a note in the conversation, `note` (it is
+    `output.show`), each time it reads differently from the last told.
 
     `show` pushes the field and returns the remover of whichever push is current, so the row
     `acquire`s it."""
 
     def __init__(
-        self,
-        status: _Push,
-        rule: Confinement,
-        last: Started,
-        note: Callable[[tuple[str, str]], None],
+        self, status: _Push, rule: Confinement, report: Mapping[str, str], note: Callable[[str], None]
     ) -> None:
         self._status = status
         self._rule = rule
+        self._report = report
         self._note = note
         self._told = ""
         self._shown: Remover | None = None
-        self._report: Mapping[str, str] = {}
-        self._degraded = ""
-        self.started(last)
 
     def show(self) -> Remover:
         """Push the field for the grades last told; return the remover of the current push."""
-        pushed = self._status("jail", *render.jail_forms(self._rule.confined, self._report, self._degraded))
+        pushed = self._status("jail", *render.jail_forms(self._rule.confined, self._report))
         if self._shown is not None:
             self._shown()
         self._shown = pushed
@@ -253,11 +240,10 @@ class GradesField:
             self._shown = None
 
     def started(self, started: Started) -> None:
-        """A start the runner made: show its grades and what its jail lost, and its notice when it
-        is new, as a failure when the jail lost something."""
-        self._report, self._degraded = started.report(), started.degraded()
+        """A start the runner made: show its grades, and its notice when it is new."""
+        self._report = started.report()
         if self._shown is not None:
             self.show()
         if (notice := started.notice()) and notice != self._told:
             self._told = notice
-            self._note((notice, "failure" if self._degraded else "note"))
+            self._note(notice)

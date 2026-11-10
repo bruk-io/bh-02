@@ -27,8 +27,9 @@ Programs the model's code starts run inside the same jail. brig's host process, 
 Python process from outside the jail, keeps the environment bh-02 was launched with (brig's
 launcher passes it on, so a key or token your shell exports is there, and bh-02 never adds one of its own); a jailed input can't read it.
 
-The jail is brig's. On macOS it is Seatbelt; on Linux it is bubblewrap, which must be installed
-(the `bubblewrap` package). Without it, bh-02 tells you to install it or run with `--no-jail`.
+The jail is brig's (bruk-io/brig). On Linux it is bubblewrap, which must be installed (the
+`bubblewrap` package); without it, bh-02 tells you to install it or run with `--no-jail`. On macOS
+brig has no jail yet, so `runner:confined` refuses and names `--no-jail`.
 
 ## The status bar
 
@@ -36,11 +37,16 @@ The `jail:` field (the `grades` row) says whether the model's code is confined a
 part of the jail holds:
 
 ```text
-jail: jailed fs_write ✓ network ✓ fs_read ~ env ✓
+jail: jailed fs_write ~ network ~ fs_read ~ env ✓
 ```
 
 Each part is graded as brig can enforce it: `✓` enforced, `~` best effort, `?` cooperative, `✗`
-unenforced. On a narrow terminal the field shortens to initials (`w✓ n✓ r~ e✓`), then to the
+unenforced, `!` violated (brig finds the claim broken). `network` reads `~` on a normal start: the
+jail reaches no network (every start enforces an egress proxy that grants nothing), and brig grades
+it best effort while the jail sees any host root. It is `!` when a root of the jail (the project,
+a write root, the scratch or memory directory) is under a place hosts keep sockets, so a start with
+one is refused: keep the project and `XDG_STATE_HOME` out of `/tmp`, `/var/tmp`, `/run`, `/dev/shm`
+and `$XDG_RUNTIME_DIR`. On a narrow terminal the field shortens to initials (`w~ n~ r~ e✓`), then to the
 marks alone. It is never cut. What a start says you should know (on Linux, the paths its jail
 holds with a mount the host can undo) is shown once, as a note in the conversation.
 
@@ -119,6 +125,8 @@ env = ["GITHUB_TOKEN", "AWS_PROFILE"]
   `XDG_CONFIG_HOME` somewhere else). No file leaves the five.
 - A file that is not TOML, has a key other than `env`, or lists something that is not a variable
   name is refused with a message saying what to fix, and bh-02 does not start the runner on it.
+- `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY` and `NO_PROXY`, in either case, are refused too: the jail
+  sets them itself to reach its egress proxy.
 - A name that a `key = { env = ... }` in your models file reads is refused at startup, naming the
   variable, the endpoint and both files: the jail would hand that key to the model's code. Remove
   it from `runner.toml` (or the layer), or change the key. (The models file checked is the default

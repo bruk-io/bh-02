@@ -7,10 +7,11 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
-from cordis import Effects, acquire, bind, component, enter
+from cordis import Effects, acquire, bind, component
 from runner_cordis_plugin import allowlist
 from runner_cordis_plugin.approval import Approval, Graded
-from runner_cordis_plugin.jail import BrigConfig, BrigJail, Host
+from runner_cordis_plugin.jail import BrigJail, Host
+from runner_cordis_plugin.policy import BrigConfig
 from runner_cordis_plugin.runner import Runner
 from runner_cordis_plugin.unconfined import Unjailed
 
@@ -47,9 +48,8 @@ class _Keyed(Host, Protocol):
 
 @component(provides=("runner",))
 async def confined(*, config: BrigConfig, host: _Keyed) -> Effects:
-    """Fills a `runner` row: `use = "runner:confined"`. One brig jail for the session's programs where
-    brig keeps them apart in it, else one each (`jail.py`): writes confined to the project, no
-    network, credentials unreadable, graded honestly. The row's end ends the jail. Depends
+    """Fills a `runner` row: `use = "runner:confined"`. A brig jail for each program it starts:
+    writes confined to the project, no network, credentials unreadable, graded honestly. Depends
     on `host` so a program can never write the files the running composition is read from. The
     variables its programs see are the baseline, the names in the person's `runner.toml` and the
     layer's `env` when it sets one (`allowlist`); a list that is refused (`allowlist.Refused`)
@@ -62,9 +62,7 @@ async def confined(*, config: BrigConfig, host: _Keyed) -> Effects:
     jailed, note = allowlist.effective(
         config, standing, file=file, readers=host.key_envs, models_file=host.models_file
     )
-    jail = BrigJail(jailed, host, note=note)
-    yield enter(jail)
-    yield bind("runner", Runner(jail))
+    yield bind("runner", Runner(BrigJail(jailed, host, note=note)))
 
 
 @component(provides=("runner",))
