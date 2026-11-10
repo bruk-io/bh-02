@@ -6,7 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-11-09 01:17'
-updated_date: '2026-11-09 15:35'
+updated_date: '2026-11-10 18:26'
 labels:
   - brig
   - size-1
@@ -33,3 +33,9 @@ Named as open in brig's decision-211, brig's README, the runner plugin's README 
 - [ ] #2 A key one jailed program adds is not found by a sibling or by a program in another jail, in a test with a control
 - [ ] #3 decision-211, brig's README, the runner's README and the jail-and-approval page no longer name it as open, and the test pinning the hole is gone
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+2026-11-10: Now tracked as bruk-io/brig TASK-0062.
+<!-- SECTION:NOTES:END -->
