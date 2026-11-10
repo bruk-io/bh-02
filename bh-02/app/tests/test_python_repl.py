@@ -210,12 +210,17 @@ async def test_a_jailed_input_does_coding_work_in_the_project_without_asking(
     await run([*layers(), patch], [Row("chat", config={"prompt": "go"})])
     out = _shown()
     assert _asked() == []  # confined: no input was asked about
-    assert "[0] ['greet.py', 'new.py']" in out, out
+    assert "[0] (namespace: + Path(*args, **kwargs) (class))\n['greet.py', 'new.py']" in out, out
     assert "return 'hello'" in out and (project / "greet.py").read_text().endswith("return 'hello'\n")
-    assert "[2] hello" in out, out  # a program the input started, in the jail, ran the edited code
+    assert "[2] (namespace: + subprocess (module), sys (module))\nhello" in out, (
+        out
+    )  # a program the input started, in the jail, ran the edited code
     assert (project / "new.py").read_text() == "X = 1\n"
     if git:
-        assert "[3] ['??', '??', 'greet.py', 'new.py'] 0 0  1" in out, out  # status, add, commit
+        assert (
+            "[3] (namespace: + s (CompletedProcess), a (CompletedProcess), c (CompletedProcess),"
+            " n (CompletedProcess))\n['??', '??', 'greet.py', 'new.py'] 0 0  1"
+        ) in out, out  # status, add, commit
 
 
 @pytest.mark.usefixtures("_needs_a_jail")
@@ -258,7 +263,11 @@ async def test_a_jailed_input_cannot_rewrite_the_composition_or_leave_the_projec
     await run([*layers(), patch], [Row("chat", config={"prompt": "go"})])
     out = _shown()
     assert "[0] WROTE" in out, out  # the project is writable
-    assert all(f"[{n}] DENIED" in out for n in range(1, 6)), out  # outside, the patch, hooks, network, ~/.ssh
+    assert all(f"[{n}] DENIED" in out for n in range(1, 4)), out
+    assert "[4] (namespace: + socket (module))\nDENIED" in out, out
+    assert ("[5] (namespace: + os (module))\nDENIED" if ssh.is_dir() else "[5] DENIED") in out, (
+        out
+    )  # outside, the patch, hooks, network, ~/.ssh
     assert not outside.exists() and not patch.read_text().endswith("x")  # neither was touched
     assert _asked() == []
 
@@ -341,7 +350,9 @@ async def test_a_jailed_input_cannot_read_a_secret_bh_02_names_from_another_dire
     _answers()
     await run([*layers(), patch], [Row("chat", config={"prompt": "go"})], secrets=[str(secret)])
     out = _shown()
-    assert "[0] DENIED" in out and "[2] DENIED" in out, out
+    assert (
+        "[0] DENIED" in out and "[2] (namespace: + subprocess (module), r (CompletedProcess))\nDENIED" in out
+    ), out
     assert f"[1] {'READ' if _READS_EVERYWHERE_ELSE else 'DENIED'}" in out, out  # Linux: not allowlisted
     assert "placeholder" not in out, out
 
@@ -434,7 +445,11 @@ async def test_a_jailed_input_cannot_read_a_file_the_project_hides_but_reads_bes
     _answers()
     await run([*layers(), patch], [Row("chat", config={"prompt": "go"})])
     out = _shown()
-    assert "[0] DENIED" in out and "[1] READ" in out and "[2] DENIED" in out, out
+    assert (
+        "[0] DENIED" in out
+        and "[1] READ" in out
+        and "[2] (namespace: + subprocess (module), r (CompletedProcess))\nDENIED" in out
+    ), out
     assert all(f"[{n}] DENIED" in out for n in (3, 4, 5, 6)), out
     assert "placeholder" not in out, out
     (project / "new.txt").unlink(missing_ok=True)  # the rename's source, left when it is refused
@@ -650,7 +665,9 @@ async def test_on_linux_release_frees_the_placeholder_while_the_extensions_worke
         try:
             records = sorted((tmp_path / "state" / "bh-02" / "jails").iterdir())
             groups = [recorded_group(record.read_text()) for record in records]
-            pid = await process.run("import os; print(os.getpid())")
+            pid = (await process.run("import os; print(os.getpid())")).splitlines()[
+                -1
+            ]  # after the namespace line
             # one jail where its programs have namespaces of their own (each is PID 1), else one each
             assert len(groups) == (1 if pid.strip() == "1" else 2) and placeholder.is_dir(), pid
             said = await runner.release()
@@ -747,7 +764,9 @@ async def test_on_linux_the_real_workers_share_one_jail_whichever_starts_first(
     if first == "extensions":
         started.append(await runner.start(extensions_worker_argv, cwd=str(project)))
     async with _python(runner, PythonProcessConfig(root=str(project), startup=())) as process:
-        pid = await process.run("import os; print(os.getpid())")
+        pid = (await process.run("import os; print(os.getpid())")).splitlines()[
+            -1
+        ]  # after the namespace line
         if first == "python":
             started.append(await runner.start(extensions_worker_argv, cwd=str(project)))
         records = list((tmp_path / "state" / "bh-02" / "jails").iterdir())
@@ -1007,7 +1026,10 @@ async def test_on_linux_the_checks_run_in_the_jail_on_a_file_with_findings_and_o
         f"({person} ran first: functions show(x: int) -> str. "
         ".bh-02/startup.py ran next: functions run(cmd), go(x: int) -> str, fine() -> None. "
         ".bh-02/startup.py findings: run D415, example, no-untyped-def; go doctest, return-value; "
-        "elsewhere in the file: import-not-found)\nFalse\n1 1 1 True\n1 1 1\n'<1>'"
+        "elsewhere in the file: import-not-found)\n"
+        "(namespace: + os (module), subprocess (module), sys (module), "
+        "ruff (CompletedProcess), rule (CompletedProcess), types (CompletedProcess))\n"
+        "False\n1 1 1 True\n1 1 1\n'<1>'"
     ), out
     cache = project / ".bh-02" / "mypy_cache"
     assert (cache / ".gitignore").read_text().rstrip().endswith("*")  # mypy's own: git ignores the cache
@@ -1100,7 +1122,10 @@ async def test_a_session_run_from_home_can_t_choose_what_a_later_session_reads_a
         BrigJail(BrigConfig(), _Host(trusted=trusted)), PythonProcessConfig(root=str(project))
     ) as process:
         seen = await process.run(f"import linecache\n''.join(linecache.getlines({str(person)!r})), MARK")
-    assert seen == f"({person} ran first: no public functions)\n('MARK = 1\\n', 1)", seen
+    assert (
+        seen
+        == f"({person} ran first: no public functions)\n(namespace: + linecache (module))\n('MARK = 1\\n', 1)"
+    ), seen
     assert "STAND-IN" not in seen
 
 
@@ -1371,14 +1396,18 @@ async def test_a_linux_jailed_git_commit_carries_the_person_s_own_name_without_t
     await run([*layers(), patch], [Row("chat", config={"prompt": "go"})])
     out = _shown()
     # committed as the person; the alias of their config is not there (only the identity is)
-    assert "[0] 0 1 Pat Person <pat@example.invalid> / Pat Person <pat@example.invalid>" in out, out
+    assert (
+        "[0] (namespace: + subprocess (module), c (CompletedProcess), a (CompletedProcess),"
+        " who (CompletedProcess))\n"
+        "0 1 Pat Person <pat@example.invalid> / Pat Person <pat@example.invalid>"
+    ) in out, out
     # the home directory is not there: at most the way to an interpreter installed under it
     on_the_way = {
         Path(p).relative_to(home).parts[0]
         for p in (sys.base_prefix, sys.prefix)
         if Path(p).is_relative_to(home)
     }
-    assert f"[1] {sorted(on_the_way)}" in out, out
+    assert f"[1] (namespace: + os (module))\n{sorted(on_the_way)}" in out, out
 
 
 @pytest.mark.usefixtures("_needs_a_jail")
@@ -1446,7 +1475,11 @@ async def test_a_jailed_input_cannot_read_under_the_sessions_state_directory(
     secrets = unreadable([str(state.resolve())])
     await run([*layers(), patch], [Row("chat", config={"prompt": "go"})], secrets=secrets)
     out = _shown()
-    assert "[0] DENIED" in out and "[1] DENIED" in out and "[3] DENIED" in out, out
+    assert (
+        "[0] DENIED" in out
+        and "[1] DENIED" in out
+        and "[3] (namespace: + subprocess (module), r (CompletedProcess))\nDENIED" in out
+    ), out
     assert f"[2] {'READ' if _READS_EVERYWHERE_ELSE else 'DENIED'}" in out, out  # Linux: not allowlisted
     assert "placeholder" not in out, out
 
@@ -1526,7 +1559,7 @@ async def test_an_input_that_opens_a_file_is_told_the_guidance_and_rules_for_it_
     inputs = (
         "len(open('src/db/models.py').read())",
         "len(open('src/db/models.py').read())",
-        "import subprocess; subprocess.run(['cat', 'src/db/models.py'], capture_output=True).returncode",
+        "__import__('subprocess').run(['cat', 'src/db/models.py'], capture_output=True).returncode",
     )
     patch = _inputs(
         composition,
@@ -1565,7 +1598,7 @@ async def test_a_write_to_a_file_with_untold_instructions_waits_until_they_are_t
     inputs = (
         "import pathlib; pathlib.Path('src/db/models.py').write_text('X = 2\\n')",
         "pathlib.Path('src/db/models.py').write_text('X = 3\\n')",
-        "import subprocess; subprocess.run(['sh', '-c', 'echo X = 4 > src/db/other.py']).returncode",
+        "__import__('subprocess').run(['sh', '-c', 'echo X = 4 > src/db/other.py']).returncode",
     )
     patch = _inputs(
         composition,
@@ -1648,7 +1681,7 @@ async def test_a_resumed_conversation_is_told_its_asides_once_and_clear_tells_th
     (project / ".claude" / "rules" / "db.md").write_text("---\npaths: src/db/**\n---\nMigrations by hand.")
     transcript = tmp_path / "transcript.jsonl"
     opens = "len(open('src/db/models.py').read())"
-    cats = "import subprocess; subprocess.run(['cat', 'src/db/models.py'], capture_output=True).returncode"
+    cats = "__import__('subprocess').run(['cat', 'src/db/models.py'], capture_output=True).returncode"
     session = (
         f'[[plugin]]\nid = "python"\nconfig = {{ root = "{project}" }}\n'
         f'[[plugin]]\nid = "system"\nconfig = {{ root = "{project}" }}\n'

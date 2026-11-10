@@ -81,7 +81,8 @@ def _events(body: Json) -> Iterator[dict[str, Any] | str]:
     if last.get("role") == "tool":
         # what the input printed, without the python tool's note of bh-02's other tools, told
         # with the first input
-        printed = "\n".join(line for line in said.strip().splitlines() if not line.startswith("(bh-02's "))
+        told = ("(bh-02's ", "(namespace: ")  # the python tool's own lines, not what the input printed
+        printed = "\n".join(line for line in said.strip().splitlines() if not line.startswith(told))
         for part in ("the input ", f"said: {printed}"):
             yield _chunk(model, {"content": part})
         finish = "stop"

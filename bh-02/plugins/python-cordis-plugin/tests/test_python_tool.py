@@ -265,13 +265,17 @@ async def test_a_startup_file_that_ends_the_repl_keeps_what_the_opening_had_to_t
     person = _person_s("MARK = 1\n")
     jail = Tripping()
     async with _process(jail, PythonProcessConfig(root=str(tmp_path))) as k:
-        assert await k.run("kept = MARK") == f"({person} ran first: no public functions)"
+        assert (
+            await k.run("kept = MARK")
+            == f"({person} ran first: no public functions)\n(namespace: + kept (int))"
+        )
         _person_s("import os\nos._exit(3)\n")
         await jail.trip("the host undid the jail's hold on /w/private.txt; the next one holds it again")
         ended = await k.run("kept")
     assert ended == (
         "(the REPL was started again, because the host undid the jail's hold on /w/private.txt; the "
-        "next one holds it again; what earlier inputs defined is gone)\n"
+        "next one holds it again; what earlier inputs defined is gone. the earlier REPL's names are "
+        "gone: MARK, kept)\n"
         f"the REPL's process ended as {person} ran, before this input, so this input did not run; "
         f"a new one starts with the next, without {person} (`/restart python` runs it again)"
     ), ended
@@ -293,7 +297,8 @@ async def test_a_startup_file_stopped_part_way_keeps_what_the_opening_had_to_tel
         told = await asyncio.wait_for(k.run("'kept' in globals()"), 5)
     assert told == (
         "(the REPL was started again, because the host undid the jail's hold on /w/private.txt; what "
-        f"earlier inputs defined is gone. {person} was stopped as it ran, so what it defines may be "
+        "earlier inputs defined is gone. the earlier REPL's names are gone: MARK, kept. "
+        f"{person} was stopped as it ran, so what it defines may be "
         "missing, and no startup file after it ran)\nFalse"
     ), told
 
@@ -1176,7 +1181,9 @@ def test_the_model_is_told_its_tool_is_a_repl_of_its_own_that_persists_and_how_t
 
 async def test_a_program_s_own_output_reaches_an_input_only_when_captured(tmp_path: Path) -> None:
     async with _process(Unjailed(), PythonProcessConfig(root=str(tmp_path))) as k:
-        assert await k.run("import subprocess; subprocess.run(['echo', 'lost']).returncode") == "0"
+        assert await k.run("import subprocess; subprocess.run(['echo', 'lost']).returncode") == (
+            "(namespace: + subprocess (module))\n0"
+        )
         said = await k.run("print(subprocess.run(['echo', 'kept'], capture_output=True, text=True).stdout)")
         assert said == "kept"
         assert "EOFError" in await k.run("input()")
@@ -1261,7 +1268,7 @@ async def test_an_open_with_no_python_frame_above_it_is_heard_and_goes_ahead(tmp
             "    time.sleep(0.01)\n"
             "os.path.exists('threaded.txt')"
         )
-        assert made == "True"
+        assert made.endswith("\nTrue")
         assert k.touched() == (str(tmp_path.resolve() / "threaded.txt"),)
 
 
@@ -1291,7 +1298,7 @@ async def test_hearing_an_open_calls_the_hook_twice_however_deep_the_stack(tmp_p
             "    return sorted(events)\n"
             "at(0, 'shallow.md'), at(500, 'deep.md')"
         )
-        assert counted == "(['open', 'sys._getframe'], ['open', 'sys._getframe'])"
+        assert counted.endswith("\n(['open', 'sys._getframe'], ['open', 'sys._getframe'])")
         root = tmp_path.resolve()
         assert k.touched() == (str(root / "shallow.md"), str(root / "deep.md"))
 
@@ -1502,7 +1509,7 @@ class Writing(Hiding):
 
 async def test_the_namespace_persists_and_the_last_expression_is_shown() -> None:
     async with _process(Unjailed(), PythonProcessConfig()) as k:
-        assert await k.run("x = 20") == "(no output)"
+        assert await k.run("x = 20") == "(namespace: + x (int))"
         assert await k.run("print('hello')\nx + 22") == "hello\n42"
 
 
@@ -1600,7 +1607,9 @@ async def test_an_unjailed_input_does_not_inherit_a_claude_credential(
             "sorted(n for n in os.environ if n.startswith(('CLAUDE', 'ANTHROPIC_'))), "
             "os.environ.get('BH_02_TEST_KEPT')"
         )
-        assert ran == "([], 'yes')"  # Claude's variables are the host's; the rest is inherited
+        assert (
+            ran == "(namespace: + os (module))\n([], 'yes')"
+        )  # Claude's variables are the host's; the rest is inherited
 
 
 async def test_an_interrupted_input_stops_and_the_namespace_survives() -> None:
@@ -1619,7 +1628,7 @@ async def test_errors_come_back_as_text_and_a_dead_worker_is_started_again() -> 
         assert "ZeroDivisionError" in failed
         assert "worker.py" not in failed and 'File "<input 1>", line 1' in failed  # the input's own
         deep = await k.run("def f():\n    open('/nonexistent/x')\nf()")
-        assert deep.startswith("Traceback (most recent call last):")
+        assert deep.startswith("(namespace: + f() (function))\nTraceback (most recent call last):")
         assert "worker.py" not in deep and deep.count('File "<input 2>"') == 2
         missing = await k.run("undefined_name")
         assert "NameError" in missing and "undefined_name" in missing
@@ -1677,7 +1686,7 @@ async def test_a_worker_its_jail_ended_between_inputs_is_started_again_for_the_n
     told why, and is not sent to the one that ended."""
     jail = Ending()
     async with _process(jail, PythonProcessConfig()) as k:
-        pid = int(await k.run("import os; x = 1; os.getpid()"))
+        pid = int((await k.run("import os; x = 1; os.getpid()")).rpartition("\n")[2])
         jail.why = "something on the host replaced /p/.git/config"
         os.killpg(pid, 9)
         time.sleep(0.5)  # the worker is gone, and the event loop has not run since
@@ -1720,16 +1729,29 @@ class _Brokers:
         return lambda: self.sections.pop(name, None)
 
 
+class _Carrying:
+    """The `carried` value as the python row needs it: the functions added, by their remover."""
+
+    def __init__(self) -> None:
+        self.added: list[Any] = []
+
+    def add(self, fn: Any) -> Any:
+        self.added.append(fn)
+        return lambda: self.added.remove(fn)
+
+
 async def test_the_row_starts_the_worker_registers_python_and_leaving_stops_it() -> None:
     """The python row registers `python` with `tools` (its call, shown as its code, run in the
     runner) and what the model is told about it as the `system` section `python`, asks `access`
     before an input writes a project file, and registers its process's stop for `/release`; the
     registrations leave with the row, and so does the worker."""
     brokers = _Brokers(refusing="not here")
+    carrying = _Carrying()
     runner = Runner(Unjailed())
 
-    @component(provides=("runner", "approval", "tools", "system", "access"))
+    @component(provides=("runner", "approval", "tools", "system", "access", "carried"))
     async def around() -> Effects:
+        yield bind("carried", carrying)
         yield bind("runner", runner)
         yield bind("approval", Approval(runner))
         yield bind("tools", brokers)
@@ -1744,7 +1766,8 @@ async def test_the_row_starts_the_worker_registers_python_and_leaving_stops_it()
     spec, run, how = brokers.tools["python"]
     assert spec is PYTHON and run == k.call and how == {"show": shown_call}
     assert brokers.sections["python"]() == k.instructions()
-    pid = int((await run({"code": "import os; os.getpid()"}))["content"])
+    assert carrying.added == [k.carried]  # what /compact says of the namespace
+    pid = int((await run({"code": "import os; os.getpid()"}))["content"].rpartition("\n")[2])
     assert not k.confined and k.report() == UNENFORCED
     probe = Path("bh-02-refused-probe.txt").resolve()  # under the row's root, the working directory
     refused = await run({"code": f"open({str(probe)!r}, 'w')"})
@@ -1880,7 +1903,7 @@ async def test_release_while_an_input_runs_leaves_it_alone_and_says_so() -> None
         await asyncio.sleep(0.3)
         said = await k.stopped()
         assert "An input is running" in said
-        assert await running == "'done'"
+        assert await running == "(namespace: + time (module))\n'done'"
 
 
 class Counting(Confined):
@@ -2049,14 +2072,15 @@ async def test_bh_02_s_other_tools_are_functions_an_input_calls_as_the_model_wou
         assert changed == (
             "(bh-02's tools in your namespace changed: tools.shout added; tools.echo removed)\n['shout']"
         )
-        assert await k.run("tools = 'mine'") == "(no output)"
+        assert await k.run("tools = 'mine'") == "(namespace: + tools (str, 4 chars))"
         offering.names = ["echo", "shout"]
         kept = await k.run("tools")
         assert kept.endswith("'mine'")  # bound by an input: left as it is
         offering.names = []
         assert (
             await k.run("del tools")
-            == "(bh-02's tools in your namespace changed: tools.echo, tools.shout removed)"
+            == "(bh-02's tools in your namespace changed: tools.echo, tools.shout removed)\n"
+            "(namespace: - tools)"
         )
         assert "NameError" in await k.run("tools")  # none to offer: no `tools` at all
 
@@ -2193,3 +2217,109 @@ def test_mypy_cache_is_a_config_key_and_a_directory_name() -> None:
     for bad in ("", None, 3, [".bh-02"]):
         with pytest.raises(TypeError, match="`mypy_cache` must be a directory name"):
             PythonProcessConfig(mypy_cache=bad)  # type: ignore[arg-type]
+
+
+async def test_carried_says_what_the_namespace_holds_by_type_size_and_signature() -> None:
+    async with _process(Unjailed(), PythonProcessConfig()) as k:
+        assert k.carried() == ""  # the worker is up, and holds nothing yet
+        await k.run(
+            "hits = [1, 2, 3]\n_hidden = 1\nword = 'abc'\n"
+            "def edit(path, old, new): ...\n"
+            "class Box: ...\n"
+            "import json\n"
+            "class Loud:\n    def __repr__(self): return 'SECRET-REPR'\n"
+            "loud = Loud()\n"
+        )
+        line = k.carried()
+        assert line == (
+            "the python REPL holds: hits (list, 3 items), word (str, 3 chars), edit(path, old, new) "
+            "(function), Box() (class), json (module), Loud() (class), loud (Loud)"
+        )
+        assert "SECRET-REPR" not in line and "_hidden" not in line
+        out = await k.run("hits")
+        assert out == "[1, 2, 3]"  # an input's output carries no listing
+
+
+async def test_carried_is_empty_with_no_process_or_no_names() -> None:
+    k = _process(Unjailed(), PythonProcessConfig())
+    assert k.carried() == ""  # never started
+    async with k:
+        await k.run("x = 1")
+        assert k.carried() == "the python REPL holds: x (int)"
+        await k.run("del x")
+        assert k.carried() == ""  # a worker that holds no names
+        await k.run("y = 2")
+        await k.stopped()  # `/release`
+        assert k.carried() == ""
+        await k.run("z = 3")  # a new worker
+        assert k.carried() == "the python REPL holds: z (int)"
+
+
+async def test_carried_leaves_out_the_functions_the_startup_files_told(tmp_path: Path) -> None:
+    _project_s(tmp_path, "def sh(cmd):\n    return cmd\n\nTOOLS = 2\n")
+    async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:
+        await k.run("mine = [1]\ndef own(a): ...")
+        assert k.carried() == "the python REPL holds: TOOLS (int), mine (list, 1 item), own(a) (function)"
+
+
+async def test_carried_says_how_many_names_were_left_out() -> None:
+    async with _process(Unjailed(), PythonProcessConfig()) as k:
+        await k.run("for n in range(300): globals()[f'name{n}'] = n")
+        line = k.carried()
+        assert line.startswith("the python REPL holds: n (int), name0 (int), name1 (int)")
+        assert line.endswith(" more not listed") and len(line) < 3_100
+        assert " (int), name" in line
+
+
+async def test_the_namespace_listing_is_cleaned_and_read_as_data() -> None:
+    async with _process(Unjailed(), PythonProcessConfig()) as k:
+        await k.run("T = type('Wide\\x1b[31m\\nName', (), {})\nobj = T()\nglobals()['bad name'] = 1")
+        line = k.carried()
+        assert "\x1b" not in line and "\n" not in line and "bad name" not in line
+        assert "obj (Wide[31mName)" in line
+
+
+async def test_an_input_is_told_what_it_added_changed_and_removed() -> None:
+    async with _process(Unjailed(), PythonProcessConfig()) as k:
+        assert await k.run("x = [1]") == "(namespace: + x (list, 1 item))"
+        assert await k.run("x.append(2)") == "(namespace: ~ x (list, 2 items))"
+        assert await k.run("print('hi')") == "hi"  # binds nothing: adds nothing
+        assert await k.run("del x") == "(namespace: - x)"
+        loud = await k.run("class Loud:\n    def __repr__(self): return 'SECRET-REPR'\nloud = Loud()\nloud")
+        assert (
+            loud.startswith("(namespace: + Loud() (class), loud (Loud))\n")
+            and "SECRET-REPR" in loud.split("\n", 1)[1]
+        )
+        assert "SECRET-REPR" not in loud.split("\n", 1)[0]
+
+
+async def test_a_startup_file_s_functions_are_not_told_as_added_by_the_first_input(tmp_path: Path) -> None:
+    _project_s(tmp_path, "def sh(cmd):\n    return cmd\n\nTOOLS = 2\n")
+    async with _process(Confined(), PythonProcessConfig(root=str(tmp_path))) as k:
+        first = await k.run("mine = 1")
+        assert first.endswith("\n(namespace: + mine (int))"), first
+        assert (
+            "sh(" not in first.rpartition("\n(namespace")[2]
+            and "TOOLS" not in first.rpartition("\n(namespace")[2]
+        )
+
+
+async def test_the_first_input_of_a_new_repl_names_the_names_the_dead_one_held() -> None:
+    jail = Ending()
+    async with _process(jail, PythonProcessConfig()) as k:
+        pid = int((await k.run("import os; hits = [1]; x = 1; os.getpid()")).rpartition("\n")[2])
+        jail.why = "the host replaced a file"
+        os.killpg(pid, 9)
+        time.sleep(0.5)
+        again = await k.run("y = 2")
+        assert again.startswith(
+            "(the REPL was started again, because the host replaced a file; what earlier inputs "
+            "defined is gone. the earlier REPL's names are gone: os, hits, x)"
+        ), again
+        assert again.endswith("\n(namespace: + y (int))")
+        assert await k.run("z = 3") == "(namespace: + z (int))"  # told once
+
+
+async def test_a_fresh_repl_has_no_earlier_names_to_tell() -> None:
+    async with _process(Unjailed(), PythonProcessConfig()) as k:
+        assert await k.run("x = 1") == "(namespace: + x (int))"

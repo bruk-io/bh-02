@@ -83,6 +83,7 @@ As [cordis's README](../libs/cordis/README.md) defines them (its "Concepts").
 - **input**: one `python` call: the code the model sent the Python process and what it printed (not a cell: there is no notebook; not the `input` key, below).
 - **Python process**: the process the runner starts to run inputs and keep the namespace for the run; to the model, a Python REPL of its own that persists.
 - **namespace**: what the inputs have defined in the Python process (variables, functions, imports): the model's working state for the run, and a cache, since the transcript is the record.
+- **namespace line**: the one line before an input's output, `(namespace: + hits (list, 42 items); ~ config (dict, 7 keys); - tmp)`, saying which names the input added (`+`), rebound or changed in size (`~`) and removed (`-`); capped, the rest counted.
 - **python** (row): `python:tool`, bh-02's handle on the Python process, which registers the `python` tool; its class is `PythonProcess` (its config `PythonProcessConfig`).
 - **extensions process**: the process the model's extensions run in, the second one the runner starts.
 - **worker**: an older word, still in some messages and in the code (`worker.py`), for a process the jail started: the Python process or the extensions process.
@@ -141,6 +142,7 @@ As [cordis's README](../libs/cordis/README.md) defines them (its "Concepts").
 - **conversation** (row): `agent:conversation`: `/clear` and `/compact`, each a new conversation written over the transcript's file ([agent-cordis-plugin](plugins/agent-cordis-plugin/README.md)).
 - **asides** (row and key): `agent:asides`: a broker of functions rows add, each of which may add an aside to a call's result.
 - **access** (row and key): `agent:access`: a broker of functions rows add that a tool asks before it opens a file, each answering go ahead or why not.
+- **carried** (row and key): `agent:carried`: a broker of functions rows add, each giving one line of what the row keeps across `/compact` (the python row: its namespace's names), told in the summary request and the new conversation's first message.
 - **executor** (row and key): `agent:executor`: where the loop reads the prompt and asks `asides`, in a thread off the app's event loop, one call at a time.
 - **touched**: the files a call opened, as its tool answers (an input's: what its own Python code opened, `touched()`).
 - **on-touch** (row): `memory:on_touch`: memory that loads on demand (a subdirectory's CLAUDE.md, a rule whose `paths` match), told whole as an aside to the first input in a conversation that opens a file it covers.
