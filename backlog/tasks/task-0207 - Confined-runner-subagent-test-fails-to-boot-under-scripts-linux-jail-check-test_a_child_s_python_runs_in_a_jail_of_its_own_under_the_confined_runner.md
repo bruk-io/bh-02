@@ -1,12 +1,12 @@
 ---
 id: TASK-0207
 title: >-
-  Confined-runner subagent test fails to boot under scripts/linux-jail-check:
-  test_a_child_s_python_runs_in_a_jail_of_its_own_under_the_confined_runner
+  Confined runner subagent test fails to boot under scripts/linux-jail-check
+  (test_a_child_s_python_shares_the_session_s_jail_only_where_they_are_kept_apart)
 status: Done
 assignee: []
 created_date: '2026-11-07 05:39'
-updated_date: '2026-11-10 16:57'
+updated_date: '2026-11-10 16:58'
 labels:
   - subagents
   - linux
